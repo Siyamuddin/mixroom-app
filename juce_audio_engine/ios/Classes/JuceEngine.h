@@ -32,7 +32,8 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int effectIndex,
                                                     int clipId,
                                                     void *ownerHandle,
-                                                    bool usesMixroomShell);
+                                                    bool usesMixroomShell,
+                                                    bool editorResizable);
 extern "C" void mixroomPostHostedPluginAutomationSelection(
     int scopeKind,
     int row,
@@ -229,31 +230,47 @@ public:
 
     void parameterValueChanged(int parameterIndex, float) override
     {
-        noteParameterIndex(parameterIndex);
+        if (parameterIndex >= 0)
+            lastChangedParameterIndex.store(parameterIndex,
+                                            std::memory_order_relaxed);
     }
 
     void parameterGestureChanged(int parameterIndex, bool gestureIsStarting) override
     {
         if (gestureIsStarting)
+        {
             noteParameterIndex(parameterIndex);
+            lastGesturedParameterIndex.store(parameterIndex,
+                                              std::memory_order_relaxed);
+        }
     }
 
     void noteParameterIndex(int parameterIndex) noexcept
     {
         if (parameterIndex >= 0)
+        {
             lastTouchedParameterIndex.store(parameterIndex,
                                             std::memory_order_relaxed);
+            lastGesturedParameterIndex.store(parameterIndex,
+                                              std::memory_order_relaxed);
+        }
     }
 
     int getLastTouchedParameterIndex() const noexcept
     {
-        return lastTouchedParameterIndex.load(std::memory_order_relaxed);
+        const int gestured =
+            lastGesturedParameterIndex.load(std::memory_order_relaxed);
+        return gestured >= 0
+                   ? gestured
+                   : lastChangedParameterIndex.load(std::memory_order_relaxed);
     }
 
 private:
     juce::AudioProcessor *processor = nullptr;
     std::vector<juce::AudioProcessorParameter *> listenedParameters;
     std::atomic<int> lastTouchedParameterIndex{-1};
+    std::atomic<int> lastGesturedParameterIndex{-1};
+    std::atomic<int> lastChangedParameterIndex{-1};
 };
 
 class HostedPluginEditorShell;
@@ -330,13 +347,25 @@ public:
 
     void presentFromHost()
     {
+        closeRequested = false;
 #if JUCE_MAC
+        const auto generation = ++presentationGeneration;
         fitMacNativePluginEditorWindow();
 #endif
+        setAlpha(1.0f);
         setVisible(true);
-        toFront(true);
 #if JUCE_MAC
+        toFront(true);
         juce::Component::SafePointer<HostedPluginEditorWindow> safeThis(this);
+        juce::Timer::callAfterDelay(16, [safeThis, generation]()
+                                    {
+            if (safeThis != nullptr &&
+                safeThis->presentationGeneration == generation &&
+                safeThis->isShowing())
+            {
+                safeThis->fitMacNativePluginEditorWindow();
+                safeThis->toFront(true);
+            } });
         juce::Timer::callAfterDelay(160, [safeThis]()
                                     {
             if (safeThis != nullptr)
@@ -353,7 +382,7 @@ public:
 
     void requestCloseFromHost()
     {
-        requestDestroyFromHost();
+        closeButtonPressed();
     }
 
     void requestDestroyFromHost()
@@ -376,9 +405,17 @@ public:
         if (closeRequested)
             return;
         closeRequested = true;
-        destroyOnClose = true;
-        releaseEmbeddedNativeChrome();
+#if JUCE_MAC
+        ++presentationGeneration;
+#endif
+        if (destroyOnClose)
+            releaseEmbeddedNativeChrome();
         setVisible(false);
+        if (!destroyOnClose)
+        {
+            closeRequested = false;
+            return;
+        }
         auto onClose = onCloseFn;
 #if JUCE_MAC
         juce::Timer::callAfterDelay(250, [onClose = std::move(onClose)]() mutable
@@ -414,6 +451,9 @@ private:
     float embeddedNativeViewScale = 1.0f;
     bool closeRequested = false;
     bool destroyOnClose = false;
+#if JUCE_MAC
+    uint32_t presentationGeneration = 0;
+#endif
     OnClose onCloseFn;
 };
 
@@ -696,8 +736,10 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
     int maxEditorWidth = 1400;
     int maxEditorHeight = 920;
     mixroomResolveHostedPluginEditorMaxSize(maxEditorWidth, maxEditorHeight);
-    const int naturalEditorWidth = juce::jmax(editor->getWidth(), 360);
-    const int naturalEditorHeight = juce::jmax(editor->getHeight(), 220);
+    const int naturalEditorWidth =
+        editor->getWidth() > 0 ? editor->getWidth() : 640;
+    const int naturalEditorHeight =
+        editor->getHeight() > 0 ? editor->getHeight() : 420;
     const bool editorResizable = editor->isResizable();
 #if ! JUCE_MAC
     const float nativeViewScale = juce::jmin(
@@ -705,36 +747,30 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
         juce::jmin((float)maxEditorWidth / (float)naturalEditorWidth,
                    (float)maxEditorHeight / (float)naturalEditorHeight));
 #endif
-    int initialWidth = juce::jmax(360, naturalEditorWidth);
-    int initialHeight = juce::jmax(220, naturalEditorHeight);
+    int initialWidth = naturalEditorWidth;
+    int initialHeight = naturalEditorHeight;
 #if JUCE_MAC
-    const float macEditorScale = juce::jlimit(
-        0.55f,
-        1.0f,
-        juce::jmin((float)maxEditorWidth / (float)naturalEditorWidth,
-                   (float)maxEditorHeight / (float)naturalEditorHeight));
-    if (macEditorScale < 0.999f)
-        editor->setScaleFactor(macEditorScale);
-
-    if (macEditorScale < 0.999f)
+    if (editorResizable &&
+        (initialWidth > maxEditorWidth || initialHeight > maxEditorHeight))
     {
+        const float fitScale = juce::jmin(
+            1.0f,
+            juce::jmin((float)maxEditorWidth / (float)naturalEditorWidth,
+                       (float)maxEditorHeight / (float)naturalEditorHeight));
         initialWidth = juce::jmax(
-            360,
-            (int)std::round((float)naturalEditorWidth * macEditorScale));
+            1, (int)std::round((float)naturalEditorWidth * fitScale));
         initialHeight = juce::jmax(
-            220,
-            (int)std::round((float)naturalEditorHeight * macEditorScale));
+            1, (int)std::round((float)naturalEditorHeight * fitScale));
+        editor->setSize(initialWidth, initialHeight);
     }
-    initialWidth = juce::jmin(initialWidth, maxEditorWidth);
-    initialHeight = juce::jmin(initialHeight, maxEditorHeight);
 #endif
     int minWidth = initialWidth;
     int minHeight = initialHeight;
     int maxWidth = initialWidth;
     int maxHeight = initialHeight;
 #if JUCE_MAC
-    maxWidth = maxEditorWidth;
-    maxHeight = maxEditorHeight;
+    maxWidth = juce::jmax(maxEditorWidth, initialWidth);
+    maxHeight = juce::jmax(maxEditorHeight, initialHeight);
 #endif
     if (auto *constrainer = editor->getConstrainer())
     {
@@ -755,8 +791,8 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
     }
     setResizable(
 #if JUCE_MAC
-        true,
-        true
+        editorResizable,
+        editorResizable
 #else
         editorResizable,
         editorResizable
@@ -831,6 +867,14 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
         if (safeThis != nullptr)
             safeThis->fitMacNativePluginEditorWindow(); });
     juce::Timer::callAfterDelay(220, [safeThis]()
+                                {
+        if (safeThis != nullptr)
+            safeThis->fitMacNativePluginEditorWindow(); });
+    juce::Timer::callAfterDelay(500, [safeThis]()
+                                {
+        if (safeThis != nullptr)
+            safeThis->fitMacNativePluginEditorWindow(); });
+    juce::Timer::callAfterDelay(1000, [safeThis]()
                                 {
         if (safeThis != nullptr)
             safeThis->fitMacNativePluginEditorWindow(); });
@@ -978,6 +1022,8 @@ inline void HostedPluginEditorWindow::releaseEmbeddedNativeChrome()
 
 inline void HostedPluginEditorWindow::configureDesktopPeerWindow()
 {
+    auto *directEditor =
+        dynamic_cast<juce::AudioProcessorEditor *>(getContentComponent());
     if (auto *peer = getPeer())
         mixroomConfigureHostedPluginWindow(
             peer->getNativeHandle(),
@@ -986,7 +1032,8 @@ inline void HostedPluginEditorWindow::configureDesktopPeerWindow()
             metadata.effectIndex,
             metadata.clipId,
             this,
-            dynamic_cast<HostedPluginEditorShell *>(getContentComponent()) != nullptr);
+            dynamic_cast<HostedPluginEditorShell *>(getContentComponent()) != nullptr,
+            directEditor != nullptr && directEditor->isResizable());
 }
 
 inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
@@ -1001,32 +1048,26 @@ inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
     int maxEditorHeight = 920;
     mixroomResolveHostedPluginEditorMaxSize(maxEditorWidth, maxEditorHeight);
 
-    int targetWidth = juce::jmax(editor->getWidth(), getContentComponent()->getWidth());
-    int targetHeight =
-        juce::jmax(editor->getHeight(), getContentComponent()->getHeight());
+    int targetWidth = editor->getWidth();
+    int targetHeight = editor->getHeight();
+    if (targetWidth <= 0 || targetHeight <= 0)
+        return;
 
     const bool needsScale =
         targetWidth > maxEditorWidth || targetHeight > maxEditorHeight;
-    if (needsScale)
+    if (needsScale && editor->isResizable())
     {
         const float fitScale = juce::jlimit(
-            0.55f,
+            0.1f,
             1.0f,
             juce::jmin((float)maxEditorWidth / (float)juce::jmax(1, targetWidth),
                        (float)maxEditorHeight / (float)juce::jmax(1, targetHeight)));
-        editor->setScaleFactor(fitScale);
         targetWidth = juce::jmax(
-            360,
-            juce::jmin(maxEditorWidth,
-                       (int)std::round((float)targetWidth * fitScale)));
+            1, (int)std::round((float)targetWidth * fitScale));
         targetHeight = juce::jmax(
-            220,
-            juce::jmin(maxEditorHeight,
-                       (int)std::round((float)targetHeight * fitScale)));
+            1, (int)std::round((float)targetHeight * fitScale));
+        editor->setSize(targetWidth, targetHeight);
     }
-
-    targetWidth = juce::jlimit(360, maxEditorWidth, targetWidth);
-    targetHeight = juce::jlimit(220, maxEditorHeight, targetHeight);
 
     {
         int minWidth = 280;
@@ -1044,6 +1085,8 @@ inline void HostedPluginEditorWindow::fitMacNativePluginEditorWindow()
         }
         maxWidth = juce::jmax(maxWidth, targetWidth);
         maxHeight = juce::jmax(maxHeight, targetHeight);
+        minWidth = juce::jmin(minWidth, targetWidth);
+        minHeight = juce::jmin(minHeight, targetHeight);
         setResizeLimits(minWidth, minHeight, maxWidth, maxHeight);
     }
 
@@ -5935,6 +5978,14 @@ public:
                              float velocity,
                              int durationMs);
     bool openMidiClipPluginEditor(int clipId);
+    void setMidiClipPluginParameter(int clipId,
+                                    const juce::String &paramId,
+                                    float normalizedValue);
+    void setMidiClipPluginAutomationPoints(
+        int clipId,
+        const juce::String &paramId,
+        const std::vector<AutomationPoint> &points);
+    void clearMidiClipPluginAutomation(int clipId);
     juce::String getMidiClipPluginStateBase64(int clipId);
     bool setMidiClipPluginStateBase64(int clipId, const juce::String &stateBase64);
     bool sendLiveMidiInputEvent(bool noteOn,
@@ -6647,6 +6698,7 @@ private:
         };
 
         juce::AudioProcessorGraph::Node::Ptr node;
+        std::shared_ptr<juce::AudioProcessor> processorOwner;
         juce::AudioProcessorParameter *parameter = nullptr;
         std::atomic<float> *realtimeRawValue = nullptr;
         bool usesFloatRange = false;
@@ -6656,7 +6708,8 @@ private:
 
         bool isValid() const noexcept
         {
-            return node != nullptr && parameter != nullptr;
+            return (node != nullptr || processorOwner != nullptr) &&
+                   parameter != nullptr;
         }
     };
 
@@ -6693,6 +6746,7 @@ private:
         AutomationParameterTarget masterPanTarget;
         bool masterMuted = false;
         std::vector<AutomationEffectLaneSnapshot> masterEffectAutomationLanes;
+        std::vector<AutomationEffectLaneSnapshot> midiClipPluginAutomationLanes;
         std::shared_ptr<AutomationLatchState> masterLatches;
     };
 
@@ -6743,6 +6797,7 @@ private:
     juce::Array<juce::AudioProcessorGraph::NodeID> *masterEffectChain = nullptr;
     juce::StringArray masterEffectIds;
     std::vector<RowState::TrackEffectAutomationLane> masterEffectAutomationLanes;
+    std::vector<RowState::TrackEffectAutomationLane> midiClipPluginAutomationLanes;
     std::vector<AutomationPoint> masterGainAutomationPoints;
     std::vector<AutomationPoint> masterPanAutomationPoints;
     float lastAppliedMasterGainAutomationNormalized = std::numeric_limits<float>::quiet_NaN();
@@ -6876,6 +6931,9 @@ private:
         const juce::String &paramId);
     AutomationParameterTarget resolveMasterAutomationParameterTargetLocked(
         int effectIndex,
+        const juce::String &paramId);
+    AutomationParameterTarget resolveMidiClipAutomationParameterTargetLocked(
+        int clipId,
         const juce::String &paramId);
     static bool automationParameterMatches(
         juce::AudioProcessorParameter &parameter,

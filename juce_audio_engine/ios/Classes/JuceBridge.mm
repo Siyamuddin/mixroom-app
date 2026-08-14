@@ -122,39 +122,38 @@ static void mixroomPositionHostedPluginWindowInHost(NSWindow *pluginWindow,
         return;
     }
 
-    NSSize desiredContentSize =
-        pluginWindow.contentView != nil ? pluginWindow.contentView.bounds.size : NSZeroSize;
+    NSSize desiredContentSize = NSZeroSize;
     for (NSView *subview in pluginWindow.contentView.subviews) {
         desiredContentSize.width =
             MAX(desiredContentSize.width, MAX(subview.bounds.size.width, subview.frame.size.width));
         desiredContentSize.height =
             MAX(desiredContentSize.height, MAX(subview.bounds.size.height, subview.frame.size.height));
     }
+    if ((desiredContentSize.width <= 0.0 || desiredContentSize.height <= 0.0) &&
+        pluginWindow.contentView != nil) {
+        desiredContentSize = pluginWindow.contentView.bounds.size;
+    }
     const CGFloat maxContentWidth = MAX(320.0, MIN(1400.0, usableRect.size.width));
     const CGFloat maxContentHeight = MAX(220.0, MIN(920.0, usableRect.size.height));
     if (desiredContentSize.width > 0.0 && desiredContentSize.height > 0.0) {
-        desiredContentSize.width =
-            MIN(MAX(desiredContentSize.width, 320.0), maxContentWidth);
-        desiredContentSize.height =
-            MIN(MAX(desiredContentSize.height, 220.0), maxContentHeight);
+        desiredContentSize.width = MIN(desiredContentSize.width, maxContentWidth);
+        desiredContentSize.height = MIN(desiredContentSize.height, maxContentHeight);
     }
 
     NSRect frame = pluginWindow.frame;
     if (desiredContentSize.width > 0.0 && desiredContentSize.height > 0.0) {
         NSRect contentFrame = [pluginWindow frameRectForContentRect:
             NSMakeRect(0.0, 0.0, desiredContentSize.width, desiredContentSize.height)];
-        frame.size.width = MAX(frame.size.width, contentFrame.size.width);
-        frame.size.height = MAX(frame.size.height, contentFrame.size.height);
+        frame.size.width = contentFrame.size.width;
+        frame.size.height = contentFrame.size.height;
     }
 
     NSRect maxContentFrame = [pluginWindow frameRectForContentRect:
         NSMakeRect(0.0, 0.0, maxContentWidth, maxContentHeight)];
-    const CGFloat maxWidth =
-        MAX(320.0, MIN(maxContentFrame.size.width, usableRect.size.width));
-    const CGFloat maxHeight =
-        MAX(220.0, MIN(maxContentFrame.size.height, usableRect.size.height));
-    frame.size.width = MIN(MAX(frame.size.width, 320.0), maxWidth);
-    frame.size.height = MIN(MAX(frame.size.height, 220.0), maxHeight);
+    const CGFloat maxWidth = MIN(maxContentFrame.size.width, usableRect.size.width);
+    const CGFloat maxHeight = MIN(maxContentFrame.size.height, usableRect.size.height);
+    frame.size.width = MIN(frame.size.width, maxWidth);
+    frame.size.height = MIN(frame.size.height, maxHeight);
 
     if (forceCenter || !NSIntersectsRect(frame, hostRect)) {
         frame.origin.x = NSMidX(hostRect) - (frame.size.width / 2.0);
@@ -1034,6 +1033,8 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
 
     const BOOL usesMixroomShell =
         [self.metadata[@"mixroomShell"] boolValue];
+    const BOOL editorResizable =
+        [self.metadata[@"editorResizable"] boolValue];
     NSButton *closeButton =
         [pluginWindow standardWindowButton:NSWindowCloseButton];
     NSButton *miniButton =
@@ -1058,7 +1059,11 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
         pluginWindow.styleMask |= NSWindowStyleMaskTitled;
         pluginWindow.styleMask |= NSWindowStyleMaskClosable;
         pluginWindow.styleMask |= NSWindowStyleMaskMiniaturizable;
-        pluginWindow.styleMask |= NSWindowStyleMaskResizable;
+        if (editorResizable) {
+            pluginWindow.styleMask |= NSWindowStyleMaskResizable;
+        } else {
+            pluginWindow.styleMask &= ~NSWindowStyleMaskResizable;
+        }
         pluginWindow.styleMask &= ~NSWindowStyleMaskFullSizeContentView;
         pluginWindow.titleVisibility = NSWindowTitleVisible;
         pluginWindow.titlebarAppearsTransparent = NO;
@@ -1072,7 +1077,7 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
             [NSColor colorWithCalibratedRed:0.045 green:0.055 blue:0.070 alpha:1.0].CGColor;
         closeButton.hidden = NO;
         miniButton.hidden = NO;
-        zoomButton.hidden = NO;
+        zoomButton.hidden = !editorResizable;
         if (supportsAutomationButton) {
             [self installAutomationAccessoryIfNeededForWindow:pluginWindow];
         } else {
@@ -1406,7 +1411,8 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int effectIndex,
                                                     int clipId,
                                                     void *ownerHandle,
-                                                    bool usesMixroomShell) {
+                                                    bool usesMixroomShell,
+                                                    bool editorResizable) {
     if (nativeHandle == nullptr) {
         return;
     }
@@ -1435,6 +1441,7 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
         metadata[@"clipId"] = @(clipId);
         metadata[@"ownerPtr"] = @((unsigned long long)(uintptr_t)ownerHandle);
         metadata[@"mixroomShell"] = @(usesMixroomShell);
+        metadata[@"editorResizable"] = @(editorResizable);
         metadata[@"primaryWindow"] = @YES;
         switch (scopeKind) {
             case 1:
@@ -1588,7 +1595,8 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int effectIndex,
                                                     int clipId,
                                                     void *ownerHandle,
-                                                    bool usesMixroomShell) {
+                                                    bool usesMixroomShell,
+                                                    bool editorResizable) {
     juce::ignoreUnused(
         nativeHandle,
         scopeKind,
@@ -1596,7 +1604,8 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
         effectIndex,
         clipId,
         ownerHandle,
-        usesMixroomShell);
+        usesMixroomShell,
+        editorResizable);
 }
 
 extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
@@ -3976,6 +3985,45 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     juce::MessageManager::getInstance()->callSync([&]
                                                   { opened = JuceEngine::get().openMidiClipPluginEditor((int)clipIndex); });
     return (BOOL)opened;
+}
+
++ (void)setMidiClipPluginParameterObjC:(NSInteger)clipIndex
+                               paramId:(NSString *)paramId
+                      normalizedValue:(float)normalizedValue
+{
+    const juce::String juceParam = juceStringFromNSString(paramId ?: @"");
+    juce::MessageManager::getInstance()->callSync([clipIndex, juceParam, normalizedValue]
+                                                  { JuceEngine::get().setMidiClipPluginParameter((int)clipIndex, juceParam, normalizedValue); });
+}
+
++ (void)setMidiClipPluginAutomationPointsObjC:(NSInteger)clipIndex
+                                       paramId:(NSString *)paramId
+                                        points:(NSArray<NSDictionary *> *)points
+{
+    std::vector<AutomationPoint> cppPoints;
+    cppPoints.reserve(points.count);
+    for (NSDictionary *dict in points)
+    {
+        AutomationPoint point;
+        id time = dict[@"x"] ?: dict[@"timeMs"];
+        id value = dict[@"value"] ?: dict[@"volume"];
+        point.timeMs = [time respondsToSelector:@selector(doubleValue)]
+                           ? [time doubleValue]
+                           : 0.0;
+        point.value = [value respondsToSelector:@selector(doubleValue)]
+                          ? (float)[value doubleValue]
+                          : 0.0f;
+        cppPoints.push_back(point);
+    }
+    const juce::String juceParam = juceStringFromNSString(paramId ?: @"");
+    juce::MessageManager::getInstance()->callSync([clipIndex, juceParam, cppPoints]() mutable
+                                                  { JuceEngine::get().setMidiClipPluginAutomationPoints((int)clipIndex, juceParam, cppPoints); });
+}
+
++ (void)clearMidiClipPluginAutomationObjC:(NSInteger)clipIndex
+{
+    juce::MessageManager::getInstance()->callSync([clipIndex]
+                                                  { JuceEngine::get().clearMidiClipPluginAutomation((int)clipIndex); });
 }
 
 + (NSString *)getMidiClipPluginStateObjC:(NSInteger)clipIndex

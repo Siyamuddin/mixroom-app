@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'dart:math' as math;
 import 'package:mixroom/models/models.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
@@ -22,6 +21,7 @@ import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/track_group_reconciler.dart';
+import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
@@ -38,13 +38,13 @@ class _QuantizePreset {
   });
 }
 
-class _SampleDropPlacement {
+class SampleDropPlacement {
   final int row;
   final double startMs;
   final double endMs;
   final bool allowed;
 
-  const _SampleDropPlacement({
+  const SampleDropPlacement({
     required this.row,
     required this.startMs,
     required this.endMs,
@@ -921,6 +921,11 @@ class AudioCanvasTimelineController {
   void Function(double deltaX)? _dragHorizontalScrollbarBy;
   VoidCallback? _endHorizontalScrollbarDrag;
   void Function(double localX)? _jumpHorizontalScrollbarTo;
+  void Function(Offset globalOffset, {SampleDragData? data})?
+      _updateExternalSampleDropPreview;
+  VoidCallback? _clearExternalSampleDropPreview;
+  SampleDropPlacement? Function(Offset globalOffset, {SampleDragData? data})?
+      _placementForExternalSampleDrop;
   final ValueNotifier<TimelineTopControlsState> _topControls =
       ValueNotifier<TimelineTopControlsState>(
     TimelineTopControlsState.initial,
@@ -956,6 +961,13 @@ class AudioCanvasTimelineController {
     required void Function(double deltaX) dragHorizontalScrollbarBy,
     required VoidCallback endHorizontalScrollbarDrag,
     required void Function(double localX) jumpHorizontalScrollbarTo,
+    required void Function(Offset globalOffset, {SampleDragData? data})
+        updateExternalSampleDropPreview,
+    required VoidCallback clearExternalSampleDropPreview,
+    required SampleDropPlacement? Function(
+      Offset globalOffset, {
+      SampleDragData? data,
+    }) placementForExternalSampleDrop,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
     _showMasterAutomationLane = showMasterAutomationLane;
@@ -971,6 +983,9 @@ class AudioCanvasTimelineController {
     _dragHorizontalScrollbarBy = dragHorizontalScrollbarBy;
     _endHorizontalScrollbarDrag = endHorizontalScrollbarDrag;
     _jumpHorizontalScrollbarTo = jumpHorizontalScrollbarTo;
+    _updateExternalSampleDropPreview = updateExternalSampleDropPreview;
+    _clearExternalSampleDropPreview = clearExternalSampleDropPreview;
+    _placementForExternalSampleDrop = placementForExternalSampleDrop;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _publishTopControlsState?.call();
     });
@@ -991,6 +1006,13 @@ class AudioCanvasTimelineController {
     required void Function(double deltaX) dragHorizontalScrollbarBy,
     required VoidCallback endHorizontalScrollbarDrag,
     required void Function(double localX) jumpHorizontalScrollbarTo,
+    required void Function(Offset globalOffset, {SampleDragData? data})
+        updateExternalSampleDropPreview,
+    required VoidCallback clearExternalSampleDropPreview,
+    required SampleDropPlacement? Function(
+      Offset globalOffset, {
+      SampleDragData? data,
+    }) placementForExternalSampleDrop,
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
       _ensureRowExpanded = null;
@@ -1039,6 +1061,24 @@ class AudioCanvasTimelineController {
     }
     if (identical(_jumpHorizontalScrollbarTo, jumpHorizontalScrollbarTo)) {
       _jumpHorizontalScrollbarTo = null;
+    }
+    if (identical(
+      _updateExternalSampleDropPreview,
+      updateExternalSampleDropPreview,
+    )) {
+      _updateExternalSampleDropPreview = null;
+    }
+    if (identical(
+      _clearExternalSampleDropPreview,
+      clearExternalSampleDropPreview,
+    )) {
+      _clearExternalSampleDropPreview = null;
+    }
+    if (identical(
+      _placementForExternalSampleDrop,
+      placementForExternalSampleDrop,
+    )) {
+      _placementForExternalSampleDrop = null;
     }
   }
 
@@ -1096,6 +1136,24 @@ class AudioCanvasTimelineController {
 
   void jumpHorizontalScrollbarTo(double localX) {
     _jumpHorizontalScrollbarTo?.call(localX);
+  }
+
+  void updateExternalSampleDropPreview(
+    Offset globalOffset, {
+    SampleDragData? data,
+  }) {
+    _updateExternalSampleDropPreview?.call(globalOffset, data: data);
+  }
+
+  void clearExternalSampleDropPreview() {
+    _clearExternalSampleDropPreview?.call();
+  }
+
+  SampleDropPlacement? placementForExternalSampleDrop(
+    Offset globalOffset, {
+    SampleDragData? data,
+  }) {
+    return _placementForExternalSampleDrop?.call(globalOffset, data: data);
   }
 
   void _setHorizontalScrollbarState(TimelineHorizontalScrollbarState state) {
@@ -4842,7 +4900,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return 900.0;
   }
 
-  _SampleDropPlacement? _sampleDropPlacementForGlobalOffset(
+  SampleDropPlacement? _sampleDropPlacementForGlobalOffset(
     Offset globalOffset, {
     SampleDragData? data,
   }) {
@@ -4852,6 +4910,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (renderObject is! RenderBox || !renderObject.hasSize) {
       return null;
     }
+    // Finder drag locations are Flutter-view logical coordinates (top-left
+    // origin), which match DragTarget global coordinates on desktop.
     final local = renderObject.globalToLocal(globalOffset);
     if (local.dx < 0 ||
         local.dy < 0 ||
@@ -4866,7 +4926,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         .toDouble();
     final startMs = _magnetEnabled ? _segmentStartMsForTap(rawMs) : rawMs;
     final endMs = startMs + _sampleDropDurationMs(data);
-    return _SampleDropPlacement(
+    return SampleDropPlacement(
       row: row,
       startMs: startMs,
       endMs: endMs,
@@ -4902,6 +4962,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _externalSampleDropAllowed = placement.allowed;
     });
     return true;
+  }
+
+  void _updateExternalSampleDropPreviewForOsDrag(
+    Offset globalOffset, {
+    SampleDragData? data,
+  }) {
+    _updateExternalSampleDropPreview(
+      globalOffset,
+      data: data,
+      notifyEntered: true,
+    );
   }
 
   Rect? _currentSelectionRect() {
@@ -5479,6 +5550,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
       endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
       jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+      updateExternalSampleDropPreview: _updateExternalSampleDropPreviewForOsDrag,
+      clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+      placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
     );
     _syncRowUiState();
     _verticalScrollController.addListener(() {
@@ -5524,6 +5598,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
         endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
         jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+        updateExternalSampleDropPreview:
+            _updateExternalSampleDropPreviewForOsDrag,
+        clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+        placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       );
       widget.controller?._bind(
         ensureRowExpanded: ensureRowExpanded,
@@ -5540,6 +5618,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
         endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
         jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+        updateExternalSampleDropPreview:
+            _updateExternalSampleDropPreviewForOsDrag,
+        clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+        placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       );
     }
     if (oldWidget.clips.length != widget.clips.length) {
@@ -5659,6 +5741,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       dragHorizontalScrollbarBy: _dragHorizontalScrollbarByDelta,
       endHorizontalScrollbarDrag: _endHorizontalScrollbarDrag,
       jumpHorizontalScrollbarTo: _jumpHorizontalScrollbarToLocalX,
+      updateExternalSampleDropPreview: _updateExternalSampleDropPreviewForOsDrag,
+      clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
+      placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
     );
     widget.controller?._setHorizontalScrollbarState(
       TimelineHorizontalScrollbarState.hidden,
@@ -12942,23 +13027,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  IconData _iconForRow(int iconId) {
-    switch (iconId) {
-      case 1:
-        return Icons.piano;
-      case 2:
-        return Icons.graphic_eq;
-      case 3:
-        return Icons.queue_music;
-      case 4:
-        return Symbols.music_note;
-      case 5:
-        return Symbols.podcasts;
-      default:
-        return Symbols.audio_file;
-    }
-  }
-
   Future<void> _showRowMenu(int row) async {
     final isInstrumentLane = row >= 0 &&
         row < widget.rows.length &&
@@ -13275,10 +13343,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     if (action == 'icon') {
+      final currentIconId = widget.rows[row].iconId;
       final selectedIconId = await showDialog<int>(
         context: context,
         builder: (ctx) {
-          const ids = [0, 1, 2, 3, 4, 5];
+          const ids = kTrackRowIconIds;
+          final scrollController = ScrollController();
+          final viewport = MediaQuery.of(ctx).size;
+          final dialogWidth = math.min(264.0, viewport.width - 80.0);
+          final gridHeight = math.min(300.0, math.max(180.0, viewport.height - 260.0));
           return AlertDialog(
             backgroundColor: const Color(0xFF5F666D),
             surfaceTintColor: Colors.transparent,
@@ -13291,29 +13364,58 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               style: const TextStyle(
                   fontFamily: 'Pretendard', color: _kTimelineShellText),
             ),
-            content: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: ids
-                  .map(
-                    (id) => InkWell(
-                      onTap: () => Navigator.pop(ctx, id),
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: _kTimelineShellFill,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
+            content: SizedBox(
+              width: dialogWidth,
+              height: gridHeight,
+              child: Scrollbar(
+                controller: scrollController,
+                thumbVisibility: PlatformCapabilities.current.isDesktop,
+                child: GridView.builder(
+                  controller: scrollController,
+                  primary: false,
+                  padding: const EdgeInsets.only(right: 16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                  ),
+                  itemCount: ids.length,
+                  itemBuilder: (_, index) {
+                    final id = ids[index];
+                    final selected = id == currentIconId;
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => Navigator.pop(ctx, id),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? Colors.white.withValues(alpha: 0.16)
+                                : _kTimelineShellFill,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: selected
+                                  ? const Color(0xFFBDEFE3)
+                                  : Colors.white.withValues(alpha: 0.12),
+                              width: selected ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: Center(
+                            child: buildTrackRowIcon(
+                              id,
+                              size: 22,
+                              color: selected
+                                  ? const Color(0xFFBDEFE3)
+                                  : _kTimelineShellText,
+                            ),
                           ),
                         ),
-                        child:
-                            Icon(_iconForRow(id), color: _kTimelineShellText),
                       ),
-                    ),
-                  )
-                  .toList(),
+                    );
+                  },
+                ),
+              ),
             ),
           );
         },
@@ -14591,17 +14693,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
         );
       }
+      final leadingIcon = isInstrumentLane
+          ? Icon(
+              Icons.piano_outlined,
+              color: Colors.white,
+              size: headerIconSize,
+            )
+          : buildTrackRowIcon(
+              rowInfo.iconId,
+              size: headerIconSize,
+              color: Colors.white,
+            );
       return SizedBox(
         width: headerIconBox,
         child: Align(
           alignment: Alignment.center,
-          child: Icon(
-            isInstrumentLane
-                ? Icons.piano_outlined
-                : _iconForRow(rowInfo.iconId),
-            color: Colors.white,
-            size: headerIconSize,
-          ),
+          child: leadingIcon,
         ),
       );
     }
@@ -15259,13 +15366,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           borderRadius: BorderRadius.circular(99),
                         ),
                       ),
-                    Icon(
-                      isInstrumentLane
-                          ? Icons.piano_outlined
-                          : _iconForRow(widget.rows[row].iconId),
-                      color: Colors.white,
-                      size: 20,
-                    ),
+                    isInstrumentLane
+                        ? const Icon(
+                            Icons.piano_outlined,
+                            color: Colors.white,
+                            size: 20,
+                          )
+                        : buildTrackRowIcon(
+                            widget.rows[row].iconId,
+                            size: 20,
+                            color: Colors.white,
+                          ),
                     if (isInstrumentLane)
                       Padding(
                         padding: const EdgeInsets.only(top: 3),

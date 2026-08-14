@@ -105,6 +105,7 @@ import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/helpers/sample_browser_roots.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
+import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/helpers/tempo_detection.dart';
 import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
@@ -4136,6 +4137,7 @@ enum _ProjectLoadIssueType {
   missingPlugin,
   partialPluginRestore,
   recoveredFromBackup,
+  planLimit,
 }
 
 class _ProjectLoadIssue {
@@ -5680,7 +5682,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _v2RecordingRouteInvalidated = false;
-  StreamSubscription<List<DesktopFileDropItem>>? _desktopFinderDropSub;
+  StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
+  SampleDragData? _finderSampleDragData;
+  String? _finderSampleDragDurationPath;
   bool _midiDevicePollBusy = false;
   Map<String, String> _knownMidiDevicesById = <String, String>{};
   final Map<int, int> _midiClipEngineRefreshTokens = <int, int>{};
@@ -5965,8 +5969,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String? _sampleBrowserUserDropFolderPath;
   String? _sampleBrowserProjectAudioFolderPath;
   final Set<String> _sampleBrowserBundledRootFolders = <String>{};
-  final List<List<DesktopFileDropItem>> _pendingDesktopFinderDropBatches =
-      <List<DesktopFileDropItem>>[];
+  final List<DesktopFileDragEvent> _pendingDesktopFinderDragEvents =
+      <DesktopFileDragEvent>[];
   final AccessingSecurityScopedResource _securityScopedResource =
       AccessingSecurityScopedResource();
   final Set<String> _startedSecurityScopeKeys = <String>{};
@@ -7925,7 +7929,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   List<Map<String, dynamic>> _uiInstrumentCatalog() {
-    final base = _instrumentCatalogForCurrentPlan(_activeInstrumentCatalog());
+    final base = _activeInstrumentCatalog();
     final hosted = _availableDesktopHostedInstrumentCatalog();
     final merged = hosted.isEmpty
         ? base
@@ -9193,18 +9197,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
     });
     if (PlatformCapabilities.current.isDesktop) {
-      _desktopFinderDropSub = DesktopFileIngressService.stream.listen((items) {
+      _desktopFinderDropSub =
+          DesktopFileIngressService.dragSession.listen((event) {
         if (_isProjectLoading || !_loadedOnce) {
-          _pendingDesktopFinderDropBatches.add(
-            List<DesktopFileDropItem>.from(items),
-          );
+          if (event.phase == DesktopFileDragPhase.dropped) {
+            _pendingDesktopFinderDragEvents.add(event);
+          }
           return;
         }
-        unawaited(_handleDesktopFinderDropBatch(items));
+        unawaited(_handleDesktopFinderDragEvent(event));
       });
-      _pendingDesktopFinderDropBatches.addAll(
-        DesktopFileIngressService.consumePendingBatches(),
+      _pendingDesktopFinderDragEvents.addAll(
+        DesktopFileIngressService.consumePendingDragEvents(),
       );
+      // Drops are also mirrored onto the legacy batch stream; discard them so
+      // projects-screen pending consumption remains the only batch consumer.
+      DesktopFileIngressService.consumePendingBatches();
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       setState(() {
@@ -12421,6 +12429,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _promptRateLimitRefreshTimer = null;
     _desktopFinderDropSub?.cancel();
     _desktopFinderDropSub = null;
+    _finderSampleDragData = null;
+    _finderSampleDragDurationPath = null;
+    _timelineController.clearExternalSampleDropPreview();
     _juceEngineEventSubscription?.cancel();
     _juceEngineEventSubscription = null;
     _samplePreviewStateSub?.cancel();
@@ -13152,6 +13163,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowsJson,
       );
       final rowFxList = (json["rowEffects"] as List?) ?? [];
+      _recordPlanLimitProjectLoadNotices(
+        savedRows: rowsJson,
+        savedTracks: tracks,
+        rowEffects: rowFxList,
+        masterState: master,
+      );
       final loadedTracksForWaveforms = <AudioTrack>[];
       final ensuredRowIndexes = <int>{};
       await _restoreRowsFromProjectJson(rowsJson, tracks);
@@ -13772,6 +13789,81 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
     }
+  }
+
+  /// Opening a project must never discard work because the account has changed
+  /// plans. Free users can open, play, and save projects that exceed Free
+  /// creation limits; the limits apply only to newly added rows and effects.
+  void _recordPlanLimitProjectLoadNotices({
+    required List<Map<String, dynamic>> savedRows,
+    required List savedTracks,
+    required List rowEffects,
+    required Map<String, dynamic> masterState,
+  }) {
+    if (!_isFreePlan) return;
+
+    var savedRowCount = savedRows.length;
+    for (final track in savedTracks) {
+      if (track is! Map) continue;
+      final rowIndex = (track['rowIndex'] as num?)?.toInt() ?? -1;
+      savedRowCount = math.max(savedRowCount, rowIndex + 1);
+    }
+    if (savedRowCount > SubscriptionLimits.freeRowsPerProject) {
+      _projectLoadIssues.add(
+        _ProjectLoadIssue(
+          type: _ProjectLoadIssueType.planLimit,
+          title: L10n.translate(context, 'Project exceeds Free track limit'),
+          detail: L10n.translateWithParams(
+            context,
+            'All {count} tracks were restored and will be preserved when you save. Free can add up to {limit} tracks per project; upgrade to add more.',
+            <String, String>{
+              'count': savedRowCount.toString(),
+              'limit': SubscriptionLimits.freeRowsPerProject.toString(),
+            },
+          ),
+        ),
+      );
+    }
+
+    final lockedEffects = <String>{};
+    void collectEffects(Object? raw) {
+      final effects = raw is List
+          ? raw
+          : raw is Map
+          ? raw['effects']
+          : null;
+      if (effects is! List) return;
+      for (final item in effects) {
+        if (item is! Map) continue;
+        final name = (item['pathOrName'] ?? item['name'] ?? item['effectId'])
+            .toString()
+            .trim();
+        if (kMixroomBuiltInEffects.contains(name) &&
+            !_canUseEffectForCurrentPlan(name)) {
+          lockedEffects.add(name);
+        }
+      }
+    }
+
+    for (final row in rowEffects) {
+      if (row is Map) collectEffects(row['effects']);
+    }
+    collectEffects(masterState['effects']);
+    if (lockedEffects.isEmpty) return;
+    final names = (lockedEffects.toList()..sort())
+        .map((name) => L10n.translate(context, name))
+        .join(', ');
+    _projectLoadIssues.add(
+      _ProjectLoadIssue(
+        type: _ProjectLoadIssueType.planLimit,
+        title: L10n.translate(context, 'Project includes plan-locked effects'),
+        detail: L10n.translateWithParams(
+          context,
+          'Restored effects: {effects}. They will be preserved when you save. Free cannot add these effects to a new chain.',
+          <String, String>{'effects': names},
+        ),
+      ),
+    );
   }
 
   AudioTrack? _primarySelectedClipOrNull() {
@@ -28618,8 +28710,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _startSecurityScopedAccessForPath(normalized);
     final persistentAccess =
         _pendingPickedSampleBrowserAccess?.path == normalized
-            ? _pendingPickedSampleBrowserAccess
-            : await SampleBrowserAccess.createPersistentAccess(normalized);
+        ? _pendingPickedSampleBrowserAccess
+        : await SampleBrowserAccess.createPersistentAccess(normalized);
     _pendingPickedSampleBrowserAccess = null;
     if (persistentAccess?.persistentToken != null) {
       _sampleBrowserPersistentTokens[normalized] =
@@ -28992,28 +29084,147 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _flushPendingDesktopFinderDrops() async {
     if (!PlatformCapabilities.current.isDesktop ||
-        _pendingDesktopFinderDropBatches.isEmpty) {
+        _pendingDesktopFinderDragEvents.isEmpty) {
       return;
     }
-    final pending = List<List<DesktopFileDropItem>>.from(
-      _pendingDesktopFinderDropBatches,
+    final pending = List<DesktopFileDragEvent>.from(
+      _pendingDesktopFinderDragEvents,
     );
-    _pendingDesktopFinderDropBatches.clear();
-    for (final batch in pending) {
-      await _handleDesktopFinderDropBatch(batch);
+    _pendingDesktopFinderDragEvents.clear();
+    for (final event in pending) {
+      if (event.phase != DesktopFileDragPhase.dropped) continue;
+      await _handleDesktopFinderDragDrop(event);
     }
   }
 
+  Future<void> _handleDesktopFinderDragEvent(DesktopFileDragEvent event) async {
+    if (!mounted || !PlatformCapabilities.current.isDesktop) return;
+    assert(() {
+      debugPrint(
+        '[FinderDrop] ${event.phase.name} audio=${event.hasAudio} '
+        'loc=${event.location} items=${event.items.length}',
+      );
+      return true;
+    }());
+    switch (event.phase) {
+      case DesktopFileDragPhase.entered:
+      case DesktopFileDragPhase.updated:
+        _handleDesktopFinderDragHover(event);
+        return;
+      case DesktopFileDragPhase.exited:
+        _clearDesktopFinderDragPreview();
+        return;
+      case DesktopFileDragPhase.dropped:
+        await _handleDesktopFinderDragDrop(event);
+        return;
+    }
+  }
+
+  void _handleDesktopFinderDragHover(DesktopFileDragEvent event) {
+    if (!event.hasAudio || event.location == null) {
+      if (!event.hasAudio) {
+        _clearDesktopFinderDragPreview();
+      }
+      return;
+    }
+
+    final firstAudio = event.audioItems.first;
+    final existing = _finderSampleDragData;
+    if (existing == null || existing.filePath != firstAudio.path) {
+      _finderSampleDragData = SampleDragData(
+        filePath: firstAudio.path,
+        label: p.basename(firstAudio.path),
+      );
+      unawaited(_resolveFinderSampleDragDuration(firstAudio.path));
+    }
+
+    if (!_sampleDragActive) {
+      setState(() {
+        _sampleDragActive = true;
+      });
+    }
+
+    _timelineController.updateExternalSampleDropPreview(
+      event.location!,
+      data: _finderSampleDragData,
+    );
+  }
+
+  Future<void> _resolveFinderSampleDragDuration(String filePath) async {
+    _finderSampleDragDurationPath = filePath;
+    final duration = await _resolveSampleDuration(filePath);
+    if (!mounted) return;
+    if (_finderSampleDragDurationPath != filePath) return;
+    final current = _finderSampleDragData;
+    if (current == null || current.filePath != filePath) return;
+    if (duration == null || duration <= Duration.zero) return;
+    if (current.duration == duration) return;
+    setState(() {
+      _finderSampleDragData = SampleDragData(
+        filePath: current.filePath,
+        label: current.label,
+        duration: duration,
+      );
+    });
+  }
+
+  void _clearDesktopFinderDragPreview() {
+    _finderSampleDragDurationPath = null;
+    _finderSampleDragData = null;
+    _timelineController.clearExternalSampleDropPreview();
+    if (_sampleDragActive && mounted) {
+      setState(() {
+        _sampleDragActive = false;
+      });
+    } else {
+      _sampleDragActive = false;
+    }
+  }
+
+  Future<void> _handleDesktopFinderDragDrop(DesktopFileDragEvent event) async {
+    final dragData = _finderSampleDragData;
+    _clearDesktopFinderDragPreview();
+
+    SampleDropPlacement? placement;
+    if (event.location != null && event.hasAudio) {
+      placement = _timelineController.placementForExternalSampleDrop(
+        event.location!,
+        data: dragData ??
+            SampleDragData(
+              filePath: event.audioItems.first.path,
+              label: p.basename(event.audioItems.first.path),
+            ),
+      );
+    }
+
+    if (placement != null && !placement.allowed) {
+      await _handleDesktopFinderDropBatch(
+        event.items,
+        skipAudio: true,
+      );
+      return;
+    }
+
+    await _handleDesktopFinderDropBatch(
+      event.items,
+      dropRow: placement?.row,
+      dropTimeMs: placement?.startMs,
+    );
+  }
+
   Future<void> _handleDesktopFinderDropBatch(
-    List<DesktopFileDropItem> items,
-  ) async {
+    List<DesktopFileDropItem> items, {
+    int? dropRow,
+    double? dropTimeMs,
+    bool skipAudio = false,
+  }) async {
     if (!mounted || !PlatformCapabilities.current.isDesktop || items.isEmpty) {
       return;
     }
 
-    final audioItems = items
-        .where((item) => item.isAudio)
-        .toList(growable: false);
+    final audioItems = skipAudio
+        ? const <DesktopFileDropItem>[]
+        : items.where((item) => item.isAudio).toList(growable: false);
     final folderItems = items
         .where((item) => item.isFolder && !item.isMixroom)
         .toList(growable: false);
@@ -29034,8 +29245,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     var insertedAudioCount = 0;
-    var nextRow = _selectedRow;
-    final dropTimeMs = _globalAudioClock.inMilliseconds.toDouble();
+    var nextRow = dropRow ?? _selectedRow;
+    final resolvedDropTimeMs =
+        dropTimeMs ?? _globalAudioClock.inMilliseconds.toDouble();
     final batchAudioDrop = audioItems.length > 1;
     final affectedFadeRowIds = <int>{};
     if (batchAudioDrop) {
@@ -29046,7 +29258,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final inserted = await _insertAudioFileAtTimeline(
           item.path,
           row: nextRow,
-          timeMs: dropTimeMs,
+          timeMs: resolvedDropTimeMs,
           uploadMethod: 'finder_drop',
           showLoadingOverlay: !batchAudioDrop,
           notifyUi: !batchAudioDrop,
@@ -30359,72 +30571,80 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _buildInstrumentPickerRow({
     required Map<String, dynamic> spec,
+    required bool isLocked,
     required VoidCallback onTap,
   }) {
     final category = _instrumentPickerCategory(spec);
     final accent = _instrumentPickerAccent(category);
     final name = (spec['name'] as String?) ?? 'Instrument';
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(10),
+    return Opacity(
+      opacity: isLocked ? 0.46 : 1.0,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    _instrumentPickerIcon(category),
+                    color: accent,
+                    size: 17,
+                  ),
                 ),
-                child: Icon(
-                  _instrumentPickerIcon(category),
-                  color: accent,
-                  size: 17,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFF4F4F4),
-                        fontSize: 13.6,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Pretendard',
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 13.6,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'Pretendard',
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _instrumentPickerCategoryLabel(context, category),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFFF4F4F4).withValues(alpha: 0.62),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        fontFamily: 'Pretendard',
+                      const SizedBox(height: 2),
+                      Text(
+                        isLocked
+                            ? L10n.translate(context, 'Upgrade plan')
+                            : _instrumentPickerCategoryLabel(context, category),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(
+                            0xFFF4F4F4,
+                          ).withValues(alpha: 0.62),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          fontFamily: 'Pretendard',
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: const Color(0xFFF4F4F4).withValues(alpha: 0.36),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Icon(
+                  isLocked ? Icons.lock_rounded : Icons.chevron_right_rounded,
+                  size: isLocked ? 16 : 18,
+                  color: const Color(0xFFF4F4F4).withValues(alpha: 0.36),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -30798,9 +31018,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ),
                                       itemBuilder: (_, index) {
                                         final spec = filtered[index];
+                                        final id =
+                                            (spec['id'] as String? ?? '').trim();
+                                        final isLocked =
+                                            !_canUseInstrumentForCurrentPlan(id);
                                         return _buildInstrumentPickerRow(
                                           spec: spec,
-                                          onTap: () => Navigator.pop(ctx, spec),
+                                          isLocked: isLocked,
+                                          onTap: () {
+                                            if (!isLocked) {
+                                              Navigator.pop(ctx, spec);
+                                              return;
+                                            }
+                                            unawaited(
+                                              showAppUpgradeDialog(
+                                                context: context,
+                                                title: L10n.translateWithParams(
+                                                  context,
+                                                  'Upgrade to use {name}',
+                                                  <String, String>{
+                                                    'name': L10n.translate(
+                                                      context,
+                                                      (spec['name'] as String? ??
+                                                              '')
+                                                          .trim(),
+                                                    ),
+                                                  },
+                                                ),
+                                                message:
+                                                    'Additional Mixroom instruments are available on Starter and higher plans.',
+                                                icon: Icons.piano_rounded,
+                                                onUpgrade:
+                                                    widget.onUpgradeRequested,
+                                              ),
+                                            );
+                                          },
                                         );
                                       },
                                     ),
@@ -35168,8 +35420,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   children: [
                     Row(
                       children: [
-                        Icon(
-                          _iconForMasterGainStagingRow(rowInfo.iconId),
+                        buildTrackRowIcon(
+                          rowInfo.iconId,
                           size: 18,
                           color: Colors.white.withOpacity(0.88),
                         ),
@@ -35340,23 +35592,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       child: child,
     );
-  }
-
-  IconData _iconForMasterGainStagingRow(int iconId) {
-    switch (iconId) {
-      case 1:
-        return Icons.piano;
-      case 2:
-        return Icons.graphic_eq;
-      case 3:
-        return Icons.queue_music;
-      case 4:
-        return Icons.music_note;
-      case 5:
-        return Icons.podcasts;
-      default:
-        return Icons.audio_file;
-    }
   }
 
   String _technicalLevelLabel(double peakDb) {
@@ -38619,7 +38854,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       clip.engineClipId >= 0 ? clip.engineClipId : idx,
                     ),
                     clip: clip,
-                    availableInstruments: _uiInstrumentCatalog(),
+                    availableInstruments: _instrumentCatalogForCurrentPlan(
+                      _uiInstrumentCatalog(),
+                    ),
                     bpm: _tempo,
                     projectPlayheadMs: clock.inMilliseconds.toDouble(),
                     isPlaying: _isPlaying,
@@ -54597,6 +54834,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return 'master:${_encodeAutomationIdComponent(paramId)}';
   }
 
+  String _midiPluginAutomationTargetId(String clipId, String paramId) {
+    return 'instrument:${_encodeAutomationIdComponent(clipId)}:${_encodeAutomationIdComponent(paramId)}';
+  }
+
   String _pluginAutomationEffectKey(String effectId, int ordinal) {
     final base = effectId.trim().isEmpty ? 'effect' : effectId.trim();
     final safeOrdinal = ordinal < 0 ? 0 : ordinal;
@@ -54686,6 +54927,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           legacyEffectIndex: -1,
           effectKey: _decodeAutomationIdComponent(encodedEffectKey),
           paramId: _decodeAutomationIdComponent(encodedParamId),
+        );
+      }
+    }
+
+    if (trimmed.startsWith('instrument:')) {
+      final payload = trimmed.substring('instrument:'.length);
+      final splitAt = payload.indexOf(':');
+      if (splitAt > 0) {
+        return _ParsedAutomationTargetId(
+          scope: 'instrument',
+          section: 'instrument',
+          isVolume: false,
+          legacyEffectIndex: -1,
+          effectKey: _decodeAutomationIdComponent(
+            payload.substring(0, splitAt),
+          ),
+          paramId: _decodeAutomationIdComponent(payload.substring(splitAt + 1)),
         );
       }
     }
@@ -55084,6 +55342,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
 
     await JuceAudioEngine.clearTrackEffectAutomationForRow(row);
+    final midiClipsForRow = _audioTracks.where(
+      (clip) => clip.isMidi && clip.rowIndex == row && clip.engineClipId >= 0,
+    );
+    for (final clip in midiClipsForRow) {
+      await JuceAudioEngine.clearMidiClipPluginAutomation(clip.engineClipId);
+    }
 
     final targets =
         _rowAutomationTargets[row] ?? const <String, _AutomationTargetMeta>{};
@@ -55095,6 +55359,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           targets[targetId] ?? _fallbackAutomationTargetMeta(targetId);
       if (target.isOrphan) continue;
       final parsed = _parseAutomationTargetId(targetId);
+      if (parsed.scope == 'instrument') {
+        final clipIndex = _audioTracks.indexWhere(
+          (clip) => clip.clipId == parsed.effectKey,
+        );
+        final engineClipId = clipIndex >= 0
+            ? _audioTracks[clipIndex].engineClipId
+            : -1;
+        if (engineClipId >= 0 && parsed.paramId.trim().isNotEmpty) {
+          final safePoints = _resolvedAutomationPointsForTarget(row, targetId);
+          await JuceAudioEngine.setMidiClipPluginAutomationPoints(
+            engineClipId,
+            parsed.paramId,
+            _toNormalizedAutomationMaps(safePoints),
+          );
+        }
+        continue;
+      }
       if (target.isVolume || parsed.isMaster || !parsed.isEffectParameter) {
         continue;
       }
@@ -56134,7 +56415,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       timeMs,
     ).clamp(0.0, 1.0);
     final value = _denormalizeAutomationValue(normalized, target);
-    if (parsed.isMaster) {
+    if (parsed.scope == 'instrument') {
+      final clipIndex = _audioTracks.indexWhere(
+        (clip) => clip.clipId == parsed.effectKey,
+      );
+      final engineClipId = clipIndex >= 0
+          ? _audioTracks[clipIndex].engineClipId
+          : -1;
+      if (engineClipId >= 0) {
+        await JuceAudioEngine.setMidiClipPluginParameter(
+          engineClipId,
+          parsed.paramId,
+          normalized.toDouble(),
+        );
+      }
+    } else if (parsed.isMaster) {
       if (parsed.isMixParameter) {
         switch (parsed.mixParamId.trim().toLowerCase()) {
           case 'gain':
@@ -57415,9 +57710,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'Touch a control in $displayName before choosing Automate.',
             );
           } else {
-            _showSmallNotice(
-              'Synth plugin automation lanes are not wired yet. Parameter selected: $paramName.',
+            final row = clip?.rowIndex ?? -1;
+            if (clip == null || row < 0 || row >= _rowCount) {
+              _showSmallNotice('Could not resolve the synth plugin track.');
+              return;
+            }
+            final targetId = _midiPluginAutomationTargetId(
+              clip.clipId,
+              paramId,
             );
+            final rowTargets = _rowAutomationTargets.putIfAbsent(
+              row,
+              () => _defaultAutomationTargetsForRow(row),
+            );
+            rowTargets[targetId] = _AutomationTargetMeta(
+              targetId: targetId,
+              label: '$displayName • $paramName',
+              effectIndex: engineClipId,
+              paramId: paramId,
+              type: 'float',
+              min: 0.0,
+              max: 1.0,
+              initialNormalized: 0.5,
+            );
+            unawaited(() async {
+              await _ensureAutomationLaneForTarget(
+                row: row,
+                targetId: targetId,
+              );
+              if (mounted) _showSmallNotice('Automation lane ready.');
+            }());
           }
         }
         return;
@@ -65316,11 +65638,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           Localizations.localeOf(context).languageCode == 'en'
           ? executionSummariesByCommandId
           : const <String, List<String>>{};
-      final verifiedBundle =
-          aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
-            bundle,
-            runtimeAlreadySatisfiedCommandIds,
-          );
+      final verifiedBundle = aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
+        bundle,
+        runtimeAlreadySatisfiedCommandIds,
+      );
       final executionDetails = aiV3VerifiedExecutionDetails(
         verifiedBundle,
         executionSummariesByCommandId: localizedExecutionSummaries,
@@ -65343,8 +65664,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'pre_state_digest': expectedDigest,
           'post_state_digest': _freshAiV3StateFingerprint(),
           'applied_action_count': transaction.captured.length,
-          'command_receipts':
-              verifiedBundle['receipts'] ?? const <Object>[],
+          'command_receipts': verifiedBundle['receipts'] ?? const <Object>[],
           'expected_mutations': expectations,
           'observed_mutations': transaction.observed,
           'verification': 'passed',
@@ -82164,7 +82484,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           ),
                                           clip: clip,
                                           availableInstruments:
-                                              _uiInstrumentCatalog(),
+                                              _instrumentCatalogForCurrentPlan(
+                                                _uiInstrumentCatalog(),
+                                              ),
                                           bpm: _tempo,
                                           projectPlayheadMs: clock
                                               .inMilliseconds

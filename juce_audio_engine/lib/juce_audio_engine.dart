@@ -1571,6 +1571,48 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setMidiClipPluginParameter(
+    int clipIndex,
+    String paramId,
+    double normalizedValue,
+  ) async {
+    try {
+      await _ch.invokeMethod('setMidiClipPluginParameter', {
+        'clip': clipIndex,
+        'paramId': paramId,
+        'value': normalizedValue.clamp(0.0, 1.0),
+      });
+    } on PlatformException catch (e) {
+      _logError('setMidiClipPluginParameter', e);
+    }
+  }
+
+  static Future<void> setMidiClipPluginAutomationPoints(
+    int clipIndex,
+    String paramId,
+    List<Map<String, dynamic>> points,
+  ) async {
+    try {
+      await _ch.invokeMethod('setMidiClipPluginAutomationPoints', {
+        'clip': clipIndex,
+        'paramId': paramId,
+        'points': points,
+      });
+    } on PlatformException catch (e) {
+      _logError('setMidiClipPluginAutomationPoints', e);
+    }
+  }
+
+  static Future<void> clearMidiClipPluginAutomation(int clipIndex) async {
+    try {
+      await _ch.invokeMethod('clearMidiClipPluginAutomation', {
+        'clip': clipIndex,
+      });
+    } on PlatformException catch (e) {
+      _logError('clearMidiClipPluginAutomation', e);
+    }
+  }
+
   static Future<String> getMidiClipPluginState(int clipIndex) async {
     try {
       final state = await _ch.invokeMethod<String>('getMidiClipPluginState', {

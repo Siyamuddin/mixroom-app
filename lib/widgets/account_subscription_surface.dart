@@ -718,7 +718,7 @@ class _PromptUsageCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final limits = entitlement.limits;
     final planCode = entitlement.planCode.trim().toLowerCase();
-    final usage = _formatPlanAiUsageFeature(planCode, limits);
+    final usage = _formatPlanAiUsageFeature(context, planCode, limits);
     final modelTier = _modelTierReadout(context, limits['ai_model_tier']);
     final advanced = _advancedPromptReadout(context, limits);
 
@@ -1834,7 +1834,7 @@ String _fallbackWebsitePriceLabel(
 }
 
 String _planAudienceLabel(BuildContext context, String planCode) {
-  return _planMarketingContent(planCode).subtitle;
+  return _t(context, _planMarketingContent(planCode).subtitle);
 }
 
 _PlanMarketingContent _planMarketingContent(String planCode) {
@@ -1848,7 +1848,7 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
             heading: 'DAW · Storage',
             items: <String>[
               '1 cloud project · sync across devices',
-              '10 local projects · 5 tracks',
+              '10 local projects · 5 tracks per project',
               'Core effects and instruments',
             ],
           ),
@@ -1999,76 +1999,93 @@ _PlanMarketingContent _planMarketingContent(String planCode) {
   }
 }
 
-List<String> _planFeatureItems(BillingPlanDefinition plan) {
+List<String> _planFeatureItems(
+  BuildContext context,
+  BillingPlanDefinition plan,
+) {
   final code = plan.code.trim().toLowerCase();
   final limits = plan.limits;
   final capabilities = plan.capabilities;
   final storage = _formatStorageAmount(limits['storage_gb']);
   final sharedStorage = _formatStorageAmount(limits['shared_storage_gb']);
-  final aiUsage = _formatPlanAiUsageFeature(code, limits);
+  final aiUsage = _formatPlanAiUsageFeature(context, code, limits);
   final members = _formatInteger(limits['members']);
 
   switch (code) {
     case 'free':
       return _compactFeatureItems([
-        '1 cloud project, sync across devices',
-        '10 local projects, 5 tracks each',
-        'Core effects and instruments',
-        'MP3 export',
-        'Light AI usage',
+        _t(context, '1 cloud project, sync across devices'),
+        _formatDawCapacityFeature(context, code),
+        _t(context, 'Core effects and instruments'),
+        _t(context, 'MP3 export'),
+        _t(context, 'Light AI usage'),
       ]);
     case 'starter':
       return _compactFeatureItems([
-        _formatDawCapacityFeature(code),
-        'All effects and instruments',
+        _formatDawCapacityFeature(context, code),
+        _t(context, 'All effects and instruments'),
         capabilities['high_quality_export'] == true
-            ? 'High-quality export in WAV, MP3, and FLAC'
-            : 'MP3 export',
-        storage == null ? null : '$storage cloud storage',
+            ? _t(context, 'High-quality export in WAV, MP3, and FLAC')
+            : _t(context, 'MP3 export'),
+        storage == null
+            ? null
+            : _tr(context, '{storage} cloud storage', {'storage': storage}),
         aiUsage,
       ]);
     case 'producer':
       return _compactFeatureItems([
-        _formatDawCapacityFeature(code),
-        storage == null ? null : '$storage cloud storage',
-        'All effects and instruments',
+        _formatDawCapacityFeature(context, code),
+        storage == null
+            ? null
+            : _tr(context, '{storage} cloud storage', {'storage': storage}),
+        _t(context, 'All effects and instruments'),
         capabilities['high_quality_export'] == true
-            ? 'High-quality export in WAV, MP3, and FLAC'
+            ? _t(context, 'High-quality export in WAV, MP3, and FLAC')
             : null,
         aiUsage,
       ]);
     case 'studio':
       return _compactFeatureItems([
-        members == null ? null : '$members seats included',
-        sharedStorage == null ? null : '$sharedStorage shared storage',
-        'Producer DAW access for each seat',
-        'Team workspace and priority support',
+        members == null
+            ? null
+            : _tr(context, '{count} seats included', {'count': members}),
+        sharedStorage == null
+            ? null
+            : _tr(context, '{storage} shared storage', {
+                'storage': sharedStorage,
+              }),
+        _t(context, 'Producer DAW access for each seat'),
+        _t(context, 'Team workspace and priority support'),
       ]);
     case 'enterprise':
       return _compactFeatureItems([
-        'Custom seats and storage',
+        _t(context, 'Custom seats and storage'),
         capabilities['custom_ai_models'] == true
-            ? 'Custom AI models'
-            : 'Custom AI usage',
-        'Team workspace and admin controls',
+            ? _t(context, 'Custom AI models')
+            : _t(context, 'Custom AI usage'),
+        _t(context, 'Team workspace and admin controls'),
         capabilities['compliance_controls'] == true
-            ? 'Compliance controls + dedicated support'
-            : 'Dedicated support',
+            ? _t(context, 'Compliance controls + dedicated support')
+            : _t(context, 'Dedicated support'),
       ]);
     case 'education':
       return _compactFeatureItems([
-        _formatSeatOptions(limits['seat_options']),
-        'Starter DAW access per seat',
-        storage == null ? null : '$storage storage per seat',
+        _formatSeatOptions(context, limits['seat_options']),
+        _t(context, 'Starter DAW access per seat'),
+        storage == null
+            ? null
+            : _tr(context, '{storage} storage per seat', {'storage': storage}),
         capabilities['education_sandbox'] == true ||
                 capabilities['education_visibility_controls'] == true
-            ? 'Education sandbox + visibility controls'
-            : 'Starter-level classroom seats',
+            ? _t(context, 'Education sandbox + visibility controls')
+            : _t(context, 'Starter-level classroom seats'),
       ]);
     default:
       return _compactFeatureItems([
-        _formatDawCapacityFeature(code),
-        storage == null ? null : '$storage storage',
+        _formatDawCapacityFeature(context, code),
+        storage == null
+            ? null
+            : _tr(context, '{storage} storage', {'storage': storage}),
         aiUsage,
       ]);
   }
@@ -2081,16 +2098,18 @@ List<String> _compactFeatureItems(Iterable<String?> items) {
       .toList(growable: false);
 }
 
-String _formatDawCapacityFeature(String planCode) {
+String _formatDawCapacityFeature(BuildContext context, String planCode) {
   final normalized = planCode.trim().toLowerCase();
   if (normalized == 'free') {
-    return '${SubscriptionLimits.freeLocalProjects} local projects, '
-        '${SubscriptionLimits.freeRowsPerProject} tracks';
+    return _tr(context, '{projects} local projects, {tracks} tracks', {
+      'projects': SubscriptionLimits.freeLocalProjects,
+      'tracks': SubscriptionLimits.freeRowsPerProject,
+    });
   }
-  return 'No free-tier track or project cap';
+  return _t(context, 'No free-tier track or project cap');
 }
 
-String? _formatSeatOptions(Object? raw) {
+String? _formatSeatOptions(BuildContext context, Object? raw) {
   if (raw is Iterable) {
     final values = raw
         .map((item) => _formatInteger(item))
@@ -2098,34 +2117,37 @@ String? _formatSeatOptions(Object? raw) {
         .map((item) => item!)
         .toList(growable: false);
     if (values.isNotEmpty) {
-      return '${values.join(' / ')} seat packages';
+      return _tr(context, '{seats} seat packages', {
+        'seats': values.join(' / '),
+      });
     }
   }
   return null;
 }
 
 String? _formatPlanAiUsageFeature(
+  BuildContext context,
   String planCode,
   Map<String, dynamic> limits,
 ) {
   final tier = (limits['ai_model_tier'] ?? '').toString().trim().toLowerCase();
   switch (planCode.trim().toLowerCase()) {
     case 'free':
-      return 'Light AI usage';
+      return _t(context, 'Light AI usage');
     case 'starter':
     case 'education':
-      return 'Expanded AI usage';
+      return _t(context, 'Expanded AI usage');
     case 'producer':
-      return 'High-volume AI usage';
+      return _t(context, 'High-volume AI usage');
     case 'studio':
-      return 'High-volume AI for every seat';
+      return _t(context, 'High-volume AI for every seat');
     case 'enterprise':
-      return 'Custom AI usage';
+      return _t(context, 'Custom AI usage');
   }
   return switch (tier) {
-    'advanced' => 'High-volume advanced AI usage',
-    'custom' => 'Custom AI usage',
-    'standard' => 'Standard AI usage',
+    'advanced' => _t(context, 'High-volume advanced AI usage'),
+    'custom' => _t(context, 'Custom AI usage'),
+    'standard' => _t(context, 'Standard AI usage'),
     _ => null,
   };
 }
@@ -2294,7 +2316,7 @@ class _PlanListRow extends StatelessWidget {
     final planCode = plan.code.trim().toLowerCase();
     final accent = _planAccentColor(planCode);
     final marketing = _planMarketingContent(planCode);
-    final featureItems = _planFeatureItems(plan);
+    final featureItems = _planFeatureItems(context, plan);
     final actions = productActions.isNotEmpty
         ? productActions
         : fallbackAction == null
@@ -2337,11 +2359,7 @@ class _PlanListRow extends StatelessWidget {
           ),
           const SizedBox(height: 13),
           Text(
-            _localizedPlanLabel(
-              context,
-              planCode: planCode,
-              fallback: plan.label,
-            ),
+            plan.label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -2353,7 +2371,7 @@ class _PlanListRow extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            marketing.tagline,
+            _t(context, marketing.tagline),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(

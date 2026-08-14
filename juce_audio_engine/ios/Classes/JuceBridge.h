@@ -128,6 +128,13 @@
                        velocity:(float)velocity
                      durationMs:(NSInteger)durationMs;
 + (BOOL)openMidiClipPluginEditorObjC:(NSInteger)clipIndex;
++ (void)setMidiClipPluginParameterObjC:(NSInteger)clipIndex
+                               paramId:(NSString * _Nonnull)paramId
+                      normalizedValue:(float)normalizedValue;
++ (void)setMidiClipPluginAutomationPointsObjC:(NSInteger)clipIndex
+                                       paramId:(NSString * _Nonnull)paramId
+                                        points:(NSArray<NSDictionary *> * _Nonnull)points;
++ (void)clearMidiClipPluginAutomationObjC:(NSInteger)clipIndex;
 + (NSString *)getMidiClipPluginStateObjC:(NSInteger)clipIndex;
 + (BOOL)setMidiClipPluginStateObjC:(NSInteger)clipIndex
                         stateBase64:(NSString *)stateBase64;
