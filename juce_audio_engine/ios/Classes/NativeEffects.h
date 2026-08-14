@@ -3562,7 +3562,8 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = inputSampleRate > 0.0 ? inputSampleRate : 44100.0;
-        ensureCapacity(maxBlockSize);
+        juce::ignoreUnused(maxBlockSize);
+        prepareRingBuffersForCurrentSampleRate();
         reset();
     }
 
@@ -3579,11 +3580,11 @@ public:
     void process(juce::AudioBuffer<float> &buffer)
     {
         const int n = buffer.getNumSamples();
-        if (!ensureCapacity(n))
+        if (n <= 0 || !isPreparedForCurrentSampleRate())
             return;
 
         const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
-        if (n <= 0 || channels <= 0 || ringSize <= 2)
+        if (channels <= 0 || ringSize <= 2)
             return;
 
         const float semitones = std::isfinite(params.semitones) ? params.semitones : 0.0f;
@@ -3653,29 +3654,44 @@ public:
     }
 
 private:
-    bool ensureCapacity(int blockSize)
+    static int requiredRingSizeForSampleRate(double rate) noexcept
     {
-        juce::ignoreUnused(blockSize);
         // Keep the shifter window tied to sample rate rather than callback size
         // so different iOS hardware buffer sizes don't change the audible modulation.
         const int minDelay = juce::jlimit(
             512,
             1024,
-            (int)std::lround(sampleRate * 0.02));
-        const int requiredRingSize = minDelay + 2;
-        if (requiredRingSize <= ringSize)
-            return true;
+            (int)std::lround(rate * 0.02));
+        return minDelay + 2;
+    }
 
-        if (ringSize > 0)
-            return mixroomEffectScratchAvailable(requiredRingSize, ringSize);
+    void prepareRingBuffersForCurrentSampleRate()
+    {
+        const int requiredRingSize =
+            requiredRingSizeForSampleRate(sampleRate);
+        bool needsResize = ringSize != requiredRingSize;
+        for (const auto &ring : ringBuffers)
+            needsResize = needsResize ||
+                (int)ring.size() != requiredRingSize;
 
-        ringSize = requiredRingSize;
-        for (int ch = 0; ch < numOutputs; ++ch)
+        if (needsResize)
         {
-            ringBuffers[ch].assign((size_t)ringSize, 0.0f);
-            writePos[ch] = 0;
-            phase[ch] = 0.0f;
+            ringSize = requiredRingSize;
+            for (auto &ring : ringBuffers)
+                ring.assign((size_t)ringSize, 0.0f);
         }
+    }
+
+    bool isPreparedForCurrentSampleRate() const noexcept
+    {
+        const int requiredRingSize =
+            requiredRingSizeForSampleRate(sampleRate);
+        if (ringSize != requiredRingSize)
+            return false;
+
+        for (const auto &ring : ringBuffers)
+            if ((int)ring.size() != requiredRingSize)
+                return false;
         return true;
     }
 
