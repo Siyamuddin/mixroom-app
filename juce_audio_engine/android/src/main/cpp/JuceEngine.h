@@ -4,6 +4,7 @@
 #include "SimpleGainProcessor.h"
 #include "NativeEffects.h"
 #include "JuceLogBridge.h"
+#include "../../../../native/RealtimeWavCapture.h"
 
 #include <array>
 #include <atomic>
@@ -4890,7 +4891,9 @@ public:
     bool startRecordingToWav(const juce::File &file,
                              int channelStart,
                              int channelCount);
-    void stopRecording(bool restorePlaybackRoute = true);
+    RealtimeWavCapture::StopResult finalizeRecordingCapture();
+    void completeRecordingStop(bool restorePlaybackRoute);
+    RealtimeWavCapture::StopResult stopRecording(bool restorePlaybackRoute = true);
     bool isRecording() const;
     void captureInput(const float *const *input,
                       int numInputChannels,
@@ -4993,8 +4996,6 @@ private:
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorGraph exportGraph;
-
-    juce::SpinLock recordLock;
 
     juce::AudioProcessorGraph::Node::Ptr inputNode;
     juce::AudioProcessorGraph::Node::Ptr outputNode;
@@ -5492,13 +5493,7 @@ private:
     std::unique_ptr<MetronomeAudioCallback> metronomeCallback;
 
     // Recording state
-    std::unique_ptr<juce::AudioFormatWriter> recorderWriter;
-    std::unique_ptr<juce::FileOutputStream> recorderStream;
-
-    bool recordingActive = false;
-    int recordChannelStart = 0;
-    int recordChannelCount = 1;
-    int recordChannelOffset = 0;
+    RealtimeWavCapture wavCapture;
     std::atomic<int> recordingRestoreDesiredInputs{0};
     juce::AudioDeviceManager::AudioDeviceSetup recordingRestorePlaybackSetup;
     bool hasRecordingRestorePlaybackSetup = false;
@@ -5511,7 +5506,6 @@ private:
     int liveMonitorChannelStart = 0;
     juce::Array<juce::AudioProcessorGraph::Connection> liveMonitorConnections;
 
-    juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
     // Recursive because public graph mutation entrypoints can call one another.
     std::recursive_mutex graphRenderMutex;
     std::atomic<std::int64_t> realtimeTicksPerSecond{0};

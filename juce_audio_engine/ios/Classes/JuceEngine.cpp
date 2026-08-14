@@ -1955,7 +1955,7 @@ bool JuceEngine::configureAudioDevice(double sampleRate,
 {
     if (isV2PlaybackSession())
         return false;
-    if (recordingActive)
+    if (wavCapture.isActive())
     {
         juceLogToFlutter(("configureAudioDevice blocked while recording [" + reason + "]").toRawUTF8());
         return false;
@@ -2935,6 +2935,8 @@ bool JuceEngine::isV2PlaybackSession() const noexcept
 void JuceEngine::shutdownEngine()
 {
     juceLogToFlutter("JuceEngine::shutdownEngine called");
+
+    wavCapture.stop(true);
 
 #if JUCE_IOS
     detachIOSBluetoothDuplexProbeCallback();
@@ -7661,7 +7663,7 @@ void JuceEngine::play()
         const int activeInputChannels =
             dev != nullptr ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
         const bool verifiedRecordingInputActive =
-            recordingActive &&
+            wavCapture.isActive() &&
             desiredInputOpenChannels.load(std::memory_order_relaxed) == 1 &&
             activeInputChannels == 1;
         const bool invalidV2Route = v2PlaybackCallbackDetached ||
@@ -13819,7 +13821,7 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                                      int channelStart,
                                      int channelCount)
 {
-    if (recordingActive)
+    if (wavCapture.isActive())
         return false;
 
     const bool v2Recording = isV2PlaybackSession();
@@ -13877,49 +13879,23 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     const int maxCount = juce::jmax(1, numInputs - channelStart);
     channelCount = juce::jlimit(1, juce::jmin(2, maxCount), channelCount);
 
-    recorderStream.reset(file.createOutputStream().release());
-    if (!recorderStream)
+    const double acceptedSampleRate = getKnownDeviceSampleRate(
+        deviceManager,
+        hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (!wavCapture.start(file,
+                          acceptedSampleRate,
+                          channelCount,
+                          channelStart))
         return false;
-
-    juce::WavAudioFormat wav;
-    recorderWriter.reset(
-        wav.createWriterFor(
-            recorderStream.get(),
-            getKnownDeviceSampleRate(
-                deviceManager,
-                hostSampleRateAtomic.load(std::memory_order_relaxed)),
-            (unsigned int)channelCount,
-            24,
-            {},
-            0));
-
-    if (!recorderWriter)
-        return false;
-
-    recorderStream.release();
-
-    recordChannelStart = channelStart;
-    recordChannelOffset = channelStart;
-    recordChannelCount = channelCount;
 
     routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
-
-    {
-        juce::SpinLock::ScopedLockType lock(recordLock);
-        recordingActive = true;
-    }
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
 
-void JuceEngine::stopRecording()
+RealtimeWavCapture::StopResult JuceEngine::stopRecording()
 {
-    {
-        juce::SpinLock::ScopedLockType lock(recordLock);
-        recordingActive = false;
-        recorderWriter.reset(); // flush + finalize WAV
-        recorderStream.reset();
-    }
+    auto captureResult = wavCapture.stop();
 
     routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 #if JUCE_IOS
@@ -13931,77 +13907,42 @@ void JuceEngine::stopRecording()
                                        "stopRecording-restorePlayback");
     logCurrentAudioDeviceState("recording-stopped");
 #endif
+    return captureResult;
+}
+
+void JuceEngine::discardRecordingCapture()
+{
+    wavCapture.stop(true);
+    routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 }
 
 bool JuceEngine::isRecording() const
 {
-    return recordingActive;
+    return wavCapture.isActive();
 }
 
 void JuceEngine::captureInput(const float *const *input, int numInputChannels, int numSamples)
 {
-    juce::SpinLock::ScopedLockType lock(recordLock);
-
-    if (!recordingActive || !recorderWriter)
-        return;
-
-    // Create the buffer object here so it has memory to copy into
-    juce::AudioBuffer<float> buffer(recordChannelCount, numSamples);
-
-    float peak = 0.0f;
-
-    // Use the offset to grab the correct pointer from the input array
-    // E.g., if offset is 2, we start at input[2] (the 3rd channel)
-    for (int ch = 0; ch < recordChannelCount; ++ch)
-    {
-        // int sourceCh = ch + recordChannelOffset;
-        // if (sourceCh < numInputChannels)
-        //     buffer.copyFrom(ch, 0, input[sourceCh], numSamples);
-
-        int sourceCh = ch + recordChannelOffset;
-
-        // Safety: Check if the hardware actually provided this channel
-        if (sourceCh < numInputChannels && input[sourceCh] != nullptr)
-        {
-            buffer.copyFrom(ch, 0, input[sourceCh], numSamples);
-
-            // for waveform visualization while recording
-            const float *data = input[sourceCh];
-            for (int i = 0; i < numSamples; ++i)
-                peak = juce::jmax(peak, std::abs(data[i]));
-        }
-        else
-        {
-            buffer.clear(ch, 0, numSamples); // Write silence if channel doesn't exist
-        }
-    }
-
-    recPeak.setTargetValue(peak);
-    recorderWriter->writeFromAudioSampleBuffer(buffer, 0, numSamples);
+    wavCapture.capture(input, numInputChannels, numSamples);
 }
 
 double JuceEngine::getRecordingPeak() const
 {
-    return recPeak.getCurrentValue();
+    return wavCapture.consumePeak();
 }
 
 void JuceEngine::captureOutput(float *const *output,
                                int numOutputChannels,
                                int numSamples)
 {
-    juce::SpinLock::ScopedLockType lock(recordLock);
-
-    if (!recordingActive || !recorderWriter)
-        return;
-
-    const int chCount = juce::jlimit(1, numOutputChannels, recordChannelCount);
-
-    juce::AudioBuffer<float> buffer(chCount, numSamples);
-
-    for (int ch = 0; ch < chCount; ++ch)
-        buffer.copyFrom(ch, 0, output[ch], numSamples);
-
-    recorderWriter->writeFromAudioSampleBuffer(buffer, 0, numSamples);
+    std::array<const float *, 2> channels{{nullptr, nullptr}};
+    const int availableChannels = juce::jlimit(0, 2, numOutputChannels);
+    for (int channel = 0; channel < availableChannels; ++channel)
+        channels[(size_t)channel] = output != nullptr ? output[channel] : nullptr;
+    wavCapture.capture(channels.data(),
+                       availableChannels,
+                       numSamples,
+                       0);
 }
 
 void JuceEngine::setMasterMeterEnabled(bool enabled)

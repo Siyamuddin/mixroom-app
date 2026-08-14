@@ -331,7 +331,8 @@
 
 + (NSNumber *)getRecordingPeakObjC;
 
-+ (void)stopRecordingObjC;
++ (NSDictionary<NSString *, id> *)stopRecordingObjC;
++ (void)discardRecordingCaptureObjC;
 + (BOOL)isRecordingObjC;
 
 // ===============================

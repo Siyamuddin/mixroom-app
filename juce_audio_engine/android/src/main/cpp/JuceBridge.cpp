@@ -3299,18 +3299,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_startRecordingJNI(JNIEnv *env,
     return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *, jclass)
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *env, jclass)
 {
+    auto result = JuceEngine::get().finalizeRecordingCapture();
     juce::MessageManager::getInstance()->callSync([]
-                                                  { JuceEngine::get().stopRecording(true); });
+                                                  { JuceEngine::get().completeRecordingStop(true); });
+    return namedValueStatsToJavaMap(env, result.toNamedValueSet());
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *, jclass)
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *env, jclass)
 {
+    auto result = JuceEngine::get().finalizeRecordingCapture();
     juce::MessageManager::getInstance()->callSync([]
-                                                  { JuceEngine::get().stopRecording(false); });
+                                                  { JuceEngine::get().completeRecordingStop(false); });
+    return namedValueStatsToJavaMap(env, result.toNamedValueSet());
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

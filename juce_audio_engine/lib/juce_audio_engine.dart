@@ -197,6 +197,49 @@ class JuceEngineDiagnostics {
   }
 }
 
+class RecordingCaptureResult {
+  const RecordingCaptureResult({
+    required this.success,
+    required this.diagnosticCode,
+    required this.attemptedSamples,
+    required this.acceptedSamples,
+    required this.droppedSamples,
+    required this.actualSampleRate,
+    required this.channelCount,
+  });
+
+  final bool success;
+  final String diagnosticCode;
+  final int attemptedSamples;
+  final int acceptedSamples;
+  final int droppedSamples;
+  final double actualSampleRate;
+  final int channelCount;
+
+  factory RecordingCaptureResult.fromMap(Map<String, dynamic> map) {
+    return RecordingCaptureResult(
+      success: map['success'] == true,
+      diagnosticCode:
+          map['diagnosticCode']?.toString() ?? 'writer_finalize_failed',
+      attemptedSamples: (map['attemptedSamples'] as num?)?.toInt() ?? 0,
+      acceptedSamples: (map['acceptedSamples'] as num?)?.toInt() ?? 0,
+      droppedSamples: (map['droppedSamples'] as num?)?.toInt() ?? 0,
+      actualSampleRate: (map['actualSampleRate'] as num?)?.toDouble() ?? 0.0,
+      channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  static const failed = RecordingCaptureResult(
+    success: false,
+    diagnosticCode: 'writer_finalize_failed',
+    attemptedSamples: 0,
+    acceptedSamples: 0,
+    droppedSamples: 0,
+    actualSampleRate: 0.0,
+    channelCount: 0,
+  );
+}
+
 enum AudioRouteKind {
   unknown,
   speaker,
@@ -3298,21 +3341,34 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> stopRecording() async {
+  static Future<RecordingCaptureResult> stopRecording() async {
     try {
-      await _ch.invokeMethod('stopRecording');
+      final raw = await _ch.invokeMethod<Object?>('stopRecording');
+      if (raw is Map) {
+        return RecordingCaptureResult.fromMap(Map<String, dynamic>.from(raw));
+      }
+      return RecordingCaptureResult.failed;
     } on PlatformException catch (e) {
       _logError('stopRecording', e);
+      return RecordingCaptureResult.failed;
     }
   }
 
-  static Future<void> stopRecordingWithoutPlaybackRestore() async {
+  static Future<RecordingCaptureResult>
+      stopRecordingWithoutPlaybackRestore() async {
     try {
-      await _ch.invokeMethod('stopRecordingWithoutPlaybackRestore');
+      final raw = await _ch.invokeMethod<Object?>(
+        'stopRecordingWithoutPlaybackRestore',
+      );
+      if (raw is Map) {
+        return RecordingCaptureResult.fromMap(Map<String, dynamic>.from(raw));
+      }
+      return RecordingCaptureResult.failed;
     } on MissingPluginException {
-      await stopRecording();
+      return stopRecording();
     } on PlatformException catch (e) {
       _logError('stopRecordingWithoutPlaybackRestore', e);
+      return RecordingCaptureResult.failed;
     }
   }
 

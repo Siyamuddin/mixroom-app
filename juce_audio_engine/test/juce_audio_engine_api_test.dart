@@ -109,6 +109,17 @@ void main() {
           return <String>['MacBook Pro Speakers', 'WH-1000XM4'];
         case 'selectOutputDevice':
           return true;
+        case 'stopRecording':
+        case 'stopRecordingWithoutPlaybackRestore':
+          return <String, dynamic>{
+            'success': true,
+            'diagnosticCode': 'ok',
+            'attemptedSamples': 24000,
+            'acceptedSamples': 24000,
+            'droppedSamples': 0,
+            'actualSampleRate': 48000.0,
+            'channelCount': 1,
+          };
         case 'initialisePlaybackV2':
           return <String, dynamic>{
             'success': true,
@@ -212,6 +223,18 @@ void main() {
           return null;
       }
     });
+  });
+
+  test('recording stop returns native capture integrity facts', () async {
+    final result = await JuceAudioEngine.stopRecording();
+    expect(result.success, isTrue);
+    expect(result.diagnosticCode, 'ok');
+    expect(result.attemptedSamples, 24000);
+    expect(result.acceptedSamples, 24000);
+    expect(result.droppedSamples, 0);
+    expect(result.actualSampleRate, 48000.0);
+    expect(result.channelCount, 1);
+    expect(calls.single.method, 'stopRecording');
   });
 
   tearDown(() {

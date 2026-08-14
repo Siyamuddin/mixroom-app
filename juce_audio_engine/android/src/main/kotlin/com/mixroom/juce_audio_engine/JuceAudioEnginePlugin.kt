@@ -2370,21 +2370,24 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           )
         }
         "stopRecording" -> {
-          // Reset Android out of communication/SCO mode before JUCE tries to
-          // reopen playback-only output, otherwise the reopen can latch onto
-          // the degraded duplex Bluetooth route.
-          normalizeAudioModeAfterRecordingStop()
-          JuceBridge.stopRecordingJNI()
-          normalizeAudioModeAfterRecordingStop()
-          mainHandler.postDelayed({
+          runHeavyTask("stopRecording", result) {
+            // Preserve Android's established route restoration order while
+            // keeping WAV flushing and device restoration off Flutter's UI.
             normalizeAudioModeAfterRecordingStop()
-          }, 250L)
-          result.success(null)
+            val captureResult = JuceBridge.stopRecordingJNI()
+            normalizeAudioModeAfterRecordingStop()
+            mainHandler.postDelayed({
+              normalizeAudioModeAfterRecordingStop()
+            }, 250L)
+            captureResult
+          }
         }
         "stopRecordingWithoutPlaybackRestore" -> {
-          JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
-          normalizeAudioModeAfterRecordingStop()
-          result.success(null)
+          runHeavyTask("stopRecordingWithoutPlaybackRestore", result) {
+            val captureResult = JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
+            normalizeAudioModeAfterRecordingStop()
+            captureResult
+          }
         }
         "restoreBluetoothPlaybackAfterRecordingStop" -> {
           restoreBluetoothPlaybackAfterRecordingStop()

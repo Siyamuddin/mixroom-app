@@ -4718,7 +4718,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"abortRecordingV2"]) {
 #if TARGET_OS_OSX
         if ([[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
-            [JuceBridge stopRecordingObjC];
+            [JuceBridge discardRecordingCaptureObjC];
             [JuceBridge quiescePlaybackRouteV2ObjC:YES];
             self.currentAudioRouteIntentV2 = @"playbackOnly";
         }
@@ -4759,7 +4759,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                 const BOOL terminal =
                     !restoreRequested ||
                     [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
-                [JuceBridge stopRecordingObjC];
+                [JuceBridge discardRecordingCaptureObjC];
                 BOOL restored = NO;
                 NSDictionary *restoredOutput = nil;
                 if (!terminal) {
@@ -4849,8 +4849,25 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                 channelCount:[args[@"channelCount"] integerValue]]));
     }
     else if ([call.method isEqualToString:@"stopRecording"]) {
-        [JuceBridge stopRecordingObjC];
-        result(nil);
+#if TARGET_OS_OSX
+        result([JuceBridge stopRecordingObjC]);
+#else
+        const BOOL isV2 = [[JuceBridge getAudioRouteImplementationObjC]
+            isEqualToString:@"v2"];
+        if (!isV2) {
+            result([JuceBridge stopRecordingObjC]);
+            return;
+        }
+        self.iosLifecycleTransitionActiveV2 = YES;
+        dispatch_async(MixroomIOSLifecycleQueue(), ^{
+            NSDictionary<NSString *, id> *captureResult =
+                [JuceBridge stopRecordingObjC];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self.iosLifecycleTransitionActiveV2 = NO;
+                result(captureResult);
+            });
+        });
+#endif
     }
     else if ([call.method isEqualToString:@"restoreBluetoothPlaybackAfterRecordingStop"]) {
         [self restoreBluetoothPlaybackAfterRecordingStop];

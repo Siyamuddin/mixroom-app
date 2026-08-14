@@ -57,7 +57,7 @@ void main() {
     final open = engine.substring(openStart, quiesceStart);
     final writerStart = engine.indexOf('bool JuceEngine::startRecordingToWav');
     final writerEnd = engine.indexOf(
-      'void JuceEngine::stopRecording()',
+      'RealtimeWavCapture::StopResult JuceEngine::stopRecording()',
       writerStart,
     );
     final writer = engine.substring(writerStart, writerEnd);
@@ -141,7 +141,7 @@ void main() {
     );
     final abort = plugin.substring(abortStart, abortEnd);
 
-    expect(abort, contains('[JuceBridge stopRecordingObjC]'));
+    expect(abort, contains('[JuceBridge discardRecordingCaptureObjC]'));
     expect(abort, contains('restorePlayback'));
     expect(abort, contains('if (terminal || !restored)'));
     expect(abort, contains('reconfigurePlaybackRouteV2ObjC:@""'));

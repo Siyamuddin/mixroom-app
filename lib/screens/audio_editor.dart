@@ -20853,6 +20853,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         if (recordingResult == null || !recordingResult.succeeded) {
           await JuceAudioEngine.stopRecording();
+          await _deleteUncommittedRecordingFile(filePath);
           await _restoreV2PlaybackOnlyAfterRecording();
           if (mounted) {
             _showSmallNotice('Failed to verify the recording input.');
@@ -20863,6 +20864,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
+        await _deleteUncommittedRecordingFile(filePath);
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -20883,6 +20885,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await JuceAudioEngine.stopRecording();
+        await _deleteUncommittedRecordingFile(filePath);
         if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
           await _restoreV2PlaybackOnlyAfterRecording();
         }
@@ -20895,6 +20898,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
+        await _deleteUncommittedRecordingFile(filePath);
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -21028,6 +21032,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _stopAudioRecordingJuce(keepPlaying: keepPlaying);
   }
 
+  Future<void> _deleteUncommittedRecordingFile(String path) async {
+    final file = File(path);
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // The take was never published. Project cleanup may retry if the OS still
+      // holds the just-finalized file briefly.
+    }
+  }
+
   Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {
     if (!_isRecording || _recordTransitionInFlight) return;
     _recordTransitionInFlight = true;
@@ -21072,10 +21086,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       // 1) Stop JUCE recorder
+      final RecordingCaptureResult captureResult;
       if (needsBluetoothStopRecovery && Platform.isAndroid) {
-        await JuceAudioEngine.stopRecordingWithoutPlaybackRestore();
+        captureResult =
+            await JuceAudioEngine.stopRecordingWithoutPlaybackRestore();
       } else {
-        await JuceAudioEngine.stopRecording();
+        captureResult = await JuceAudioEngine.stopRecording();
       }
       if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
         final restored = await _restoreV2PlaybackOnlyAfterRecording();
@@ -21105,6 +21121,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         // another immediate native refresh here can reopen Android's Bluetooth
         // stream again and destabilize post-record playback.
         await _refreshAudioRouteInfo(refreshNativeRoute: false);
+      }
+
+      if (!captureResult.success) {
+        if (deferredBluetoothRestore != null) {
+          await deferredBluetoothRestore;
+        }
+        final failedPath = _recordingFilePath;
+        if (failedPath != null) {
+          final partialFile = File(failedPath);
+          if (await partialFile.exists()) {
+            try {
+              await partialFile.delete();
+            } catch (_) {
+              // Native finalization already made the take unpublished. A later
+              // project cleanup may remove a filesystem entry that is locked.
+            }
+          }
+        }
+        if (mounted) {
+          setState(() {
+            _recordingFilePath = null;
+          });
+          _showSmallNotice(
+            'Recording could not be saved reliably. Please try again.',
+          );
+        }
+        return;
       }
 
       if (_recordingFilePath == null ||

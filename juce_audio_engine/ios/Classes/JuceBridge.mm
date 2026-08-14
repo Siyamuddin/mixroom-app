@@ -4950,9 +4950,23 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return @(JuceEngine::get().getRecordingPeak());
 }
 
-+ (void)stopRecordingObjC
++ (NSDictionary<NSString *, id> *)stopRecordingObjC
 {
-    JuceEngine::get().stopRecording();
+    const auto result = JuceEngine::get().stopRecording();
+    return @{
+        @"success" : @(result.success),
+        @"diagnosticCode" : [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()] ?: @"writer_finalize_failed",
+        @"attemptedSamples" : @(result.attemptedSamples),
+        @"acceptedSamples" : @(result.acceptedSamples),
+        @"droppedSamples" : @(result.droppedSamples),
+        @"actualSampleRate" : @(result.actualSampleRate),
+        @"channelCount" : @(result.channelCount),
+    };
+}
+
++ (void)discardRecordingCaptureObjC
+{
+    JuceEngine::get().discardRecordingCapture();
 }
 
 + (BOOL)isRecordingObjC
