@@ -2303,6 +2303,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             ? _activeSelectedClipIndices()
             : const <int>[],
       );
+    final clipUnderStart = _getGestureClipIndexAt(localPosition);
+    if (clipUnderStart != null) {
+      _selectionBoxBaseClipIndices.add(clipUnderStart);
+    }
     _selectionBoxActive = true;
     _selectionBoxStart = localPosition;
     _selectionBoxCurrent = localPosition;
@@ -4988,6 +4992,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return Rect.fromLTRB(left, top, right, bottom);
   }
 
+  bool _rectsOverlapInclusive(Rect a, Rect b) {
+    return a.left <= b.right &&
+        b.left <= a.right &&
+        a.top <= b.bottom &&
+        b.top <= a.bottom;
+  }
+
   void _updateSelectionFromRect(Rect rect) {
     final selected = <int>{..._selectionBoxBaseClipIndices};
     _ensureClipSpatialIndex();
@@ -4997,19 +5008,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     for (final entry in _clipSpatialIndexByRow.entries) {
       final row = entry.key;
       if (row < 0 || row >= _rowCount || !_isSourceRowVisible(row)) continue;
-      final rowRect = Rect.fromLTWH(
-        0.0,
-        _rowTopForIndex(row),
-        rect.right,
-        _rowHeight,
-      );
-      if (!rect.overlaps(rowRect)) continue;
+      final rowTop = _rowTopForIndex(row);
+      final rowBottom = rowTop + _rowHeight;
+      // Inclusive vertical overlap so a bottom-up or zero-width box still
+      // considers the row it starts on or first touches.
+      if (rect.bottom < rowTop || rect.top > rowBottom) continue;
       entry.value.addIntersecting(startMs, endMs, candidates);
     }
     for (final i in candidates) {
       final clipRect = _getClipRect(i);
       if (clipRect == null) continue;
-      if (rect.overlaps(clipRect)) {
+      if (_rectsOverlapInclusive(rect, clipRect)) {
         selected.add(i);
       }
     }
@@ -5019,11 +5028,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_selectedClipIndices.isEmpty) {
       _selectedClipIndex = -1;
       _clipPopupMs = null;
+      _clearClipVisualStackOrder();
       _emitSelectionChanged();
       return;
     }
     _selectedClipIndex = _selectedClipIndices.reduce((a, b) => a > b ? a : b);
     _clipPopupMs = null;
+    _setClipVisualStackSelection(
+      _selectedClipIndices,
+      primaryClipIndex: _selectedClipIndex,
+    );
     _emitSelectionChanged();
   }
 
@@ -10502,7 +10516,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (rect == null) return const SizedBox.shrink();
     return Positioned(
       left: _headerWidth + rect.left,
-      top: rect.top,
+      top: _contentYToTimelineViewportY(rect.top),
       width: rect.width,
       height: rect.height,
       child: IgnorePointer(
@@ -10530,7 +10544,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _selectionArmIndicatorPulseRadius / _selectionArmIndicatorRadius;
     return Positioned(
       left: _headerWidth + point.dx - layoutRadius,
-      top: point.dy - layoutRadius,
+      top: _contentYToTimelineViewportY(point.dy) - layoutRadius,
       width: layoutDiameter,
       height: layoutDiameter,
       child: IgnorePointer(
