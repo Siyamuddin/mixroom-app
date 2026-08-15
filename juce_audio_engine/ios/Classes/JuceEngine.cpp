@@ -2770,12 +2770,22 @@ bool JuceEngine::prepareBluetoothDuplexSessionV2()
 #endif
 }
 
-bool JuceEngine::openPreparedBluetoothDuplexRouteV2()
+bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
 {
 #if JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession() ||
-        isIOSIntentRouteInvalidatedV2())
+        isIOSIntentRouteInvalidatedV2() || timeoutMilliseconds <= 0)
         return false;
+
+    const auto startedAtMs = juce::Time::getMillisecondCounterHiRes();
+    const auto remainingTimeout = [&]() noexcept
+    {
+        const auto elapsed = juce::Time::getMillisecondCounterHiRes() -
+            startedAtMs;
+        return juce::jmax(
+            0,
+            timeoutMilliseconds - static_cast<int>(std::ceil(elapsed)));
+    };
 
     const auto error = deviceManager.initialise(1, 1, nullptr, true);
     if (error.isNotEmpty())
@@ -2806,7 +2816,8 @@ bool JuceEngine::openPreparedBluetoothDuplexRouteV2()
             std::make_unique<IOSBluetoothDuplexProbeCallback>();
     deviceManager.addAudioCallback(iosBluetoothDuplexProbeCallback.get());
     iosBluetoothDuplexProbeCallbackAttached = true;
-    if (!iosBluetoothDuplexProbeCallback->waitForFirstValidCallback(1000))
+    if (!iosBluetoothDuplexProbeCallback->waitForFirstValidCallback(
+            remainingTimeout()))
     {
         detachIOSBluetoothDuplexProbeCallback();
         deviceManager.closeAudioDevice();
@@ -2815,6 +2826,34 @@ bool JuceEngine::openPreparedBluetoothDuplexRouteV2()
     if (isIOSIntentRouteInvalidatedV2())
     {
         detachIOSBluetoothDuplexProbeCallback();
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    // The isolated callback proves that iOS and RemoteIO have reached the HFP
+    // shape. Hand the still-open device to the existing project callback so
+    // graph preparation and recording use the same callback as every other
+    // route. No AVAudioSession or device reopen occurs in this handoff.
+    detachIOSBluetoothDuplexProbeCallback();
+    if (metronomeCallback == nullptr || remainingTimeout() <= 0)
+    {
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+    metronomeCallback->beginFirstValidCallbackProof();
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    v2PlaybackCallbackDetached = false;
+    if (!metronomeCallback->waitForFirstValidCallback(remainingTimeout()))
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        v2PlaybackCallbackDetached = true;
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+    if (isIOSIntentRouteInvalidatedV2())
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        v2PlaybackCallbackDetached = true;
         deviceManager.closeAudioDevice();
         return false;
     }
@@ -2829,7 +2868,19 @@ bool JuceEngine::reconfigureBluetoothDuplexRouteV2()
 {
 #if JUCE_IOS
     return prepareBluetoothDuplexSessionV2() &&
-        openPreparedBluetoothDuplexRouteV2();
+        openPreparedBluetoothDuplexRouteV2(2000);
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::isBluetoothDuplexProjectCallbackReadyV2() const noexcept
+{
+#if JUCE_IOS
+    return engineInitialized && isV2PlaybackSession() &&
+        !iosBluetoothDuplexProbeCallbackAttached &&
+        !v2PlaybackCallbackDetached && metronomeCallback != nullptr &&
+        metronomeCallback->hasCompletedFirstValidCallback();
 #else
     return false;
 #endif
@@ -7962,6 +8013,14 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
         "duplexProbeCallbackCount",
         juce::var((juce::int64)(iosBluetoothDuplexProbeCallback != nullptr
             ? iosBluetoothDuplexProbeCallback->getCallbackCount()
+            : 0)));
+    out.set(
+        "bluetoothDuplexProjectCallbackReady",
+        isBluetoothDuplexProjectCallbackReadyV2());
+    out.set(
+        "bluetoothDuplexProjectCallbackCount",
+        juce::var((juce::int64)(metronomeCallback != nullptr
+            ? metronomeCallback->getFirstValidCallbackCount()
             : 0)));
 #endif
     out.set("sampleRate", sampleRate);
@@ -13807,6 +13866,19 @@ void JuceEngine::syncLiveInputMonitorRoutingLocked(
 
 void JuceEngine::routeLiveInputToRow(int row, int channelCount, int channelStart)
 {
+#if JUCE_IOS
+    if (isV2PlaybackSession())
+    {
+        // V2 recording captures directly in the device callback and never
+        // monitors input through the graph. Avoid scheduling a graph change
+        // while the iOS lifecycle executor is replacing the duplex device.
+        liveMonitorTargetRow = row;
+        liveMonitorChannelCount = channelCount;
+        liveMonitorChannelStart = channelStart;
+        return;
+    }
+#endif
+
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
     liveMonitorTargetRow = row;

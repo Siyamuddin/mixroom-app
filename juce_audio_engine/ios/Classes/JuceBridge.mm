@@ -2409,14 +2409,20 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return JuceEngine::get().prepareBluetoothDuplexSessionV2();
 }
 
-+ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC
++ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds
 {
-    return JuceEngine::get().openPreparedBluetoothDuplexRouteV2();
+    return JuceEngine::get().openPreparedBluetoothDuplexRouteV2(
+        static_cast<int>(timeoutMilliseconds));
 }
 
 + (BOOL)validateRecordingRouteV2ObjC
 {
     return JuceEngine::get().validateRecordingRouteV2();
+}
+
++ (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC
+{
+    return JuceEngine::get().isBluetoothDuplexProjectCallbackReadyV2();
 }
 
 + (void)beginIOSIntentOperationV2ObjC

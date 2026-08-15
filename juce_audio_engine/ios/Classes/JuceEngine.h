@@ -5886,9 +5886,10 @@ public:
     bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                      const juce::String &inputDeviceName);
     bool prepareBluetoothDuplexSessionV2();
-    bool openPreparedBluetoothDuplexRouteV2();
+    bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
     bool reconfigureBluetoothDuplexRouteV2();
     bool validateRecordingRouteV2() const;
+    bool isBluetoothDuplexProjectCallbackReadyV2() const noexcept;
     void beginIOSIntentOperationV2() noexcept;
     void endIOSIntentOperationV2() noexcept;
     void markIOSIntentRouteInvalidatedV2() noexcept;
@@ -7048,6 +7049,33 @@ public:
 
     void setIsPlaying(bool p) { isPlaying = p; }
 
+    void beginFirstValidCallbackProof() noexcept
+    {
+        firstValidCallbackCompleted.store(false, std::memory_order_release);
+        firstValidCallbackCount.store(0, std::memory_order_relaxed);
+        firstValidCallbackRequested.store(true, std::memory_order_release);
+        firstValidCallback.reset();
+    }
+
+    bool waitForFirstValidCallback(int timeoutMilliseconds) noexcept
+    {
+        if (hasCompletedFirstValidCallback())
+            return true;
+        return firstValidCallback.wait(timeoutMilliseconds) &&
+            hasCompletedFirstValidCallback();
+    }
+
+    bool hasCompletedFirstValidCallback() const noexcept
+    {
+        return callbackReady.load(std::memory_order_acquire) &&
+            firstValidCallbackCompleted.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t getFirstValidCallbackCount() const noexcept
+    {
+        return firstValidCallbackCount.load(std::memory_order_acquire);
+    }
+
     // ===== AudioIODeviceCallback =====
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
@@ -7075,9 +7103,12 @@ public:
     void audioDeviceStopped() override
     {
         callbackReady.store(false, std::memory_order_release);
+        firstValidCallbackRequested.store(false, std::memory_order_release);
+        firstValidCallbackCompleted.store(false, std::memory_order_release);
         expectedBlockCapacity.store(0, std::memory_order_relaxed);
         expectedInputChannels.store(0, std::memory_order_relaxed);
         expectedOutputChannels.store(0, std::memory_order_relaxed);
+        firstValidCallback.signal();
         player.audioDeviceStopped();
     }
 
@@ -7163,6 +7194,7 @@ public:
                 numSamples,
                 sampleRate,
                 juce::Time::getHighResolutionTicks() - callbackStartTicks);
+            completeFirstValidCallbackProof();
             return;
         }
 
@@ -7233,6 +7265,7 @@ public:
             numSamples,
             sampleRate,
             juce::Time::getHighResolutionTicks() - callbackStartTicks);
+        completeFirstValidCallbackProof();
     }
 
     void setupClickFilter(bool accent)
@@ -7275,12 +7308,26 @@ public:
     }
 
 private:
+    void completeFirstValidCallbackProof() noexcept
+    {
+        if (!firstValidCallbackRequested.exchange(
+                false, std::memory_order_acq_rel))
+            return;
+        firstValidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+        firstValidCallbackCompleted.store(true, std::memory_order_release);
+        firstValidCallback.signal();
+    }
+
     juce::AudioProcessorPlayer &player;
     JuceEngine &engine;
     std::atomic<bool> callbackReady{false};
     std::atomic<int> expectedBlockCapacity{0};
     std::atomic<int> expectedInputChannels{0};
     std::atomic<int> expectedOutputChannels{0};
+    std::atomic<bool> firstValidCallbackRequested{false};
+    std::atomic<bool> firstValidCallbackCompleted{false};
+    std::atomic<std::uint64_t> firstValidCallbackCount{0};
+    juce::WaitableEvent firstValidCallback;
 
     bool enabled = false;
     bool isPlaying = false;

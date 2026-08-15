@@ -403,4 +403,30 @@ void main() {
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
     await coordinator.dispose();
   });
+
+  test('cancelled input preparation accepts verified playback cleanup',
+      () async {
+    final adapter = _FakeAdapter();
+    adapter.intentResults[AudioRouteIntentV2.preparingRecording] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'stale_generation',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
 }

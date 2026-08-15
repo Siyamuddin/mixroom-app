@@ -542,6 +542,20 @@ void main() {
     expect(calls, isEmpty);
   });
 
+  test('iOS preparation cancellation uses the existing abort contract',
+      () async {
+    await JuceAudioEngine.abortRecordingV2(
+      platformOverride: TargetPlatform.iOS,
+      cancelOnly: true,
+    );
+
+    expect(calls.single.method, 'abortRecordingV2');
+    expect(
+      Map<String, dynamic>.from(calls.single.arguments as Map),
+      <String, dynamic>{'restorePlayback': true, 'cancelOnly': true},
+    );
+  });
+
   test('iOS V2 readiness accepts its verified mono recording route', () async {
     await JuceAudioEngine.initialisePlaybackV2(
       platformOverride: TargetPlatform.iOS,
@@ -582,6 +596,79 @@ void main() {
 
     expect(ready, isTrue);
     expect(calls.single.method, 'getAudioRouteSnapshotV2');
+  });
+
+  test('iOS V2 readiness accepts only its exact verified HFP recording route',
+      () async {
+    final duplex = _v2Snapshot(
+      nativePortType: 'BluetoothHFP',
+      normalizedKind: 'bluetoothDuplex',
+      uid: 'hfp-output',
+      sessionInputChannels: 1,
+    );
+    duplex['intent'] = 'recording';
+    duplex['inputs'] = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'direction': 'input',
+        'nativePortType': 'BluetoothHFP',
+        'normalizedKind': 'bluetoothDuplex',
+        'uid': 'hfp-input',
+        'name': 'Bluetooth Input',
+        'channelCount': 1,
+      },
+    ];
+    final session = duplex['session']! as Map<String, dynamic>;
+    session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+    final juce = duplex['juce']! as Map<String, dynamic>;
+    juce['activeInputChannels'] = 1;
+
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(
+      AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
+        'status': 'success',
+        'generation': 0,
+        'transitionId': 2,
+        'diagnosticCode': 'ok',
+        'elapsedMs': 1,
+        'transportWasPlaying': false,
+        'snapshot': duplex,
+      }),
+    );
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      return duplex;
+    });
+
+    expect(
+      await JuceAudioEngine.validatePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      ),
+      isTrue,
+    );
+
+    final changed = Map<String, dynamic>.from(duplex);
+    changed['inputs'] = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'direction': 'input',
+        'nativePortType': 'BluetoothHFP',
+        'normalizedKind': 'bluetoothDuplex',
+        'uid': 'different-hfp-input',
+        'name': 'Different Bluetooth Input',
+        'channelCount': 1,
+      },
+    ];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      return changed;
+    });
+
+    expect(
+      await JuceAudioEngine.validatePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      ),
+      isFalse,
+    );
   });
 
   test('loadClip sends rowId + timeline payload', () async {

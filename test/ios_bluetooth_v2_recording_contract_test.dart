@@ -40,6 +40,7 @@ void main() {
     );
     expect(stopIndex, greaterThanOrEqualTo(0));
     expect(reopenIndex, greaterThan(stopIndex));
+    expect(intent, contains('if ([JuceBridge isRecordingObjC])'));
     expect(intent, isNot(contains('setPreferredInput:')));
     expect(intent, isNot(contains('setCategory:')));
     expect(intent, isNot(contains('setMode:')));
@@ -104,7 +105,7 @@ void main() {
     );
   });
 
-  test('iOS A2DP recording rejects before permission or route mutation', () {
+  test('iOS A2DP recording uses the verified HFP intent path', () {
     final preflightStart = editor.indexOf(
       'Future<bool> _prepareAudioRecordingStartPreflight()',
     );
@@ -116,20 +117,175 @@ void main() {
       'JuceAudioEngine.getAudioRouteSnapshotV2()',
       preflightStart,
     );
-    final rejectionIndex = editor.indexOf(
-      'Recording is unavailable while Bluetooth is the audio output.',
-      preflightStart,
-    );
     final intentIndex = editor.indexOf(
       'AudioRouteIntentV2.preparingRecording',
       preflightStart,
     );
 
     expect(snapshotIndex, greaterThan(preflightStart));
-    expect(rejectionIndex, greaterThan(snapshotIndex));
-    expect(rejectionIndex, lessThan(permissionIndex));
+    expect(
+      editor.substring(preflightStart, permissionIndex),
+      isNot(
+        contains(
+          'Recording is unavailable while Bluetooth is the audio output.',
+        ),
+      ),
+    );
     expect(permissionIndex, lessThan(intentIndex));
+    expect(
+      editor.substring(preflightStart, intentIndex + 2000),
+      contains(
+        'Bluetooth microphone in use. Playback quality is reduced while recording.',
+      ),
+    );
+    expect(
+      editor.substring(preflightStart, intentIndex + 2000),
+      contains('Bluetooth recording is unavailable for the current headset.'),
+    );
   });
+
+  test('HFP recording accepts only the exact verified transaction target', () {
+    final intentStart = plugin.indexOf(
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+    );
+    final intentEnd = plugin.indexOf(
+      '- (void)updateObservedOutputDeviceV2:',
+      intentStart,
+    );
+    final intent = plugin.substring(intentStart, intentEnd);
+
+    expect(intent, contains('const BOOL bluetoothRecording ='));
+    expect(intent, contains('iosIntentOperationTargetFingerprintV2'));
+    expect(intent, contains('iosIntentOperationTargetOutputV2'));
+    expect(
+      intent,
+      contains('MixroomIOSRouteFingerprint(session.currentRoute)'),
+    );
+    expect(intent, contains('MixroomIOSInputIsBluetoothHFP(actualInput)'));
+    expect(intent, contains('MixroomIOSOutputIsBluetoothHFP(actualOutput)'));
+    expect(intent, contains('isBluetoothDuplexProjectCallbackReadyV2ObjC'));
+    expect(intent, contains('[JuceBridge isRecordingObjC]'));
+    expect(intent, isNot(contains('44.1')));
+    expect(intent, isNot(contains('48000')));
+  });
+
+  test('HFP input is captured but never monitored through the graph', () {
+    final callbackStart = File('juce_audio_engine/ios/Classes/JuceEngine.h')
+        .readAsStringSync()
+        .indexOf(
+          'class MetronomeAudioCallback : public juce::AudioIODeviceCallback',
+        );
+    final header = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.h',
+    ).readAsStringSync();
+    final callback = header.substring(callbackStart);
+    expect(callback, contains('engine.captureInput(inputChannelData'));
+    expect(
+      callback,
+      contains(
+        'player.audioDeviceIOCallbackWithContext(\n            nullptr,\n            0,',
+      ),
+    );
+
+    final routeStart = engine.indexOf(
+      'void JuceEngine::routeLiveInputToRow',
+    );
+    final writerStart = engine.indexOf(
+      'bool JuceEngine::startRecordingToWav',
+      routeStart,
+    );
+    final route = engine.substring(routeStart, writerStart);
+    final v2Guard = route.indexOf('if (isV2PlaybackSession())');
+    expect(v2Guard, greaterThanOrEqualTo(0));
+    expect(
+      route.indexOf('return;', v2Guard),
+      lessThan(route.indexOf('syncLiveInputMonitorRoutingLocked')),
+    );
+  });
+
+  test(
+    'preparation cancellation uses the abort contract without cleanup racing',
+    () {
+      final handlerStart = editor.indexOf(
+        'Future<void> _handleRecordPressed({required bool keepPlayingOnStop})',
+      );
+      final handlerEnd = editor.indexOf(
+        'String _normalizeEffectText',
+        handlerStart,
+      );
+      final handler = editor.substring(handlerStart, handlerEnd);
+      expect(handler, contains('abortRecordingV2(cancelOnly: true)'));
+      expect(handler, contains('_showSmallNotice(_v2RecordingInvalidationNotice)'));
+      expect(
+        handler,
+        contains('AudioRouteCoordinatorStateV2.preparingInput'),
+      );
+      final startFlowStart = editor.indexOf(
+        'Future<void> _startAudioRecordingJuce()',
+      );
+      final startFlowEnd = editor.indexOf(
+        'Future<bool> _restoreV2PlaybackOnlyAfterRecording()',
+        startFlowStart,
+      );
+      final startFlow = editor.substring(startFlowStart, startFlowEnd);
+      final preflightStart = editor.indexOf(
+        'Future<bool> _prepareAudioRecordingStartPreflight()',
+      );
+      final preflightEnd = editor.indexOf(
+        'Future<void> _startAudioRecordingJuce()',
+        preflightStart,
+      );
+      final preflight = editor.substring(preflightStart, preflightEnd);
+      final preparationResultIndex = preflight.indexOf(
+        'final result = await coordinator.transitionIntent(',
+      );
+      final cancellationResultIndex = preflight.indexOf(
+        'if (_recordStartCancelRequested) return false;',
+        preparationResultIndex,
+      );
+      final preparationFailureIndex = preflight.indexOf(
+        'if (!result.succeeded)',
+        preparationResultIndex,
+      );
+      expect(preparationResultIndex, greaterThanOrEqualTo(0));
+      expect(cancellationResultIndex, greaterThan(preparationResultIndex));
+      expect(preparationFailureIndex, greaterThan(cancellationResultIndex));
+      final restoreIndex = startFlow.indexOf(
+        'await _restoreV2PlaybackOnlyAfterRecording();',
+      );
+      final transitionCompleteIndex = startFlow.indexOf(
+        '_recordTransitionInFlight = false;',
+        restoreIndex,
+      );
+      expect(restoreIndex, greaterThanOrEqualTo(0));
+      expect(transitionCompleteIndex, greaterThan(restoreIndex));
+
+      final abortStart = plugin.indexOf(
+        'else if ([call.method isEqualToString:@"abortRecordingV2"])',
+      );
+      final abortEnd = plugin.indexOf(
+        'else if ([call.method isEqualToString:@"stopAudioRouteMonitoringV2"])',
+        abortStart,
+      );
+      final abort = plugin.substring(abortStart, abortEnd);
+      expect(abort, contains('const BOOL cancelOnly ='));
+      expect(
+        abort.indexOf('if (cancelOnly)'),
+        lessThan(abort.indexOf('dispatch_async(MixroomIOSLifecycleQueue()')),
+      );
+      expect(
+        plugin,
+        contains('self.iosIntentOperationActiveV2)) {'),
+        reason:
+            'an active cancelled preparation must retain the single native cleanup owner',
+      );
+      expect(plugin, contains('recordingRouteMutationStarted'));
+      expect(
+        plugin,
+        contains('if (self.iosIntentOperationCancelledV2) {'),
+      );
+    },
+  );
 
   test('iOS V2 route invalidation performs terminal cleanup', () {
     final abortStart = plugin.indexOf(
@@ -161,4 +317,31 @@ void main() {
     expect(invalidation, contains('await coordinator?.dispose()'));
     expect(invalidation, contains('await JuceAudioEngine.shutdown()'));
   });
+
+  test(
+    'cancelled built-in preparation cannot turn a duplicate session notification into a route change',
+    () {
+      final observerStart = plugin.indexOf(
+        '- (void)handleIOSAudioRouteChangeV2:(NSNotification *)notification {',
+      );
+      final observerEnd = plugin.indexOf('\n}\n#endif', observerStart);
+      final observer = plugin.substring(observerStart, observerEnd);
+
+      expect(observer, contains('!terminalRouteNotification'));
+      expect(observer, contains('!self.iosIntentOperationActiveV2'));
+      expect(
+        observer,
+        contains(
+          '[fingerprint isEqualToString:self.audioRouteFingerprintV2]',
+        ),
+      );
+      expect(
+        observer,
+        isNot(contains(
+          '!self.iosIntentOperationCancelledV2 &&\n'
+          '            [fingerprint isEqualToString:',
+        )),
+      );
+    },
+  );
 }

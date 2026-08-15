@@ -590,6 +590,7 @@ class JuceAudioEngine {
   static Future<void> abortRecordingV2({
     TargetPlatform? platformOverride,
     bool restorePlayback = true,
+    bool cancelOnly = false,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
@@ -599,6 +600,7 @@ class JuceAudioEngine {
     try {
       await _ch.invokeMethod<void>('abortRecordingV2', <String, dynamic>{
         'restorePlayback': restorePlayback,
+        'cancelOnly': cancelOnly,
       });
     } on MissingPluginException {
       return;
@@ -654,6 +656,10 @@ class JuceAudioEngine {
     final current = await getAudioRouteSnapshotV2();
     final expectedInputChannels =
         startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
+    final expectedIOSBluetoothDuplex = platform == TargetPlatform.iOS &&
+        expectedInputChannels == 1 &&
+        startup.outputs.single.normalizedKind ==
+            AudioRouteKindV2.bluetoothDuplex;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
@@ -674,23 +680,34 @@ class JuceAudioEngine {
         current.outputs.length != 1) {
       return false;
     }
-    if ((platform == TargetPlatform.macOS ||
-            platform == TargetPlatform.iOS) &&
+    if ((platform == TargetPlatform.macOS || platform == TargetPlatform.iOS) &&
         expectedInputChannels == 1) {
       if (startup.inputs.length != 1 ||
           current.intent == AudioRouteIntentV2.playbackOnly ||
           current.inputs.length != 1 ||
           current.inputs.single.uid.isEmpty ||
-          current.inputs.single.normalizedKind != AudioRouteKindV2.builtIn ||
-          startup.inputs.single.uid != current.inputs.single.uid) {
+          startup.inputs.single.uid.isEmpty ||
+          startup.inputs.single.uid != current.inputs.single.uid ||
+          (expectedIOSBluetoothDuplex
+              ? startup.inputs.single.nativePortType !=
+                      current.inputs.single.nativePortType ||
+                  startup.inputs.single.normalizedKind !=
+                      AudioRouteKindV2.bluetoothDuplex ||
+                  current.inputs.single.normalizedKind !=
+                      AudioRouteKindV2.bluetoothDuplex
+              : current.inputs.single.normalizedKind !=
+                  AudioRouteKindV2.builtIn)) {
         return false;
       }
     }
     final expected = startup.outputs.single;
     final actual = current.outputs.single;
     if (platform == TargetPlatform.iOS) {
-      return expected.normalizedKind != AudioRouteKindV2.bluetoothDuplex &&
-          actual.normalizedKind != AudioRouteKindV2.bluetoothDuplex &&
+      final acceptedOutputProfile = expectedIOSBluetoothDuplex
+          ? actual.normalizedKind == AudioRouteKindV2.bluetoothDuplex
+          : expected.normalizedKind != AudioRouteKindV2.bluetoothDuplex &&
+              actual.normalizedKind != AudioRouteKindV2.bluetoothDuplex;
+      return acceptedOutputProfile &&
           expected.uid.isNotEmpty &&
           actual.uid.isNotEmpty &&
           expected.nativePortType.isNotEmpty &&

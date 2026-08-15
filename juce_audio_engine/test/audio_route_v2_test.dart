@@ -258,6 +258,30 @@ void main() {
     expect(configuration.monitoringAllowed, isFalse);
   });
 
+  test('Bluetooth recording defers exact input verification to native intent',
+      () {
+    final configuration = const AudioRoutePolicyV2().resolve(
+      snapshot: snapshot(
+        outputs: const <AudioRouteEndpointV2>[
+          AudioRouteEndpointV2(
+            direction: AudioRouteDirectionV2.output,
+            nativePortType: 'BluetoothA2DPOutput',
+            normalizedKind: AudioRouteKindV2.bluetoothMedia,
+            uid: 'output-a',
+            name: 'Headphones',
+            channelCount: 2,
+          ),
+        ],
+      ),
+      intent: AudioRouteIntentV2.preparingRecording,
+    );
+
+    expect(configuration.supported, isTrue);
+    expect(configuration.desiredInputChannels, 1);
+    expect(configuration.requireNonBluetoothInput, isFalse);
+    expect(configuration.monitoringAllowed, isFalse);
+  });
+
   test('playback startup result preserves verified snapshot and future fields',
       () {
     final result = AudioPlaybackStartupResultV2.fromMap(<String, dynamic>{

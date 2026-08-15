@@ -5682,7 +5682,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _iosBluetoothDuplexProbeRunning = false;
+  bool _iosBluetoothRecordingNoticeShown = false;
   bool _v2RecordingRouteInvalidated = false;
+  String _v2RecordingInvalidationNotice =
+      'Audio output changed during recording. Reopen the audio editor to continue.';
   StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
   SampleDragData? _finderSampleDragData;
   String? _finderSampleDragDurationPath;
@@ -12642,6 +12645,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (_v2RecordingRouteInvalidated) return;
+    _v2RecordingInvalidationNotice =
+        Platform.isIOS && event.cause == 'oldDeviceUnavailable'
+        ? 'Bluetooth disconnected during recording. Reopen the audio editor to continue.'
+        : 'Audio output changed during recording. Reopen the audio editor to continue.';
     final pausedPosition = _isPlaying
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
@@ -12670,9 +12677,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await coordinator?.dispose();
     await JuceAudioEngine.shutdown();
     if (!mounted) return;
-    _showSmallNotice(
-      'Audio output changed during recording. Reopen the audio editor to continue.',
-    );
+    _showSmallNotice(_v2RecordingInvalidationNotice);
   }
 
   Future<void> _synchronizeIOSRouteSafetyPositionV2({
@@ -12724,11 +12729,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
     if (result.status == AudioRouteTransitionStatusV2.fallback) {
       _showSmallNotice(
-        Platform.isAndroid
-            ? 'Bluetooth disconnected. Using phone speaker. Press Play to continue.'
-            : Platform.isIOS
-            ? 'Bluetooth disconnected. Using built-in speaker. Press Play to continue.'
-            : 'Audio device disconnected. Using Mac speakers. Press Play to continue.',
+        'Bluetooth disconnected. Audio output changed. Press Play to continue.',
       );
       return;
     }
@@ -20621,17 +20622,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    var preparingBluetoothHeadsetRecording = false;
     if (_isBluetoothV2Session && Platform.isIOS) {
       final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
       if (!mounted) return false;
-      if (snapshot.outputs.length == 1 &&
+      preparingBluetoothHeadsetRecording =
+          snapshot.outputs.length == 1 &&
           snapshot.outputs.single.normalizedKind ==
-              AudioRouteKindV2.bluetoothMedia) {
-        _showSmallNotice(
-          'Recording is unavailable while Bluetooth is the audio output.',
-        );
-        return false;
-      }
+              AudioRouteKindV2.bluetoothMedia;
     }
     if (!await _ensureMicrophonePermissionForRecording()) {
       return false;
@@ -20662,10 +20660,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final result = await coordinator.transitionIntent(
         AudioRouteIntentV2.preparingRecording,
       );
+      if (_recordStartCancelRequested) return false;
       if (!result.succeeded) {
         if (mounted) {
           _showSmallNotice(
-            result.diagnosticCode == 'bluetooth_input_forbidden'
+            Platform.isIOS && preparingBluetoothHeadsetRecording
+                ? 'Bluetooth recording is unavailable for the current headset.'
+                : result.diagnosticCode == 'bluetooth_input_forbidden'
                 ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
                 : 'Recording with the built-in device microphone is unavailable for the current output.',
           );
@@ -20675,6 +20676,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
       _selectedChannelStart = 0;
       _selectedChannelCount = 1;
+      if (Platform.isIOS &&
+          preparingBluetoothHeadsetRecording &&
+          !_iosBluetoothRecordingNoticeShown) {
+        _iosBluetoothRecordingNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone in use. Playback quality is reduced while recording.',
+        );
+      }
       return true;
     }
 
@@ -20943,8 +20952,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _recordStartVisualPending = false;
         });
       }
-      _recordStartCancelRequested = false;
-      _recordTransitionInFlight = false;
       if (_isBluetoothV2Session &&
           (Platform.isMacOS || Platform.isIOS) &&
           !_isRecording &&
@@ -20952,6 +20959,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
         await _restoreV2PlaybackOnlyAfterRecording();
       }
+      _recordStartCancelRequested = false;
+      _recordTransitionInFlight = false;
     }
   }
 
@@ -44620,9 +44629,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_v2RecordingRouteInvalidated) {
-        _showSmallNotice(
-          'Audio output changed during recording. Reopen the audio editor to continue.',
-        );
+        _showSmallNotice(_v2RecordingInvalidationNotice);
         return;
       }
     }
@@ -44632,6 +44639,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         setState(() {
           _recordStartVisualPending = false;
         });
+      }
+      if (_isBluetoothV2Session &&
+          Platform.isIOS &&
+          _audioRouteCoordinatorV2?.state ==
+              AudioRouteCoordinatorStateV2.preparingInput) {
+        await JuceAudioEngine.abortRecordingV2(cancelOnly: true);
       }
       return;
     }

@@ -10,9 +10,10 @@
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;
 + (BOOL)prepareBluetoothDuplexSessionV2ObjC;
-+ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC;
++ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds;
 + (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
 + (BOOL)validateRecordingRouteV2ObjC;
++ (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC;
 + (void)beginIOSIntentOperationV2ObjC;
 + (void)endIOSIntentOperationV2ObjC;
 + (void)markIOSIntentRouteInvalidatedV2ObjC;

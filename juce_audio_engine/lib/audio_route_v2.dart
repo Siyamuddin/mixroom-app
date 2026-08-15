@@ -700,7 +700,10 @@ class AudioRoutePolicyV2 {
           ? 'bluetooth_monitoring_unsupported'
           : null,
       desiredInputChannels: wantsInput ? 1 : 0,
-      requireNonBluetoothInput: wantsInput,
+      // Recording input identity is verified by the platform-specific intent
+      // transition. Monitoring remains the only globally forbidden Bluetooth
+      // input mode.
+      requireNonBluetoothInput: intent == AudioRouteIntentV2.monitoring,
       hardwareRatePolicy: bluetoothOutput
           ? AudioHardwareRatePolicyV2.prefer48000
           : AudioHardwareRatePolicyV2.native,

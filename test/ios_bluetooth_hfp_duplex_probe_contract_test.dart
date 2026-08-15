@@ -65,35 +65,46 @@ void main() {
     expect(configure, isNot(contains('dispatch_after')));
   });
 
-  test('writer-free engine route never starts the WAV writer', () {
-    final start = engine.indexOf(
-      'bool JuceEngine::prepareBluetoothDuplexSessionV2()',
-    );
-    final end = engine.indexOf(
-      'bool JuceEngine::validateRecordingRouteV2()',
-      start,
-    );
-    final route = engine.substring(start, end);
+  test(
+    'writer-free engine route hands the open HFP device to the project callback',
+    () {
+      final start = engine.indexOf(
+        'bool JuceEngine::prepareBluetoothDuplexSessionV2()',
+      );
+      final end = engine.indexOf(
+        'bool JuceEngine::validateRecordingRouteV2()',
+        start,
+      );
+      final route = engine.substring(start, end);
 
-    expect(route, contains('mixroomIOSPrepareAudioSessionPolicy()'));
-    expect(route, contains('deviceManager.initialise(1, 1, nullptr, true)'));
-    expect(route, contains('v2-bluetooth-hfp-duplex-probe'));
-    expect(
-      route,
-      contains(
-        'deviceManager.addAudioCallback('
-        'iosBluetoothDuplexProbeCallback.get())',
-      ),
-    );
-    expect(route, isNot(contains('startRecordingToWav')));
-    expect(route, isNot(contains('recordWriter')));
-    expect(route, isNot(contains('prepareLiveClipProcessorsForCurrentDevice')));
-    expect(route, isNot(contains('armOutputSafetyForCurrentRoute')));
-    expect(route, isNot(contains('metronomeCallback')));
-    expect(bridge, contains('prepareBluetoothDuplexSessionV2ObjC'));
-    expect(bridge, contains('openPreparedBluetoothDuplexRouteV2ObjC'));
-    expect(bridge, contains('reconfigureBluetoothDuplexRouteV2ObjC'));
-  });
+      expect(route, contains('mixroomIOSPrepareAudioSessionPolicy()'));
+      expect(route, contains('deviceManager.initialise(1, 1, nullptr, true)'));
+      expect(route, contains('v2-bluetooth-hfp-duplex-probe'));
+      expect(
+        route,
+        contains(
+          'deviceManager.addAudioCallback('
+          'iosBluetoothDuplexProbeCallback.get())',
+        ),
+      );
+      expect(route, contains('detachIOSBluetoothDuplexProbeCallback()'));
+      expect(
+        route,
+        contains('metronomeCallback->beginFirstValidCallbackProof()'),
+      );
+      expect(
+        route,
+        contains('deviceManager.addAudioCallback(metronomeCallback.get())'),
+      );
+      expect(route, contains('metronomeCallback->waitForFirstValidCallback'));
+      expect(route, isNot(contains('startRecordingToWav')));
+      expect(route, isNot(contains('recordWriter')));
+      expect(route, isNot(contains('armOutputSafetyForCurrentRoute')));
+      expect(bridge, contains('prepareBluetoothDuplexSessionV2ObjC'));
+      expect(bridge, contains('openPreparedBluetoothDuplexRouteV2ObjC'));
+      expect(bridge, contains('reconfigureBluetoothDuplexRouteV2ObjC'));
+    },
+  );
 
   test('isolated HFP callback can only validate and clear audio', () {
     final start = engineHeader.indexOf(
@@ -180,19 +191,20 @@ void main() {
       plugin,
       contains('[self setAudioRouteIntentV2:args ?: @{} completion:result]'),
     );
-    expect(
-      plugin,
-      contains('dispatch_async(MixroomIOSLifecycleQueue(), ^{'),
-    );
+    expect(plugin, contains('dispatch_async(MixroomIOSLifecycleQueue(), ^{'));
     expect(plugin, contains('lifecycleTransitionInProgress'));
     expect(plugin, contains('claimIOSIntentCleanupV2'));
     expect(plugin, contains('iosIntentCompletionDeliveredV2'));
   });
 
   test('duplex verification requires one real callback', () {
-    expect(engine, contains('waitForFirstValidCallback(1000)'));
+    expect(engine, contains('waitForFirstValidCallback('));
     expect(engine, contains('hasCompletedValidCallback()'));
     expect(engine, contains('duplexProbeCallbackCount'));
+    expect(engine, contains('isBluetoothDuplexProjectCallbackReadyV2'));
+    expect(engineHeader, contains('beginFirstValidCallbackProof()'));
+    expect(engineHeader, contains('completeFirstValidCallbackProof()'));
+    expect(plugin, contains('@"projectCallback"'));
     expect(engine, isNot(contains('while (iosBluetoothDuplexProbe')));
   });
 
@@ -316,7 +328,7 @@ void main() {
     expect(intent, isNot(contains('sleep(')));
 
     final hfpStart = engine.indexOf(
-      'bool JuceEngine::openPreparedBluetoothDuplexRouteV2()',
+      'bool JuceEngine::openPreparedBluetoothDuplexRouteV2(',
     );
     final hfpEnd = engine.indexOf(
       'bool JuceEngine::validateRecordingRouteV2()',
@@ -336,6 +348,7 @@ void main() {
       greaterThan(attach),
     );
     expect(hfp, contains('detachIOSBluetoothDuplexProbeCallback()'));
+    expect(hfp, contains('metronomeCallback->beginFirstValidCallbackProof()'));
     expect(hfp, contains('deviceManager.closeAudioDevice()'));
 
     final begin = engine.indexOf(

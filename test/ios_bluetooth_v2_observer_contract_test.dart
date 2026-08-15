@@ -104,7 +104,7 @@ void main() {
     expect(
       transitionHandler,
       contains(
-        'Bluetooth disconnected. Using built-in speaker. Press Play to continue.',
+        'Bluetooth disconnected. Audio output changed. Press Play to continue.',
       ),
     );
     expect(transitionHandler, isNot(contains('_playAudio(')));
