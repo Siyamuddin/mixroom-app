@@ -3646,6 +3646,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _dragXAxisLocked = false;
   }
 
+  void _cancelClipGestureAfterTopologyChange() {
+    _clearPendingClipTapState();
+    _resetTrimInteractionState();
+    _interactionMode = '';
+    _isUserInteracting = false;
+    _dragGroupStartMs.clear();
+    _dragGroupStartRows.clear();
+    _dragDeltaMs = 0.0;
+    _dragDeltaRows = 0;
+    _timelineKeyboardModifierPointer = null;
+  }
+
   void _restoreTentativeClipSelectionIfNeeded() {
     if (!_tentativeClipSelectionActive) return;
     _tentativeClipSelectionActive = false;
@@ -5625,6 +5637,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       );
     }
     if (oldWidget.clips.length != widget.clips.length) {
+      // Clip indices are transient. A deletion or insertion can invalidate an
+      // active drag/trim before its next pointer update is delivered.
+      _cancelClipGestureAfterTopologyChange();
       _syncSelectionAfterClipTopologyChange();
       if (_pendingPaintPastes.isNotEmpty) {
         _ensureClipSpatialIndex();
@@ -16461,10 +16476,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       return;
     }
-    if (_draggedClipIndex == null || _dragStartGlobalOffset == null) return;
+    final draggedIndex = _draggedClipIndex;
+    if (draggedIndex == null || _dragStartGlobalOffset == null) return;
+    if (draggedIndex < 0 || draggedIndex >= widget.clips.length) {
+      setState(_cancelClipGestureAfterTopologyChange);
+      return;
+    }
 
     setState(() {
-      final draggedIndex = _draggedClipIndex!;
       final draggedClip = widget.clips[draggedIndex];
 
       // Calculate TOTAL delta from drag start (for row)
@@ -16549,9 +16568,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       return;
     }
-    if (_trimClipIndex == null || _trimStartAnchorX == null) return;
+    final trimClipIndex = _trimClipIndex;
+    if (trimClipIndex == null || _trimStartAnchorX == null) return;
+    if (trimClipIndex < 0 || trimClipIndex >= widget.clips.length) {
+      setState(_cancelClipGestureAfterTopologyChange);
+      return;
+    }
 
-    final clip = widget.clips[_trimClipIndex!];
+    final clip = widget.clips[trimClipIndex];
     final fullDuration = widget.getFullDurationMs(clip);
     final isReversed = clip.isReversed;
     final timelineScale =

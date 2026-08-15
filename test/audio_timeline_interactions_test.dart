@@ -2640,6 +2640,42 @@ void main() {
     expect(deleteRequests, <int>[0]);
   });
 
+  testWidgets('clip deletion cancels a drag that holds a stale clip index',
+      (tester) async {
+    final clips = <AudioTrack>[
+      await _buildClip(),
+      await _buildClip(),
+      await _buildClip(),
+    ];
+    final moveRequests = <int>[];
+
+    Widget harness(List<AudioTrack> currentClips) => _buildHarness(
+          clips: currentClips,
+          onMoveClipCommit: (clipIndex, _, __) async {
+            moveRequests.add(clipIndex);
+          },
+        );
+
+    await tester.pumpWidget(harness(clips));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(_clipCenter(tester));
+    await gesture.moveBy(const Offset(24.0, 0.0));
+    await tester.pump();
+
+    // The topmost clip is index 2. Removing it while the pointer remains down
+    // must invalidate the transient drag before another update arrives.
+    await tester.pumpWidget(harness(clips.take(2).toList(growable: false)));
+    await tester.pump();
+    await gesture.moveBy(const Offset(24.0, 0.0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(moveRequests, isEmpty);
+  });
+
   testWidgets('desktop delete key removes selected clips', (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
     final deleteRequests = <int>[];
