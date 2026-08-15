@@ -5988,6 +5988,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<String, Set<AudioTrack>> _waveformPendingTracksByPath =
       <String, Set<AudioTrack>>{};
   final Map<String, int> _waveformFailureCountByPath = <String, int>{};
+  Future<void> _waveformExtractionLane = Future<void>.value();
   static const int _maxWaveformExtractionAttempts = 3;
   String _aiLibrarySnapshotCache = '';
   String? _aiLibrarySnapshotCacheKey;
@@ -27957,6 +27958,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<List<double>?> _extractWaveformData(
+    String inputPath, {
+    required double durSec,
+    required int target,
+  }) {
+    final result = Completer<List<double>?>();
+    final previous = _waveformExtractionLane;
+    _waveformExtractionLane = () async {
+      try {
+        await previous;
+      } catch (_) {
+        // A failed job must not poison the lane for later clips.
+      }
+      try {
+        result.complete(
+          await _extractWaveformDataNow(
+            inputPath,
+            durSec: durSec,
+            target: target,
+          ),
+        );
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    }();
+    return result.future;
+  }
+
+  Future<List<double>?> _extractWaveformDataNow(
     String inputPath, {
     required double durSec,
     required int target,
