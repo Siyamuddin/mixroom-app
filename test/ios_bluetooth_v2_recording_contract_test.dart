@@ -316,6 +316,35 @@ void main() {
     expect(invalidation, contains('abortRecordingV2(restorePlayback: false)'));
     expect(invalidation, contains('await coordinator?.dispose()'));
     expect(invalidation, contains('await JuceAudioEngine.shutdown()'));
+    final terminalAbort = invalidation.indexOf(
+      'await JuceAudioEngine.abortRecordingV2(restorePlayback: false)',
+    );
+    final terminalDelete = invalidation.indexOf(
+      'await _deleteUncommittedRecordingFile(unpublishedRecordingPath)',
+      terminalAbort,
+    );
+    final terminalShutdown = invalidation.indexOf(
+      'await JuceAudioEngine.shutdown()',
+      terminalAbort,
+    );
+    expect(terminalAbort, greaterThanOrEqualTo(0));
+    expect(terminalShutdown, greaterThan(terminalAbort));
+    expect(terminalDelete, greaterThan(terminalShutdown));
+
+    final shutdownStart = editor.indexOf(
+      'Future<void> _shutdownAudioEngineV2Aware() async',
+    );
+    final shutdownEnd = editor.indexOf(
+      '@override\n  void didChangeAppLifecycleState',
+      shutdownStart,
+    );
+    final shutdown = editor.substring(shutdownStart, shutdownEnd);
+    expect(shutdown, contains('final routeRecovery ='));
+    expect(shutdown, contains('await routeRecovery;'));
+    expect(
+      shutdown.indexOf('await routeRecovery;'),
+      lessThan(shutdown.indexOf('await coordinator?.dispose()')),
+    );
 
     final playbackIntentStart = plugin.indexOf(
       'NSDictionary<NSString *, id> *recordingSourceOutput =',

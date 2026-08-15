@@ -12487,6 +12487,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _shutdownAudioEngineV2Aware() async {
+    final routeRecovery = _v2RecordingRouteRecoveryFuture;
+    if (routeRecovery != null) {
+      try {
+        await routeRecovery;
+      } catch (_) {
+        // Shutdown must still close the coordinator and engine if recovery fails.
+      }
+    }
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
     if (_isBluetoothV2Session &&
@@ -12707,10 +12715,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       recoveryResult = await _audioRouteCoordinatorV2
           ?.recoverPlaybackAfterIntentInvalidation();
     }
-    if (unpublishedRecordingPath != null) {
-      await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
-    }
     if (recoveryResult != null && recoveryResult.succeeded) {
+      if (unpublishedRecordingPath != null) {
+        await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+      }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
       if (!mounted) return;
       setState(() {
@@ -12728,6 +12736,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _audioRouteCoordinatorV2 = null;
     await coordinator?.dispose();
     await JuceAudioEngine.shutdown();
+    if (unpublishedRecordingPath != null) {
+      await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+    }
     if (!mounted) return;
     setState(() {
       _v2RecordingRouteRecoveryInProgress = false;
