@@ -1260,6 +1260,23 @@ remain schema-version 1 and add nullable phase, callback-count, terminal-cause,
 and cleanup-outcome evidence. Bluetooth recording and the realtime WAV writer
 remain disconnected from this proof.
 
+#### Checkpoint 7I — recording-route disconnect recovery
+
+The accepted HFP recording path now follows an `oldDeviceUnavailable` event with
+one serialized transition to `playbackOnly` after the invalidated recording
+intent has completely stopped. The native owner discards unpublished capture,
+ends HFP transaction ownership, accepts the single non-HFP output selected by
+iOS, and verifies `playback/default`, zero inputs, an attached callback, and
+positive native rate and buffer. It does not force speaker or A2DP routing and
+does not retry.
+
+Physical iPad testing passed both removal during recording preparation and
+removal during active recording. In each case the unpublished take was not
+inserted, the microphone closed, the editor remained responsive, and playback
+continued through the replacement system output after manual Play without
+reopening the editor. If this single verification or reopen fails, the existing
+terminal shutdown and editor-reopen boundary remains the fallback.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1422,7 +1439,6 @@ Each run records:
 
 ## Immediate next step
 
-Complete the Checkpoint 7H physical disconnect gate. After it passes, correct
-the WAV capture path so realtime callbacks never allocate, lock, or write to
-disk. Only then attach recording and clip insertion to the already-verified HFP
-duplex lifecycle.
+Serialize editor waveform extraction jobs to remove the confirmed FFmpeg session
+lookup race during large project loading. This is a rendering-only correction
+and must remain separate from Bluetooth routing and recording lifecycle work.

@@ -187,9 +187,7 @@ void main() {
       ),
     );
 
-    final routeStart = engine.indexOf(
-      'void JuceEngine::routeLiveInputToRow',
-    );
+    final routeStart = engine.indexOf('void JuceEngine::routeLiveInputToRow');
     final writerStart = engine.indexOf(
       'bool JuceEngine::startRecordingToWav',
       routeStart,
@@ -215,11 +213,11 @@ void main() {
       );
       final handler = editor.substring(handlerStart, handlerEnd);
       expect(handler, contains('abortRecordingV2(cancelOnly: true)'));
-      expect(handler, contains('_showSmallNotice(_v2RecordingInvalidationNotice)'));
       expect(
         handler,
-        contains('AudioRouteCoordinatorStateV2.preparingInput'),
+        contains('_showSmallNotice(_v2RecordingInvalidationNotice)'),
       );
+      expect(handler, contains('AudioRouteCoordinatorStateV2.preparingInput'));
       final startFlowStart = editor.indexOf(
         'Future<void> _startAudioRecordingJuce()',
       );
@@ -280,14 +278,11 @@ void main() {
             'an active cancelled preparation must retain the single native cleanup owner',
       );
       expect(plugin, contains('recordingRouteMutationStarted'));
-      expect(
-        plugin,
-        contains('if (self.iosIntentOperationCancelledV2) {'),
-      );
+      expect(plugin, contains('if (self.iosIntentOperationCancelledV2) {'));
     },
   );
 
-  test('iOS V2 route invalidation performs terminal cleanup', () {
+  test('iOS HFP removal attempts one verified system-output recovery', () {
     final abortStart = plugin.indexOf(
       'else if ([call.method isEqualToString:@"abortRecordingV2"])',
     );
@@ -306,16 +301,43 @@ void main() {
     expect(abort, isNot(contains('setActive:')));
 
     final invalidationStart = editor.indexOf(
-      'Future<void> _abortRecordingV2AfterRouteChange()',
+      'Future<void> _recoverV2PlaybackAfterRecordingRouteChange({',
     );
     final invalidationEnd = editor.indexOf(
       'Future<void> _synchronizeIOSRouteSafetyPositionV2',
       invalidationStart,
     );
     final invalidation = editor.substring(invalidationStart, invalidationEnd);
+    expect(invalidation, contains('recoverPlaybackAfterIntentInvalidation()'));
+    expect(
+      invalidation,
+      contains('JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2'),
+    );
     expect(invalidation, contains('abortRecordingV2(restorePlayback: false)'));
     expect(invalidation, contains('await coordinator?.dispose()'));
     expect(invalidation, contains('await JuceAudioEngine.shutdown()'));
+
+    final playbackIntentStart = plugin.indexOf(
+      'NSDictionary<NSString *, id> *recordingSourceOutput =',
+    );
+    final playbackIntentEnd = plugin.indexOf(
+      '\n    if (success) {\n        self.currentAudioRouteIntentV2 = intent;',
+      playbackIntentStart,
+    );
+    final playbackIntent = plugin.substring(
+      playbackIntentStart,
+      playbackIntentEnd,
+    );
+    expect(playbackIntent, contains('recoveringAfterPhysicalInvalidation'));
+    expect(
+      playbackIntent,
+      contains('[JuceBridge discardRecordingCaptureObjC]'),
+    );
+    expect(playbackIntent, contains('reconfigurePlaybackRouteV2ObjC:@""'));
+    expect(playbackIntent, contains('fallback_succeeded'));
+    expect(playbackIntent, contains('activeInputChannels'));
+    expect(playbackIntent, contains('audioCallbackAttached'));
+    expect(playbackIntent, isNot(contains('dispatch_after')));
   });
 
   test(
@@ -331,16 +353,16 @@ void main() {
       expect(observer, contains('!self.iosIntentOperationActiveV2'));
       expect(
         observer,
-        contains(
-          '[fingerprint isEqualToString:self.audioRouteFingerprintV2]',
-        ),
+        contains('[fingerprint isEqualToString:self.audioRouteFingerprintV2]'),
       );
       expect(
         observer,
-        isNot(contains(
-          '!self.iosIntentOperationCancelledV2 &&\n'
-          '            [fingerprint isEqualToString:',
-        )),
+        isNot(
+          contains(
+            '!self.iosIntentOperationCancelledV2 &&\n'
+            '            [fingerprint isEqualToString:',
+          ),
+        ),
       );
     },
   );

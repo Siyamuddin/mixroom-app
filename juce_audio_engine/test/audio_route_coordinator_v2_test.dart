@@ -378,6 +378,80 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('serializes one playback recovery after invalidated preparation',
+      () async {
+    final adapter = _FakeAdapter();
+    final preparing = Completer<AudioRouteTransitionResultV2>();
+    adapter.intentResults[AudioRouteIntentV2.preparingRecording] =
+        preparing.future;
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final preparation = coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+    );
+    await _flush();
+    adapter.controller.add(
+      _event(
+        1,
+        'speaker-after-disconnect',
+        cause: 'oldDeviceUnavailable',
+      ),
+    );
+    await _flush();
+
+    final recovery = coordinator.recoverPlaybackAfterIntentInvalidation();
+    await _flush();
+    expect(
+      adapter.appliedIntents,
+      <AudioRouteIntentV2>[AudioRouteIntentV2.preparingRecording],
+    );
+
+    preparing.complete(_result(0));
+    expect((await preparation).diagnosticCode, 'stale_generation');
+    final recoveryResult = await recovery;
+
+    expect(recoveryResult.succeeded, isTrue);
+    expect(recoveryResult.generation, 1);
+    expect(adapter.appliedIntents, <AudioRouteIntentV2>[
+      AudioRouteIntentV2.preparingRecording,
+      AudioRouteIntentV2.playbackOnly,
+    ]);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('recording invalidation performs only the requested recovery attempt',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+
+    adapter.controller.add(
+      _event(1, 'speaker', cause: 'oldDeviceUnavailable'),
+    );
+    await _flush();
+    final result = await coordinator.recoverPlaybackAfterIntentInvalidation();
+
+    expect(result.succeeded, isTrue);
+    expect(adapter.appliedIntents, <AudioRouteIntentV2>[
+      AudioRouteIntentV2.preparingRecording,
+      AudioRouteIntentV2.recording,
+      AudioRouteIntentV2.playbackOnly,
+    ]);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
   test('failed input preparation with verified cleanup keeps playback usable',
       () async {
     final adapter = _FakeAdapter();

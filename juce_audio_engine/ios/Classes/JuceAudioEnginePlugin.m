@@ -2065,6 +2065,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     NSArray<NSString *> *probeCandidateCategoryOptions = @[];
     NSNumber *probeActualCallbackCount = @0;
     BOOL success = NO;
+    BOOL playbackRecoveryUsedFallback = NO;
     BOOL recordingRouteMutationStarted = NO;
     AVAudioSession *session = [AVAudioSession sharedInstance];
 
@@ -2418,28 +2419,45 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             }
         }
     } else {
-        NSDictionary<NSString *, id> *expectedOutput =
-            self.iosRecordingOutputV2 ?:
+        NSDictionary<NSString *, id> *recordingSourceOutput =
+            self.iosRecordingOutputV2;
+        NSDictionary<NSString *, id> *currentSystemOutput =
             MixroomIOSSingleOutputEndpoint(session.currentRoute);
-        const BOOL restoringBluetoothRoute =
-            MixroomIOSOutputIsBluetoothMedia(expectedOutput);
+        const BOOL activeBluetoothOperation =
+            self.iosIntentOperationActiveV2 &&
+            MixroomIOSOutputIsBluetoothMedia(recordingSourceOutput);
+        const BOOL recoveringAfterPhysicalInvalidation =
+            activeBluetoothOperation &&
+            [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
+        NSDictionary<NSString *, id> *expectedOutput =
+            recoveringAfterPhysicalInvalidation
+                ? currentSystemOutput
+                : (recordingSourceOutput ?: currentSystemOutput);
         const BOOL restoringBluetoothProbe =
-            self.iosIntentOperationActiveV2 && restoringBluetoothRoute;
+            activeBluetoothOperation;
         NSDictionary<NSString *, id> *restoredOutputForFacts = nil;
         if (restoringBluetoothProbe) {
             [self claimIOSIntentCleanupV2];
-            self.iosIntentLifecyclePhaseV2 = @"restoringPlayback";
+            self.iosIntentLifecyclePhaseV2 = recoveringAfterPhysicalInvalidation
+                ? @"recoveringSystemOutput" : @"restoringPlayback";
         }
-        if ([JuceBridge isRecordingObjC]) {
+        if (recoveringAfterPhysicalInvalidation) {
+            [JuceBridge discardRecordingCaptureObjC];
+            // The terminal route event already selected the replacement output.
+            // End HFP transaction ownership before installing playback policy so
+            // its configuration notifications follow ordinary duplicate rules.
+            [JuceBridge endIOSIntentOperationV2ObjC];
+            self.iosIntentOperationActiveV2 = NO;
+            self.iosIntentRouteConditionV2 = nil;
+        } else if ([JuceBridge isRecordingObjC]) {
             [JuceBridge stopRecordingObjC];
         }
-        if (restoringBluetoothProbe &&
-            [JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) {
-            diagnosticCode = @"route_unstable";
-        } else if (expectedOutput == nil ||
-            (!MixroomIOSOutputIsBuiltInSpeaker(expectedOutput) &&
-             !restoringBluetoothRoute)) {
-            diagnosticCode = @"recording_route_unsupported";
+        if (expectedOutput == nil) {
+            diagnosticCode = @"no_output";
+        } else if (!MixroomIOSOutputIdentityIsObservable(expectedOutput)) {
+            diagnosticCode = @"actual_state_unavailable";
+        } else if (MixroomIOSOutputIsBluetoothDuplex(expectedOutput)) {
+            diagnosticCode = @"bluetooth_duplex_forbidden";
         } else if (![JuceBridge reconfigurePlaybackRouteV2ObjC:@""]) {
             diagnosticCode = @"juce_reopen_failed";
         } else {
@@ -2455,16 +2473,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 ? snapshot[@"outputs"] : @[];
             NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
             restoredOutputForFacts = actualOutput;
-            success = !(restoringBluetoothProbe &&
-                        [JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) &&
+            success = (!restoringBluetoothProbe ||
+                       recoveringAfterPhysicalInvalidation ||
+                       ![JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) &&
                 generation == self.audioRouteGenerationV2 &&
                 [snapshot[@"captureConsistency"] isEqualToString:@"stable"] &&
                 MixroomIOSEndpointIdentitiesMatchStrict(
                     expectedOutput, actualOutput) &&
-                ((restoringBluetoothRoute &&
-                  MixroomIOSOutputIsBluetoothMedia(actualOutput)) ||
-                 (!restoringBluetoothRoute &&
-                  MixroomIOSOutputIsBuiltInSpeaker(actualOutput))) &&
+                !MixroomIOSOutputIsBluetoothDuplex(actualOutput) &&
                 [sessionFacts[@"category"] isEqual:AVAudioSessionCategoryPlayback] &&
                 [sessionFacts[@"mode"] isEqual:AVAudioSessionModeDefault] &&
                 inputs.count == 0 &&
@@ -2477,6 +2493,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 [juce[@"bufferFrames"] integerValue] > 0;
             if (!success) {
                 if (restoringBluetoothProbe &&
+                    !recoveringAfterPhysicalInvalidation &&
                     [JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) {
                     diagnosticCode = @"route_unstable";
                 } else {
@@ -2490,17 +2507,30 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             if (restoringBluetoothProbe) {
                 self.audioRouteFingerprintV2 =
                     MixroomIOSOutputFingerprint(session.currentRoute);
-                self.iosObservedOutputWasBluetoothV2 = YES;
+                self.iosObservedOutputWasBluetoothV2 =
+                    MixroomIOSOutputIsBluetooth(restoredOutputForFacts);
+                self.iosVerifiedPlaybackOutputFingerprintV2 =
+                    self.audioRouteFingerprintV2;
+                self.iosVerifiedPlaybackOutputWasBluetoothV2 =
+                    self.iosObservedOutputWasBluetoothV2;
+                self.routeTransitionFromBluetoothV2 = NO;
+                self.routeTransitionWasPlayingV2 = NO;
                 NSDictionary *verifiedDuplexFacts =
                     [self.iosLastDuplexProbeV2 isKindOfClass:[NSDictionary class]]
                         ? self.iosLastDuplexProbeV2 : @{};
                 self.iosLastDuplexProbeV2 = @{
-                    @"status": @"restored",
-                    @"diagnosticCode": @"ok",
+                    @"status": recoveringAfterPhysicalInvalidation
+                        ? @"recoveredAfterDisconnect" : @"restored",
+                    @"diagnosticCode": recoveringAfterPhysicalInvalidation
+                        ? @"fallback_succeeded" : @"ok",
                     @"validationStage": @"duplexVerified",
                     @"phase": @"complete",
-                    @"terminalCause": [NSNull null],
-                    @"cleanupOutcome": @"restored",
+                    @"terminalCause": recoveringAfterPhysicalInvalidation
+                        ? (self.iosIntentTerminalCauseV2 ?:
+                           @"physicalRouteInvalidation")
+                        : [NSNull null],
+                    @"cleanupOutcome": recoveringAfterPhysicalInvalidation
+                        ? @"recovered" : @"restored",
                     @"categoryOptions":
                         verifiedDuplexFacts[@"categoryOptions"] ?: @[],
                     @"operationId": @(self.iosIntentOperationIdV2),
@@ -2509,7 +2539,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     @"elapsedMs": @((NSInteger)(
                         MixroomIOSMonotonicMilliseconds() -
                         self.iosIntentOperationStartedAtMsV2 + 0.5)),
-                    @"sourceOutput": expectedOutput,
+                    @"sourceOutput": recordingSourceOutput ?: expectedOutput,
                     @"duplexInput": self.iosRecordingInputV2 ?: [NSNull null],
                     @"duplexOutput":
                         self.iosIntentOperationTargetOutputV2 ?: [NSNull null],
@@ -2526,6 +2556,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 self.iosIntentOperationTargetFingerprintV2 = nil;
                 self.iosIntentOperationTargetOutputV2 = nil;
             }
+            if (recoveringAfterPhysicalInvalidation) {
+                playbackRecoveryUsedFallback = YES;
+                diagnosticCode = @"fallback_succeeded";
+            }
             self.iosRecordingOutputV2 = nil;
             self.iosRecordingInputV2 = nil;
         } else if (restoringBluetoothProbe) {
@@ -2533,6 +2567,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             NSDictionary<NSString *, id> *currentOutput =
                 MixroomIOSSingleOutputEndpoint(session.currentRoute);
             const BOOL physicalRouteInvalidation =
+                recoveringAfterPhysicalInvalidation ||
                 [JuceBridge isIOSIntentRouteInvalidatedV2ObjC] ||
                 (!MixroomIOSEndpointIdentitiesMatchStrict(
                      expectedOutput, currentOutput) &&
@@ -2558,7 +2593,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 @"elapsedMs": @((NSInteger)(
                     MixroomIOSMonotonicMilliseconds() -
                     self.iosIntentOperationStartedAtMsV2 + 0.5)),
-                @"sourceOutput": expectedOutput ?: [NSNull null],
+                @"sourceOutput": recordingSourceOutput ?: expectedOutput ?:
+                    [NSNull null],
                 @"duplexInput": self.iosRecordingInputV2 ?: [NSNull null],
                 @"duplexOutput":
                     self.iosIntentOperationTargetOutputV2 ?: [NSNull null],
@@ -2668,7 +2704,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const NSInteger elapsedMs = (NSInteger)(
         MixroomIOSMonotonicMilliseconds() - startedAtMs + 0.5);
     return @{
-        @"status": success ? @"success" : @"failure",
+        @"status": success
+            ? (playbackRecoveryUsedFallback ? @"fallback" : @"success")
+            : @"failure",
         @"generation": @(generation),
         @"transitionId": @(transitionID),
         @"diagnosticCode": diagnosticCode,

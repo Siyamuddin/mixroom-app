@@ -5684,6 +5684,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _iosBluetoothDuplexProbeRunning = false;
   bool _iosBluetoothRecordingNoticeShown = false;
   bool _v2RecordingRouteInvalidated = false;
+  bool _v2RecordingRouteRecoveryInProgress = false;
+  Future<void>? _v2RecordingRouteRecoveryFuture;
   String _v2RecordingInvalidationNotice =
       'Audio output changed during recording. Reopen the audio editor to continue.';
   StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
@@ -12598,12 +12600,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
+      if (_v2RecordingRouteRecoveryInProgress) {
+        if (mounted) {
+          _showSmallNotice('Audio output is changing. Please wait.');
+        }
+        return false;
+      }
       final coordinator = _audioRouteCoordinatorV2;
       if (_usesLiveAudioRouteCoordinatorV2 &&
           coordinator != null &&
           coordinator.state != AudioRouteCoordinatorStateV2.stable) {
         if (mounted) {
-          _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
+          _showSmallNotice(
+            coordinator.state == AudioRouteCoordinatorStateV2.failed
+                ? 'Audio output is unavailable. Reopen the audio editor.'
+                : 'Audio output is changing. Please wait.',
+          );
         }
         return false;
       }
@@ -12645,14 +12657,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (_v2RecordingRouteInvalidated) return;
-    _v2RecordingInvalidationNotice =
-        Platform.isIOS && event.cause == 'oldDeviceUnavailable'
-        ? 'Bluetooth disconnected during recording. Reopen the audio editor to continue.'
+    final canRecoverSystemOutput =
+        Platform.isIOS && event.cause == 'oldDeviceUnavailable';
+    _v2RecordingInvalidationNotice = canRecoverSystemOutput
+        ? 'Audio output is changing. Please wait.'
         : 'Audio output changed during recording. Reopen the audio editor to continue.';
     final pausedPosition = _isPlaying
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
+    final unpublishedRecordingPath = _recordingFilePath;
     _v2RecordingRouteInvalidated = true;
+    _v2RecordingRouteRecoveryInProgress = canRecoverSystemOutput;
+    _recordStartCancelRequested = true;
     _transportDesiredPlaying = false;
     ++_transportCommandSerial;
     _transportTicker?.stop();
@@ -12667,16 +12683,57 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _recordingPeaks.clear();
       _syncTransportClock(pausedPosition, playing: false);
     });
-    unawaited(_abortRecordingV2AfterRouteChange());
+    final recovery = _recoverV2PlaybackAfterRecordingRouteChange(
+      canRecoverSystemOutput: canRecoverSystemOutput,
+      unpublishedRecordingPath: unpublishedRecordingPath,
+    );
+    _v2RecordingRouteRecoveryFuture = recovery;
+    unawaited(
+      recovery.whenComplete(() {
+        if (identical(_v2RecordingRouteRecoveryFuture, recovery)) {
+          _v2RecordingRouteRecoveryFuture = null;
+        }
+      }),
+    );
   }
 
-  Future<void> _abortRecordingV2AfterRouteChange() async {
+  Future<void> _recoverV2PlaybackAfterRecordingRouteChange({
+    required bool canRecoverSystemOutput,
+    required String? unpublishedRecordingPath,
+  }) async {
+    AudioRouteTransitionResultV2? recoveryResult;
+    if (canRecoverSystemOutput) {
+      recoveryResult = await _audioRouteCoordinatorV2
+          ?.recoverPlaybackAfterIntentInvalidation();
+    }
+    if (unpublishedRecordingPath != null) {
+      await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+    }
+    if (recoveryResult != null && recoveryResult.succeeded) {
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+      if (!mounted) return;
+      setState(() {
+        _v2RecordingRouteInvalidated = false;
+        _v2RecordingRouteRecoveryInProgress = false;
+        _v2RecordingInvalidationNotice =
+            'Audio output changed. Press Play to continue.';
+      });
+      _showSmallNotice(_v2RecordingInvalidationNotice);
+      return;
+    }
+
     await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
     await coordinator?.dispose();
     await JuceAudioEngine.shutdown();
     if (!mounted) return;
+    setState(() {
+      _v2RecordingRouteRecoveryInProgress = false;
+      _v2RecordingInvalidationNotice = canRecoverSystemOutput
+          ? 'Audio output could not be restored. Reopen the audio editor.'
+          : 'Audio output changed during recording. Reopen the audio editor to continue.';
+    });
     _showSmallNotice(_v2RecordingInvalidationNotice);
   }
 
@@ -20644,7 +20701,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (coordinator == null ||
           coordinator.state != AudioRouteCoordinatorStateV2.stable ||
           coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-        _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
+        _showSmallNotice(
+          coordinator?.state == AudioRouteCoordinatorStateV2.failed
+              ? 'Audio output is unavailable. Reopen the audio editor.'
+              : 'Audio output is changing. Please wait.',
+        );
         return false;
       }
       if (_isPlaying) {

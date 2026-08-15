@@ -42,6 +42,7 @@ class AudioRouteCoordinatorV2 {
   int _latestGeneration = 0;
   bool _applyInFlight = false;
   bool _intentTransitionInFlight = false;
+  Completer<void>? _intentTransitionCompletion;
   bool _started = false;
   bool _disposed = false;
   AudioRouteIntentV2 _intent = AudioRouteIntentV2.playbackOnly;
@@ -145,6 +146,8 @@ class AudioRouteCoordinatorV2 {
     }
 
     _intentTransitionInFlight = true;
+    final completion = Completer<void>();
+    _intentTransitionCompletion = completion;
     _transitioningIntent = intent;
     final generation = _latestGeneration;
     _setState(intent == AudioRouteIntentV2.playbackOnly
@@ -160,7 +163,17 @@ class AudioRouteCoordinatorV2 {
       _transitioningIntent = null;
     }
 
-    if (_disposed) return _localFailure(intent, 'coordinator_disposed');
+    void finishTransition() {
+      if (!completion.isCompleted) completion.complete();
+      if (identical(_intentTransitionCompletion, completion)) {
+        _intentTransitionCompletion = null;
+      }
+    }
+
+    if (_disposed) {
+      finishTransition();
+      return _localFailure(intent, 'coordinator_disposed');
+    }
     final restoredPlaybackAfterPreparation =
         intent == AudioRouteIntentV2.preparingRecording &&
             result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
@@ -173,6 +186,7 @@ class AudioRouteCoordinatorV2 {
             !restoredPlaybackAfterPreparation);
     if (stale) {
       _setState(AudioRouteCoordinatorStateV2.failed);
+      finishTransition();
       return result.diagnosticCode == 'stale_generation'
           ? result
           : _localFailure(intent, 'stale_generation');
@@ -190,7 +204,24 @@ class AudioRouteCoordinatorV2 {
       _settlingTimer?.cancel();
       _settlingTimer = Timer(settlingDelay, _drain);
     }
+    finishTransition();
     return result;
+  }
+
+  /// Serializes a playback-only recovery behind an intent transition that was
+  /// invalidated by a native route event. This does not retry: it performs one
+  /// transition using the latest observed generation.
+  Future<AudioRouteTransitionResultV2>
+      recoverPlaybackAfterIntentInvalidation() async {
+    final activeTransition = _intentTransitionCompletion;
+    if (activeTransition != null) await activeTransition.future;
+    if (_disposed || !_started) {
+      return _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'coordinator_disposed',
+      );
+    }
+    return transitionIntent(AudioRouteIntentV2.playbackOnly);
   }
 
   AudioRouteTransitionResultV2 _localFailure(
