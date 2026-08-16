@@ -493,4 +493,53 @@ void main() {
       );
     },
   );
+
+  test('async recording UI work is guarded after native awaits', () {
+    final startBegin = editor.indexOf(
+      'Future<void> _startAudioRecordingJuce() async',
+    );
+    final startEnd = editor.indexOf(
+      'Future<bool> _restoreV2PlaybackOnlyAfterRecording()',
+      startBegin,
+    );
+    final start = editor.substring(startBegin, startEnd);
+    expect(
+      start,
+      contains(
+        'if (!mounted) {\n        await JuceAudioEngine.stopRecording();',
+      ),
+    );
+    expect(
+      start,
+      contains(
+        'final peak = await JuceAudioEngine.getRecordingPeak();\n'
+        '        if (!mounted || !_isRecording) return;',
+      ),
+    );
+    expect(
+      start,
+      contains('if (mounted &&\n          _isBluetoothV2Session &&'),
+    );
+
+    final stopBegin = editor.indexOf(
+      'Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async',
+    );
+    final stopEnd = editor.indexOf(
+      'Future<void> _addAudioTrackFromFile(',
+      stopBegin,
+    );
+    final stop = editor.substring(stopBegin, stopEnd);
+    expect(
+      stop,
+      contains(
+        'final recordingLatencyMs =\n'
+        '          await JuceAudioEngine.getEstimatedRecordingLatencyMs();',
+      ),
+    );
+    expect(stop, contains('if (!mounted) {\n        final unpublishedPath ='));
+    expect(
+      stop,
+      contains("if (mounted) {\n          ScaffoldMessenger.of(context)"),
+    );
+  });
 }

@@ -183,10 +183,9 @@ void main() {
     final dispatchStart = jucePolicyPatch.indexOf(
       'static void dispatchAudioUnitPropertyChange',
     );
-    final dispatchEnd = jucePolicyPatch.indexOf(
-      'static double getTimestampForMIDI',
-      dispatchStart,
-    );
+    final dispatchEnd = jucePolicyPatch.indexOf('\n@@', dispatchStart);
+    expect(dispatchStart, isNonNegative);
+    expect(dispatchEnd, greaterThan(dispatchStart));
     final dispatch = jucePolicyPatch.substring(dispatchStart, dispatchEnd);
     expect(dispatch, contains('mixroomIOSAudioUnitPropertyMutex'));
     expect(dispatch, contains('mixroomIOSAudioUnitPropertyOwners.find(data)'));

@@ -21036,11 +21036,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           await _restoreV2PlaybackOnlyAfterRecording();
         }
         _liveInputMonitoringEffective = null;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(L10n.translate(context, 'Failed to start recording')),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(context, 'Failed to start recording'),
+              ),
+            ),
+          );
+        }
         return;
       }
       if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
@@ -21109,6 +21113,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
 
+      if (!mounted) {
+        await JuceAudioEngine.stopRecording();
+        await _deleteUncommittedRecordingFile(filePath);
+        return;
+      }
+
       // 7) UI state (UNCHANGED)
       setState(() {
         _recordingFilePath = filePath;
@@ -21129,6 +21139,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (!_isRecording) return;
 
         final peak = await JuceAudioEngine.getRecordingPeak();
+        if (!mounted || !_isRecording) return;
         setState(() {
           _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
         });
@@ -21140,7 +21151,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _recordStartVisualPending = false;
         });
       }
-      if (_isBluetoothV2Session &&
+      if (mounted &&
+          _isBluetoothV2Session &&
           (Platform.isMacOS || Platform.isIOS) &&
           !_isRecording &&
           !_v2AudioSessionInvalidated &&
@@ -21349,22 +21361,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (_recordingFilePath == null ||
           !File(_recordingFilePath!).existsSync()) {
-        setState(() {
-          _isRecording = false;
-          _isMidiClipRecording = false;
-          _midiRecordingClipEngineId = null;
-          _midiRecordingClipIndex = null;
-          _midiRecordingLiveInputArmed = false;
-          _recordingFilePath = null;
-        });
+        if (mounted) {
+          setState(() {
+            _isRecording = false;
+            _isMidiClipRecording = false;
+            _midiRecordingClipEngineId = null;
+            _midiRecordingClipIndex = null;
+            _midiRecordingLiveInputArmed = false;
+            _recordingFilePath = null;
+          });
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              L10n.translate(context, 'Recording failed or no data captured.'),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(
+                  context,
+                  'Recording failed or no data captured.',
+                ),
+              ),
             ),
-          ),
-        );
+          );
+        }
         return;
       }
 
@@ -21376,6 +21393,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           await JuceAudioEngine.getEstimatedRecordingLatencyMs();
       final compensatedStartMs = math.max(0.0, startMs - recordingLatencyMs);
       final appliedAlignmentOffsetMs = compensatedStartMs - startMs;
+      if (!mounted) {
+        final unpublishedPath = _recordingFilePath;
+        if (unpublishedPath != null) {
+          await _deleteUncommittedRecordingFile(unpublishedPath);
+        }
+        return;
+      }
 
       // 2) Insert recorded clip (UNCHANGED)
       try {
@@ -21407,13 +21431,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       } catch (e) {
         debugPrint("Error adding recorded track: $e");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              L10n.translate(context, 'Failed to add recorded track.'),
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(context, 'Failed to add recorded track.'),
+              ),
             ),
-          ),
-        );
+          );
+        }
       }
 
       // 3) Restore the intended playback state after the clip is inserted.
