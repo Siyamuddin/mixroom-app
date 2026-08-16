@@ -2513,9 +2513,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 isEqualToString:@"systemSelectedProbe"] &&
             [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
         NSDictionary<NSString *, id> *expectedOutput =
-            recoveringAfterPhysicalInvalidation
-                ? currentSystemOutput
-                : (recordingSourceOutput ?: currentSystemOutput);
+            recordingSourceOutput ?: currentSystemOutput;
         const BOOL restoringBluetoothProbe =
             activeBluetoothOperation;
         NSDictionary<NSString *, id> *restoredOutputForFacts = nil;
@@ -2536,6 +2534,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             [JuceBridge endIOSIntentOperationV2ObjC];
             self.iosIntentOperationActiveV2 = NO;
             self.iosIntentRouteConditionV2 = nil;
+            // The notification cause is diagnostic only. Once recording
+            // cleanup has released transaction ownership, follow the output
+            // that iOS currently exposes instead of the removed source route.
+            expectedOutput =
+                MixroomIOSSingleOutputEndpoint(session.currentRoute);
         } else if ([JuceBridge isRecordingObjC]) {
             [JuceBridge stopRecordingObjC];
         }

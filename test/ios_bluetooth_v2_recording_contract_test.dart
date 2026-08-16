@@ -336,7 +336,7 @@ void main() {
     );
   });
 
-  test('iOS HFP removal attempts one verified system-output recovery', () {
+  test('iOS recording route changes attempt one verified output recovery', () {
     final abortStart = plugin.indexOf(
       'else if ([call.method isEqualToString:@"abortRecordingV2"])',
     );
@@ -385,6 +385,22 @@ void main() {
     expect(terminalShutdown, greaterThan(terminalAbort));
     expect(terminalDelete, greaterThan(terminalShutdown));
 
+    final handlerStart = editor.indexOf(
+      'void _handleAudioRouteIntentInvalidatedV2(',
+    );
+    final handlerEnd = editor.indexOf(
+      'Future<void> _recoverV2PlaybackAfterRecordingRouteChange({',
+      handlerStart,
+    );
+    final handler = editor.substring(handlerStart, handlerEnd);
+    expect(handler, contains("event.cause != 'audioInterrupted'"));
+    expect(handler, contains("event.cause != 'shutdown'"));
+    expect(handler, isNot(contains("event.cause == 'oldDeviceUnavailable'")));
+    expect(
+      handler.indexOf('if (_v2RecordingRouteInvalidated) return;'),
+      lessThan(handler.indexOf('recoverV2PlaybackAfterRecordingRouteChange')),
+    );
+
     final shutdownStart = editor.indexOf(
       'Future<void> _shutdownAudioEngineV2Aware() async',
     );
@@ -421,6 +437,29 @@ void main() {
     expect(playbackIntent, contains('activeInputChannels'));
     expect(playbackIntent, contains('audioCallbackAttached'));
     expect(playbackIntent, isNot(contains('dispatch_after')));
+    final discard = playbackIntent.indexOf(
+      '[JuceBridge discardRecordingCaptureObjC]',
+    );
+    final endOwnership = playbackIntent.indexOf(
+      '[JuceBridge endIOSIntentOperationV2ObjC]',
+      discard,
+    );
+    final captureReplacement = playbackIntent.indexOf(
+      'MixroomIOSSingleOutputEndpoint(session.currentRoute)',
+      endOwnership,
+    );
+    final reopen = playbackIntent.indexOf(
+      'reconfigurePlaybackRouteV2ObjC:@""',
+      captureReplacement,
+    );
+    expect(discard, greaterThanOrEqualTo(0));
+    expect(endOwnership, greaterThan(discard));
+    expect(captureReplacement, greaterThan(endOwnership));
+    expect(reopen, greaterThan(captureReplacement));
+    expect(
+      RegExp('reconfigurePlaybackRouteV2ObjC').allMatches(playbackIntent),
+      hasLength(1),
+    );
   });
 
   test(

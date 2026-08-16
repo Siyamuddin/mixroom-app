@@ -12672,9 +12672,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (_v2RecordingRouteInvalidated) return;
-    final canRecoverSystemOutput =
-        Platform.isIOS && event.cause == 'oldDeviceUnavailable';
-    _v2RecordingInvalidationNotice = canRecoverSystemOutput
+    final shouldAttemptSystemOutputRecovery =
+        Platform.isIOS &&
+        event.cause != 'audioInterrupted' &&
+        event.cause != 'shutdown';
+    _v2RecordingInvalidationNotice = shouldAttemptSystemOutputRecovery
         ? 'Audio output is changing. Please wait.'
         : 'Audio output changed during recording. Reopen the audio editor to continue.';
     final pausedPosition = _isPlaying
@@ -12682,7 +12684,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : _globalAudioClock;
     final unpublishedRecordingPath = _recordingFilePath;
     _v2RecordingRouteInvalidated = true;
-    _v2RecordingRouteRecoveryInProgress = canRecoverSystemOutput;
+    _v2RecordingRouteRecoveryInProgress = shouldAttemptSystemOutputRecovery;
     _recordStartCancelRequested = true;
     _transportDesiredPlaying = false;
     ++_transportCommandSerial;
@@ -12699,7 +12701,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _syncTransportClock(pausedPosition, playing: false);
     });
     final recovery = _recoverV2PlaybackAfterRecordingRouteChange(
-      canRecoverSystemOutput: canRecoverSystemOutput,
+      shouldAttemptSystemOutputRecovery: shouldAttemptSystemOutputRecovery,
       unpublishedRecordingPath: unpublishedRecordingPath,
     );
     _v2RecordingRouteRecoveryFuture = recovery;
@@ -12713,11 +12715,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _recoverV2PlaybackAfterRecordingRouteChange({
-    required bool canRecoverSystemOutput,
+    required bool shouldAttemptSystemOutputRecovery,
     required String? unpublishedRecordingPath,
   }) async {
     AudioRouteTransitionResultV2? recoveryResult;
-    if (canRecoverSystemOutput) {
+    if (shouldAttemptSystemOutputRecovery) {
       recoveryResult = await _audioRouteCoordinatorV2
           ?.recoverPlaybackAfterIntentInvalidation();
     }
@@ -12748,9 +12750,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return;
     setState(() {
       _v2RecordingRouteRecoveryInProgress = false;
-      _v2RecordingInvalidationNotice = canRecoverSystemOutput
-          ? 'Audio output could not be restored. Reopen the audio editor.'
-          : 'Audio output changed during recording. Reopen the audio editor to continue.';
+      _v2RecordingInvalidationNotice =
+          'Audio output could not be restored. Reopen the audio editor.';
     });
     _showSmallNotice(_v2RecordingInvalidationNotice);
   }

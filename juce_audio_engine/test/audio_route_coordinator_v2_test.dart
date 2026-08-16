@@ -505,6 +505,42 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('recording route-change causes share one serialized recovery contract',
+      () async {
+    for (final cause in <String>[
+      'oldDeviceUnavailable',
+      'routeConfigurationChanged',
+      'noSuitableRoute',
+      'unrelatedRoute',
+    ]) {
+      final adapter = _FakeAdapter();
+      final coordinator = AudioRouteCoordinatorV2(
+        adapter: adapter,
+        settlingDelay: Duration.zero,
+      );
+      await coordinator.start();
+      await coordinator.transitionIntent(
+        AudioRouteIntentV2.preparingRecording,
+      );
+
+      adapter.controller.add(_event(1, 'replacement-$cause', cause: cause));
+      await _flush();
+      final result = await coordinator.recoverPlaybackAfterIntentInvalidation();
+
+      expect(result.succeeded, isTrue, reason: cause);
+      expect(
+        adapter.appliedIntents,
+        <AudioRouteIntentV2>[
+          AudioRouteIntentV2.preparingRecording,
+          AudioRouteIntentV2.playbackOnly,
+        ],
+        reason: cause,
+      );
+      expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+      await coordinator.dispose();
+    }
+  });
+
   test('failed input preparation with verified cleanup keeps playback usable',
       () async {
     final adapter = _FakeAdapter();
