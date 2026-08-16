@@ -2415,6 +2415,20 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         static_cast<int>(timeoutMilliseconds));
 }
 
++ (BOOL)prepareSystemSelectedDuplexSessionV2ObjC
+{
+    return JuceEngine::get().prepareSystemSelectedDuplexSessionV2();
+}
+
++ (BOOL)openPreparedSystemSelectedDuplexRouteV2ObjC:
+            (NSInteger)timeoutMilliseconds
+                                      outputChannels:(NSInteger)outputChannels
+{
+    return JuceEngine::get().openPreparedSystemSelectedDuplexRouteV2(
+        static_cast<int>(timeoutMilliseconds),
+        static_cast<int>(outputChannels));
+}
+
 + (BOOL)validateRecordingRouteV2ObjC
 {
     return JuceEngine::get().validateRecordingRouteV2();
@@ -2460,6 +2474,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         break;
     case MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex:
         policy = @"v2BluetoothHfpDuplex";
+        break;
+    case MixroomIOSAudioSessionPolicy::v2SystemSelectedDuplex:
+        policy = @"v2SystemSelectedDuplex";
         break;
     case MixroomIOSAudioSessionPolicy::legacyManaged:
         break;

@@ -2773,6 +2773,33 @@ bool JuceEngine::prepareBluetoothDuplexSessionV2()
 bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
 {
 #if JUCE_IOS
+    return openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1);
+#else
+    juce::ignoreUnused(timeoutMilliseconds);
+    return false;
+#endif
+}
+
+bool JuceEngine::prepareSystemSelectedDuplexSessionV2()
+{
+#if JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession())
+        return false;
+    quiescePlaybackRouteV2(false);
+    deviceManager.closeAudioDevice();
+    mixroomIOSSetAudioSessionPolicy(
+        MixroomIOSAudioSessionPolicy::v2SystemSelectedDuplex);
+    return mixroomIOSPrepareAudioSessionPolicy();
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
+    int timeoutMilliseconds,
+    int outputChannels)
+{
+#if JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession() ||
         isIOSIntentRouteInvalidatedV2() || timeoutMilliseconds <= 0)
         return false;
@@ -2787,7 +2814,11 @@ bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
             timeoutMilliseconds - static_cast<int>(std::ceil(elapsed)));
     };
 
-    const auto error = deviceManager.initialise(1, 1, nullptr, true);
+    const auto error = deviceManager.initialise(
+        1,
+        juce::jlimit(1, 2, outputChannels),
+        nullptr,
+        true);
     if (error.isNotEmpty())
     {
         deviceManager.closeAudioDevice();
@@ -2830,8 +2861,8 @@ bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
         return false;
     }
 
-    // The isolated callback proves that iOS and RemoteIO have reached the HFP
-    // shape. Hand the still-open device to the existing project callback so
+    // The isolated callback proves that iOS and RemoteIO have reached the
+    // settled duplex shape. Hand the still-open device to the existing project callback so
     // graph preparation and recording use the same callback as every other
     // route. No AVAudioSession or device reopen occurs in this handoff.
     detachIOSBluetoothDuplexProbeCallback();
@@ -2857,9 +2888,10 @@ bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
         deviceManager.closeAudioDevice();
         return false;
     }
-    logCurrentAudioDeviceState("v2-bluetooth-hfp-duplex-probe");
+    logCurrentAudioDeviceState("v2-system-selected-duplex-probe");
     return true;
 #else
+    juce::ignoreUnused(timeoutMilliseconds, outputChannels);
     return false;
 #endif
 }

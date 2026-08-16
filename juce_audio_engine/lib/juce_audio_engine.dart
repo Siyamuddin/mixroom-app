@@ -73,12 +73,12 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
 
   @override
   Future<AudioRouteTransitionResultV2> applyIntent(
-    AudioRouteIntentV2 intent,
-    int generation,
-  ) {
+      AudioRouteIntentV2 intent, int generation,
+      {bool systemSelectedProbe = false}) {
     return JuceAudioEngine.setAudioRouteIntentV2(
       intent,
       generation: generation,
+      systemSelectedProbe: systemSelectedProbe,
       platformOverride: platformOverride,
     );
   }
@@ -536,6 +536,7 @@ class JuceAudioEngine {
   static Future<AudioRouteTransitionResultV2> setAudioRouteIntentV2(
     AudioRouteIntentV2 intent, {
     required int generation,
+    bool systemSelectedProbe = false,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -552,6 +553,7 @@ class JuceAudioEngine {
         <String, Object>{
           'generation': generation,
           'intent': intent.name,
+          if (systemSelectedProbe) 'systemSelectedProbe': true,
         },
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);

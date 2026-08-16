@@ -1277,6 +1277,55 @@ continued through the replacement system output after manual Play without
 reopening the editor. If this single verification or reopen fails, the existing
 terminal shutdown and editor-reopen boundary remains the fallback.
 
+#### Checkpoint 7J — system-selected recording-route proof
+
+The next iOS checkpoint removes Mixroom's input choice from a writer-free
+route experiment. A private `v2SystemSelectedDuplex` JUCE policy configures
+`playAndRecord/default` with the standard speaker, A2DP, and HFP capabilities,
+then activates without calling `setPreferredInput` or matching device names.
+iOS chooses the active input and output; Mixroom accepts the result only after
+one observable input, one observable output, the complete route fingerprint,
+active channels, native rate/buffer, and a real project callback all agree.
+
+The experiment reuses the existing lifecycle executor, two-second deadline,
+observer transaction, callback gate, and exactly-once cleanup. It records and
+monitors nothing, never starts transport, and restores the exact source output
+with zero inputs immediately after verification. An unchanged output is
+accepted for built-in, wired/USB, or built-in-microphone-plus-A2DP routes. An
+A2DP source may also become a verified HFP input/output pair because iOS couples
+that profile intentionally. Any other output change, removal, interruption,
+missing identity, stale generation, or unstable route fails safely.
+
+Reports remain schema-version 1 and identify this debug evidence with
+`selectionMode: systemSelected`. The physical gate requires repeatable built-in
+and microphone-equipped-headset results, plus a genuine A2DP-only speaker before
+built-in-microphone-plus-A2DP support can be claimed. Production Record behavior
+is unchanged until this route-only gate passes.
+
+On the built-in iPad route, iOS established and JUCE verified the requested
+built-in microphone plus speaker route at 48 kHz/256 frames with one valid
+project callback, but the public category-options readback normalized the
+configured speaker/A2DP/HFP capability set to `mixWithOthers` plus
+`allowBluetoothA2DP`. The probe therefore treats the successful JUCE policy
+result as evidence of the requested options and the complete active route as
+evidence of iOS's selection. It retains the normalized options in diagnostics
+but does not require iOS to echo every configured capability bit.
+
+The physical iPad route gate passed five times for each required route class:
+
+- built-in microphone plus built-in speaker at 48 kHz/256 frames;
+- headset HFP input/output from an A2DP source, followed by exact 44.1 kHz
+  A2DP restoration; and
+- built-in microphone plus the unchanged microphone-less A2DP speaker at
+  44.1 kHz/256 frames.
+
+Every accepted check completed a real project callback and restored
+output-only playback with zero inputs. The representative microphone-less
+speaker check completed in 564 ms with no callback overrun. Physical headset
+removal during a check entered the intended terminal editor-reopen boundary
+instead of forcing restoration. Actual recording through the system-selected
+route remains outside this writer-free checkpoint.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1439,6 +1488,7 @@ Each run records:
 
 ## Immediate next step
 
-Serialize editor waveform extraction jobs to remove the confirmed FFmpeg session
-lookup race during large project loading. This is a rendering-only correction
-and must remain separate from Bluetooth routing and recording lifecycle work.
+Complete the physical gate for the writer-free iOS system-selected recording
+route. Only after built-in, microphone-headset, and genuine A2DP-only speaker
+routes pass should the existing realtime-safe WAV capture be connected to this
+verified route. Android recording and mobile selectors remain separate work.

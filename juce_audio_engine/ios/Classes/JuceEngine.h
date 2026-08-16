@@ -5887,6 +5887,9 @@ public:
                                      const juce::String &inputDeviceName);
     bool prepareBluetoothDuplexSessionV2();
     bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
+    bool prepareSystemSelectedDuplexSessionV2();
+    bool openPreparedSystemSelectedDuplexRouteV2(int timeoutMilliseconds,
+                                                  int outputChannels);
     bool reconfigureBluetoothDuplexRouteV2();
     bool validateRecordingRouteV2() const;
     bool isBluetoothDuplexProjectCallbackReadyV2() const noexcept;

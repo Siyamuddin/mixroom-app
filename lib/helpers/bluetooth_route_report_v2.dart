@@ -60,6 +60,7 @@ class BluetoothRouteReportSerializerV2 {
       'terminalCause': probe.terminalCause,
       'actualCallbackCount': probe.actualCallbackCount,
       'cleanupOutcome': probe.cleanupOutcome,
+      'selectionMode': probe.selectionMode,
       'operationId': probe.operationId,
       'elapsedMs': probe.elapsedMs,
       'sourceOutput': endpoint(probe.sourceOutput, 0),

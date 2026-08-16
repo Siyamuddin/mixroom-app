@@ -32,6 +32,7 @@ void main() {
     expect(policyHeader, contains('v2PlaybackOnly = 1'));
     expect(policyHeader, contains('v2BuiltInDuplex = 2'));
     expect(policyHeader, contains('v2BluetoothHfpDuplex = 3'));
+    expect(policyHeader, contains('v2SystemSelectedDuplex = 4'));
     expect(policyHeader, contains('activationCount'));
     expect(policyHeader, contains('mutationElapsedMilliseconds'));
     expect(policyHeader, isNot(contains('FlutterMethodChannel')));
@@ -53,10 +54,8 @@ void main() {
     expect(preferred, greaterThan(activation));
     expect(policy, contains('AVAudioSessionCategoryOptionMixWithOthers'));
     expect(policy, contains('AVAudioSessionCategoryOptionDefaultToSpeaker'));
-    expect(
-      policy,
-      isNot(contains('AVAudioSessionCategoryOptionAllowBluetoothA2DP')),
-    );
+    expect(policy, contains('wantsSystemSelectedInput'));
+    expect(policy, contains('AVAudioSessionCategoryOptionAllowBluetoothA2DP'));
   });
 
   test('engine closes old policy before installing every new V2 policy', () {
@@ -77,6 +76,7 @@ void main() {
     expect(playback, contains('v2PlaybackOnly'));
     expect(duplex, contains('v2BuiltInDuplex'));
     expect(duplex, contains('v2BluetoothHfpDuplex'));
+    expect(engine, contains('v2SystemSelectedDuplex'));
   });
 
   test('accepted V2 plugin transitions contain no session setters', () {

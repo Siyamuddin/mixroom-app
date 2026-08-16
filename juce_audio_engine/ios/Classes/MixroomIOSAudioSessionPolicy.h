@@ -8,6 +8,7 @@ enum class MixroomIOSAudioSessionPolicy : std::int32_t
     v2PlaybackOnly = 1,
     v2BuiltInDuplex = 2,
     v2BluetoothHfpDuplex = 3,
+    v2SystemSelectedDuplex = 4,
 };
 
 enum class MixroomIOSAudioSessionPolicyStatus : std::int32_t

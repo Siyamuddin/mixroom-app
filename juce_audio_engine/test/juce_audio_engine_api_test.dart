@@ -542,6 +542,26 @@ void main() {
     expect(calls, isEmpty);
   });
 
+  test('iOS system-selected probe reuses the existing intent contract',
+      () async {
+    await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.preparingRecording,
+      generation: 9,
+      systemSelectedProbe: true,
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(calls.single.method, 'setAudioRouteIntentV2');
+    expect(
+      Map<String, dynamic>.from(calls.single.arguments as Map),
+      <String, dynamic>{
+        'generation': 9,
+        'intent': 'preparingRecording',
+        'systemSelectedProbe': true,
+      },
+    );
+  });
+
   test('iOS preparation cancellation uses the existing abort contract',
       () async {
     await JuceAudioEngine.abortRecordingV2(

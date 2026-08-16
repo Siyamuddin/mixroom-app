@@ -445,6 +445,7 @@ class AudioRouteDuplexProbeFactsV2 {
     this.terminalCause,
     this.actualCallbackCount,
     this.cleanupOutcome,
+    this.selectionMode,
     required this.operationId,
     required this.elapsedMs,
     this.sourceOutput,
@@ -461,6 +462,7 @@ class AudioRouteDuplexProbeFactsV2 {
   final String? terminalCause;
   final int? actualCallbackCount;
   final String? cleanupOutcome;
+  final String? selectionMode;
   final int? operationId;
   final int? elapsedMs;
   final AudioRouteEndpointV2? sourceOutput;
@@ -489,6 +491,7 @@ class AudioRouteDuplexProbeFactsV2 {
       terminalCause: map['terminalCause']?.toString(),
       actualCallbackCount: _nullableInt(map['actualCallbackCount']),
       cleanupOutcome: map['cleanupOutcome']?.toString(),
+      selectionMode: map['selectionMode']?.toString(),
       operationId: _nullableInt(map['operationId']),
       elapsedMs: _nullableInt(map['elapsedMs']),
       sourceOutput: endpoint('sourceOutput'),
@@ -507,6 +510,7 @@ class AudioRouteDuplexProbeFactsV2 {
         'terminalCause': terminalCause,
         'actualCallbackCount': actualCallbackCount,
         'cleanupOutcome': cleanupOutcome,
+        'selectionMode': selectionMode,
         'operationId': operationId,
         'elapsedMs': elapsedMs,
         'sourceOutput': sourceOutput?.toRawMap(),

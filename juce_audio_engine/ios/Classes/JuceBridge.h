@@ -11,6 +11,9 @@
                               inputName:(NSString * _Nonnull)inputDeviceName;
 + (BOOL)prepareBluetoothDuplexSessionV2ObjC;
 + (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds;
++ (BOOL)prepareSystemSelectedDuplexSessionV2ObjC;
++ (BOOL)openPreparedSystemSelectedDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds
+                                      outputChannels:(NSInteger)outputChannels;
 + (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
 + (BOOL)validateRecordingRouteV2ObjC;
 + (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC;

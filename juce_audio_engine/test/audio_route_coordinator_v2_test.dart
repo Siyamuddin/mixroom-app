@@ -73,6 +73,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final controller = StreamController<AudioRouteChangeEventV2>.broadcast();
   final appliedGenerations = <int>[];
   final appliedIntents = <AudioRouteIntentV2>[];
+  final appliedSystemSelectedProbes = <bool>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
   final intentResults =
       <AudioRouteIntentV2, Future<AudioRouteTransitionResultV2>>{};
@@ -98,10 +99,10 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
 
   @override
   Future<AudioRouteTransitionResultV2> applyIntent(
-    AudioRouteIntentV2 intent,
-    int generation,
-  ) async {
+      AudioRouteIntentV2 intent, int generation,
+      {bool systemSelectedProbe = false}) async {
     appliedIntents.add(intent);
+    appliedSystemSelectedProbes.add(systemSelectedProbe);
     return intentResults[intent] ?? _result(generation);
   }
 
@@ -298,6 +299,29 @@ void main() {
     ]);
     expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('forwards the private system-selected probe on the existing intent',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+      systemSelectedProbe: true,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(
+      adapter.appliedIntents,
+      <AudioRouteIntentV2>[AudioRouteIntentV2.preparingRecording],
+    );
+    expect(adapter.appliedSystemSelectedProbes, <bool>[true]);
     await coordinator.dispose();
   });
 

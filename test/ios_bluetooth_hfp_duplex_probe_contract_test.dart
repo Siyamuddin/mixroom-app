@@ -59,7 +59,11 @@ void main() {
     );
     expect(
       configure,
-      isNot(contains('AVAudioSessionCategoryOptionAllowBluetoothA2DP')),
+      contains(
+        'else if (wantsHfpInput)\n'
+        '+                options |= '
+        'AVAudioSessionCategoryOptionAllowBluetoothHFP;',
+      ),
     );
     expect(configure, isNot(contains('sleep')));
     expect(configure, isNot(contains('dispatch_after')));
@@ -78,8 +82,14 @@ void main() {
       final route = engine.substring(start, end);
 
       expect(route, contains('mixroomIOSPrepareAudioSessionPolicy()'));
-      expect(route, contains('deviceManager.initialise(1, 1, nullptr, true)'));
-      expect(route, contains('v2-bluetooth-hfp-duplex-probe'));
+      expect(
+        route,
+        contains(
+          'openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1)',
+        ),
+      );
+      expect(route, contains('deviceManager.initialise('));
+      expect(route, contains('v2-system-selected-duplex-probe'));
       expect(
         route,
         contains(
@@ -210,24 +220,25 @@ void main() {
 
   test('debug probe uses intents but never enters recording', () {
     final start = editor.indexOf(
-      'Future<void> _runIOSBluetoothDuplexProbeV2()',
+      'Future<void> _runIOSSystemSelectedRouteProbeV2()',
     );
     final end = editor.indexOf('String _bluetoothImplementationLabel', start);
     final probe = editor.substring(start, end);
 
     expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
     expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(probe, contains('if (_iosBluetoothDuplexProbeRunning) return;'));
+    expect(probe, contains('if (_iosSystemSelectedRouteProbeRunning) return;'));
+    expect(probe, contains('systemSelectedProbe: true'));
     expect(probe, isNot(contains('Cancel Bluetooth Input + Output Check')));
     expect(probe, isNot(contains('AudioRouteIntentV2.recording')));
     expect(probe, isNot(contains('startRecording(')));
     expect(probe, isNot(contains('_startAudioRecordingJuce')));
-    expect(editor, contains('Run Bluetooth Input + Output Check'));
-    expect(editor, contains('Checking Bluetooth Input + Output…'));
+    expect(editor, contains('Run System Recording Route Check'));
+    expect(editor, contains('Checking System Recording Route…'));
     expect(
       editor,
       contains(
-        'onPressed: _iosBluetoothDuplexProbeRunning\n'
+        'onPressed: _iosSystemSelectedRouteProbeRunning\n'
         '                    ? null',
       ),
     );
