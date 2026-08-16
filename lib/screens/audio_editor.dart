@@ -5683,10 +5683,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _iosSystemSelectedRouteProbeRunning = false;
   bool _iosBluetoothRecordingNoticeShown = false;
-  bool _v2RecordingRouteInvalidated = false;
-  bool _v2RecordingRouteRecoveryInProgress = false;
-  Future<void>? _v2RecordingRouteRecoveryFuture;
-  String _v2RecordingInvalidationNotice =
+  bool _v2AudioSessionInvalidated = false;
+  bool _v2AudioSessionRecoveryInProgress = false;
+  bool _iosV2ForegroundRecoveryPending = false;
+  Future<void>? _v2AudioSessionRecoveryFuture;
+  String _v2AudioSessionInvalidationNotice =
       'Audio output changed during recording. Reopen the audio editor to continue.';
   StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
   SampleDragData? _finderSampleDragData;
@@ -9203,8 +9204,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
     });
     if (PlatformCapabilities.current.isDesktop) {
-      _desktopFinderDropSub =
-          DesktopFileIngressService.dragSession.listen((event) {
+      _desktopFinderDropSub = DesktopFileIngressService.dragSession.listen((
+        event,
+      ) {
         if (_isProjectLoading || !_loadedOnce) {
           if (event.phase == DesktopFileDragPhase.dropped) {
             _pendingDesktopFinderDragEvents.add(event);
@@ -12487,7 +12489,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _shutdownAudioEngineV2Aware() async {
-    final routeRecovery = _v2RecordingRouteRecoveryFuture;
+    final routeRecovery = _v2AudioSessionRecoveryFuture;
+    _audioRouteCoordinatorV2?.cancelPendingRecoveryForShutdown();
     if (routeRecovery != null) {
       try {
         await routeRecovery;
@@ -12530,7 +12533,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        if (_bluetoothImplementationSessionV2 != null &&
+        if (_isBluetoothV2Session) {
+          unawaited(_resumeIOSV2AudioAfterForeground());
+        } else if (_bluetoothImplementationSessionV2 != null &&
             !_isBluetoothV2Session) {
           unawaited(_refreshMicrophonePermissionAndInputs());
           unawaited(_refreshAudioRouteInfo());
@@ -12549,8 +12554,40 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         setState(() {
           _isPlaying = false;
         });
+        if (_isBluetoothV2Session &&
+            (state == AppLifecycleState.paused ||
+                state == AppLifecycleState.hidden)) {
+          unawaited(_handleIOSV2EditorBackgrounded());
+        }
       }
     }
+  }
+
+  Future<void> _handleIOSV2EditorBackgrounded() async {
+    if (!mounted ||
+        !_isBluetoothV2Session ||
+        _audioRouteCoordinatorV2 == null ||
+        _v2AudioSessionInvalidated) {
+      return;
+    }
+    _iosV2ForegroundRecoveryPending = true;
+    _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
+    final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
+      notice: 'Audio is temporarily unavailable.',
+    );
+    final cleanup = _cleanupV2InterruptedAudio(
+      unpublishedRecordingPath: unpublishedRecordingPath,
+    );
+    _trackV2AudioSessionRecovery(cleanup);
+    await cleanup;
+  }
+
+  Future<void> _resumeIOSV2AudioAfterForeground() async {
+    if (!_iosV2ForegroundRecoveryPending || !mounted) return;
+    final cleanup = _v2AudioSessionRecoveryFuture;
+    if (cleanup != null) await cleanup;
+    // UIApplicationDidBecomeActiveNotification emits the single native
+    // foreground-reconciliation event. Its coordinator callback owns reopen.
   }
 
   bool get _shouldDeferAndroidRouteRefresh =>
@@ -12609,13 +12646,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
-      if (_v2RecordingRouteInvalidated) {
+      if (_v2AudioSessionInvalidated) {
         if (mounted) {
-          _showSmallNotice(_v2RecordingInvalidationNotice);
+          _showSmallNotice(_v2AudioSessionInvalidationNotice);
         }
         return false;
       }
-      if (_v2RecordingRouteRecoveryInProgress) {
+      if (_v2AudioSessionRecoveryInProgress) {
         if (mounted) {
           _showSmallNotice('Audio output is changing. Please wait.');
         }
@@ -12671,20 +12708,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         !_isBluetoothV2Session) {
       return;
     }
-    if (_v2RecordingRouteInvalidated) return;
+    if (_v2AudioSessionInvalidated) {
+      final foregroundRecoveryEvent =
+          Platform.isIOS &&
+          _iosV2ForegroundRecoveryPending &&
+          event.cause == 'audioInterruptionEnded';
+      if (foregroundRecoveryEvent) {
+        _iosV2ForegroundRecoveryPending = false;
+        final cleanup = _v2AudioSessionRecoveryFuture;
+        final recovery = () async {
+          if (cleanup != null) await cleanup;
+          await _recoverV2PlaybackAfterAudioSessionInvalidation(
+            shouldAttemptSystemOutputRecovery: true,
+            unpublishedRecordingPath: null,
+            successNotice: 'Audio is ready. Press Play to continue.',
+          );
+        }();
+        _trackV2AudioSessionRecovery(recovery);
+      }
+      return;
+    }
+    final interruption =
+        event.cause == 'audioInterruptionBegan' ||
+        event.cause == 'audioInterruptionEnded' ||
+        event.cause == 'audioInterrupted';
     final shouldAttemptSystemOutputRecovery =
-        Platform.isIOS &&
-        event.cause != 'audioInterrupted' &&
-        event.cause != 'shutdown';
-    _v2RecordingInvalidationNotice = shouldAttemptSystemOutputRecovery
-        ? 'Audio output is changing. Please wait.'
-        : 'Audio output changed during recording. Reopen the audio editor to continue.';
+        Platform.isIOS && event.cause != 'shutdown';
+    final recordingWasActive =
+        _isRecording ||
+        _recordStartVisualPending ||
+        _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly;
+    final pendingNotice = interruption
+        ? (recordingWasActive
+              ? 'Audio was interrupted. Recording stopped.'
+              : 'Audio is temporarily unavailable.')
+        : (shouldAttemptSystemOutputRecovery
+              ? 'Audio output is changing. Please wait.'
+              : 'Audio output changed during recording. Reopen the audio editor to continue.');
+    final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
+      notice: pendingNotice,
+    );
+    if (interruption) _showSmallNotice(pendingNotice);
+    final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
+      shouldAttemptSystemOutputRecovery: shouldAttemptSystemOutputRecovery,
+      unpublishedRecordingPath: unpublishedRecordingPath,
+      cleanupBeforeRecovery: interruption,
+      successNotice: interruption
+          ? 'Audio is ready. Press Play to continue.'
+          : 'Audio output changed. Press Play to continue.',
+    );
+    _trackV2AudioSessionRecovery(recovery);
+  }
+
+  String? _enterV2AudioSessionSafetyBoundary({required String notice}) {
     final pausedPosition = _isPlaying
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
     final unpublishedRecordingPath = _recordingFilePath;
-    _v2RecordingRouteInvalidated = true;
-    _v2RecordingRouteRecoveryInProgress = shouldAttemptSystemOutputRecovery;
+    _v2AudioSessionInvalidationNotice = notice;
+    _v2AudioSessionInvalidated = true;
+    _v2AudioSessionRecoveryInProgress = true;
     _recordStartCancelRequested = true;
     _transportDesiredPlaying = false;
     ++_transportCommandSerial;
@@ -12700,24 +12783,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _recordingPeaks.clear();
       _syncTransportClock(pausedPosition, playing: false);
     });
-    final recovery = _recoverV2PlaybackAfterRecordingRouteChange(
-      shouldAttemptSystemOutputRecovery: shouldAttemptSystemOutputRecovery,
-      unpublishedRecordingPath: unpublishedRecordingPath,
-    );
-    _v2RecordingRouteRecoveryFuture = recovery;
+    return unpublishedRecordingPath;
+  }
+
+  void _trackV2AudioSessionRecovery(Future<void> recovery) {
+    _v2AudioSessionRecoveryFuture = recovery;
     unawaited(
       recovery.whenComplete(() {
-        if (identical(_v2RecordingRouteRecoveryFuture, recovery)) {
-          _v2RecordingRouteRecoveryFuture = null;
+        if (identical(_v2AudioSessionRecoveryFuture, recovery)) {
+          _v2AudioSessionRecoveryFuture = null;
         }
       }),
     );
   }
 
-  Future<void> _recoverV2PlaybackAfterRecordingRouteChange({
-    required bool shouldAttemptSystemOutputRecovery,
+  Future<void> _cleanupV2InterruptedAudio({
     required String? unpublishedRecordingPath,
   }) async {
+    await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+    if (unpublishedRecordingPath != null) {
+      await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+    }
+  }
+
+  Future<void> _recoverV2PlaybackAfterAudioSessionInvalidation({
+    required bool shouldAttemptSystemOutputRecovery,
+    required String? unpublishedRecordingPath,
+    bool cleanupBeforeRecovery = false,
+    required String successNotice,
+  }) async {
+    if (cleanupBeforeRecovery) {
+      await _cleanupV2InterruptedAudio(
+        unpublishedRecordingPath: unpublishedRecordingPath,
+      );
+      unpublishedRecordingPath = null;
+    }
     AudioRouteTransitionResultV2? recoveryResult;
     if (shouldAttemptSystemOutputRecovery) {
       recoveryResult = await _audioRouteCoordinatorV2
@@ -12730,12 +12830,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
       if (!mounted) return;
       setState(() {
-        _v2RecordingRouteInvalidated = false;
-        _v2RecordingRouteRecoveryInProgress = false;
-        _v2RecordingInvalidationNotice =
-            'Audio output changed. Press Play to continue.';
+        _v2AudioSessionInvalidated = false;
+        _v2AudioSessionRecoveryInProgress = false;
+        _v2AudioSessionInvalidationNotice = successNotice;
       });
-      _showSmallNotice(_v2RecordingInvalidationNotice);
+      _showSmallNotice(_v2AudioSessionInvalidationNotice);
       return;
     }
 
@@ -12749,11 +12848,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (!mounted) return;
     setState(() {
-      _v2RecordingRouteRecoveryInProgress = false;
-      _v2RecordingInvalidationNotice =
+      _v2AudioSessionRecoveryInProgress = false;
+      _v2AudioSessionInvalidationNotice =
           'Audio output could not be restored. Reopen the audio editor.';
     });
-    _showSmallNotice(_v2RecordingInvalidationNotice);
+    _showSmallNotice(_v2AudioSessionInvalidationNotice);
   }
 
   Future<void> _synchronizeIOSRouteSafetyPositionV2({
@@ -20704,7 +20803,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (_isBluetoothV2Session) {
       if ((!Platform.isMacOS && !Platform.isIOS) ||
-          _v2RecordingRouteInvalidated) {
+          _v2AudioSessionInvalidated) {
         return false;
       }
       final coordinator = _audioRouteCoordinatorV2;
@@ -21044,7 +21143,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_isBluetoothV2Session &&
           (Platform.isMacOS || Platform.isIOS) &&
           !_isRecording &&
-          !_v2RecordingRouteInvalidated &&
+          !_v2AudioSessionInvalidated &&
           _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
         await _restoreV2PlaybackOnlyAfterRecording();
       }
@@ -21055,7 +21154,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _restoreV2PlaybackOnlyAfterRecording() async {
     final coordinator = _audioRouteCoordinatorV2;
-    if (coordinator == null || _v2RecordingRouteInvalidated) return false;
+    if (coordinator == null || _v2AudioSessionInvalidated) return false;
     final result = await coordinator.transitionIntent(
       AudioRouteIntentV2.playbackOnly,
     );
@@ -21194,7 +21293,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
         final restored = await _restoreV2PlaybackOnlyAfterRecording();
         if (!restored) {
-          _v2RecordingRouteInvalidated = true;
+          _v2AudioSessionInvalidated = true;
           if (mounted) {
             _showSmallNotice(
               'Recording stopped, but audio output could not be restored. Reopen the audio editor.',
@@ -29348,7 +29447,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (event.location != null && event.hasAudio) {
       placement = _timelineController.placementForExternalSampleDrop(
         event.location!,
-        data: dragData ??
+        data:
+            dragData ??
             SampleDragData(
               filePath: event.audioItems.first.path,
               label: p.basename(event.audioItems.first.path),
@@ -29357,10 +29457,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (placement != null && !placement.allowed) {
-      await _handleDesktopFinderDropBatch(
-        event.items,
-        skipAudio: true,
-      );
+      await _handleDesktopFinderDropBatch(event.items, skipAudio: true);
       return;
     }
 
@@ -31177,10 +31274,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ),
                                       itemBuilder: (_, index) {
                                         final spec = filtered[index];
-                                        final id =
-                                            (spec['id'] as String? ?? '').trim();
+                                        final id = (spec['id'] as String? ?? '')
+                                            .trim();
                                         final isLocked =
-                                            !_canUseInstrumentForCurrentPlan(id);
+                                            !_canUseInstrumentForCurrentPlan(
+                                              id,
+                                            );
                                         return _buildInstrumentPickerRow(
                                           spec: spec,
                                           isLocked: isLocked,
@@ -31198,7 +31297,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   <String, String>{
                                                     'name': L10n.translate(
                                                       context,
-                                                      (spec['name'] as String? ??
+                                                      (spec['name']
+                                                                  as String? ??
                                                               '')
                                                           .trim(),
                                                     ),
@@ -44740,8 +44840,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         return;
       }
-      if (_v2RecordingRouteInvalidated) {
-        _showSmallNotice(_v2RecordingInvalidationNotice);
+      if (_v2AudioSessionInvalidated) {
+        _showSmallNotice(_v2AudioSessionInvalidationNotice);
         return;
       }
     }

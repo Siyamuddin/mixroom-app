@@ -42,6 +42,7 @@ class BluetoothRouteReportSerializerV2 {
       'unavailableReasons': snapshot.unavailableReasons,
       'observation': snapshot.observation.toMap(),
       'duplexProbe': _sanitizeDuplexProbe(snapshot.duplexProbe),
+      'interruption': snapshot.interruption?.toMap(),
     };
   }
 

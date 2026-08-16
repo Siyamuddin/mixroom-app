@@ -179,7 +179,8 @@ void main() {
     expect(intent, contains('reconfigurePlaybackRouteV2ObjC:@""'));
     expect(observer, contains('matchesSource || matchesTarget'));
     expect(observer, contains('MixroomIOSRouteIsBluetoothHFPDuplex(route)'));
-    expect(observer, contains('audioInterrupted'));
+    expect(observer, contains('audioInterruptionBegan'));
+    expect(observer, contains('audioInterruptionEnded'));
     expect(observer, contains('iosIntentOperationCancelledV2 = YES'));
     for (final forbidden in <String>[
       'setCategory:',

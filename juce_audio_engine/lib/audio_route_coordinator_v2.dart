@@ -43,12 +43,37 @@ class AudioRouteCoordinatorV2 {
   bool _applyInFlight = false;
   bool _intentTransitionInFlight = false;
   Completer<void>? _intentTransitionCompletion;
+  Completer<void>? _interruptionEndedCompletion;
+  Future<AudioRouteTransitionResultV2>? _invalidationRecovery;
+  AudioRouteTransitionResultV2? _completedInvalidationRecovery;
+  int? _completedInvalidationRecoveryGeneration;
+  bool _interruptionActive = false;
+  bool _interruptionEndHandled = false;
+  bool _shutdownCancellation = false;
+  int _invalidationEpisode = 0;
   bool _started = false;
   bool _disposed = false;
   AudioRouteIntentV2 _intent = AudioRouteIntentV2.playbackOnly;
   AudioRouteIntentV2? _transitioningIntent;
 
   AudioRouteIntentV2 get intent => _intent;
+
+  void _beginInvalidationEpisode() {
+    _invalidationEpisode += 1;
+    _completedInvalidationRecovery = null;
+    _completedInvalidationRecoveryGeneration = null;
+  }
+
+  /// Starts one editor-lifecycle invalidation episode when iOS backgrounds
+  /// without first delivering a native audio interruption notification.
+  void beginLocalInvalidationEpisode() {
+    if (_disposed || !_started || _shutdownCancellation) return;
+    _beginInvalidationEpisode();
+    _pending = null;
+    _settlingTimer?.cancel();
+    _settlingTimer = null;
+    _setState(AudioRouteCoordinatorStateV2.reconfiguring);
+  }
 
   Future<AudioRouteSnapshotV2> start() async {
     if (_disposed) throw StateError('AudioRouteCoordinatorV2 is disposed');
@@ -68,8 +93,63 @@ class AudioRouteCoordinatorV2 {
   void _receive(AudioRouteChangeEventV2 event) {
     if (_disposed || event.generation <= _latestGeneration) return;
     _latestGeneration = event.generation;
+    final interruptionBegan = event.cause == 'audioInterruptionBegan' ||
+        event.cause == 'audioInterrupted';
+    final interruptionEnded = event.cause == 'audioInterruptionEnded';
+
+    if (interruptionBegan) {
+      _lastFingerprint = event.fingerprint;
+      _pending = null;
+      _settlingTimer?.cancel();
+      _settlingTimer = null;
+      if (!_interruptionActive) {
+        _beginInvalidationEpisode();
+        _interruptionActive = true;
+        _interruptionEndHandled = false;
+        _interruptionEndedCompletion = Completer<void>();
+        _setState(AudioRouteCoordinatorStateV2.reconfiguring);
+        onIntentInvalidated?.call(event);
+      }
+      return;
+    }
+
+    if (interruptionEnded) {
+      _lastFingerprint = event.fingerprint;
+      _pending = null;
+      _settlingTimer?.cancel();
+      _settlingTimer = null;
+      final suspendedSession =
+          event.snapshot.interruption?.wasSuspended == true;
+      if (suspendedSession && !_interruptionActive) {
+        _beginInvalidationEpisode();
+        _interruptionEndHandled = false;
+      }
+      if (_interruptionEndHandled) return;
+      _interruptionEndHandled = true;
+      if (_interruptionActive) {
+        _interruptionActive = false;
+        final completion = _interruptionEndedCompletion;
+        if (completion != null && !completion.isCompleted) {
+          completion.complete();
+        }
+      } else if (_invalidationRecovery == null) {
+        // iOS can deliver a suspended-session interruption only after the app
+        // is running again. It is already recoverable, but still needs the
+        // same cleanup and one playback-only transition.
+        _setState(AudioRouteCoordinatorStateV2.reconfiguring);
+        onIntentInvalidated?.call(event);
+      }
+      return;
+    }
+
+    if (_interruptionActive) {
+      // Retain the newest generation and route identity for the eventual
+      // recovery, but never apply a route while the session is interrupted.
+      _lastFingerprint = event.fingerprint;
+      return;
+    }
+
     final terminalEvent = event.cause == 'oldDeviceUnavailable' ||
-        event.cause == 'audioInterrupted' ||
         event.cause == 'noSuitableRoute';
     if (!terminalEvent &&
         event.fingerprint.isNotEmpty &&
@@ -139,8 +219,11 @@ class AudioRouteCoordinatorV2 {
       AudioRouteIntentV2 intent,
       {AudioRouteIntentOperationV2 operation =
           AudioRouteIntentOperationV2.standard}) async {
-    if (_disposed || !_started) {
+    if (_disposed || !_started || _shutdownCancellation) {
       return _localFailure(intent, 'coordinator_disposed');
+    }
+    if (_interruptionActive) {
+      return _localFailure(intent, 'route_unstable');
     }
     if (_applyInFlight || _intentTransitionInFlight || _pending != null) {
       return _localFailure(intent, 'route_unstable');
@@ -218,15 +301,69 @@ class AudioRouteCoordinatorV2 {
   /// transition using the latest observed generation.
   Future<AudioRouteTransitionResultV2>
       recoverPlaybackAfterIntentInvalidation() async {
+    final existing = _invalidationRecovery;
+    if (existing != null) return existing;
+    if (_completedInvalidationRecoveryGeneration == _latestGeneration &&
+        _completedInvalidationRecovery != null) {
+      return _completedInvalidationRecovery!;
+    }
+
+    final recovery = _runPlaybackRecoveryAfterIntentInvalidation();
+    _invalidationRecovery = recovery;
+    final result = await recovery;
+    if (identical(_invalidationRecovery, recovery)) {
+      _invalidationRecovery = null;
+      _completedInvalidationRecovery = result;
+      _completedInvalidationRecoveryGeneration = _latestGeneration;
+    }
+    return result;
+  }
+
+  Future<AudioRouteTransitionResultV2>
+      _runPlaybackRecoveryAfterIntentInvalidation() async {
+    var recoveryEpisode = _invalidationEpisode;
+    final interruptionEnded = _interruptionEndedCompletion;
+    if (_interruptionActive && interruptionEnded != null) {
+      await interruptionEnded.future;
+    }
     final activeTransition = _intentTransitionCompletion;
     if (activeTransition != null) await activeTransition.future;
-    if (_disposed || !_started) {
+    if (_disposed || !_started || _shutdownCancellation) {
       return _localFailure(
         AudioRouteIntentV2.playbackOnly,
         'coordinator_disposed',
       );
     }
+    final result = await transitionIntent(AudioRouteIntentV2.playbackOnly);
+    if (recoveryEpisode == _invalidationEpisode) return result;
+
+    // An interruption can begin while an older route restoration is already
+    // in flight. That stale transition belongs to the older episode. Wait for
+    // the new interruption to end, then perform its single playback recovery.
+    recoveryEpisode = _invalidationEpisode;
+    final supersedingInterruptionEnd = _interruptionEndedCompletion;
+    if (_interruptionActive && supersedingInterruptionEnd != null) {
+      await supersedingInterruptionEnd.future;
+    }
+    if (_disposed ||
+        !_started ||
+        _shutdownCancellation ||
+        recoveryEpisode != _invalidationEpisode) {
+      return _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        _shutdownCancellation ? 'coordinator_disposed' : 'stale_generation',
+      );
+    }
     return transitionIntent(AudioRouteIntentV2.playbackOnly);
+  }
+
+  /// Releases an interruption waiter during editor shutdown without allowing
+  /// a late playback reopen to start.
+  void cancelPendingRecoveryForShutdown() {
+    _shutdownCancellation = true;
+    _interruptionActive = false;
+    final completion = _interruptionEndedCompletion;
+    if (completion != null && !completion.isCompleted) completion.complete();
   }
 
   AudioRouteTransitionResultV2 _localFailure(
@@ -258,6 +395,7 @@ class AudioRouteCoordinatorV2 {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    cancelPendingRecoveryForShutdown();
     _settlingTimer?.cancel();
     _settlingTimer = null;
     _pending = null;

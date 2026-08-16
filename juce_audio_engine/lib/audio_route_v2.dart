@@ -332,6 +332,7 @@ class AudioRouteSnapshotV2 {
     this.intent = AudioRouteIntentV2.playbackOnly,
     this.observation = const AudioRouteObservationFactsV2(),
     this.duplexProbe,
+    this.interruption,
   });
 
   final int schemaVersion;
@@ -350,6 +351,7 @@ class AudioRouteSnapshotV2 {
   final AudioRouteIntentV2 intent;
   final AudioRouteObservationFactsV2 observation;
   final AudioRouteDuplexProbeFactsV2? duplexProbe;
+  final AudioRouteInterruptionFactsV2? interruption;
 
   bool get hasBluetoothOutput => outputs.any(
         (endpoint) => <AudioRouteKindV2>{
@@ -422,6 +424,9 @@ class AudioRouteSnapshotV2 {
       duplexProbe: map['duplexProbe'] is Map
           ? AudioRouteDuplexProbeFactsV2.fromMap(nestedMap('duplexProbe'))
           : null,
+      interruption: map['interruption'] is Map
+          ? AudioRouteInterruptionFactsV2.fromMap(nestedMap('interruption'))
+          : null,
     );
   }
 
@@ -442,6 +447,41 @@ class AudioRouteSnapshotV2 {
         'intent': _wireName(intent),
         'observation': observation.toMap(),
         'duplexProbe': duplexProbe?.toRawMap(),
+        'interruption': interruption?.toMap(),
+      };
+}
+
+class AudioRouteInterruptionFactsV2 {
+  const AudioRouteInterruptionFactsV2({
+    required this.phase,
+    required this.wasSuspended,
+    required this.shouldResumeHint,
+    this.reason,
+    this.recoveryOutcome,
+  });
+
+  final String phase;
+  final bool wasSuspended;
+  final bool shouldResumeHint;
+  final int? reason;
+  final String? recoveryOutcome;
+
+  factory AudioRouteInterruptionFactsV2.fromMap(Map<String, dynamic> map) {
+    return AudioRouteInterruptionFactsV2(
+      phase: map['phase']?.toString() ?? 'idle',
+      wasSuspended: map['wasSuspended'] == true,
+      shouldResumeHint: map['shouldResumeHint'] == true,
+      reason: _nullableInt(map['reason']),
+      recoveryOutcome: map['recoveryOutcome']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'phase': phase,
+        'wasSuspended': wasSuspended,
+        'shouldResumeHint': shouldResumeHint,
+        'reason': reason,
+        'recoveryOutcome': recoveryOutcome,
       };
 }
 

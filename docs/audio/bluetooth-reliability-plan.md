@@ -1366,6 +1366,43 @@ contained no assertion, crash, callback failure, or microphone leak. Playback
 after a terminal invalidation now reports the existing reopen requirement
 directly instead of presenting a generic unavailable-output message.
 
+#### Checkpoint 7L — interruption and foreground recovery
+
+iOS V2 now treats calls, Siri, alarms, suspension, and foreground return as one
+bounded interruption episode. Native observation distinguishes interruption
+begin and end, records the suspension/reason/resume-hint facts for diagnostics,
+and emits terminal events even when the output fingerprint is unchanged. Begin
+only pauses and invalidates; it never activates or reopens audio. End, or one
+native foreground reconciliation after a real background event, permits one
+serialized output-only recovery through the existing lifecycle executor and
+coordinator.
+
+Recording preparation and active recording share the same cleanup owner:
+capture admission closes, unpublished audio is discarded, input/duplex audio
+closes once, visuals stop, and no clip is inserted. Playback restoration then
+uses the current iOS-selected output rather than the pre-interruption route and
+requires playback/default, zero inputs, an attached callback, active outputs,
+and positive native settings. Playback and recording remain paused until the
+user acts. Duplicate and late notifications cannot start a second cleanup or
+reopen, and repeated background/foreground episodes on an unchanged route each
+perform a real recovery instead of reusing an earlier result.
+
+The schema-version 1 report adds optional interruption phase, suspension,
+reason, resume-hint, and recovery-outcome facts. The automated coordinator,
+observer, recording, HFP, redaction, and engine suites pass, as do iOS, Android,
+and macOS debug builds. The physical iPad gate passed Siri interruption on
+speaker and A2DP playback, interruption of built-in and HFP recording,
+background cancellation during HFP recording, and stopped foreground recovery
+on speaker and A2DP. Each path remained paused, closed the microphone, preserved
+the project, and permitted manual playback or another recording afterward.
+
+The first background-recording run exposed a JUCE RemoteIO lifetime race: a
+stream-format property callback could reach its device owner while the Audio
+Unit was being disposed. The tracked JUCE patch now unregisters and drains that
+listener, stops RemoteIO before disposal, and rejects notifications for an
+owner that is no longer live. Rebuilt device and simulator archives passed the
+same hardware case without a crash or freeze.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1528,8 +1565,6 @@ Each run records:
 
 ## Immediate next step
 
-Complete the physical recording gate for built-in, microphone-headset, and
-genuine A2DP-only-speaker routes. Require valid clips, zero dropped or invalid
-capture samples, exact output-only restoration, responsive cancellation, and
-safe removal handling before committing checkpoint 7K. Android recording and
-mobile selectors remain separate work.
+Begin the Android V2 recording foundation while retaining the completed iOS
+cross-route regression gate as the non-regression baseline. Mobile selectors
+remain a separate product decision.

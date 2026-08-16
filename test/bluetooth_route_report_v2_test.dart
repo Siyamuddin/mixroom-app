@@ -61,6 +61,13 @@ AudioRouteSnapshotV2 snapshot() {
       meaningfulChangeCount: 3,
       lastCause: 'oldDeviceUnavailable',
     ),
+    interruption: const AudioRouteInterruptionFactsV2(
+      phase: 'ended',
+      wasSuspended: true,
+      shouldResumeHint: false,
+      reason: 1,
+      recoveryOutcome: 'recovered',
+    ),
   );
 }
 
@@ -84,6 +91,13 @@ void main() {
       startsWith('output-'),
     );
     expect(report['intent'], 'preparingRecording');
+    expect(report['interruption'], <String, dynamic>{
+      'phase': 'ended',
+      'wasSuspended': true,
+      'shouldResumeHint': false,
+      'reason': 1,
+      'recoveryOutcome': 'recovered',
+    });
   });
 
   test('endpoint tokens are stable only for the same session salt', () {

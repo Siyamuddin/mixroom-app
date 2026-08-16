@@ -244,7 +244,7 @@ void main() {
       expect(handler, contains('abortRecordingV2(cancelOnly: true)'));
       expect(
         handler,
-        contains('_showSmallNotice(_v2RecordingInvalidationNotice)'),
+        contains('_showSmallNotice(_v2AudioSessionInvalidationNotice)'),
       );
       expect(handler, contains('AudioRouteCoordinatorStateV2.preparingInput'));
       final startFlowStart = editor.indexOf(
@@ -324,7 +324,7 @@ void main() {
       readinessEnd < 0 ? readinessStart + 3000 : readinessEnd,
     );
     final invalidationCheck = readiness.indexOf(
-      'if (_v2RecordingRouteInvalidated)',
+      'if (_v2AudioSessionInvalidated)',
     );
     final nativeValidation = readiness.indexOf('validatePlaybackV2()');
 
@@ -332,7 +332,7 @@ void main() {
     expect(invalidationCheck, lessThan(nativeValidation));
     expect(
       readiness.substring(invalidationCheck, nativeValidation),
-      contains('_showSmallNotice(_v2RecordingInvalidationNotice)'),
+      contains('_showSmallNotice(_v2AudioSessionInvalidationNotice)'),
     );
   });
 
@@ -355,7 +355,7 @@ void main() {
     expect(abort, isNot(contains('setActive:')));
 
     final invalidationStart = editor.indexOf(
-      'Future<void> _recoverV2PlaybackAfterRecordingRouteChange({',
+      'Future<void> _recoverV2PlaybackAfterAudioSessionInvalidation({',
     );
     final invalidationEnd = editor.indexOf(
       'Future<void> _synchronizeIOSRouteSafetyPositionV2',
@@ -389,16 +389,21 @@ void main() {
       'void _handleAudioRouteIntentInvalidatedV2(',
     );
     final handlerEnd = editor.indexOf(
-      'Future<void> _recoverV2PlaybackAfterRecordingRouteChange({',
+      'Future<void> _recoverV2PlaybackAfterAudioSessionInvalidation({',
       handlerStart,
     );
     final handler = editor.substring(handlerStart, handlerEnd);
-    expect(handler, contains("event.cause != 'audioInterrupted'"));
+    expect(handler, contains("event.cause == 'audioInterruptionBegan'"));
+    expect(handler, contains("event.cause == 'audioInterruptionEnded'"));
     expect(handler, contains("event.cause != 'shutdown'"));
     expect(handler, isNot(contains("event.cause == 'oldDeviceUnavailable'")));
+    expect(handler, contains('if (_v2AudioSessionInvalidated)'));
+    expect(handler, contains('foregroundRecoveryEvent'));
     expect(
-      handler.indexOf('if (_v2RecordingRouteInvalidated) return;'),
-      lessThan(handler.indexOf('recoverV2PlaybackAfterRecordingRouteChange')),
+      handler.indexOf('if (_v2AudioSessionInvalidated)'),
+      lessThan(
+        handler.indexOf('_recoverV2PlaybackAfterAudioSessionInvalidation'),
+      ),
     );
 
     final shutdownStart = editor.indexOf(

@@ -1,6 +1,6 @@
 --- a/juce_audio_devices/native/juce_Audio_ios.cpp
 +++ b/juce_audio_devices/native/juce_Audio_ios.cpp
-@@ -32,7 +32,90 @@
+@@ -32,7 +32,107 @@
    ==============================================================================
  */
  
@@ -9,10 +9,13 @@
 +
 +#include <chrono>
 +#include <mutex>
++#include <unordered_set>
 +
 +namespace
 +{
 +std::mutex mixroomIOSPolicyMutex;
++std::mutex mixroomIOSAudioUnitPropertyMutex;
++std::unordered_set<void*> mixroomIOSAudioUnitPropertyOwners;
 +MixroomIOSAudioSessionPolicyFacts mixroomIOSPolicyFacts{
 +    MixroomIOSAudioSessionPolicy::legacyManaged,
 +    MixroomIOSAudioSessionPolicyStatus::ok,
@@ -22,6 +25,20 @@
 +bool mixroomIOSPreparedSessionActive = false;
 +MixroomIOSAudioSessionPolicy mixroomIOSPreparedSessionPolicy =
 +    MixroomIOSAudioSessionPolicy::legacyManaged;
++
++void mixroomIOSRegisterAudioUnitPropertyOwner(void* owner)
++{
++    const std::lock_guard<std::mutex> lock(
++        mixroomIOSAudioUnitPropertyMutex);
++    mixroomIOSAudioUnitPropertyOwners.insert(owner);
++}
++
++void mixroomIOSUnregisterAudioUnitPropertyOwner(void* owner)
++{
++    const std::lock_guard<std::mutex> lock(
++        mixroomIOSAudioUnitPropertyMutex);
++    mixroomIOSAudioUnitPropertyOwners.erase(owner);
++}
 +
 +MixroomIOSAudioSessionPolicy mixroomIOSCurrentPolicy() noexcept
 +{
@@ -412,7 +429,18 @@
  
              isRunning = true;
  
-@@ -726,8 +1036,12 @@
+@@ -722,12 +1032,22 @@
+                 if (audioUnit != nullptr)
+                 {
+-                    AudioOutputUnitStart(audioUnit);
++                    mixroomIOSUnregisterAudioUnitPropertyOwner(this);
++                    AudioUnitRemovePropertyListenerWithUserData(
++                        audioUnit,
++                        kAudioUnitProperty_StreamFormat,
++                        dispatchAudioUnitPropertyChange,
++                        this);
++                    AudioOutputUnitStop(audioUnit);
+                     AudioComponentInstanceDispose(audioUnit);
                      audioUnit = nullptr;
                  }
  
@@ -468,7 +496,34 @@
          }
  
          void handleRouteChange(AVAudioSessionRouteChangeReason reason)
-@@ -1567,10 +1894,11 @@
+@@ -1176,5 +1536,12 @@
+             if (audioUnit != nullptr)
+             {
++                mixroomIOSUnregisterAudioUnitPropertyOwner(this);
++                AudioUnitRemovePropertyListenerWithUserData(
++                    audioUnit,
++                    kAudioUnitProperty_StreamFormat,
++                    dispatchAudioUnitPropertyChange,
++                    this);
++                AudioOutputUnitStop(audioUnit);
+                 AudioComponentInstanceDispose(audioUnit);
+                 audioUnit = nullptr;
+             }
+@@ -1289,1 +1656,2 @@
++            mixroomIOSRegisterAudioUnitPropertyOwner(this);
+             AudioUnitAddPropertyListener(audioUnit, kAudioUnitProperty_StreamFormat, dispatchAudioUnitPropertyChange, this);
+@@ -1393,5 +1761,10 @@
+         static void dispatchAudioUnitPropertyChange(void *data, AudioUnit unit, AudioUnitPropertyID propertyID,
+                                                     AudioUnitScope scope, AudioUnitElement element)
+         {
++            const std::lock_guard<std::mutex> lock(
++                mixroomIOSAudioUnitPropertyMutex);
++            if (mixroomIOSAudioUnitPropertyOwners.find(data) ==
++                mixroomIOSAudioUnitPropertyOwners.end())
++                return;
+             static_cast<Pimpl *>(data)->handleAudioUnitPropertyChange(unit, propertyID, scope, element);
+         }
+@@ -1567,10 +1907,11 @@
  
          BigInteger requestedInputChannels, requestedOutputChannels;
  

@@ -342,6 +342,32 @@ void main() {
     expect(event.snapshot.implementation, BluetoothImplementationV2.v2);
   });
 
+  test('interruption diagnostics are optional and forward compatible', () {
+    final withFacts = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'implementation': 'v2',
+      'captureConsistency': 'stable',
+      'interruption': <String, dynamic>{
+        'phase': 'ended',
+        'wasSuspended': true,
+        'shouldResumeHint': true,
+        'reason': 1,
+        'recoveryOutcome': 'pending',
+        'futureField': 'ignored',
+      },
+    });
+    final withoutFacts = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'implementation': 'v2',
+      'captureConsistency': 'stable',
+    });
+
+    expect(withFacts.interruption?.phase, 'ended');
+    expect(withFacts.interruption?.wasSuspended, isTrue);
+    expect(withFacts.interruption?.shouldResumeHint, isTrue);
+    expect(withFacts.interruption?.reason, 1);
+    expect(withFacts.interruption?.recoveryOutcome, 'pending');
+    expect(withoutFacts.interruption, isNull);
+  });
+
   test('transition result parses fallback and fails closed without snapshot',
       () {
     final fallback = AudioRouteTransitionResultV2.fromMap(<String, dynamic>{

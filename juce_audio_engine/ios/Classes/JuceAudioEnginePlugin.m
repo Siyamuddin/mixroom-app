@@ -62,6 +62,14 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @property (atomic, copy) NSString *iosIntentLifecyclePhaseV2;
 @property (atomic, copy) NSString *iosIntentTerminalCauseV2;
 @property (atomic, copy) NSString *iosIntentOperationModeV2;
+@property (atomic, assign) BOOL iosInterruptionActiveV2;
+@property (atomic, assign) BOOL iosInterruptionRecoveryPendingV2;
+@property (atomic, assign) BOOL iosInterruptionWasSuspendedV2;
+@property (atomic, assign) BOOL iosInterruptionShouldResumeV2;
+@property (atomic, copy) NSString *iosInterruptionPhaseV2;
+@property (atomic, retain) NSNumber *iosInterruptionReasonV2;
+@property (atomic, copy) NSString *iosInterruptionRecoveryOutcomeV2;
+@property (atomic, assign) BOOL iosForegroundRecoveryPendingV2;
 - (void)bindEventSink:(FlutterEventSink)events;
 - (void)clearEventSink;
 - (NSDictionary<NSString *, id> *)buildAudioRouteSnapshotV2;
@@ -1624,6 +1632,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ? (self.currentAudioRouteIntentV2 ?: @"playbackOnly")
             : @"playbackOnly",
         @"duplexProbe": self.iosLastDuplexProbeV2 ?: [NSNull null],
+        @"interruption": @{
+            @"phase": self.iosInterruptionPhaseV2 ?: @"idle",
+            @"wasSuspended": @(self.iosInterruptionWasSuspendedV2),
+            @"shouldResumeHint": @(self.iosInterruptionShouldResumeV2),
+            @"reason": self.iosInterruptionReasonV2 ?: [NSNull null],
+            @"recoveryOutcome":
+                self.iosInterruptionRecoveryOutcomeV2 ?: [NSNull null],
+        },
         @"captureConsistency": captureConsistency,
         @"inputs": inputs,
         @"outputs": outputs,
@@ -1790,6 +1806,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosIntentOperationPendingFingerprintV2 = nil;
     self.iosIntentOperationTargetFingerprintV2 = nil;
     self.iosIntentOperationTargetOutputV2 = nil;
+    self.iosInterruptionActiveV2 = NO;
+    self.iosInterruptionRecoveryPendingV2 = NO;
+    self.iosInterruptionWasSuspendedV2 = NO;
+    self.iosInterruptionShouldResumeV2 = NO;
+    self.iosInterruptionPhaseV2 = @"idle";
+    self.iosInterruptionReasonV2 = nil;
+    self.iosInterruptionRecoveryOutcomeV2 = nil;
+    self.iosForegroundRecoveryPendingV2 = NO;
     self.iosLastDuplexProbeV2 = nil;
     NSString *before = [JuceBridge getAudioRouteImplementationObjC] ?: @"none";
     if (![before isEqualToString:@"none"] && ![before isEqualToString:@"v2"]) {
@@ -2715,6 +2739,34 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 
     if (success) {
         self.currentAudioRouteIntentV2 = intent;
+        if ([intent isEqualToString:@"playbackOnly"] &&
+            self.iosInterruptionRecoveryPendingV2) {
+            self.iosInterruptionRecoveryPendingV2 = NO;
+            self.iosInterruptionPhaseV2 = @"complete";
+            self.iosInterruptionRecoveryOutcomeV2 = @"recovered";
+            self.iosForegroundRecoveryPendingV2 = NO;
+            self.audioRouteFingerprintV2 =
+                MixroomIOSOutputFingerprint(session.currentRoute);
+            NSDictionary<NSString *, id> *recoveredOutput =
+                MixroomIOSSingleOutputEndpoint(session.currentRoute);
+            self.iosObservedOutputWasBluetoothV2 =
+                recoveredOutput != nil &&
+                MixroomIOSOutputIsBluetooth(recoveredOutput);
+            self.iosVerifiedPlaybackOutputFingerprintV2 =
+                self.audioRouteFingerprintV2;
+            self.iosVerifiedPlaybackOutputWasBluetoothV2 =
+                self.iosObservedOutputWasBluetoothV2;
+            self.routeTransitionWasPlayingV2 = NO;
+            self.routeTransitionFromBluetoothV2 = NO;
+            self.iosIntentTerminalCauseV2 = nil;
+        }
+    } else if ([intent isEqualToString:@"playbackOnly"] &&
+               self.iosInterruptionRecoveryPendingV2 &&
+               !self.iosInterruptionActiveV2) {
+        self.iosInterruptionRecoveryPendingV2 = NO;
+        self.iosInterruptionPhaseV2 = @"failed";
+        self.iosInterruptionRecoveryOutcomeV2 = @"failed";
+        self.iosForegroundRecoveryPendingV2 = NO;
     } else if ([intent isEqualToString:@"preparingRecording"] &&
                (recordingRouteMutationStarted ||
                 ![diagnosticCode isEqualToString:@"stale_generation"])) {
@@ -2908,6 +2960,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosIntentOperationPendingFingerprintV2 = nil;
     self.iosIntentOperationTargetFingerprintV2 = nil;
     self.iosIntentOperationTargetOutputV2 = nil;
+    self.iosInterruptionActiveV2 = NO;
+    self.iosInterruptionRecoveryPendingV2 = NO;
+    self.iosInterruptionWasSuspendedV2 = NO;
+    self.iosInterruptionShouldResumeV2 = NO;
+    self.iosInterruptionPhaseV2 = @"idle";
+    self.iosInterruptionReasonV2 = nil;
+    self.iosInterruptionRecoveryOutcomeV2 = nil;
+    self.iosForegroundRecoveryPendingV2 = NO;
     NSString *currentFingerprint = MixroomIOSOutputFingerprint(route);
     self.audioRouteFingerprintV2 =
         self.iosVerifiedPlaybackOutputFingerprintV2.length > 0
@@ -2927,6 +2987,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         addObserver:self
            selector:@selector(handleIOSAudioRouteChangeV2:)
                name:UIApplicationDidBecomeActiveNotification
+             object:nil];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(handleIOSAudioRouteChangeV2:)
+               name:UIApplicationDidEnterBackgroundNotification
              object:nil];
     [[NSNotificationCenter defaultCenter]
         addObserver:self
@@ -2957,6 +3022,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     object:nil];
         [[NSNotificationCenter defaultCenter]
             removeObserver:self
+                      name:UIApplicationDidEnterBackgroundNotification
+                    object:nil];
+        [[NSNotificationCenter defaultCenter]
+            removeObserver:self
                       name:AVAudioSessionInterruptionNotification
                     object:[AVAudioSession sharedInstance]];
     }
@@ -2971,6 +3040,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosLastObservedRouteCauseV2 = nil;
     self.iosIntentOperationCancelledV2 = self.iosIntentOperationActiveV2;
     self.iosIntentTerminalCauseV2 = @"shutdown";
+    self.iosInterruptionActiveV2 = NO;
+    self.iosInterruptionRecoveryPendingV2 = NO;
+    self.iosInterruptionPhaseV2 = @"shutdown";
+    self.iosInterruptionRecoveryOutcomeV2 = @"shutdown";
+    self.iosForegroundRecoveryPendingV2 = NO;
     [self signalIOSIntentRouteConditionV2];
 #endif
 }
@@ -2981,6 +3055,47 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         [notification.name isEqualToString:AVAudioSessionRouteChangeNotification];
     const BOOL interruptionNotification =
         [notification.name isEqualToString:AVAudioSessionInterruptionNotification];
+    const BOOL appBecameActiveNotification =
+        [notification.name isEqualToString:UIApplicationDidBecomeActiveNotification];
+    const BOOL appEnteredBackgroundNotification =
+        [notification.name isEqualToString:UIApplicationDidEnterBackgroundNotification];
+    NSNumber *interruptionTypeValue =
+        interruptionNotification &&
+        [notification.userInfo[AVAudioSessionInterruptionTypeKey]
+            isKindOfClass:[NSNumber class]]
+            ? notification.userInfo[AVAudioSessionInterruptionTypeKey]
+            : nil;
+    const BOOL interruptionEnded = interruptionNotification &&
+        interruptionTypeValue != nil &&
+        interruptionTypeValue.unsignedIntegerValue ==
+            AVAudioSessionInterruptionTypeEnded;
+    const BOOL interruptionBegan = interruptionNotification &&
+        !interruptionEnded;
+    NSNumber *interruptionOptionsValue =
+        interruptionNotification &&
+        [notification.userInfo[AVAudioSessionInterruptionOptionKey]
+            isKindOfClass:[NSNumber class]]
+            ? notification.userInfo[AVAudioSessionInterruptionOptionKey]
+            : nil;
+    const BOOL interruptionShouldResume = interruptionEnded &&
+        (interruptionOptionsValue.unsignedIntegerValue &
+         AVAudioSessionInterruptionOptionShouldResume) != 0;
+    NSNumber *interruptionSuspendedValue =
+        interruptionNotification &&
+        [notification.userInfo[AVAudioSessionInterruptionWasSuspendedKey]
+            isKindOfClass:[NSNumber class]]
+            ? notification.userInfo[AVAudioSessionInterruptionWasSuspendedKey]
+            : nil;
+    const BOOL interruptionWasSuspended =
+        interruptionBegan && interruptionSuspendedValue.boolValue;
+    const BOOL duplicateSuspendedInterruption =
+        interruptionWasSuspended && self.iosInterruptionRecoveryPendingV2;
+    NSNumber *interruptionReasonValue =
+        interruptionNotification &&
+        [notification.userInfo[AVAudioSessionInterruptionReasonKey]
+            isKindOfClass:[NSNumber class]]
+            ? notification.userInfo[AVAudioSessionInterruptionReasonKey]
+            : nil;
     NSNumber *reasonValue =
         routeNotification &&
         [notification.userInfo[AVAudioSessionRouteChangeReasonKey]
@@ -2993,7 +3108,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const BOOL terminalRouteNotification = routeNotification &&
         (reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable ||
          reason == AVAudioSessionRouteChangeReasonNoSuitableRouteForCategory);
-    if (interruptionNotification || terminalRouteNotification) {
+    if ((interruptionBegan && !duplicateSuspendedInterruption) ||
+        terminalRouteNotification) {
         [JuceBridge markIOSIntentRouteInvalidatedV2ObjC];
         [self signalIOSIntentRouteConditionV2];
     }
@@ -3002,13 +3118,37 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
             return;
         }
-        if (interruptionNotification && !self.iosIntentOperationActiveV2 &&
-            [self.currentAudioRouteIntentV2 isEqualToString:@"playbackOnly"]) {
+        if (appEnteredBackgroundNotification) {
+            self.iosForegroundRecoveryPendingV2 = YES;
+            return;
+        }
+        if (duplicateSuspendedInterruption) {
+            return;
+        }
+        if (interruptionBegan && self.iosInterruptionActiveV2 &&
+            !interruptionWasSuspended) {
+            return;
+        }
+        if (interruptionEnded && !self.iosInterruptionActiveV2 &&
+            ([self.iosInterruptionPhaseV2 isEqualToString:@"ended"] ||
+             [self.iosInterruptionPhaseV2 isEqualToString:@"complete"])) {
+            return;
+        }
+        if (appBecameActiveNotification && self.iosInterruptionActiveV2) {
+            // Foregrounding does not prove that a call/Siri interruption ended.
+            return;
+        }
+        const BOOL foregroundRecovery = appBecameActiveNotification &&
+            self.iosForegroundRecoveryPendingV2;
+        if (foregroundRecovery && self.iosInterruptionRecoveryPendingV2) {
+            // A native interruption end already owns this foreground episode.
+            self.iosForegroundRecoveryPendingV2 = NO;
             return;
         }
         AVAudioSessionRouteDescription *route =
             [AVAudioSession sharedInstance].currentRoute;
         if (route == nil && !interruptionNotification &&
+            !foregroundRecovery &&
             !self.iosIntentOperationActiveV2) {
             return;
         }
@@ -3016,10 +3156,46 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ? @"" : MixroomIOSOutputFingerprint(route);
         NSString *completeFingerprint = route == nil
             ? @"" : MixroomIOSRouteFingerprint(route);
-        if (interruptionNotification) {
+        NSString *interruptionCause = nil;
+        if (interruptionBegan) {
             self.iosIntentOperationCancelledV2 = YES;
-            self.iosIntentTerminalCauseV2 = @"audioInterrupted";
+            self.iosIntentTerminalCauseV2 = @"audioInterruptionBegan";
+            self.iosInterruptionWasSuspendedV2 = interruptionWasSuspended;
+            self.iosInterruptionShouldResumeV2 = NO;
+            self.iosInterruptionReasonV2 = interruptionReasonValue;
+            self.iosInterruptionRecoveryPendingV2 = YES;
+            self.iosInterruptionRecoveryOutcomeV2 = @"pending";
+            if (interruptionWasSuspended) {
+                // A suspended-session notification is delivered only after the
+                // app is running again, so it is already eligible for one
+                // foreground recovery after cleanup.
+                self.iosInterruptionActiveV2 = NO;
+                self.iosInterruptionPhaseV2 = @"ended";
+                interruptionCause = @"audioInterruptionEnded";
+            } else {
+                self.iosInterruptionActiveV2 = YES;
+                self.iosInterruptionPhaseV2 = @"began";
+                interruptionCause = @"audioInterruptionBegan";
+            }
             [self signalIOSIntentRouteConditionV2];
+        } else if (interruptionEnded) {
+            self.iosInterruptionActiveV2 = NO;
+            self.iosInterruptionRecoveryPendingV2 = YES;
+            self.iosInterruptionPhaseV2 = @"ended";
+            self.iosInterruptionShouldResumeV2 = interruptionShouldResume;
+            self.iosInterruptionReasonV2 = interruptionReasonValue ?:
+                self.iosInterruptionReasonV2;
+            self.iosInterruptionRecoveryOutcomeV2 = @"pending";
+            interruptionCause = @"audioInterruptionEnded";
+        } else if (foregroundRecovery) {
+            self.iosForegroundRecoveryPendingV2 = NO;
+            self.iosInterruptionActiveV2 = NO;
+            self.iosInterruptionRecoveryPendingV2 = YES;
+            self.iosInterruptionWasSuspendedV2 = YES;
+            self.iosInterruptionShouldResumeV2 = NO;
+            self.iosInterruptionPhaseV2 = @"ended";
+            self.iosInterruptionRecoveryOutcomeV2 = @"pending";
+            interruptionCause = @"audioInterruptionEnded";
         } else if (self.iosIntentOperationActiveV2) {
             const BOOL matchesSource =
                 self.iosIntentOperationSourceFingerprintV2.length > 0 &&
@@ -3063,7 +3239,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 : @"unrelatedRoute";
             [self signalIOSIntentRouteConditionV2];
         }
-        if (!interruptionNotification &&
+        if (!interruptionNotification && !foregroundRecovery &&
             !terminalRouteNotification &&
             !self.iosIntentOperationActiveV2 &&
             [fingerprint isEqualToString:self.audioRouteFingerprintV2]) {
@@ -3082,8 +3258,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ? nil : MixroomIOSSingleOutputEndpoint(route);
         self.iosObservedOutputWasBluetoothV2 =
             output != nil && MixroomIOSOutputIsBluetooth(output);
-        self.iosLastObservedRouteCauseV2 = interruptionNotification
-            ? @"audioInterrupted"
+        self.iosLastObservedRouteCauseV2 =
+            (interruptionNotification || foregroundRecovery)
+            ? (interruptionCause ?: @"audioInterruptionBegan")
             : (routeNotification
                 ? MixroomIOSObservedRouteCause(reason)
                 : @"appBecameActive");
