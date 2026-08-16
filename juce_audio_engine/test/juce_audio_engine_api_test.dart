@@ -171,7 +171,7 @@ void main() {
             snapshot['inputs'] = <Map<String, dynamic>>[
               <String, dynamic>{
                 'direction': 'input',
-                'nativePortType': 'builtIn',
+                'nativePortType': 'MicrophoneBuiltIn',
                 'normalizedKind': 'builtIn',
                 'uid': 'built-in-input',
                 'name': 'Built-in Microphone',
@@ -547,7 +547,7 @@ void main() {
     await JuceAudioEngine.setAudioRouteIntentV2(
       AudioRouteIntentV2.preparingRecording,
       generation: 9,
-      systemSelectedProbe: true,
+      operation: AudioRouteIntentOperationV2.systemSelectedProbe,
       platformOverride: TargetPlatform.iOS,
     );
 
@@ -557,7 +557,27 @@ void main() {
       <String, dynamic>{
         'generation': 9,
         'intent': 'preparingRecording',
-        'systemSelectedProbe': true,
+        'intentOperation': 'systemSelectedProbe',
+      },
+    );
+  });
+
+  test('iOS system-selected recording reuses the existing intent contract',
+      () async {
+    await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.preparingRecording,
+      generation: 10,
+      operation: AudioRouteIntentOperationV2.systemSelectedRecording,
+      platformOverride: TargetPlatform.iOS,
+    );
+
+    expect(calls.single.method, 'setAudioRouteIntentV2');
+    expect(
+      Map<String, dynamic>.from(calls.single.arguments as Map),
+      <String, dynamic>{
+        'generation': 10,
+        'intent': 'preparingRecording',
+        'intentOperation': 'systemSelectedRecording',
       },
     );
   });
@@ -690,6 +710,78 @@ void main() {
       isFalse,
     );
   });
+
+  for (final route in <({
+    String label,
+    String outputType,
+    String outputKind,
+    String inputType,
+    String inputKind,
+  })>[
+    (
+      label: 'built-in microphone plus A2DP',
+      outputType: 'BluetoothA2DPOutput',
+      outputKind: 'bluetoothMedia',
+      inputType: 'MicrophoneBuiltIn',
+      inputKind: 'builtIn',
+    ),
+    (
+      label: 'system-selected wired route',
+      outputType: 'Headphones',
+      outputKind: 'wired',
+      inputType: 'HeadsetMic',
+      inputKind: 'wired',
+    ),
+  ]) {
+    test('iOS V2 readiness accepts exact ${route.label}', () async {
+      final duplex = _v2Snapshot(
+        nativePortType: route.outputType,
+        normalizedKind: route.outputKind,
+        uid: '${route.outputKind}-output',
+        sessionInputChannels: 1,
+      );
+      duplex['intent'] = 'recording';
+      duplex['inputs'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'direction': 'input',
+          'nativePortType': route.inputType,
+          'normalizedKind': route.inputKind,
+          'uid': '${route.inputKind}-input',
+          'name': 'System Input',
+          'channelCount': 1,
+        },
+      ];
+      final session = duplex['session']! as Map<String, dynamic>;
+      session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+      final juce = duplex['juce']! as Map<String, dynamic>;
+      juce['activeInputChannels'] = 1;
+
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(
+        AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
+          'status': 'success',
+          'generation': 0,
+          'transitionId': 3,
+          'diagnosticCode': 'ok',
+          'elapsedMs': 1,
+          'transportWasPlaying': false,
+          'snapshot': duplex,
+        }),
+      );
+      calls.clear();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        calls.add(methodCall);
+        return duplex;
+      });
+
+      expect(
+        await JuceAudioEngine.validatePlaybackV2(
+          platformOverride: TargetPlatform.iOS,
+        ),
+        isTrue,
+      );
+    });
+  }
 
   test('loadClip sends rowId + timeline payload', () async {
     await JuceAudioEngine.loadClip(

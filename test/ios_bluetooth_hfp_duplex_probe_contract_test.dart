@@ -228,7 +228,10 @@ void main() {
     expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
     expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
     expect(probe, contains('if (_iosSystemSelectedRouteProbeRunning) return;'));
-    expect(probe, contains('systemSelectedProbe: true'));
+    expect(
+      probe,
+      contains('operation: AudioRouteIntentOperationV2.systemSelectedProbe'),
+    );
     expect(probe, isNot(contains('Cancel Bluetooth Input + Output Check')));
     expect(probe, isNot(contains('AudioRouteIntentV2.recording')));
     expect(probe, isNot(contains('startRecording(')));

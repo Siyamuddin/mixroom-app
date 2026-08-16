@@ -26,6 +26,16 @@ enum AudioRouteIntentV2 {
   monitoring,
 }
 
+/// Private execution context for an existing V2 intent transition.
+///
+/// This is carried over the existing method-channel contract; it is not a
+/// coordinator state and does not create another route owner.
+enum AudioRouteIntentOperationV2 {
+  standard,
+  systemSelectedProbe,
+  systemSelectedRecording,
+}
+
 enum AudioHardwareRatePolicyV2 { native, prefer48000 }
 
 enum AudioBufferPolicyV2 { routeNative, conservativeBluetooth }

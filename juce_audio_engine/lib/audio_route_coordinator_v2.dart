@@ -11,7 +11,8 @@ abstract interface class AudioRouteAdapterV2 {
 
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
-      {bool systemSelectedProbe = false});
+      {AudioRouteIntentOperationV2 operation =
+          AudioRouteIntentOperationV2.standard});
 
   Future<void> stopMonitoring();
 }
@@ -136,7 +137,8 @@ class AudioRouteCoordinatorV2 {
 
   Future<AudioRouteTransitionResultV2> transitionIntent(
       AudioRouteIntentV2 intent,
-      {bool systemSelectedProbe = false}) async {
+      {AudioRouteIntentOperationV2 operation =
+          AudioRouteIntentOperationV2.standard}) async {
     if (_disposed || !_started) {
       return _localFailure(intent, 'coordinator_disposed');
     }
@@ -157,7 +159,7 @@ class AudioRouteCoordinatorV2 {
       result = await _adapter.applyIntent(
         intent,
         generation,
-        systemSelectedProbe: systemSelectedProbe,
+        operation: operation,
       );
     } catch (_) {
       result = _localFailure(intent, 'actual_state_unavailable');

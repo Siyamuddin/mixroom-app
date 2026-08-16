@@ -75,7 +75,7 @@ void main() {
         plugin,
         isNot(
           contains(
-            'systemSelectedProbe &&\n'
+            'systemSelectedRoute &&\n'
             '                           (![categoryOptions containsObject:',
           ),
         ),
@@ -119,7 +119,10 @@ void main() {
       final probe = editor.substring(start, end);
 
       expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
-      expect(probe, contains('systemSelectedProbe: true'));
+      expect(
+        probe,
+        contains('operation: AudioRouteIntentOperationV2.systemSelectedProbe'),
+      );
       expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
       expect(probe, isNot(contains('AudioRouteIntentV2.recording')));
       expect(probe, isNot(contains('_startAudioRecordingJuce')));

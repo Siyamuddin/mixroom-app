@@ -61,7 +61,7 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @property (atomic, assign) BOOL iosIntentRouteConditionSignalledV2;
 @property (atomic, copy) NSString *iosIntentLifecyclePhaseV2;
 @property (atomic, copy) NSString *iosIntentTerminalCauseV2;
-@property (atomic, assign) BOOL iosIntentSystemSelectedProbeV2;
+@property (atomic, copy) NSString *iosIntentOperationModeV2;
 - (void)bindEventSink:(FlutterEventSink)events;
 - (void)clearEventSink;
 - (NSDictionary<NSString *, id> *)buildAudioRouteSnapshotV2;
@@ -1780,7 +1780,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosRecordingInputV2 = nil;
     [JuceBridge endIOSIntentOperationV2ObjC];
     self.iosIntentOperationActiveV2 = NO;
-    self.iosIntentSystemSelectedProbeV2 = NO;
+    self.iosIntentOperationModeV2 = @"standard";
     self.iosIntentOperationCancelledV2 = NO;
     self.iosIntentCleanupClaimedV2 = NO;
     self.iosIntentLifecyclePhaseV2 = @"idle";
@@ -2103,9 +2103,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     BOOL playbackRecoveryUsedFallback = NO;
     BOOL recordingRouteMutationStarted = NO;
     AVAudioSession *session = [AVAudioSession sharedInstance];
-    const BOOL systemSelectedProbe =
-        [args[@"systemSelectedProbe"] isKindOfClass:[NSNumber class]] &&
-        [args[@"systemSelectedProbe"] boolValue];
+    NSString *intentOperation =
+        [args[@"intentOperation"] isKindOfClass:[NSString class]]
+            ? args[@"intentOperation"] : @"standard";
+    const BOOL systemSelectedRoute =
+        [intentOperation isEqualToString:@"systemSelectedProbe"] ||
+        [intentOperation isEqualToString:@"systemSelectedRecording"];
 
     if (!self.audioRouteMonitoringV2 ||
         ![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
@@ -2117,7 +2120,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                ![intent isEqualToString:@"recording"]) {
         diagnosticCode = @"recording_route_unsupported";
     } else if ([intent isEqualToString:@"recording"] &&
-               self.iosIntentSystemSelectedProbeV2) {
+               [self.iosIntentOperationModeV2
+                   isEqualToString:@"systemSelectedProbe"]) {
         diagnosticCode = @"recording_route_unsupported";
     } else if ([intent isEqualToString:@"preparingRecording"]) {
         AVAudioSessionRouteDescription *sourceRoute = session.currentRoute;
@@ -2130,19 +2134,19 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         const BOOL builtInDuplex =
             MixroomIOSOutputIsBuiltInSpeaker(expectedOutput);
         const BOOL bluetoothProbe =
-            !systemSelectedProbe &&
+            !systemSelectedRoute &&
             MixroomIOSOutputIsBluetoothMedia(expectedOutput);
-        const BOOL lifecycleProbe = bluetoothProbe || systemSelectedProbe;
+        const BOOL lifecycleOperation = bluetoothProbe || systemSelectedRoute;
         if (expectedOutput == nil) {
             diagnosticCode = @"no_output";
         } else if (!MixroomIOSOutputIdentityIsObservable(expectedOutput)) {
             diagnosticCode = @"actual_state_unavailable";
-        } else if (!systemSelectedProbe && !builtInDuplex && !bluetoothProbe) {
+        } else if (!systemSelectedRoute && !builtInDuplex && !bluetoothProbe) {
             diagnosticCode = @"recording_route_unsupported";
         } else {
             self.iosIntentOperationCancelledV2 = NO;
             self.iosIntentTerminalCauseV2 = nil;
-            if (lifecycleProbe) {
+            if (lifecycleOperation) {
                 [JuceBridge beginIOSIntentOperationV2ObjC];
                 self.iosIntentOperationIdV2 += 1;
                 const uint64_t operationID = self.iosIntentOperationIdV2;
@@ -2161,7 +2165,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 self.iosIntentOperationPendingFingerprintV2 = nil;
                 self.iosIntentOperationTargetFingerprintV2 = nil;
                 self.iosIntentOperationTargetOutputV2 = nil;
-                self.iosIntentSystemSelectedProbeV2 = systemSelectedProbe;
+                self.iosIntentOperationModeV2 = intentOperation;
                 self.iosRecordingOutputV2 = expectedOutput;
                 self.iosRecordingInputV2 = nil;
                 dispatch_after(
@@ -2185,18 +2189,18 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     });
             }
             recordingRouteMutationStarted = YES;
-            const BOOL sessionPrepared = !lifecycleProbe ||
-                (systemSelectedProbe
+            const BOOL sessionPrepared = !lifecycleOperation ||
+                (systemSelectedRoute
                     ? [JuceBridge prepareSystemSelectedDuplexSessionV2ObjC]
                     : [JuceBridge prepareBluetoothDuplexSessionV2ObjC]);
-            const BOOL initialRouteReady = systemSelectedProbe
+            const BOOL initialRouteReady = systemSelectedRoute
                 ? MixroomIOSSystemSelectedTargetMatchesSource(
                     expectedOutput, session.currentRoute)
                 : MixroomIOSRouteIsBluetoothHFPDuplex(session.currentRoute);
-            if (lifecycleProbe && sessionPrepared && !initialRouteReady &&
+            if (lifecycleOperation && sessionPrepared && !initialRouteReady &&
                 !self.iosIntentOperationCancelledV2 &&
                 ![JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) {
-                self.iosIntentLifecyclePhaseV2 = systemSelectedProbe
+                self.iosIntentLifecyclePhaseV2 = systemSelectedRoute
                     ? @"awaitingSystemRoute" : @"awaitingHfpRoute";
                 const double remainingMilliseconds =
                     2000.0 - (MixroomIOSMonotonicMilliseconds() -
@@ -2212,20 +2216,20 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 }
             }
             self.iosIntentLifecyclePhaseV2 = @"openingDevice";
-            const BOOL routeReady = !lifecycleProbe ||
-                (systemSelectedProbe
+            const BOOL routeReady = !lifecycleOperation ||
+                (systemSelectedRoute
                     ? MixroomIOSSystemSelectedTargetMatchesSource(
                         expectedOutput, session.currentRoute)
                     : MixroomIOSRouteIsBluetoothHFPDuplex(
                         session.currentRoute));
-            const NSInteger deviceOpenTimeoutMs = lifecycleProbe
+            const NSInteger deviceOpenTimeoutMs = lifecycleOperation
                 ? MAX(0, (NSInteger)(2000.0 -
                     (MixroomIOSMonotonicMilliseconds() -
                      self.iosIntentOperationStartedAtMsV2)))
                 : 0;
             const BOOL opened = sessionPrepared && routeReady &&
-                (lifecycleProbe
-                    ? (systemSelectedProbe
+                (lifecycleOperation
+                    ? (systemSelectedRoute
                         ? [JuceBridge
                             openPreparedSystemSelectedDuplexRouteV2ObjC:
                                 deviceOpenTimeoutMs
@@ -2241,11 +2245,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 diagnosticCode = @"stale_generation";
                 probeValidationStage = self.iosIntentTerminalCauseV2.length > 0
                     ? self.iosIntentTerminalCauseV2 : @"cancelled";
-            } else if (lifecycleProbe &&
+            } else if (lifecycleOperation &&
                 [JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) {
                 diagnosticCode = @"route_unstable";
                 probeValidationStage = @"physicalRouteInvalidation";
-            } else if (lifecycleProbe && sessionPrepared && !routeReady) {
+            } else if (lifecycleOperation && sessionPrepared && !routeReady) {
                 diagnosticCode = @"route_unstable";
                 probeValidationStage = @"systemRouteAcquisition";
             } else if (!opened) {
@@ -2279,7 +2283,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 NSArray *categoryOptions =
                     [sessionFacts[@"categoryOptions"] isKindOfClass:[NSArray class]]
                         ? sessionFacts[@"categoryOptions"] : @[];
-                if (lifecycleProbe) {
+                if (lifecycleOperation) {
                     probeCandidateInput = actualInput;
                     probeCandidateOutput = actualOutput;
                     probeCandidateCategoryOptions = categoryOptions;
@@ -2288,17 +2292,17 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                             isKindOfClass:[NSNumber class]]
                             ? juce[@"bluetoothDuplexProjectCallbackCount"] : @0;
                 }
-                if (lifecycleProbe &&
+                if (lifecycleOperation &&
                     [JuceBridge isIOSIntentRouteInvalidatedV2ObjC]) {
                     diagnosticCode = @"route_unstable";
                     probeValidationStage = @"physicalRouteInvalidation";
                 } else if (generation != self.audioRouteGenerationV2 ||
-                    (lifecycleProbe &&
+                    (lifecycleOperation &&
                      (self.iosIntentOperationCancelledV2 ||
                       self.iosIntentOperationGenerationV2 != generation))) {
                     diagnosticCode = @"stale_generation";
                     probeValidationStage = @"epoch";
-                } else if (lifecycleProbe &&
+                } else if (lifecycleOperation &&
                            self.iosIntentOperationPendingFingerprintV2.length > 0 &&
                            ![self.iosIntentOperationPendingFingerprintV2
                                isEqualToString:
@@ -2314,7 +2318,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                                 isEqualToString:expectedFingerprint] ||
                              !MixroomIOSEndpointIdentitiesMatchStrict(
                                  expectedOutput, actualOutput))) ||
-                           (systemSelectedProbe &&
+                           (systemSelectedRoute &&
                             !MixroomIOSSystemSelectedTargetMatchesSource(
                                 expectedOutput, session.currentRoute)) ||
                            (bluetoothProbe &&
@@ -2323,7 +2327,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     diagnosticCode = @"route_unstable";
                     probeValidationStage = @"routeProfile";
                 } else if (![policyFacts[@"policy"] isEqualToString:
-                               systemSelectedProbe
+                               systemSelectedRoute
                                    ? @"v2SystemSelectedDuplex"
                                    : (bluetoothProbe
                                        ? @"v2BluetoothHfpDuplex"
@@ -2359,7 +2363,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 } else if (![juce[@"audioCallbackAttached"] boolValue]) {
                     diagnosticCode = @"actual_state_unavailable";
                     probeValidationStage = @"callback";
-                } else if (lifecycleProbe &&
+                } else if (lifecycleOperation &&
                            (![juce[@"bluetoothDuplexProjectCallbackReady"]
                                boolValue] ||
                             ![JuceBridge
@@ -2388,7 +2392,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     probeValidationStage = @"nativeReadiness";
                 } else {
                     probeValidationStage = @"duplexVerified";
-                    if (lifecycleProbe) {
+                    if (lifecycleOperation) {
                         self.iosIntentOperationTargetFingerprintV2 =
                             MixroomIOSRouteFingerprint(session.currentRoute);
                         self.iosIntentOperationPendingFingerprintV2 = nil;
@@ -2404,7 +2408,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                             @"phase": @"duplexVerified",
                             @"terminalCause": [NSNull null],
                             @"cleanupOutcome": @"pending",
-                            @"selectionMode": systemSelectedProbe
+                            @"selectionMode": systemSelectedRoute
                                 ? @"systemSelected" : @"explicitHfp",
                             @"categoryOptions": categoryOptions,
                             @"operationId": @(self.iosIntentOperationIdV2),
@@ -2437,17 +2441,20 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ? snapshot[@"outputs"] : @[];
         NSDictionary *actualInput = inputs.count == 1 ? inputs.firstObject : nil;
         NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
-        const BOOL bluetoothRecording =
+        const BOOL lifecycleRecording =
             self.iosIntentOperationActiveV2 &&
-            MixroomIOSOutputIsBluetoothMedia(self.iosRecordingOutputV2) &&
             self.iosIntentOperationTargetFingerprintV2.length > 0;
-        NSDictionary *expectedActiveOutput = bluetoothRecording
+        const BOOL systemSelectedRecording =
+            lifecycleRecording &&
+            [self.iosIntentOperationModeV2
+                isEqualToString:@"systemSelectedRecording"];
+        NSDictionary *expectedActiveOutput = lifecycleRecording
             ? self.iosIntentOperationTargetOutputV2
             : self.iosRecordingOutputV2;
         if (self.iosRecordingOutputV2 == nil || self.iosRecordingInputV2 == nil) {
             diagnosticCode = @"recording_route_unsupported";
         } else if (generation != self.audioRouteGenerationV2 ||
-                   (bluetoothRecording &&
+                   (lifecycleRecording &&
                     (self.iosIntentOperationCancelledV2 ||
                      self.iosIntentOperationGenerationV2 != generation))) {
             diagnosticCode = @"stale_generation";
@@ -2457,15 +2464,16 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                        expectedActiveOutput, actualOutput) ||
                    !MixroomIOSEndpointIdentitiesMatchStrict(
                        self.iosRecordingInputV2, actualInput) ||
-                   (bluetoothRecording &&
+                   (lifecycleRecording &&
                     ![self.iosIntentOperationTargetFingerprintV2
                         isEqualToString:
                             MixroomIOSRouteFingerprint(session.currentRoute)])) {
             diagnosticCode = @"route_unstable";
         } else {
-            const BOOL expectedProfile = bluetoothRecording
-                ? (MixroomIOSInputIsBluetoothHFP(actualInput) &&
-                   MixroomIOSOutputIsBluetoothHFP(actualOutput) &&
+            const BOOL expectedProfile = lifecycleRecording
+                ? ((!systemSelectedRecording ||
+                    MixroomIOSSystemSelectedTargetMatchesSource(
+                        self.iosRecordingOutputV2, session.currentRoute)) &&
                    [JuceBridge isBluetoothDuplexProjectCallbackReadyV2ObjC])
                 : (MixroomIOSInputIsBuiltInMicrophone(actualInput) &&
                    MixroomIOSOutputIsBuiltInSpeaker(actualOutput));
@@ -2483,7 +2491,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 [JuceBridge isRecordingObjC];
             if (!success) {
                 diagnosticCode = @"actual_state_unavailable";
-            } else if (bluetoothRecording) {
+            } else if (lifecycleRecording) {
                 self.iosIntentLifecyclePhaseV2 = @"recording";
             }
         }
@@ -2496,11 +2504,13 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             self.iosIntentOperationActiveV2;
         const BOOL terminalSystemProbeInvalidation =
             activeBluetoothOperation &&
-            self.iosIntentSystemSelectedProbeV2 &&
+            [self.iosIntentOperationModeV2
+                isEqualToString:@"systemSelectedProbe"] &&
             [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
         const BOOL recoveringAfterPhysicalInvalidation =
             activeBluetoothOperation &&
-            !self.iosIntentSystemSelectedProbeV2 &&
+            ![self.iosIntentOperationModeV2
+                isEqualToString:@"systemSelectedProbe"] &&
             [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
         NSDictionary<NSString *, id> *expectedOutput =
             recoveringAfterPhysicalInvalidation
@@ -2630,7 +2640,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 };
                 [JuceBridge endIOSIntentOperationV2ObjC];
                 self.iosIntentOperationActiveV2 = NO;
-                self.iosIntentSystemSelectedProbeV2 = NO;
+                self.iosIntentOperationModeV2 = @"standard";
                 self.iosIntentLifecyclePhaseV2 = @"idle";
                 self.iosIntentRouteConditionV2 = nil;
                 self.iosIntentOperationCancelledV2 = NO;
@@ -2687,7 +2697,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             };
             [JuceBridge endIOSIntentOperationV2ObjC];
             self.iosIntentOperationActiveV2 = NO;
-            self.iosIntentSystemSelectedProbeV2 = NO;
+            self.iosIntentOperationModeV2 = @"standard";
             self.iosIntentLifecyclePhaseV2 = @"idle";
             self.iosIntentRouteConditionV2 = nil;
             self.iosIntentOperationCancelledV2 = YES;
@@ -2752,7 +2762,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     ? (self.iosIntentTerminalCauseV2 ?: @"physicalRouteInvalidation")
                     : [NSNull null],
                 @"cleanupOutcome": outputRestored ? @"restored" : @"closed",
-                @"selectionMode": systemSelectedProbe
+                @"selectionMode": systemSelectedRoute
                     ? @"systemSelected" : @"explicitHfp",
                 @"categoryOptions": probeCandidateCategoryOptions,
                 @"operationId": @(self.iosIntentOperationIdV2),
@@ -2768,7 +2778,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             };
             [JuceBridge endIOSIntentOperationV2ObjC];
             self.iosIntentOperationActiveV2 = NO;
-            self.iosIntentSystemSelectedProbeV2 = NO;
+            self.iosIntentOperationModeV2 = @"standard";
             self.iosIntentLifecyclePhaseV2 = @"idle";
             self.iosIntentRouteConditionV2 = nil;
             self.iosIntentOperationSourceFingerprintV2 = nil;
@@ -2889,7 +2899,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosLastObservedRouteCauseV2 = nil;
     [JuceBridge endIOSIntentOperationV2ObjC];
     self.iosIntentOperationActiveV2 = NO;
-    self.iosIntentSystemSelectedProbeV2 = NO;
+    self.iosIntentOperationModeV2 = @"standard";
     self.iosIntentOperationCancelledV2 = NO;
     self.iosIntentOperationSourceFingerprintV2 = nil;
     self.iosIntentOperationPendingFingerprintV2 = nil;
@@ -3028,10 +3038,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 return;
             }
             if (self.iosIntentOperationTargetFingerprintV2.length == 0 &&
-                ((self.iosIntentSystemSelectedProbeV2 &&
+                ((![self.iosIntentOperationModeV2
+                       isEqualToString:@"standard"] &&
                   MixroomIOSSystemSelectedTargetMatchesSource(
                       self.iosRecordingOutputV2, route)) ||
-                 (!self.iosIntentSystemSelectedProbeV2 &&
+                 ([self.iosIntentOperationModeV2
+                       isEqualToString:@"standard"] &&
                   MixroomIOSRouteIsBluetoothHFPDuplex(route)))) {
                 self.iosIntentOperationPendingFingerprintV2 =
                     completeFingerprint;
@@ -4995,7 +5007,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                             ? @"restored" : @"closed",
                         @"selectionMode":
                             probeFacts[@"selectionMode"] ?:
-                                (self.iosIntentSystemSelectedProbeV2
+                                (![self.iosIntentOperationModeV2
+                                      isEqualToString:@"standard"]
                                     ? @"systemSelected" : @"explicitHfp"),
                         @"operationId": @(self.iosIntentOperationIdV2),
                         @"elapsedMs": @((NSInteger)(
@@ -5010,7 +5023,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                     };
                     [JuceBridge endIOSIntentOperationV2ObjC];
                     self.iosIntentOperationActiveV2 = NO;
-                    self.iosIntentSystemSelectedProbeV2 = NO;
+                    self.iosIntentOperationModeV2 = @"standard";
                 }
                 self.iosIntentLifecyclePhaseV2 = @"idle";
                 self.iosIntentRouteConditionV2 = nil;

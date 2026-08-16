@@ -12609,6 +12609,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
     if (_isBluetoothV2Session) {
+      if (_v2RecordingRouteInvalidated) {
+        if (mounted) {
+          _showSmallNotice(_v2RecordingInvalidationNotice);
+        }
+        return false;
+      }
       if (_v2RecordingRouteRecoveryInProgress) {
         if (mounted) {
           _showSmallNotice('Audio output is changing. Please wait.');
@@ -20691,15 +20697,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
-    var preparingBluetoothHeadsetRecording = false;
-    if (_isBluetoothV2Session && Platform.isIOS) {
-      final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
-      if (!mounted) return false;
-      preparingBluetoothHeadsetRecording =
-          snapshot.outputs.length == 1 &&
-          snapshot.outputs.single.normalizedKind ==
-              AudioRouteKindV2.bluetoothMedia;
-    }
     if (!await _ensureMicrophonePermissionForRecording()) {
       return false;
     }
@@ -20732,13 +20729,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       final result = await coordinator.transitionIntent(
         AudioRouteIntentV2.preparingRecording,
+        operation: Platform.isIOS
+            ? AudioRouteIntentOperationV2.systemSelectedRecording
+            : AudioRouteIntentOperationV2.standard,
       );
       if (_recordStartCancelRequested) return false;
       if (!result.succeeded) {
         if (mounted) {
           _showSmallNotice(
-            Platform.isIOS && preparingBluetoothHeadsetRecording
-                ? 'Bluetooth recording is unavailable for the current headset.'
+            Platform.isIOS
+                ? 'Recording is unavailable for the current iOS audio route.'
                 : result.diagnosticCode == 'bluetooth_input_forbidden'
                 ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
                 : 'Recording with the built-in device microphone is unavailable for the current output.',
@@ -20749,8 +20749,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
       _selectedChannelStart = 0;
       _selectedChannelCount = 1;
+      final verifiedInput = result.snapshot.inputs.length == 1
+          ? result.snapshot.inputs.single
+          : null;
+      final verifiedOutput = result.snapshot.outputs.length == 1
+          ? result.snapshot.outputs.single
+          : null;
+      final usingBluetoothDuplex =
+          verifiedInput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex &&
+          verifiedOutput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex;
       if (Platform.isIOS &&
-          preparingBluetoothHeadsetRecording &&
+          usingBluetoothDuplex &&
           !_iosBluetoothRecordingNoticeShown) {
         _iosBluetoothRecordingNoticeShown = true;
         _showSmallNotice(
@@ -20869,14 +20878,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_recordStartCancelRequested) return;
 
-      // 2) Determine where in the project we start recording (UNCHANGED)
-      _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      // V2 input preparation can pause for a route transition, so its take
+      // starts from the settled position. Other recording paths retain their
+      // established preflight timing.
+      final captureStartAfterRoutePreparation =
+          _isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS);
+      if (!captureStartAfterRoutePreparation) {
+        _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      }
 
       if (!await _prepareAudioRecordingStartPreflight()) {
         return;
       }
       if (_recordStartCancelRequested) return;
-      if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
+      if (captureStartAfterRoutePreparation) {
         _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
       }
 
@@ -41041,7 +41056,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       final duplexResult = await coordinator.transitionIntent(
         AudioRouteIntentV2.preparingRecording,
-        systemSelectedProbe: true,
+        operation: AudioRouteIntentOperationV2.systemSelectedProbe,
       );
       if (!mounted) return;
       if (!duplexResult.succeeded) {

@@ -74,11 +74,12 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   @override
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
-      {bool systemSelectedProbe = false}) {
+      {AudioRouteIntentOperationV2 operation =
+          AudioRouteIntentOperationV2.standard}) {
     return JuceAudioEngine.setAudioRouteIntentV2(
       intent,
       generation: generation,
-      systemSelectedProbe: systemSelectedProbe,
+      operation: operation,
       platformOverride: platformOverride,
     );
   }
@@ -536,7 +537,8 @@ class JuceAudioEngine {
   static Future<AudioRouteTransitionResultV2> setAudioRouteIntentV2(
     AudioRouteIntentV2 intent, {
     required int generation,
-    bool systemSelectedProbe = false,
+    AudioRouteIntentOperationV2 operation =
+        AudioRouteIntentOperationV2.standard,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -553,7 +555,8 @@ class JuceAudioEngine {
         <String, Object>{
           'generation': generation,
           'intent': intent.name,
-          if (systemSelectedProbe) 'systemSelectedProbe': true,
+          if (operation != AudioRouteIntentOperationV2.standard)
+            'intentOperation': operation.name,
         },
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);
@@ -658,10 +661,6 @@ class JuceAudioEngine {
     final current = await getAudioRouteSnapshotV2();
     final expectedInputChannels =
         startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
-    final expectedIOSBluetoothDuplex = platform == TargetPlatform.iOS &&
-        expectedInputChannels == 1 &&
-        startup.outputs.single.normalizedKind ==
-            AudioRouteKindV2.bluetoothDuplex;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
@@ -690,13 +689,11 @@ class JuceAudioEngine {
           current.inputs.single.uid.isEmpty ||
           startup.inputs.single.uid.isEmpty ||
           startup.inputs.single.uid != current.inputs.single.uid ||
-          (expectedIOSBluetoothDuplex
+          (platform == TargetPlatform.iOS
               ? startup.inputs.single.nativePortType !=
                       current.inputs.single.nativePortType ||
                   startup.inputs.single.normalizedKind !=
-                      AudioRouteKindV2.bluetoothDuplex ||
-                  current.inputs.single.normalizedKind !=
-                      AudioRouteKindV2.bluetoothDuplex
+                      current.inputs.single.normalizedKind
               : current.inputs.single.normalizedKind !=
                   AudioRouteKindV2.builtIn)) {
         return false;
@@ -705,12 +702,7 @@ class JuceAudioEngine {
     final expected = startup.outputs.single;
     final actual = current.outputs.single;
     if (platform == TargetPlatform.iOS) {
-      final acceptedOutputProfile = expectedIOSBluetoothDuplex
-          ? actual.normalizedKind == AudioRouteKindV2.bluetoothDuplex
-          : expected.normalizedKind != AudioRouteKindV2.bluetoothDuplex &&
-              actual.normalizedKind != AudioRouteKindV2.bluetoothDuplex;
-      return acceptedOutputProfile &&
-          expected.uid.isNotEmpty &&
+      return expected.uid.isNotEmpty &&
           actual.uid.isNotEmpty &&
           expected.nativePortType.isNotEmpty &&
           actual.nativePortType.isNotEmpty &&

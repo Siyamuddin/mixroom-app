@@ -1326,6 +1326,46 @@ removal during a check entered the intended terminal editor-reopen boundary
 instead of forcing restoration. Actual recording through the system-selected
 route remains outside this writer-free checkpoint.
 
+#### Checkpoint 7K — system-selected recording integration
+
+Production iOS V2 recording now reuses the accepted system-selected duplex
+operation instead of choosing separate built-in and HFP preparation paths.
+One private intent-operation mode distinguishes the writer-free diagnostic from
+real recording without adding a coordinator state or MethodChannel method.
+JUCE configures `playAndRecord/default` with the existing speaker, A2DP, and HFP
+capabilities and never selects an input or matches a device name. iOS chooses
+the complete route; Mixroom requires the exact verified input/output
+fingerprint, one real project callback, active channels, and positive native
+rate/buffer before admitting realtime-safe WAV capture.
+
+The same production path accepts the three physically proven route classes:
+built-in microphone plus speaker, HFP headset input/output from an A2DP source,
+and built-in microphone plus an unchanged microphone-less A2DP speaker. The
+reduced-quality notice is based on the verified HFP target rather than the
+source being Bluetooth, so A2DP plus built-in input is not mislabeled. Ordinary
+Stop finalizes capture before restoring and verifying the exact original
+output-only route. Existing cancellation, removal recovery, and terminal
+reopen boundaries remain unchanged.
+
+The physical iPad recording gate passed for all three required route classes:
+
+- built-in microphone plus speaker recorded repeated short and 30-second takes
+  at 48 kHz/256 frames and restored output-only playback;
+- a microphone-equipped headset recorded through verified 16 kHz/256-frame
+  mono HFP input/output and restored the exact original 44.1 kHz A2DP output;
+- a microphone-less A2DP speaker remained the two-channel output while iOS
+  selected the built-in microphone at 48 kHz/256 frames, with no HFP-quality
+  warning.
+
+Successful takes were audible, cancellation published no clip, and the
+microphone closed after every Stop. Physical removal during preparation entered
+the existing safe reopen boundary. Physical removal during active HFP recording
+discarded the interrupted take and recovered a 48 kHz output-only built-in
+route with zero inputs. The editor remained responsive and the attached logs
+contained no assertion, crash, callback failure, or microphone leak. Playback
+after a terminal invalidation now reports the existing reopen requirement
+directly instead of presenting a generic unavailable-output message.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and
@@ -1488,7 +1528,8 @@ Each run records:
 
 ## Immediate next step
 
-Complete the physical gate for the writer-free iOS system-selected recording
-route. Only after built-in, microphone-headset, and genuine A2DP-only speaker
-routes pass should the existing realtime-safe WAV capture be connected to this
-verified route. Android recording and mobile selectors remain separate work.
+Complete the physical recording gate for built-in, microphone-headset, and
+genuine A2DP-only-speaker routes. Require valid clips, zero dropped or invalid
+capture samples, exact output-only restoration, responsive cancellation, and
+safe removal handling before committing checkpoint 7K. Android recording and
+mobile selectors remain separate work.

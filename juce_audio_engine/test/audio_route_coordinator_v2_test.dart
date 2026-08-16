@@ -73,7 +73,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final controller = StreamController<AudioRouteChangeEventV2>.broadcast();
   final appliedGenerations = <int>[];
   final appliedIntents = <AudioRouteIntentV2>[];
-  final appliedSystemSelectedProbes = <bool>[];
+  final appliedOperations = <AudioRouteIntentOperationV2>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
   final intentResults =
       <AudioRouteIntentV2, Future<AudioRouteTransitionResultV2>>{};
@@ -100,9 +100,10 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   @override
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
-      {bool systemSelectedProbe = false}) async {
+      {AudioRouteIntentOperationV2 operation =
+          AudioRouteIntentOperationV2.standard}) async {
     appliedIntents.add(intent);
-    appliedSystemSelectedProbes.add(systemSelectedProbe);
+    appliedOperations.add(operation);
     return intentResults[intent] ?? _result(generation);
   }
 
@@ -313,7 +314,7 @@ void main() {
 
     final result = await coordinator.transitionIntent(
       AudioRouteIntentV2.preparingRecording,
-      systemSelectedProbe: true,
+      operation: AudioRouteIntentOperationV2.systemSelectedProbe,
     );
 
     expect(result.succeeded, isTrue);
@@ -321,7 +322,35 @@ void main() {
       adapter.appliedIntents,
       <AudioRouteIntentV2>[AudioRouteIntentV2.preparingRecording],
     );
-    expect(adapter.appliedSystemSelectedProbes, <bool>[true]);
+    expect(adapter.appliedOperations, <AudioRouteIntentOperationV2>[
+      AudioRouteIntentOperationV2.systemSelectedProbe,
+    ]);
+    await coordinator.dispose();
+  });
+
+  test('forwards system-selected recording without adding coordinator state',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+      operation: AudioRouteIntentOperationV2.systemSelectedRecording,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(
+      adapter.appliedOperations,
+      <AudioRouteIntentOperationV2>[
+        AudioRouteIntentOperationV2.systemSelectedRecording,
+      ],
+    );
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    expect(coordinator.intent, AudioRouteIntentV2.preparingRecording);
     await coordinator.dispose();
   });
 

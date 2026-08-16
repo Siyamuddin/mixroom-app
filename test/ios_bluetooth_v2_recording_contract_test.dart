@@ -17,7 +17,7 @@ void main() {
     editor = File('lib/screens/audio_editor.dart').readAsStringSync();
   });
 
-  test('iOS V2 recording uses built-in input and an output-only restore', () {
+  test('iOS V2 recording uses system selection and an output-only restore', () {
     final intentStart = plugin.indexOf(
       '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
     );
@@ -27,10 +27,12 @@ void main() {
     );
     final intent = plugin.substring(intentStart, intentEnd);
 
-    expect(intent, contains('reconfigureRecordingRouteV2ObjC:@""'));
+    expect(intent, contains('systemSelectedRecording'));
+    expect(intent, contains('prepareSystemSelectedDuplexSessionV2ObjC'));
+    expect(intent, contains('openPreparedSystemSelectedDuplexRouteV2ObjC'));
     expect(intent, contains('getIOSAudioSessionPolicyFactsObjC'));
-    expect(intent, contains('v2BuiltInDuplex'));
-    expect(intent, contains('MixroomIOSInputIsBuiltInMicrophone'));
+    expect(intent, contains('v2SystemSelectedDuplex'));
+    expect(intent, contains('MixroomIOSSystemSelectedTargetMatchesSource'));
     expect(intent, contains('AVAudioSessionCategoryPlayAndRecord'));
     expect(intent, contains('reconfigurePlaybackRouteV2ObjC:@""'));
     final stopIndex = intent.indexOf('[JuceBridge stopRecordingObjC]');
@@ -105,7 +107,7 @@ void main() {
     );
   });
 
-  test('iOS A2DP recording uses the verified HFP intent path', () {
+  test('all iOS V2 recording uses the system-selected intent path', () {
     final preflightStart = editor.indexOf(
       'Future<bool> _prepareAudioRecordingStartPreflight()',
     );
@@ -113,16 +115,11 @@ void main() {
       '_ensureMicrophonePermissionForRecording()',
       preflightStart,
     );
-    final snapshotIndex = editor.indexOf(
-      'JuceAudioEngine.getAudioRouteSnapshotV2()',
-      preflightStart,
-    );
     final intentIndex = editor.indexOf(
       'AudioRouteIntentV2.preparingRecording',
       preflightStart,
     );
 
-    expect(snapshotIndex, greaterThan(preflightStart));
     expect(
       editor.substring(preflightStart, permissionIndex),
       isNot(
@@ -133,18 +130,38 @@ void main() {
     );
     expect(permissionIndex, lessThan(intentIndex));
     expect(
+      editor.substring(preflightStart, intentIndex + 500),
+      contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
+    );
+    expect(
       editor.substring(preflightStart, intentIndex + 2000),
       contains(
         'Bluetooth microphone in use. Playback quality is reduced while recording.',
       ),
     );
     expect(
-      editor.substring(preflightStart, intentIndex + 2000),
-      contains('Bluetooth recording is unavailable for the current headset.'),
+      editor.substring(preflightStart, intentIndex + 2500),
+      contains('Recording is unavailable for the current iOS audio route.'),
+    );
+    expect(
+      editor.substring(preflightStart, intentIndex),
+      isNot(contains('getAudioRouteSnapshotV2')),
+    );
+    expect(
+      editor.substring(intentIndex, intentIndex + 2500),
+      contains(
+        'verifiedInput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex',
+      ),
+    );
+    expect(
+      editor.substring(intentIndex, intentIndex + 2500),
+      contains(
+        'verifiedOutput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex',
+      ),
     );
   });
 
-  test('HFP recording accepts only the exact verified transaction target', () {
+  test('recording accepts only the exact verified system-selected target', () {
     final intentStart = plugin.indexOf(
       '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
     );
@@ -154,19 +171,31 @@ void main() {
     );
     final intent = plugin.substring(intentStart, intentEnd);
 
-    expect(intent, contains('const BOOL bluetoothRecording ='));
-    expect(intent, contains('iosIntentOperationTargetFingerprintV2'));
-    expect(intent, contains('iosIntentOperationTargetOutputV2'));
+    final iosStart = intent.indexOf(
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds()',
+    );
+    final recordingStart = intent.indexOf(
+      '} else if ([intent isEqualToString:@"recording"]) {',
+      iosStart,
+    );
+    final playbackStart = intent.indexOf('\n    } else {', recordingStart + 10);
+    final recording = intent.substring(recordingStart, playbackStart);
+
+    expect(recording, contains('const BOOL lifecycleRecording ='));
+    expect(recording, contains('const BOOL systemSelectedRecording ='));
+    expect(recording, contains('iosIntentOperationTargetFingerprintV2'));
+    expect(recording, contains('iosIntentOperationTargetOutputV2'));
     expect(
-      intent,
+      recording,
       contains('MixroomIOSRouteFingerprint(session.currentRoute)'),
     );
-    expect(intent, contains('MixroomIOSInputIsBluetoothHFP(actualInput)'));
-    expect(intent, contains('MixroomIOSOutputIsBluetoothHFP(actualOutput)'));
-    expect(intent, contains('isBluetoothDuplexProjectCallbackReadyV2ObjC'));
-    expect(intent, contains('[JuceBridge isRecordingObjC]'));
-    expect(intent, isNot(contains('44.1')));
-    expect(intent, isNot(contains('48000')));
+    expect(recording, contains('MixroomIOSSystemSelectedTargetMatchesSource'));
+    expect(recording, contains('isBluetoothDuplexProjectCallbackReadyV2ObjC'));
+    expect(recording, contains('[JuceBridge isRecordingObjC]'));
+    expect(recording, isNot(contains('MixroomIOSInputIsBluetoothHFP')));
+    expect(recording, isNot(contains('MixroomIOSOutputIsBluetoothHFP')));
+    expect(recording, isNot(contains('44.1')));
+    expect(recording, isNot(contains('48000')));
   });
 
   test('HFP input is captured but never monitored through the graph', () {
@@ -281,6 +310,31 @@ void main() {
       expect(plugin, contains('if (self.iosIntentOperationCancelledV2) {'));
     },
   );
+
+  test('playback reports the existing reopen boundary after invalidation', () {
+    final readinessStart = editor.indexOf(
+      'Future<bool> _ensurePlaybackRouteReady({required String reason}) async',
+    );
+    final readinessEnd = editor.indexOf(
+      'Future<void> _requestAndroidRouteRefresh',
+      readinessStart,
+    );
+    final readiness = editor.substring(
+      readinessStart,
+      readinessEnd < 0 ? readinessStart + 3000 : readinessEnd,
+    );
+    final invalidationCheck = readiness.indexOf(
+      'if (_v2RecordingRouteInvalidated)',
+    );
+    final nativeValidation = readiness.indexOf('validatePlaybackV2()');
+
+    expect(invalidationCheck, greaterThanOrEqualTo(0));
+    expect(invalidationCheck, lessThan(nativeValidation));
+    expect(
+      readiness.substring(invalidationCheck, nativeValidation),
+      contains('_showSmallNotice(_v2RecordingInvalidationNotice)'),
+    );
+  });
 
   test('iOS HFP removal attempts one verified system-output recovery', () {
     final abortStart = plugin.indexOf(
