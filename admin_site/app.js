@@ -117,6 +117,7 @@ const MESSAGES = {
     "action.showLess": "Show less",
     "action.saving": "Saving...",
     "action.savePromptLimits": "Save prompt limits",
+    "action.removePromptLimitsOverride": "Remove override",
     "action.saveProducerCaptureWhitelist": "Save producer whitelist",
     "action.saveAiOverride": "Save AI override",
     "auth.kicker": "Employee access",
@@ -307,6 +308,9 @@ const MESSAGES = {
     "status.savingAiPromptLimits": "Saving AI prompt limit settings...",
     "status.aiPromptLimitsSaved": "AI prompt limit settings saved.",
     "status.saveAiPromptLimitsFailed": "Could not save AI prompt limit settings.",
+    "status.removingAiPromptLimitsOverride": "Removing AI prompt limit override...",
+    "status.aiPromptLimitsOverrideRemoved": "AI prompt limit override removed. Deployed defaults are active.",
+    "status.removeAiPromptLimitsOverrideFailed": "Could not remove AI prompt limit override.",
     "status.savingProducerCaptureWhitelist":
       "Saving producer capture whitelist settings...",
     "status.producerCaptureWhitelistSaved":
@@ -431,6 +435,7 @@ const MESSAGES = {
     "detail.created": "Created",
     "detail.updated": "Updated",
     "settings.currentLimits": "Current effective limits",
+    "settings.deployedDefaults": "Deployed defaults",
     "settings.currentAiRuntime": "Current AI runtime override",
     "settings.currentProducerCaptureWhitelist": "Current producer capture whitelist",
     "settings.producerCaptureWhitelistUsernames": "Usernames (comma or line separated)",
@@ -773,6 +778,9 @@ const MESSAGES = {
     "status.savingAiPromptLimits": "AI 프롬프트 제한 설정을 저장하는 중...",
     "status.aiPromptLimitsSaved": "AI 프롬프트 제한 설정을 저장했습니다.",
     "status.saveAiPromptLimitsFailed": "AI 프롬프트 제한 설정 저장에 실패했습니다.",
+    "status.removingAiPromptLimitsOverride": "AI 프롬프트 제한 재정의를 제거하는 중...",
+    "status.aiPromptLimitsOverrideRemoved": "AI 프롬프트 제한 재정의를 제거했습니다. 배포된 기본값이 적용됩니다.",
+    "status.removeAiPromptLimitsOverrideFailed": "AI 프롬프트 제한 재정의를 제거하지 못했습니다.",
     "status.savingProducerCaptureWhitelist":
       "프로듀서 캡처 화이트리스트 설정을 저장하는 중...",
     "status.producerCaptureWhitelistSaved":
@@ -897,6 +905,7 @@ const MESSAGES = {
     "detail.created": "생성일",
     "detail.updated": "수정일",
     "settings.currentLimits": "현재 적용 중인 제한",
+    "settings.deployedDefaults": "배포된 기본값",
     "settings.currentAiRuntime": "현재 AI 런타임 재정의",
     "settings.currentProducerCaptureWhitelist": "현재 프로듀서 캡처 화이트리스트",
     "settings.producerCaptureWhitelistUsernames": "사용자명(쉼표 또는 줄바꿈 구분)",
@@ -1097,6 +1106,7 @@ const elements = {
   aiPromptLimitsConfirmLabel: document.querySelector("#ai-prompt-limits-confirm-label"),
   aiPromptLimitsConfirmInput: document.querySelector("#ai-prompt-limits-confirm-input"),
   aiPromptLimitsSaveButton: document.querySelector("#ai-prompt-limits-save-button"),
+  aiPromptLimitsResetButton: document.querySelector("#ai-prompt-limits-reset-button"),
   aiPromptLimitsFeedback: document.querySelector("#ai-prompt-limits-feedback"),
   featureFlagsMeta: document.querySelector("#feature-flags-meta"),
   featureFlagsSummary: document.querySelector("#feature-flags-summary"),
@@ -1349,6 +1359,7 @@ const state = {
   selectedFeedbackId: "",
   selectedFeedback: null,
   aiPromptLimits: null,
+  aiPromptLimitDefaults: null,
   aiPromptLimitsFeedback: null,
   featureFlags: null,
   featureFlagsBusy: false,
@@ -1436,6 +1447,7 @@ function bindEvents() {
   elements.userInspector.addEventListener("click", handleInspectorClick);
   elements.userInspector.addEventListener("change", handleInspectorChange);
   elements.aiPromptLimitsForm.addEventListener("submit", handleAiPromptLimitsSubmit);
+  elements.aiPromptLimitsResetButton.addEventListener("click", handleAiPromptLimitsReset);
   elements.aiPromptLimitsConfirmInput.addEventListener("input", updateBusyState);
   elements.featureFlagsForm.addEventListener("submit", handleFeatureFlagsSubmit);
   elements.featureFlagsConfirmInput.addEventListener("input", updateBusyState);
@@ -2516,6 +2528,7 @@ async function loadAiPromptLimitSettings({ silent = false } = {}) {
   try {
     const payload = await fetchAdminJson(ADMIN_AI_PROMPT_LIMITS_PATH);
     state.aiPromptLimits = payload.settings || null;
+    state.aiPromptLimitDefaults = payload.defaults || null;
     renderAiPromptLimitSettings();
     if (!silent) {
       setStatus(t("status.aiPromptLimitsLoaded"), "success");
@@ -2881,13 +2894,26 @@ function renderAiPromptLimitSettings() {
   }
   elements.aiPromptLimitsMeta.textContent = metaParts.join(" • ");
   elements.aiPromptLimitsSummary.innerHTML = `
-    <div class="detail-label">${escapeHtml(t("settings.currentLimits"))}</div>
-    <div class="detail-value">${escapeHtml(
-      t("value.dailyWeeklyLimits", {
-        daily: formatWholeNumber(settings.free_daily_prompt_limit || 0),
-        weekly: formatWholeNumber(settings.free_weekly_prompt_limit || 0),
-      }),
-    )}</div>
+    <div class="settings-limit-grid">
+      <div class="settings-limit-item">
+        <div class="detail-label">${escapeHtml(t("settings.currentLimits"))}</div>
+        <div class="detail-value">${escapeHtml(
+          t("value.dailyWeeklyLimits", {
+            daily: formatWholeNumber(settings.free_daily_prompt_limit || 0),
+            weekly: formatWholeNumber(settings.free_weekly_prompt_limit || 0),
+          }),
+        )}</div>
+      </div>
+      <div class="settings-limit-item">
+        <div class="detail-label">${escapeHtml(t("settings.deployedDefaults"))}</div>
+        <div class="detail-value">${escapeHtml(
+          t("value.dailyWeeklyLimits", {
+            daily: formatWholeNumber(state.aiPromptLimitDefaults?.free_daily_prompt_limit || 0),
+            weekly: formatWholeNumber(state.aiPromptLimitDefaults?.free_weekly_prompt_limit || 0),
+          }),
+        )}</div>
+      </div>
+    </div>
   `;
   elements.freeDailyPromptLimitInput.value = `${Number(settings.free_daily_prompt_limit || 0)}`;
   elements.freeWeeklyPromptLimitInput.value = `${Number(settings.free_weekly_prompt_limit || 0)}`;
@@ -6399,6 +6425,12 @@ function updateBusyState() {
     || !signedIn
     || !canViewAiRuntimeSettings()
     || !promptLimitsConfirmationMatches();
+  elements.aiPromptLimitsResetButton.disabled =
+    state.aiPromptLimitsBusy
+    || !signedIn
+    || !canViewAiRuntimeSettings()
+    || state.aiPromptLimits?.source !== "remote"
+    || !promptLimitsConfirmationMatches();
   elements.aiPromptLimitsSaveButton.textContent = state.aiPromptLimitsBusy
     ? t("action.saving")
     : t("action.savePromptLimits");
@@ -7282,6 +7314,45 @@ async function handleAiPromptLimitsSubmit(event) {
   }
 }
 
+async function handleAiPromptLimitsReset() {
+  if (
+    !tokens?.idToken
+    || !canViewAiRuntimeSettings()
+    || state.aiPromptLimits?.source !== "remote"
+    || !promptLimitsConfirmationMatches()
+  ) {
+    return;
+  }
+
+  state.aiPromptLimitsBusy = true;
+  state.aiPromptLimitsFeedback = null;
+  updateBusyState();
+  setStatus(t("status.removingAiPromptLimitsOverride"), "info");
+
+  try {
+    const payload = await fetchAdminJson(ADMIN_AI_PROMPT_LIMITS_PATH, { method: "DELETE" });
+    state.aiPromptLimits = payload.settings || null;
+    state.aiPromptLimitDefaults = payload.defaults || state.aiPromptLimitDefaults;
+    state.aiPromptLimitsFeedback = {
+      tone: "success",
+      message: t("status.aiPromptLimitsOverrideRemoved"),
+    };
+    elements.aiPromptLimitsConfirmInput.value = "";
+    renderAiPromptLimitSettings();
+    setStatus(t("status.aiPromptLimitsOverrideRemoved"), "success");
+  } catch (error) {
+    handleAdminRequestError(error, t("status.removeAiPromptLimitsOverrideFailed"));
+    state.aiPromptLimitsFeedback = {
+      tone: "error",
+      message: error.message || t("status.removeAiPromptLimitsOverrideFailed"),
+    };
+    renderAiPromptLimitSettings();
+  } finally {
+    state.aiPromptLimitsBusy = false;
+    updateBusyState();
+  }
+}
+
 async function handleFeatureFlagsSubmit(event) {
   event.preventDefault();
   if (!tokens?.idToken || !featureFlagsConfirmationMatches()) {
@@ -7536,6 +7607,7 @@ function resetAdminState() {
   state.selectedFeedbackId = "";
   state.selectedFeedback = null;
   state.aiPromptLimits = null;
+  state.aiPromptLimitDefaults = null;
   state.aiPromptLimitsFeedback = null;
   state.featureFlags = null;
   state.featureFlagsFeedback = null;
@@ -7745,7 +7817,7 @@ function formatOnboardingLabel(value) {
 }
 
 function formatNumber(value) {
-  return new Intl.NumberFormat(state.locale, { notation: "compact" }).format(Number(value || 0));
+  return new Intl.NumberFormat(state.locale).format(Number(value || 0));
 }
 
 function formatDecimal(value) {

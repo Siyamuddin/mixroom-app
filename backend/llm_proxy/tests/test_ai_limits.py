@@ -22,8 +22,8 @@ class AiLimitsTests(unittest.TestCase):
     def test_load_ai_limits_reads_expected_single_source_file(self) -> None:
         limits = ai_limits.load_ai_limits()
 
-        self.assertEqual(limits["prompt_limits"]["free"]["daily"], 200)
-        self.assertEqual(limits["prompt_limits"]["free"]["weekly"], 600)
+        self.assertEqual(limits["prompt_limits"]["free"]["daily"], 100)
+        self.assertEqual(limits["prompt_limits"]["free"]["weekly"], 400)
         self.assertEqual(limits["prompt_limits"]["starter"]["daily"], 400)
         self.assertEqual(limits["prompt_limits"]["producer"]["daily"], 1000)
         self.assertEqual(limits["tiers"]["free"]["daily_credits"], 100)
@@ -33,8 +33,8 @@ class AiLimitsTests(unittest.TestCase):
     def test_get_prompt_limits_reads_daily_and_weekly_caps(self) -> None:
         limits = ai_limits.get_prompt_limits()
 
-        self.assertEqual(limits["daily_prompts"], 200)
-        self.assertEqual(limits["weekly_prompts"], 600)
+        self.assertEqual(limits["daily_prompts"], 100)
+        self.assertEqual(limits["weekly_prompts"], 400)
 
     def test_get_prompt_limits_reads_subscription_tiers(self) -> None:
         starter = ai_limits.get_prompt_limits("starter")

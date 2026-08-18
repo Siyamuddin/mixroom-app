@@ -29,6 +29,16 @@ _PADDLE_PROJECTABLE_TRANSACTION_EVENTS = {
     "transaction.payment_failed",
     "transaction.refunded",
 }
+_PURCHASE_SUCCESS_EVENT_TYPES = {
+    "toss_payment_confirmed",
+    "toss_billing_payment_approved",
+    "transaction.completed",
+}
+_APPLE_PURCHASE_SUCCESS_TYPES = {"SUBSCRIBED", "DID_RENEW"}
+# Google RTDN subscriptionNotification values: SUBSCRIPTION_RECOVERED,
+# SUBSCRIPTION_RENEWED, and SUBSCRIPTION_PURCHASED.  A recovery is excluded:
+# it does not represent a new successful charge.
+_GOOGLE_PURCHASE_SUCCESS_TYPES = {2, 4}
 
 
 def _is_team_plan(raw: Dict[str, Any]) -> bool:
@@ -51,6 +61,49 @@ def _is_projectable_event(event_record: Dict[str, Any], provider: str, normalize
     if event_type in _PADDLE_PROJECTABLE_TRANSACTION_EVENTS:
         return str(normalized.get("subscription_id") or "").strip().startswith("sub_")
     return False
+
+
+def _is_successful_purchase(event_record: Dict[str, Any], provider: str, normalized: Dict[str, Any]) -> bool:
+    """Return true only for a completed charge, never entitlement state changes."""
+    if str(normalized.get("status") or "").strip().lower() not in {"active", "trialing"}:
+        return False
+    event_type = str(event_record.get("event_type") or "").strip().lower()
+    if event_type in _PURCHASE_SUCCESS_EVENT_TYPES:
+        return True
+
+    raw = event_record.get("raw_payload") or {}
+    if not isinstance(raw, dict):
+        return False
+    if provider == "apple" and event_type == "apple_webhook":
+        return str(raw.get("notificationType") or "").strip().upper() in _APPLE_PURCHASE_SUCCESS_TYPES
+    if provider == "google" and event_type == "google_rtdn":
+        notification = raw.get("subscriptionNotification") or {}
+        if not isinstance(notification, dict):
+            return False
+        try:
+            return int(notification.get("notificationType")) in _GOOGLE_PURCHASE_SUCCESS_TYPES
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def _purchase_money(event_record: Dict[str, Any], normalized: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose provider-reported money when available; never invent an amount."""
+    amount = normalized.get("billing_amount")
+    currency = normalized.get("billing_currency")
+    raw = event_record.get("raw_payload") or {}
+    if isinstance(raw, dict) and not amount:
+        data = raw.get("data") if isinstance(raw.get("data"), dict) else raw
+        details = data.get("details") if isinstance(data.get("details"), dict) else {}
+        totals = details.get("totals") if isinstance(details.get("totals"), dict) else {}
+        amount = totals.get("total") or data.get("amount") or data.get("price")
+        currency = currency or totals.get("currency_code") or data.get("currency")
+    result: Dict[str, Any] = {}
+    if amount not in (None, ""):
+        result["amount"] = amount
+    if currency:
+        result["currency"] = str(currency).upper()
+    return result
 
 
 def _value_or_existing(normalized: Dict[str, Any], existing: Dict[str, Any] | None, key: str) -> Any:
@@ -210,24 +263,39 @@ def _apply_projection(event_record: Dict[str, Any]) -> str:
         subscription_id=subscription_id,
     )
 
-    eventbridge.put_events(
-        Entries=[
+    event_details = {
+        "user_id": user_id,
+        "plan_code": selected_plan_code,
+        "status": selected_status,
+        "provider": selected_provider,
+        "revision": next_revision,
+    }
+    entries = [
+        {
+            "Source": "mixroom.subscriptions",
+            "DetailType": "entitlement.changed",
+            "EventBusName": "default",
+            "Detail": json.dumps(event_details),
+        }
+    ]
+    if _is_successful_purchase(event_record, provider, normalized):
+        purchase = {
+            **event_details,
+            "event_id": str(event_record.get("event_id") or ""),
+            "product_code": str(subscription.get("product_code") or ""),
+            "customer_email": str(subscription.get("customer_email") or ""),
+            "purchased_at": occurred_at,
+            **_purchase_money(event_record, normalized),
+        }
+        entries.append(
             {
                 "Source": "mixroom.subscriptions",
-                "DetailType": "entitlement.changed",
+                "DetailType": "billing.purchase_completed",
                 "EventBusName": "default",
-                "Detail": json.dumps(
-                    {
-                        "user_id": user_id,
-                        "plan_code": selected_plan_code,
-                        "status": selected_status,
-                        "provider": selected_provider,
-                        "revision": next_revision,
-                    }
-                ),
+                "Detail": json.dumps(purchase),
             }
-        ]
-    )
+        )
+    eventbridge.put_events(Entries=entries)
 
     return "projected"
 

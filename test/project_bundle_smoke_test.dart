@@ -5,13 +5,15 @@ import 'dart:typed_data';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 const _ffmpegMethodChannel = MethodChannel('flutter.arthenica.com/ffmpeg_kit');
-const _ffmpegEventMethodChannel =
-    MethodChannel('flutter.arthenica.com/ffmpeg_kit_event');
+const _ffmpegEventMethodChannel = MethodChannel(
+  'flutter.arthenica.com/ffmpeg_kit_event',
+);
 
 class _FakePathProviderPlatform extends PathProviderPlatform {
   _FakePathProviderPlatform({
@@ -105,7 +107,8 @@ class _FakeFfmpegKit {
       return null;
     }
     throw MissingPluginException(
-        'Unhandled ffmpeg event method ${call.method}');
+      'Unhandled ffmpeg event method ${call.method}',
+    );
   }
 
   Future<Object?> _handleMethodCall(MethodCall call) async {
@@ -125,8 +128,8 @@ class _FakeFfmpegKit {
       case 'setLogLevel':
         return null;
       case 'ffmpegSession':
-        final args =
-            ((call.arguments as Map)['arguments'] as List).cast<String>();
+        final args = ((call.arguments as Map)['arguments'] as List)
+            .cast<String>();
         final sessionId = _nextSessionId++;
         _sessionArgs[sessionId] = List<String>.from(args);
         return <String, Object>{
@@ -197,64 +200,76 @@ void main() {
     }
   });
 
-  test('project bundle export/import preserves bundled audio and track mapping',
-      () async {
-    final projectDir = await ProjectManager.createNewProjectDir(
-      name: 'Bundle Smoke',
-    );
-    final audioDir = ProjectManager.audioDir(projectDir);
-    final sourceFile = File(p.join(audioDir.path, 'tone.wav'));
-    final sourceBytes = _buildTestWavBytes();
-    await sourceFile.writeAsBytes(sourceBytes, flush: true);
+  test(
+    'project bundle export/import preserves bundled audio and track mapping',
+    () async {
+      final projectDir = await ProjectManager.createNewProjectDir(
+        name: 'Bundle Smoke',
+      );
+      final audioDir = ProjectManager.audioDir(projectDir);
+      final sourceFile = File(p.join(audioDir.path, 'tone.wav'));
+      final sourceBytes = _buildTestWavBytes();
+      await sourceFile.writeAsBytes(sourceBytes, flush: true);
 
-    final json = await ProjectManager.readProjectJson(projectDir);
-    json['tracks'] = <Map<String, dynamic>>[
-      <String, dynamic>{
-        'fileName': 'tone.wav',
-        'label': 'Tone',
-        'rowIndex': 0,
-        'trimStartMs': 0,
-        'trimEndMs': 300,
-        'offset': 0.0,
-        'gain': 2.0,
-      },
-    ];
-    await ProjectManager.writeProjectJson(projectDir, json);
+      final json = await ProjectManager.readProjectJson(projectDir);
+      json['tracks'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'fileName': 'tone.wav',
+          'label': 'Tone',
+          'rowIndex': 0,
+          'trimStartMs': 0,
+          'trimEndMs': 300,
+          'offset': 0.0,
+          'gain': 2.0,
+        },
+      ];
+      await ProjectManager.writeProjectJson(projectDir, json);
 
-    final bundlePath = await ProjectBundle.exportMixroomBundle(
-      projectDir: projectDir,
-      audioMode: BundleAudioMode.preserveAsIs,
-    );
-    final bundleFile = File(bundlePath);
-    expect(await bundleFile.exists(), isTrue);
-    expect(await bundleFile.length(), greaterThan(1024));
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: projectDir,
+        audioMode: BundleAudioMode.preserveAsIs,
+      );
+      final bundleFile = File(bundlePath);
+      expect(await bundleFile.exists(), isTrue);
+      expect(await bundleFile.length(), greaterThan(1024));
+      final canonical = await ProjectBundle.readCanonicalProjectJsonFromBundle(
+        bundleFile,
+      );
+      expect(canonical, isNotNull);
+      expect((canonical!['tracks'] as List).single['fileName'], 'tone.wav');
 
-    final importedDir = await ProjectBundleImport.importMixroomBundle(
-      bundleFile: bundleFile,
-      audioStrategy: ImportAudioStrategy.keepAsBundled,
-    );
+      final importedDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: bundleFile,
+        audioStrategy: ImportAudioStrategy.keepAsBundled,
+      );
 
-    final importedJson = await ProjectManager.readProjectJson(importedDir);
-    expect(importedJson['name'], p.basename(importedDir.path));
+      final importedJson = await ProjectManager.readProjectJson(importedDir);
+      expect(importedJson['name'], p.basename(importedDir.path));
 
-    final tracks =
-        (importedJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
-    expect(tracks, hasLength(1));
-    expect(tracks.first['fileName'], 'tone.wav');
+      final tracks =
+          (importedJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
+      expect(tracks, hasLength(1));
+      expect(tracks.first['fileName'], 'tone.wav');
 
-    final importedAudio =
-        File(p.join(ProjectManager.audioDir(importedDir).path, 'tone.wav'));
-    expect(await importedAudio.exists(), isTrue);
-    expect(await importedAudio.readAsBytes(), sourceBytes);
+      final importedAudio = File(
+        p.join(ProjectManager.audioDir(importedDir).path, 'tone.wav'),
+      );
+      expect(await importedAudio.exists(), isTrue);
+      expect(await importedAudio.readAsBytes(), sourceBytes);
 
-    final reparsed = jsonDecode(
-            await File(p.join(importedDir.path, 'project.json')).readAsString())
-        as Map<String, dynamic>;
-    expect(
-      ((reparsed['tracks'] as List).first as Map)['fileName'],
-      'tone.wav',
-    );
-  });
+      final reparsed =
+          jsonDecode(
+                await File(
+                  p.join(importedDir.path, 'project.json'),
+                ).readAsString(),
+              )
+              as Map<String, dynamic>;
+      expect(
+        ((reparsed['tracks'] as List).first as Map)['fileName'],
+        'tone.wav',
+      );
+    },
+  );
 
   test('project bundle sharing strips cloud sync metadata', () async {
     final projectDir = await ProjectManager.createNewProjectDir(
@@ -285,61 +300,129 @@ void main() {
   });
 
   test(
-      'project bundle flac export/import path remaps filenames and runs ffmpeg',
-      () async {
-    final projectDir = await ProjectManager.createNewProjectDir(
-      name: 'Bundle Smoke Flac',
-    );
-    final audioDir = ProjectManager.audioDir(projectDir);
-    final sourceFile = File(p.join(audioDir.path, 'tone.wav'));
-    final sourceBytes = _buildTestWavBytes();
-    await sourceFile.writeAsBytes(sourceBytes, flush: true);
+    'project bundle flac export/import path remaps filenames and runs ffmpeg',
+    () async {
+      final projectDir = await ProjectManager.createNewProjectDir(
+        name: 'Bundle Smoke Flac',
+      );
+      final audioDir = ProjectManager.audioDir(projectDir);
+      final sourceFile = File(p.join(audioDir.path, 'tone.wav'));
+      final sourceBytes = _buildTestWavBytes();
+      await sourceFile.writeAsBytes(sourceBytes, flush: true);
 
+      final json = await ProjectManager.readProjectJson(projectDir);
+      json['tracks'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'fileName': 'tone.wav',
+          'label': 'Tone',
+          'rowIndex': 0,
+          'trimStartMs': 0,
+          'trimEndMs': 300,
+          'offset': 0.0,
+          'gain': 2.0,
+        },
+      ];
+      await ProjectManager.writeProjectJson(projectDir, json);
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: projectDir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+      final bundleFile = File(bundlePath);
+      expect(await bundleFile.exists(), isTrue);
+
+      final importedDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: bundleFile,
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+
+      final importedJson = await ProjectManager.readProjectJson(importedDir);
+      final tracks =
+          (importedJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
+      expect(tracks, hasLength(1));
+      expect(tracks.first['fileName'], 'tone.wav');
+
+      final importedAudio = File(
+        p.join(ProjectManager.audioDir(importedDir).path, 'tone.wav'),
+      );
+      expect(await importedAudio.exists(), isTrue);
+      expect(await importedAudio.readAsBytes(), sourceBytes);
+
+      expect(fakeFfmpegKit.executedCommands, hasLength(2));
+      expect(
+        fakeFfmpegKit.executedCommands.first,
+        containsAllInOrder(<String>['-c:a', 'flac']),
+      );
+      expect(
+        fakeFfmpegKit.executedCommands.last,
+        containsAllInOrder(<String>['-c:a', 'pcm_s16le', '-ar', '48000']),
+      );
+    },
+  );
+
+  test('project bundle preserves a current compatible audio copy', () async {
+    final projectDir = await ProjectManager.createNewProjectDir(
+      name: 'Compatible Bundle',
+    );
     final json = await ProjectManager.readProjectJson(projectDir);
-    json['tracks'] = <Map<String, dynamic>>[
+    json['rowEffects'] = <Map<String, dynamic>>[
       <String, dynamic>{
-        'fileName': 'tone.wav',
-        'label': 'Tone',
-        'rowIndex': 0,
-        'trimStartMs': 0,
-        'trimEndMs': 300,
-        'offset': 0.0,
-        'gain': 2.0,
+        'row': 0,
+        'effects': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'effectId': 'vst3:com.acme.delay',
+            'pluginOrigin': 'third_party',
+          },
+        ],
       },
     ];
     await ProjectManager.writeProjectJson(projectDir, json);
+    final dependency = ProjectCompatibilityService.inspect(
+      json,
+    ).dependencies.single;
+    final audioDir = ProjectCompatibilityService.audioDirectoryFor(projectDir);
+    await audioDir.create(recursive: true);
+    const fileName = 'compatibility/audio/frozen.wav';
+    await File(p.join(projectDir.path, fileName)).writeAsBytes(<int>[1]);
+    await ProjectCompatibilityService.writeCompatibleCopy(
+      projectDir: projectDir,
+      sourceProject: json,
+      artifacts: <ProjectCompatibilityArtifact>[
+        ProjectCompatibilityArtifact(
+          dependencyKey: dependency.key,
+          fileName: fileName,
+          fingerprint: ProjectCompatibilityService.artifactFingerprint(
+            json,
+            dependency,
+          ),
+          trackJson: <String, dynamic>{
+            'fileName': fileName,
+            'label': 'Frozen audio',
+            'clipType': 'audio',
+            'rowIndex': 0,
+            'clipId': 'frozen-0',
+          },
+          replacementRows: const <int>[0],
+        ),
+      ],
+    );
 
     final bundlePath = await ProjectBundle.exportMixroomBundle(
       projectDir: projectDir,
-      audioMode: BundleAudioMode.flacLossless,
+      audioMode: BundleAudioMode.preserveAsIs,
     );
-    final bundleFile = File(bundlePath);
-    expect(await bundleFile.exists(), isTrue);
-
     final importedDir = await ProjectBundleImport.importMixroomBundle(
-      bundleFile: bundleFile,
-      audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      bundleFile: File(bundlePath),
+      audioStrategy: ImportAudioStrategy.keepAsBundled,
     );
-
-    final importedJson = await ProjectManager.readProjectJson(importedDir);
-    final tracks =
-        (importedJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
-    expect(tracks, hasLength(1));
-    expect(tracks.first['fileName'], 'tone.wav');
-
-    final importedAudio =
-        File(p.join(ProjectManager.audioDir(importedDir).path, 'tone.wav'));
-    expect(await importedAudio.exists(), isTrue);
-    expect(await importedAudio.readAsBytes(), sourceBytes);
-
-    expect(fakeFfmpegKit.executedCommands, hasLength(2));
-    expect(
-      fakeFfmpegKit.executedCommands.first,
-      containsAllInOrder(<String>['-c:a', 'flac']),
+    expect(await ProjectCompatibilityService.isCurrent(importedDir), isTrue);
+    final source = await ProjectManager.readProjectJson(importedDir);
+    final opened = await ProjectCompatibilityService.resolveForOpen(
+      projectDir: importedDir,
+      sourceProject: source,
+      canHostExternalPlugins: false,
+      hasPlugin: (_) => false,
     );
-    expect(
-      fakeFfmpegKit.executedCommands.last,
-      containsAllInOrder(<String>['-c:a', 'pcm_s16le', '-ar', '48000']),
-    );
+    expect(opened.usingCompatibleAudio, isTrue);
   });
 }

@@ -231,11 +231,14 @@ class CollaborationRepository:
         )
         now = _utc_now_iso()
         shared_workspace_enabled = (
-            False
-            if plan_code == "education"
-            else _safe_bool(
+            _safe_bool(
                 payload.get("shared_workspace_enabled"),
-                default=_safe_bool(current.get("shared_workspace_enabled"), default=True),
+                # Education organizations have a dedicated class cloud. It is
+                # a real workspace so it can be selected separately from a
+                # student's personal cloud storage.
+                default=True if plan_code == "education" else _safe_bool(
+                    current.get("shared_workspace_enabled"), default=True
+                ),
             )
         )
         record = {
@@ -498,7 +501,7 @@ class CollaborationRepository:
                 "plan_code": "education",
                 "seat_limit": seat_limit,
                 "status": _safe_str(payload.get("status") or "active") or "active",
-                "shared_workspace_enabled": False,
+                "shared_workspace_enabled": True,
             },
             updated_by_user_id=updated_by_user_id,
             updated_by_email=updated_by_email,
@@ -516,11 +519,40 @@ class CollaborationRepository:
             updated_by_user_id=updated_by_user_id,
             updated_by_email=updated_by_email,
         )
+        workspace = self.ensure_education_cloud_workspace(organization)
         return {
             "organization": self.get_organization(organization_id),
             "teacher_membership": teacher_membership,
-            "workspace": {},
+            "workspace": workspace,
         }
+
+    def ensure_education_cloud_workspace(
+        self,
+        organization: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Return the stable class-cloud workspace for an education org.
+
+        Older education organizations were provisioned before education cloud
+        storage became a selectable destination, so create the missing
+        workspace lazily as well as during new organization provisioning.
+        """
+        organization_id = _safe_str(organization.get("organization_id"))
+        if not organization_id:
+            return {}
+        existing = self.list_workspaces(organization_id=organization_id)
+        if existing:
+            return existing[0]
+        return self.save_workspace(
+            {
+                "workspace_id": f"education-cloud-{organization_id}",
+                "organization_id": organization_id,
+                "owner_user_id": _safe_str(organization.get("owner_user_id")),
+                "name": f"{_safe_str(organization.get('name')) or 'Education'} Cloud",
+                "status": "active",
+                "visibility": "organization",
+                "default_project_privacy": "workspace",
+            }
+        )
 
     def list_memberships(
         self,
@@ -1449,7 +1481,25 @@ class CollaborationRepository:
             if not _org_allows_read(organization):
                 continue
             if _safe_str(organization.get("plan_code")).lower() == "education":
-                continue
+                # Older Education organizations intentionally had no shared
+                # workspace. Upgrade their persisted access flag before
+                # exposing the class cloud, otherwise the visibility check
+                # below would still hide it from students.
+                if not _safe_bool(
+                    organization.get("shared_workspace_enabled"),
+                    default=True,
+                ):
+                    organization.update(
+                        self.save_organization(
+                            {
+                                "organization_id": _safe_str(
+                                    organization.get("organization_id")
+                                ),
+                                "shared_workspace_enabled": True,
+                            }
+                        )
+                    )
+                self.ensure_education_cloud_workspace(organization)
             for workspace in self.list_workspaces(
                 organization_id=_safe_str(organization.get("organization_id"))
             ):

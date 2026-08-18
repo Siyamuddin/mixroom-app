@@ -36,6 +36,7 @@ import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:mixroom/helpers/export_progress_ui.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/project_telemetry_service.dart';
+import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_chat_history.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/top_bar_visualizer_mode.dart';
@@ -4273,8 +4274,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     'project_settings_close_button',
   );
   static const double _kTransportBarHeight = 88.0;
-  static const double _kIosSnackBarExtraLift = 16.0;
   static const double _kChatBarStackHeight = 68.0;
+  // Keep floating notices close to the control dock they describe. The dock
+  // already owns the iOS safe area, so adding another platform lift here
+  // creates an unnecessarily large gap above the chat bar.
+  static const double _kSnackBarDockGap = 10.0;
   static const double _kChatHistoryHeight = 380.0;
   static const double _kDesktopChatHistoryMinHeight = 300.0;
   static const double _kDesktopChatHistoryMaxHeight = 620.0;
@@ -4520,7 +4524,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _cloudWorkspaceId = '';
   String _cloudOrganizationId = '';
   int? _cloudDocumentRevision;
+  String _cloudSourceFingerprint = '';
   String _cloudSyncedAt = '';
+  Future<void>? _compatibilityRenderInFlight;
+  bool _compatibilityAudioRequired = false;
+  bool _compatibilityAudioCurrent = false;
+  bool _compatibilityPreparationActive = false;
+  String _compatibilityAudioError = '';
   CloudSyncMode _cloudSyncMode = CloudSyncMode.auto;
   Timer? _cloudAutoSyncTimer;
   bool _cloudAutoSyncDirty = false;
@@ -4529,6 +4539,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _cloudAutoSyncFailureCount = 0;
   DateTime? _cloudAutoSyncBackoffUntil;
   bool _requiresProjectNaming = false;
+  bool _usingCompatibilityAudio = false;
+  Map<String, dynamic> _compatibilityProjectionMetadata =
+      const <String, dynamic>{};
+  Map<int, List<String>> _frozenPluginNamesByRow = const <int, List<String>>{};
+  bool _compatibilityOpenNoticeQueued = false;
+  bool _compatibilityForkInFlight = false;
   int _projectCreatedAtMs = 0;
   bool _loadedOnce = false;
   Future<String>? _bundledSamplePackRefreshTokenFuture;
@@ -7823,17 +7839,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final trimmed = pluginId.trim();
     if (trimmed.isEmpty) return false;
     for (final plugin in _desktopScannedPlugins) {
-      if ((plugin['id'] as String?)?.trim() == trimmed) {
+      if ((plugin['id'] as String?)?.trim().toLowerCase() ==
+          trimmed.toLowerCase()) {
         return true;
       }
     }
-    if (_looksLikeDesktopHostedPluginId(trimmed)) {
-      if (trimmed.toLowerCase().endsWith('.vst3') ||
-          trimmed.contains('/') ||
-          trimmed.contains(r'\')) {
-        return File(trimmed).existsSync();
-      }
-      return true;
+    if (trimmed.toLowerCase().endsWith('.vst3') ||
+        trimmed.contains('/') ||
+        trimmed.contains(r'\')) {
+      return File(trimmed).existsSync();
     }
     return false;
   }
@@ -9173,8 +9187,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
     });
     if (PlatformCapabilities.current.isDesktop) {
-      _desktopFinderDropSub =
-          DesktopFileIngressService.dragSession.listen((event) {
+      _desktopFinderDropSub = DesktopFileIngressService.dragSession.listen((
+        event,
+      ) {
         if (_isProjectLoading || !_loadedOnce) {
           if (event.phase == DesktopFileDragPhase.dropped) {
             _pendingDesktopFinderDragEvents.add(event);
@@ -12760,7 +12775,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final loadResult = await _projectPersistence.loadProjectState(
         _projectDir,
       );
-      final json = loadResult.projectState;
+      // Project opening is never allowed to scan every third-party plug-in
+      // installed on the machine. It uses the persisted catalog only; a full
+      // scan is an explicit Plug-in Settings action. This keeps an unrelated
+      // unhealthy VST from preventing a project from opening.
+      final compatibilityOpen =
+          await ProjectCompatibilityService.resolveForOpen(
+            projectDir: _projectDir,
+            sourceProject: loadResult.projectState,
+            canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
+            hasPlugin: _isKnownDesktopPluginId,
+          );
+      final json = compatibilityOpen.projectState;
+      _usingCompatibilityAudio = compatibilityOpen.usingCompatibleAudio;
+      _compatibilityAudioRequired =
+          !_usingCompatibilityAudio &&
+          ProjectCompatibilityService.inspect(
+            loadResult.projectState,
+          ).needsPluginAudio;
+      _compatibilityAudioCurrent =
+          _compatibilityAudioRequired &&
+          await ProjectCompatibilityService.isCurrent(_projectDir);
+      _compatibilityAudioError = '';
+      _compatibilityProjectionMetadata = json['compatibility'] is Map
+          ? Map<String, dynamic>.from(json['compatibility'] as Map)
+          : const <String, dynamic>{};
+      _frozenPluginNamesByRow = const <int, List<String>>{};
+      if (_usingCompatibilityAudio) {
+        final manifest = await ProjectCompatibilityService.readManifest(
+          _projectDir,
+        );
+        if (manifest != null) {
+          _frozenPluginNamesByRow =
+              ProjectCompatibilityService.frozenPluginNamesByRow(
+                manifest: manifest,
+                projection: json,
+              );
+        }
+      }
       if (loadResult.warningMessage?.trim().isNotEmpty == true) {
         _projectLoadIssues.add(
           _ProjectLoadIssue(
@@ -12809,6 +12861,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _cloudDocumentRevision = rawCloudDocumentRevision is num
           ? rawCloudDocumentRevision.toInt()
           : int.tryParse((rawCloudDocumentRevision ?? '').toString().trim());
+      _cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+          .toString()
+          .trim();
       _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
           .toString()
           .trim();
@@ -13096,8 +13151,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               )
               .toList();
 
-          final audioFile = File(
-            p.join(ProjectManager.audioDir(_projectDir).path, fileName),
+          final audioFile = ProjectCompatibilityService.resolveAudioFile(
+            _projectDir,
+            fileName,
           );
           if (!audioFile.existsSync()) {
             if (clipKind == ClipKind.midi) {
@@ -13522,14 +13578,128 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
       }
+      if (mounted && _usingCompatibilityAudio) {
+        _queueCompatibilityAudioOpenNotice();
+      }
     } catch (e) {
       debugPrint("Project load failed: $e");
     } finally {
       _isProjectLoading = false;
-      if (projectLoadedSuccessfully) {
+      if (projectLoadedSuccessfully && !_usingCompatibilityAudio) {
         _scheduleProjectAutosave(debounce: const Duration(seconds: 3));
       }
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
+    }
+  }
+
+  void _queueCompatibilityAudioOpenNotice() {
+    if (_compatibilityOpenNoticeQueued) return;
+    _compatibilityOpenNoticeQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_usingCompatibilityAudio) return;
+      unawaited(
+        showAppMessageDialog(
+          context: context,
+          title: 'Plugin audio included',
+          message:
+              'This project contains plugins not available on this device. '
+              'Any edits made will create a clone of this project.\n\n'
+              'Rows containing unavailable plugins have been stemmed out to audio files.',
+          icon: Icons.graphic_eq_rounded,
+        ),
+      );
+    });
+  }
+
+  String? _frozenRowDescription(int row) {
+    if (!_usingCompatibilityAudio) return null;
+    final names = _frozenPluginNamesByRow[row] ?? const <String>[];
+    if (names.isEmpty) return null;
+    final plugins = names.join(', ');
+    return 'This row was stemmed to audio because this device does not have: $plugins.';
+  }
+
+  Future<void> _showFrozenRowInfo(int row) async {
+    final detail = _frozenRowDescription(row);
+    if (detail == null || !mounted) return;
+    await showAppMessageDialog(
+      context: context,
+      title: 'Plugin audio',
+      message: detail,
+      icon: Icons.graphic_eq_rounded,
+    );
+  }
+
+  void _remapCompatibilityForkAudioPaths({
+    required Directory oldProjectDir,
+    required Directory newProjectDir,
+  }) {
+    final oldPath = p.normalize(oldProjectDir.path);
+    for (final track in _audioTracks) {
+      final paths = <File>[track.file, track.originalFile];
+      for (var index = 0; index < paths.length; index++) {
+        final file = paths[index];
+        final normalized = p.normalize(file.path);
+        if (!p.isWithin(oldPath, normalized)) continue;
+        final remapped = File(
+          p.join(newProjectDir.path, p.relative(normalized, from: oldPath)),
+        );
+        if (index == 0) {
+          track.file = remapped;
+        } else {
+          track.originalFile = remapped;
+        }
+      }
+    }
+  }
+
+  Future<void> _forkCompatibilityProjectForEdits() async {
+    if (!_usingCompatibilityAudio || _compatibilityForkInFlight) return;
+    _compatibilityForkInFlight = true;
+    try {
+      final oldProjectDir = _projectDir;
+      final duplicated = await ProjectManager.duplicateProject(oldProjectDir);
+      final forkDir = await ProjectManager.renameProject(
+        duplicated,
+        _projectName,
+      );
+      final forkJson = await ProjectManager.readProjectJson(forkDir);
+      _remapCompatibilityForkAudioPaths(
+        oldProjectDir: oldProjectDir,
+        newProjectDir: forkDir,
+      );
+      _projectDir = forkDir;
+      _projectName = (forkJson['name'] ?? p.basename(forkDir.path))
+          .toString()
+          .trim();
+      _projectId = ProjectManager.ensureProjectIdInJson(forkJson);
+      _projectCreatedAtMs =
+          (forkJson['createdAt'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch;
+      _cloudProjectId = '';
+      _cloudWorkspaceId = '';
+      _cloudOrganizationId = '';
+      _cloudDocumentRevision = null;
+      _cloudSyncedAt = '';
+      _cloudSourceFingerprint = '';
+      _cloudAutoSyncConflict = false;
+      _usingCompatibilityAudio = false;
+      _compatibilityProjectionMetadata = const <String, dynamic>{};
+      _frozenPluginNamesByRow = const <int, List<String>>{};
+      _undoManager.clear();
+      ProjectManager.notifyProjectLibraryChanged();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Editing ${_projectName.isEmpty ? 'a new project' : _projectName}',
+            ),
+          ),
+        );
+      }
+    } finally {
+      _compatibilityForkInFlight = false;
     }
   }
 
@@ -13823,7 +13993,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _canAttemptAutoCloudSync() {
     if (!_cloudProjectsFeatureEnabled) return false;
     if (_cloudSyncMode != CloudSyncMode.auto) return false;
+    // The compatible projection is a local, plugin-free view of a canonical
+    // desktop project. Opening or autosaving that view must never publish it
+    // as a competing cloud revision and overwrite the source plugin state.
+    if (_usingCompatibilityAudio) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
+    // Compatibility renders take a live graph snapshot. Do not start that
+    // work in the middle of transport playback. The autosave remains dirty
+    // and publishes after playback stops.
+    if (_isPlaying) return false;
     if (_isRecording ||
         _recordStartVisualPending ||
         _isMidiClipRecording ||
@@ -13840,8 +14018,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration debounce = const Duration(seconds: 60),
     bool immediate = false,
   }) {
-    if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncDirty = true;
+    // Saving while transport is running deliberately defers the expensive
+    // compatibility snapshot. Keep the dirty bit first so stopping transport
+    // can pick that save up instead of silently losing the auto-sync request.
+    if (!_canAttemptAutoCloudSync()) return;
     if (_cloudAutoSyncInFlight) return;
 
     final now = DateTime.now();
@@ -13860,8 +14041,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _requestCloudAutoSyncNow(String reason) {
-    if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncDirty = true;
+    if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncTimer?.cancel();
     _cloudAutoSyncTimer = null;
     unawaited(_runCloudAutoSync(reason: reason));
@@ -13874,6 +14055,117 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         raw.contains('limit reached') ||
         raw.contains('storage limit') ||
         raw.contains('(403)');
+  }
+
+  /// Optimistic cloud writes must use the exact revision that was opened.
+  /// A revision-only difference is rebased when the canonical source inside
+  /// the current cloud bundle is identical to this local source.
+  Future<bool> _hasCurrentCloudRevisionForAutoSync(AuthService auth) async {
+    final cloudProjectId = _cloudProjectId.trim();
+    if (cloudProjectId.isEmpty) return true;
+
+    final service = CloudProjectService();
+    try {
+      final snapshot = await service.listProjects(auth: auth);
+      CloudProjectAccessItem? remote;
+      for (final project in snapshot.cloudProjects) {
+        if (project.projectId == cloudProjectId) {
+          remote = project;
+          break;
+        }
+      }
+      // A locally remembered cloud ID that is absent from a successful cloud
+      // listing is stale. Clear it before upload so the service can create or
+      // reactivate the deterministic personal project for this local project
+      // ID without sending an obsolete expected_revision token.
+      if (remote == null) {
+        _cloudProjectId = '';
+        _cloudWorkspaceId = '';
+        _cloudOrganizationId = '';
+        _cloudDocumentRevision = null;
+        _cloudSourceFingerprint = '';
+        _cloudAutoSyncConflict = false;
+        final localProject = await ProjectManager.readProjectJson(_projectDir);
+        ProjectManager.stripCloudSyncMetadata(localProject);
+        await ProjectManager.writeProjectJson(_projectDir, localProject);
+        debugPrint(
+          'Cloud auto sync detached a stale local cloud link and will '
+          'publish a fresh personal project.',
+        );
+        return true;
+      }
+
+      if (_cloudDocumentRevision != remote.documentRevision) {
+        File? downloadedBundle;
+        Map<String, dynamic>? localProject;
+        try {
+          final downloaded = await service.downloadBundle(
+            auth: auth,
+            project: remote,
+          );
+          downloadedBundle = downloaded.file;
+          final remoteProject =
+              await ProjectBundle.readCanonicalProjectJsonFromBundle(
+                downloaded.file,
+              );
+          localProject = await ProjectManager.readProjectJson(_projectDir);
+          if (remoteProject != null &&
+              ProjectCompatibilityService.sourceFingerprint(remoteProject) ==
+                  ProjectCompatibilityService.sourceFingerprint(localProject)) {
+            _cloudDocumentRevision = remote.documentRevision;
+            _cloudAutoSyncConflict = false;
+            debugPrint(
+              'Cloud auto sync rebased from revision-only change to '
+              'cloud revision ${remote.documentRevision}.',
+            );
+            return true;
+          }
+        } catch (error) {
+          debugPrint('Cloud revision content check skipped: $error');
+        } finally {
+          if (downloadedBundle != null) {
+            try {
+              await downloadedBundle.delete();
+            } catch (_) {}
+          }
+        }
+        // A personal project that depends on external plugins has one
+        // authoritative editable source: a capable desktop. Mobile only ever
+        // opens its derived audio copy, so it must not permanently strand the
+        // desktop source behind a revision produced by that fallback path.
+        final localSource =
+            localProject ?? await ProjectManager.readProjectJson(_projectDir);
+        final isPersonalProject = remote.workspaceId.trim().isEmpty;
+        final localNeedsDesktopPlugins =
+            _platformCapabilities.externalPluginHosting &&
+            ProjectCompatibilityService.inspect(localSource).needsPluginAudio;
+        if (isPersonalProject && localNeedsDesktopPlugins) {
+          _cloudDocumentRevision = remote.documentRevision;
+          _cloudAutoSyncConflict = false;
+          debugPrint(
+            'Cloud auto sync restored the authoritative desktop plugin '
+            'source at cloud revision ${remote.documentRevision}.',
+          );
+          return true;
+        }
+        _cloudAutoSyncConflict = true;
+        _cloudAutoSyncDirty = true;
+        debugPrint(
+          'Cloud auto sync paused: local revision '
+          '${_cloudDocumentRevision ?? 'unknown'} is behind cloud revision '
+          '${remote.documentRevision}.',
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      // Preserve the existing upload error handling for network/list errors.
+      // This preflight only prevents known stale optimistic writes.
+      debugPrint('Cloud revision preflight skipped: $error');
+      return true;
+    } finally {
+      service.close();
+    }
   }
 
   Duration _nextCloudAutoSyncBackoff() {
@@ -13898,7 +14190,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration? retryDelay;
     try {
       await _projectAutosaveCoordinator.flush();
-      if (!_canAttemptAutoCloudSync()) return;
+      if (!_canAttemptAutoCloudSync()) {
+        _cloudAutoSyncDirty = true;
+        return;
+      }
+      final sourceBeforePublish = await ProjectManager.readProjectJson(
+        _projectDir,
+      );
+      final sourceFingerprintBeforePreparation =
+          ProjectCompatibilityService.sourceFingerprint(sourceBeforePublish);
+      final sourceUsesThirdPartyPlugins = ProjectCompatibilityService.inspect(
+        sourceBeforePublish,
+      ).needsPluginAudio;
+      final compatibleVersionIsCurrent =
+          !sourceUsesThirdPartyPlugins ||
+          await ProjectCompatibilityService.isCurrent(_projectDir);
+      if (_cloudSourceFingerprint == sourceFingerprintBeforePreparation &&
+          compatibleVersionIsCurrent) {
+        return;
+      }
+      // A cloud autosave must never turn into an offline plug-in export. The
+      // producer prepares that version explicitly from Project Settings.
+      if (sourceUsesThirdPartyPlugins && !compatibleVersionIsCurrent) {
+        debugPrint(
+          'Cloud auto sync is waiting for a manually prepared compatible '
+          'version.',
+        );
+        return;
+      }
+      if (!await _hasCurrentCloudRevisionForAutoSync(auth)) return;
+      if (!_canAttemptAutoCloudSync()) {
+        _cloudAutoSyncDirty = true;
+        return;
+      }
+
+      // An autosave can complete while a previous compatibility render is
+      // running. Only package a revision after the source we are about to
+      // upload and its frozen audio have been verified as the same revision.
+      final sourceForPublish = await ProjectManager.readProjectJson(
+        _projectDir,
+      );
+      final sourceFingerprint = ProjectCompatibilityService.sourceFingerprint(
+        sourceForPublish,
+      );
+      final sourceForPublishUsesThirdPartyPlugins =
+          ProjectCompatibilityService.inspect(
+            sourceForPublish,
+          ).needsPluginAudio;
+      if (sourceForPublishUsesThirdPartyPlugins &&
+          !await ProjectCompatibilityService.isCurrent(_projectDir)) {
+        _cloudAutoSyncDirty = true;
+        return;
+      }
 
       final projectId = _projectId.trim().isNotEmpty
           ? _projectId.trim()
@@ -13961,6 +14304,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _cloudOrganizationId = result.project.organizationId.trim();
         _cloudDocumentRevision = result.project.documentRevision;
         _cloudSyncedAt = syncedAt;
+        _cloudSourceFingerprint = sourceFingerprint;
         _cloudAutoSyncFailureCount = 0;
         _cloudAutoSyncBackoffUntil = null;
         _cloudAutoSyncConflict = false;
@@ -13979,6 +14323,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         json['cloudDocumentRevision'] = _cloudDocumentRevision;
         json['cloudSyncedAt'] = _cloudSyncedAt;
+        json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
         await ProjectManager.writeProjectJson(_projectDir, json);
         ProjectManager.notifyProjectLibraryChanged();
       } finally {
@@ -14007,6 +14352,357 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _cloudAutoSyncTimer = null;
           unawaited(_runCloudAutoSync(reason: 'retry:$reason'));
         });
+      } else if (_cloudAutoSyncDirty && _canAttemptAutoCloudSync()) {
+        // Do not lose an edit made while the preceding upload was in flight.
+        // The follow-up run re-reads the canonical source before publishing.
+        _cloudAutoSyncTimer?.cancel();
+        _cloudAutoSyncTimer = Timer(Duration.zero, () {
+          _cloudAutoSyncTimer = null;
+          unawaited(_runCloudAutoSync(reason: 'latest:$reason'));
+        });
+      }
+    }
+  }
+
+  Future<void> _ensureCompatibilityAudioForPublish() async {
+    if (!_platformCapabilities.externalPluginHosting) return;
+    final inFlight = _compatibilityRenderInFlight;
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final task = () async {
+      final source = await ProjectManager.readProjectJson(_projectDir);
+      final inspected = ProjectCompatibilityService.inspect(source);
+      if (!inspected.needsPluginAudio ||
+          await ProjectCompatibilityService.isCurrent(_projectDir)) {
+        return;
+      }
+      final prefs = await SharedPreferences.getInstance();
+      const noticeKey = 'third_party_plugin_audio_notice_seen_v1';
+      if (prefs.getBool(noticeKey) != true) {
+        await prefs.setBool(noticeKey, true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Third-party plugins will be included as audio when you share, so collaborators can open this project without the same plugins.',
+              ),
+            ),
+          );
+        }
+      }
+
+      await _prepareNativeEngineStateForExport((_) {});
+      await ProjectCompatibilityService.audioDirectoryFor(
+        _projectDir,
+      ).create(recursive: true);
+      final existingManifest = await ProjectCompatibilityService.readManifest(
+        _projectDir,
+      );
+      final reusableArtifacts = <String, ProjectCompatibilityArtifact>{};
+      if (existingManifest != null) {
+        for (final dependency in inspected.dependencies) {
+          for (final artifact in existingManifest.artifacts) {
+            if (artifact.dependencyKey != dependency.key ||
+                artifact.fingerprint !=
+                    ProjectCompatibilityService.artifactFingerprint(
+                      source,
+                      dependency,
+                    ) ||
+                !await File(
+                  p.join(_projectDir.path, artifact.fileName),
+                ).exists()) {
+              continue;
+            }
+            reusableArtifacts[dependency.key] = artifact;
+            break;
+          }
+        }
+      }
+      final artifacts = <ProjectCompatibilityArtifact>[
+        ...reusableArtifacts.values,
+      ];
+      final rows = (source['rows'] as List?) ?? const <Object?>[];
+      final rowIndexById = <int, int>{
+        for (var i = 0; i < rows.length; i++)
+          if (rows[i] is Map && (rows[i] as Map)['rowId'] is num)
+            ((rows[i] as Map)['rowId'] as num).toInt(): i,
+      };
+      final dependenciesByRow = <int, List<ProjectCompatibilityDependency>>{};
+      for (final dependency in inspected.dependencies) {
+        if (!reusableArtifacts.containsKey(dependency.key) &&
+            (dependency.scope == ProjectCompatibilityScope.instrument ||
+                dependency.scope == ProjectCompatibilityScope.row) &&
+            dependency.row >= 0) {
+          dependenciesByRow
+              .putIfAbsent(
+                dependency.row,
+                () => <ProjectCompatibilityDependency>[],
+              )
+              .add(dependency);
+        }
+      }
+
+      Future<void> renderBoundary({
+        required List<ProjectCompatibilityDependency> dependencies,
+        required List<int> boundaryRows,
+        required String outputName,
+      }) async {
+        final clipIds = _audioTracks
+            .where(
+              (clip) =>
+                  boundaryRows.contains(clip.rowIndex) &&
+                  clip.engineClipId >= 0,
+            )
+            .map((clip) => clip.engineClipId)
+            .toSet();
+        if (clipIds.isEmpty || boundaryRows.isEmpty) return;
+        // The offline renderer normally starts at project zero. A frozen
+        // row should instead be an ordinary audio clip beginning where its
+        // earliest contributing clip begins, otherwise its visible and
+        // audible placement drifts to the left in the compatible project.
+        final boundaryStartSeconds = _audioTracks
+            .where(
+              (clip) =>
+                  boundaryRows.contains(clip.rowIndex) &&
+                  clip.engineClipId >= 0,
+            )
+            .map((clip) => math.max(0.0, clip.offset))
+            .fold<double>(double.infinity, math.min);
+        if (!boundaryStartSeconds.isFinite) return;
+        final fileName = 'compatibility/audio/$outputName.wav';
+        final output = File(p.join(_projectDir.path, fileName));
+        final rendered = await JuceAudioEngine.exportMix(
+          output.path,
+          format: 'wav',
+          sampleRate: _preferredDawSampleRate,
+          wavBitDepth: 32,
+          wavDithering: false,
+          audibleClipIds: clipIds.toList(growable: false),
+          timelineStartSeconds: boundaryStartSeconds,
+          bypassMasterProcessing: true,
+          preserveRealtimePlayback: true,
+        );
+        if (rendered.isEmpty || !await output.exists()) {
+          throw StateError('Could not render third-party plugin audio.');
+        }
+        if (await output.length() <= 44) {
+          throw StateError('Third-party plugin audio render was empty.');
+        }
+        final fallback = <String, dynamic>{
+          'fileName': fileName,
+          'label': 'Frozen audio',
+          'clipType': 'audio',
+          'clipId': 'compatibility-$outputName',
+          'rowIndex': boundaryRows.first,
+          'rowId': _rowIdAt(boundaryRows.first),
+          'offset': boundaryStartSeconds,
+          // Mixroom's unity fader value is 2.0. The offline render already
+          // includes the source clip gain, so the replacement must be unity.
+          'gain': kDefaultGainUi,
+          'normalizeVolume': false,
+          'normalizeGain': 1.0,
+          'preNormalizeGain': kDefaultGainUi,
+          'trimStartMs': 0,
+        };
+        for (final dependency in dependencies) {
+          artifacts.add(
+            ProjectCompatibilityArtifact(
+              dependencyKey: dependency.key,
+              fileName: fileName,
+              fingerprint: ProjectCompatibilityService.artifactFingerprint(
+                source,
+                dependency,
+              ),
+              trackJson: fallback,
+              replacementRows: boundaryRows,
+            ),
+          );
+        }
+      }
+
+      for (final entry in dependenciesByRow.entries) {
+        await renderBoundary(
+          dependencies: entry.value,
+          boundaryRows: <int>[entry.key],
+          outputName: 'frozen_row_${entry.key}',
+        );
+      }
+      final groups = (source['trackGroups'] as List?) ?? const <Object?>[];
+      for (final dependency in inspected.dependencies.where(
+        (item) =>
+            item.scope == ProjectCompatibilityScope.group &&
+            !reusableArtifacts.containsKey(item.key),
+      )) {
+        final group = groups.whereType<Map>().cast<Map>().firstWhere(
+          (item) => (item['id'] ?? '').toString() == dependency.groupId,
+          orElse: () => const <String, dynamic>{},
+        );
+        final groupRows = ((group['rowIds'] as List?) ?? const <Object?>[])
+            .whereType<num>()
+            .map((rowId) => rowIndexById[rowId.toInt()] ?? -1)
+            .where((row) => row >= 0)
+            .toList(growable: false);
+        final safeId = dependency.groupId.replaceAll(
+          RegExp(r'[^A-Za-z0-9_-]'),
+          '_',
+        );
+        await renderBoundary(
+          dependencies: <ProjectCompatibilityDependency>[dependency],
+          boundaryRows: groupRows,
+          outputName: 'frozen_group_$safeId',
+        );
+      }
+
+      String referenceMix = '';
+      final allMasterDependencies = inspected.dependencies
+          .where((item) => item.scope == ProjectCompatibilityScope.master)
+          .toList(growable: false);
+      final masterDependencies = inspected.dependencies
+          .where(
+            (item) =>
+                item.scope == ProjectCompatibilityScope.master &&
+                !reusableArtifacts.containsKey(item.key),
+          )
+          .toList(growable: false);
+      if (masterDependencies.isEmpty && allMasterDependencies.isNotEmpty) {
+        referenceMix =
+            reusableArtifacts[allMasterDependencies.first.key]?.fileName ?? '';
+      }
+      if (masterDependencies.isNotEmpty) {
+        referenceMix = 'compatibility/audio/original_mix_reference.wav';
+        final reference = File(p.join(_projectDir.path, referenceMix));
+        final rendered = await JuceAudioEngine.exportMix(
+          reference.path,
+          format: 'wav',
+          sampleRate: _preferredDawSampleRate,
+          wavBitDepth: 32,
+          wavDithering: false,
+          preserveRealtimePlayback: true,
+        );
+        if (rendered.isEmpty || !await reference.exists()) {
+          throw StateError('Could not render the original mix reference.');
+        }
+        for (final dependency in masterDependencies) {
+          artifacts.add(
+            ProjectCompatibilityArtifact(
+              dependencyKey: dependency.key,
+              fileName: referenceMix,
+              fingerprint: ProjectCompatibilityService.artifactFingerprint(
+                source,
+                dependency,
+              ),
+            ),
+          );
+        }
+      }
+      if (artifacts.length != inspected.dependencies.length) {
+        throw StateError('Could not render every third-party plugin path.');
+      }
+      await ProjectCompatibilityService.writeCompatibleCopy(
+        projectDir: _projectDir,
+        sourceProject: source,
+        artifacts: artifacts,
+        referenceMixFileName: referenceMix,
+      );
+    }();
+    _compatibilityRenderInFlight = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_compatibilityRenderInFlight, task)) {
+        _compatibilityRenderInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _refreshCompatibilityAudioStatus({
+    Map<String, dynamic>? project,
+  }) async {
+    if (_usingCompatibilityAudio ||
+        !_platformCapabilities.externalPluginHosting) {
+      if (!mounted) return;
+      _setStateAndRefreshProjectSettings(() {
+        _compatibilityAudioRequired = false;
+        _compatibilityAudioCurrent = false;
+      });
+      return;
+    }
+    final source = project ?? await ProjectManager.readProjectJson(_projectDir);
+    final required = ProjectCompatibilityService.inspect(
+      source,
+    ).needsPluginAudio;
+    final current =
+        required && await ProjectCompatibilityService.isCurrent(_projectDir);
+    if (!mounted ||
+        (required == _compatibilityAudioRequired &&
+            current == _compatibilityAudioCurrent)) {
+      return;
+    }
+    _setStateAndRefreshProjectSettings(() {
+      _compatibilityAudioRequired = required;
+      _compatibilityAudioCurrent = current;
+    });
+  }
+
+  Future<void> _prepareCompatibilityAudioManually() async {
+    if (_compatibilityPreparationActive || _usingCompatibilityAudio) return;
+    if (_isPlaying ||
+        _isRecording ||
+        _recordStartVisualPending ||
+        _isMidiClipRecording ||
+        _recordTransitionInFlight) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Stop playback or recording before preparing a compatible version.',
+          tone: AppPopupTone.warning,
+        );
+      }
+      return;
+    }
+
+    _setStateAndRefreshProjectSettings(() {
+      _compatibilityPreparationActive = true;
+      _compatibilityAudioError = '';
+    });
+    try {
+      await _projectAutosaveCoordinator.flush();
+      await _ensureCompatibilityAudioForPublish();
+      await _refreshCompatibilityAudioStatus();
+      if (!_compatibilityAudioCurrent) {
+        throw StateError(
+          'The project changed while its compatible version was being prepared. Try again when the edit is stable.',
+        );
+      }
+      _requestCloudAutoSyncNow('compatible-version-ready');
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Compatible version is ready. Future edits will not re-render it automatically.',
+          tone: AppPopupTone.success,
+        );
+      }
+    } catch (error) {
+      final message = error.toString().replaceFirst('Bad state: ', '').trim();
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(() {
+          _compatibilityAudioError = message;
+        });
+        showAppSnackBar(
+          context,
+          'Could not prepare compatible version: $message',
+          tone: AppPopupTone.error,
+        );
+      }
+    } finally {
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(() {
+          _compatibilityPreparationActive = false;
+        });
+      } else {
+        _compatibilityPreparationActive = false;
       }
     }
   }
@@ -14489,7 +15185,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final tr = tracksForSave[trackIndex];
       final src = tr.file;
       if (!tr.isMidi && !src.existsSync()) continue;
-      final fileName = p.basename(src.path).trim();
+      final fileName = ProjectCompatibilityService.persistedAudioFileName(
+        projectDir: _projectDir,
+        audioFile: src,
+      ).trim();
       if (fileName.isEmpty) continue;
       final rowForTrack = _rowForClipFromRows(
         tr,
@@ -14653,29 +15352,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_cloudSyncedAt.isNotEmpty) {
       json["cloudSyncedAt"] = _cloudSyncedAt;
     }
+    if (_cloudSourceFingerprint.isNotEmpty) {
+      json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
+    }
     if (assistantChat != null) {
       json["assistantChat"] = assistantChat;
+    }
+    if (_usingCompatibilityAudio) {
+      json['compatibility'] = _compatibilityProjectionMetadata.isEmpty
+          ? const <String, dynamic>{'variant': 'audio'}
+          : _compatibilityProjectionMetadata;
     }
     return json;
   }
 
   Future<void> _performAutosaveWrite() async {
+    if (_usingCompatibilityAudio) {
+      await _forkCompatibilityProjectForEdits();
+    }
     _syncEffectSnapshotCacheToCurrentRows();
     await _refreshHostedInstrumentStatesForPersistence(captureAll: false);
     final json = await _buildProjectJsonSnapshot();
     _attachPersistedUndoHistoryToProjectJson(json);
-    await _projectPersistence.saveProjectState(
-      projectDir: _projectDir,
-      projectState: json,
-      mode: AudioProjectSaveMode.autosave,
-    );
-    if (!_cloudAutoSyncInFlight) {
+    if (_usingCompatibilityAudio) {
+      await ProjectCompatibilityService.writeCompatibleProjection(
+        projectDir: _projectDir,
+        project: json,
+      );
+    } else {
+      await _projectPersistence.saveProjectState(
+        projectDir: _projectDir,
+        projectState: json,
+        mode: AudioProjectSaveMode.autosave,
+      );
+    }
+    if (!_usingCompatibilityAudio) {
+      await _refreshCompatibilityAudioStatus(project: json);
+    }
+    if (_isPlaying) {
+      // _scheduleCloudAutoSync intentionally does not run while playing.
+      // Retain the intent and schedule it when transport stops.
+      _cloudAutoSyncDirty = true;
+    } else if (!_cloudAutoSyncInFlight) {
       _scheduleCloudAutoSync(reason: 'autosave');
     }
-    _requestLocalVersionSnapshot(
-      reason: ProjectVersionReason.autosave,
-      minInterval: ProjectVersionStore.defaultPeriodicInterval,
-    );
+    if (!_usingCompatibilityAudio) {
+      _requestLocalVersionSnapshot(
+        reason: ProjectVersionReason.autosave,
+        minInterval: ProjectVersionStore.defaultPeriodicInterval,
+      );
+    }
     await _persistUndoHistory();
   }
 
@@ -16392,6 +17118,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required ProjectVersionReason reason,
     required Duration minInterval,
   }) {
+    if (_usingCompatibilityAudio) return;
     if (_localVersionSnapshotInFlight) return;
     _localVersionSnapshotInFlight = true;
     unawaited(() async {
@@ -16414,6 +17141,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required ProjectVersionReason reason,
     required Duration minInterval,
   }) {
+    if (_usingCompatibilityAudio) return;
     if (_localVersionSnapshotInFlight) return;
     _localVersionSnapshotInFlight = true;
     unawaited(() async {
@@ -16525,23 +17253,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _saveProject({bool showSnackBar = true}) async {
     try {
       await _projectAutosaveCoordinator.flush();
-      await _normalizeProjectAudioAssetsForCheckpoint();
+      if (!_usingCompatibilityAudio) {
+        await _normalizeProjectAudioAssetsForCheckpoint();
+      }
       await _refreshAllPersistedEffectSnapshots();
       await _refreshHostedInstrumentStatesForPersistence();
       final json = await _buildProjectJsonSnapshot();
       _attachPersistedUndoHistoryToProjectJson(json);
-      await _projectPersistence.saveProjectState(
-        projectDir: _projectDir,
-        projectState: json,
-        mode: AudioProjectSaveMode.checkpoint,
-      );
+      if (_usingCompatibilityAudio) {
+        await ProjectCompatibilityService.writeCompatibleProjection(
+          projectDir: _projectDir,
+          project: json,
+        );
+      } else {
+        await _projectPersistence.saveProjectState(
+          projectDir: _projectDir,
+          projectState: json,
+          mode: AudioProjectSaveMode.checkpoint,
+        );
+      }
       _projectAutosaveCoordinator.clearDirty();
       await _uploadProjectTelemetrySnapshot(json);
       _requestCloudAutoSyncNow('save');
-      _requestLocalVersionSnapshot(
-        reason: ProjectVersionReason.manualSave,
-        minInterval: ProjectVersionStore.defaultSaveInterval,
-      );
+      if (!_usingCompatibilityAudio) {
+        _requestLocalVersionSnapshot(
+          reason: ProjectVersionReason.manualSave,
+          minInterval: ProjectVersionStore.defaultSaveInterval,
+        );
+      }
       await _persistUndoHistory();
 
       if (mounted && showSnackBar) {
@@ -16999,6 +17738,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _syncTransportClock(currentVisualClock, playing: false);
     });
     _stopMeterPolling();
+    if (_cloudAutoSyncDirty) {
+      _scheduleCloudAutoSync(
+        reason: 'playbackStopped',
+        debounce: const Duration(seconds: 15),
+      );
+    }
   }
 
   Future<void> _drainTransportCommandQueue(StateSetter setLocalState) async {
@@ -20753,6 +21498,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (pausePlaybackBeforeInsert && _isPlaying) {
       await _pausePlayback();
+    }
+    // A Finder drop can arrive immediately after the app regains focus, before
+    // the audio device has reattached. Prime the same route used by first
+    // playback before asking JUCE to install the clip, so importing audio does
+    // not depend on the user pressing Play once.
+    await JuceAudioEngine.initialise();
+    if (PlatformCapabilities.current.isDesktop || Platform.isIOS) {
+      await _ensurePlaybackRouteReady(reason: 'audioImport');
     }
     await _ensureRowIndexExists(row);
     await _ensureRowExistsForClipInsertion();
@@ -25784,7 +26537,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _clipFadeRowIdByEngineId.remove(clip.engineClipId);
   }
 
-  String _buildNativeExportClipSnapshotJson() {
+  String _buildNativeExportClipSnapshotJson({Set<int>? audibleClipIds}) {
     final snapshots = <Map<String, dynamic>>[];
     final fadeByClipId = _resolvedClipFadesByEngineId();
 
@@ -25829,7 +26582,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'fadeInSec': fades.fadeInSec,
         'fadeOutSec': fades.fadeOutSec,
         'fadeCurve': fades.fadeCurve,
-        'muted': false,
+        'muted':
+            audibleClipIds != null && !audibleClipIds.contains(engineClipId),
         'isMidi': exportUsesLiveMidiPath,
         if (clip.file.path.isNotEmpty) 'sourceFilePath': clip.file.path,
       };
@@ -28708,7 +29462,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (event.location != null && event.hasAudio) {
       placement = _timelineController.placementForExternalSampleDrop(
         event.location!,
-        data: dragData ??
+        data:
+            dragData ??
             SampleDragData(
               filePath: event.audioItems.first.path,
               label: p.basename(event.audioItems.first.path),
@@ -28717,10 +29472,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (placement != null && !placement.allowed) {
-      await _handleDesktopFinderDropBatch(
-        event.items,
-        skipAudio: true,
-      );
+      await _handleDesktopFinderDropBatch(event.items, skipAudio: true);
       return;
     }
 
@@ -29763,14 +30515,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleSampleDragExitedBrowserPanel() {
-    if (!mounted || !_sampleBrowserVisible) return;
-    setState(() {
-      _reopenSampleBrowserAfterDrag = true;
-      _reopenSampleBrowserExpanded = _sampleBrowserExpanded;
-      _sampleBrowserVisible = false;
-      _sampleBrowserExpanded = false;
-    });
-    _setDawPanelVisible('sample_browser', false);
+    // Keep the drag source mounted until DragTarget accepts or cancels the
+    // operation. Removing the sample-browser panel during hover disposes the
+    // Draggable and can cancel an otherwise valid timeline drop.
   }
 
   Future<Duration?> _resolveSampleDuration(String filePath) async {
@@ -38876,6 +39623,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 _buildDesktopKeyboardShortcutsLauncher(),
                                 const SizedBox(height: 9),
                                 _buildDesktopPluginManagerLauncher(),
+                                if (_compatibilityAudioRequired) ...[
+                                  const SizedBox(height: 9),
+                                  _buildCompatibilityVersionLauncher(),
+                                ],
                                 const SizedBox(height: 9),
                                 _buildDesktopDiagnosticsLauncher(),
                               ],
@@ -40794,6 +41545,94 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ? 'Scan'
           : '${_desktopScannedPlugins.length}',
       onTap: _showDesktopPluginManagerDialog,
+    );
+  }
+
+  Widget _buildCompatibilityVersionLauncher() {
+    final active = _compatibilityPreparationActive;
+    final current = _compatibilityAudioCurrent;
+    final subtitle = active
+        ? 'Rendering tracks that use third-party plugins. You can keep the editable source unchanged.'
+        : current
+        ? 'Ready to open on devices that do not have the same plugins. Update it manually after future edits.'
+        : _compatibilityAudioError.isNotEmpty
+        ? _compatibilityAudioError
+        : 'Create frozen audio for third-party plugin paths before sharing or cloud sync.';
+    final accent = current ? const Color(0xFF63D69A) : const Color(0xFF7DB7FF);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: active
+            ? null
+            : () => unawaited(_prepareCompatibilityAudioManually()),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: current ? 0.09 : 0.07),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: accent.withValues(alpha: 0.22)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      L10n.translate(context, 'Compatible Project Version'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      L10n.translate(context, subtitle),
+                      style: const TextStyle(
+                        color: Color(0xB8F4F4F4),
+                        fontSize: 12.4,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                constraints: const BoxConstraints(minWidth: 68),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                alignment: Alignment.center,
+                child: active
+                    ? SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: accent,
+                        ),
+                      )
+                    : Text(
+                        L10n.translate(context, current ? 'Ready' : 'Prepare'),
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 11.8,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -55090,6 +55929,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           previousTargets[originalTargetId] ??
           _fallbackAutomationTargetMeta(originalTargetId);
       final parsed = _parseAutomationTargetId(originalTargetId);
+
+      // Hosted instrument parameters are not part of the row FX parameter
+      // discovery pass. Their target id deliberately contains the persisted
+      // clip id, so reconnect them directly to the newly assigned native clip
+      // id after a project reopen. Without this, valid VST/AU instrument
+      // automation is marked orphaned, hidden, and never sent back to JUCE.
+      if (parsed.scope == 'instrument') {
+        final clipId = parsed.effectKey.trim();
+        final paramId = parsed.paramId.trim();
+        final clip = _audioTracks.cast<AudioTrack?>().firstWhere(
+          (candidate) =>
+              candidate != null &&
+              candidate.isMidi &&
+              candidate.clipId == clipId &&
+              candidate.engineClipId >= 0,
+          orElse: () => null,
+        );
+        if (clip != null && paramId.isNotEmpty) {
+          return previousMeta.copyWith(
+            targetId: originalTargetId,
+            effectIndex: clip.engineClipId,
+            paramId: paramId,
+            isOrphan: false,
+            uiVisible: true,
+          );
+        }
+        return null;
+      }
+
       final normalizedParamId =
           (parsed.paramId.isNotEmpty ? parsed.paramId : previousMeta.paramId)
               .trim()
@@ -76558,6 +77426,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     _deferredClipTimelineSyncIndices.clear();
     await _syncClipFadesForRowsToEngine(affectedFadeRowIds);
+    // Clip moves change rendered-plugin timing. Persist the final model only
+    // after the native timeline batch has accepted the same move, so the
+    // compatibility render and cloud bundle cannot retain the old position.
+    _scheduleProjectAutosave();
     if (!mounted) return;
     setState(() {});
   }
@@ -79544,9 +80416,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final keyboardLift = usesTabletDawLayout
             ? rawKeyboardLift
             : math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
-        // The phone dock contains both the AI bar and transport controls.
-        // Reserving only the transport height positions a floating warning
-        // directly on top of the AI bar.
+        // Reserve the complete bottom control dock. This positions every
+        // ScaffoldMessenger snack bar just above the chat bar on phone and
+        // above the combined control row on tablet/desktop.
         final snackBottomInset = usesBottomControlRow
             ? _kChatBarStackHeight +
                   tabletDawBottomInset +
@@ -79554,7 +80426,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       ? _kProducerBannerHeightEstimate
                       : 0.0) +
                   keyboardLift +
-                  10.0
+                  _kSnackBarDockGap
             : _kChatBarStackHeight +
                   _kTransportBarHeight +
                   (_isProducerCaptureUiVisible
@@ -79562,8 +80434,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       : 0.0) +
                   _androidTransportBottomInset(context) +
                   (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
-                  (Platform.isIOS ? _kIosSnackBarExtraLift : 0.0) +
-                  18.0;
+                  _kSnackBarDockGap;
         final mediaSize = MediaQuery.of(context).size;
         final tabletSidePanelWidth =
             TabletDawPanelLayout.expandedLeftPanelWidth(
@@ -79756,6 +80627,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           transportClockListenable:
                                               _transportClock,
                                           rows: _rows,
+                                          frozenRowDescription:
+                                              _frozenRowDescription,
+                                          onFrozenRowInfoPressed: (row) {
+                                            unawaited(_showFrozenRowInfo(row));
+                                          },
                                           trackGroups: _trackGroups,
                                           clips: _audioTracks, // your list
                                           clipTopologyRevision:

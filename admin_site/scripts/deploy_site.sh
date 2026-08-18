@@ -187,6 +187,15 @@ aws s3 sync "${BUILD_DIR}/" "s3://${BUCKET_NAME}/" \
   --delete \
   --cache-control "public,max-age=300"
 
+# Keep the HTML and runtime configuration fresh so a deployment can point an
+# already-open dashboard at versioned JS and CSS assets on its next reload.
+aws s3 cp "${BUILD_DIR}/index.html" "s3://${BUCKET_NAME}/index.html" \
+  --cache-control "no-cache, no-store, must-revalidate" \
+  --content-type "text/html"
+aws s3 cp "${BUILD_DIR}/config.js" "s3://${BUCKET_NAME}/config.js" \
+  --cache-control "no-cache, no-store, must-revalidate" \
+  --content-type "application/javascript"
+
 if [[ -n "${DISTRIBUTION_ID}" ]]; then
   aws cloudfront create-invalidation \
     --distribution-id "${DISTRIBUTION_ID}" \
