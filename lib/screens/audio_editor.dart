@@ -106,6 +106,7 @@ import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/helpers/sample_browser_roots.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
+import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/helpers/tempo_detection.dart';
 import 'package:mixroom/helpers/dbfs_meter_visuals.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
@@ -4133,6 +4134,7 @@ enum _ProjectLoadIssueType {
   missingPlugin,
   partialPluginRestore,
   recoveredFromBackup,
+  planLimit,
 }
 
 class _ProjectLoadIssue {
@@ -7901,7 +7903,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   List<Map<String, dynamic>> _uiInstrumentCatalog() {
-    final base = _instrumentCatalogForCurrentPlan(_activeInstrumentCatalog());
+    final base = _activeInstrumentCatalog();
     final hosted = _availableDesktopHostedInstrumentCatalog();
     final merged = hosted.isEmpty
         ? base
@@ -12907,6 +12909,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowsJson,
       );
       final rowFxList = (json["rowEffects"] as List?) ?? [];
+      _recordPlanLimitProjectLoadNotices(
+        savedRows: rowsJson,
+        savedTracks: tracks,
+        rowEffects: rowFxList,
+        masterState: master,
+      );
       final loadedTracksForWaveforms = <AudioTrack>[];
       final ensuredRowIndexes = <int>{};
       await _restoreRowsFromProjectJson(rowsJson, tracks);
@@ -13527,6 +13535,81 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
     }
+  }
+
+  /// Opening a project must never discard work because the account has changed
+  /// plans. Free users can open, play, and save projects that exceed Free
+  /// creation limits; the limits apply only to newly added rows and effects.
+  void _recordPlanLimitProjectLoadNotices({
+    required List<Map<String, dynamic>> savedRows,
+    required List savedTracks,
+    required List rowEffects,
+    required Map<String, dynamic> masterState,
+  }) {
+    if (!_isFreePlan) return;
+
+    var savedRowCount = savedRows.length;
+    for (final track in savedTracks) {
+      if (track is! Map) continue;
+      final rowIndex = (track['rowIndex'] as num?)?.toInt() ?? -1;
+      savedRowCount = math.max(savedRowCount, rowIndex + 1);
+    }
+    if (savedRowCount > SubscriptionLimits.freeRowsPerProject) {
+      _projectLoadIssues.add(
+        _ProjectLoadIssue(
+          type: _ProjectLoadIssueType.planLimit,
+          title: L10n.translate(context, 'Project exceeds Free track limit'),
+          detail: L10n.translateWithParams(
+            context,
+            'All {count} tracks were restored and will be preserved when you save. Free can add up to {limit} tracks per project; upgrade to add more.',
+            <String, String>{
+              'count': savedRowCount.toString(),
+              'limit': SubscriptionLimits.freeRowsPerProject.toString(),
+            },
+          ),
+        ),
+      );
+    }
+
+    final lockedEffects = <String>{};
+    void collectEffects(Object? raw) {
+      final effects = raw is List
+          ? raw
+          : raw is Map
+          ? raw['effects']
+          : null;
+      if (effects is! List) return;
+      for (final item in effects) {
+        if (item is! Map) continue;
+        final name = (item['pathOrName'] ?? item['name'] ?? item['effectId'])
+            .toString()
+            .trim();
+        if (kMixroomBuiltInEffects.contains(name) &&
+            !_canUseEffectForCurrentPlan(name)) {
+          lockedEffects.add(name);
+        }
+      }
+    }
+
+    for (final row in rowEffects) {
+      if (row is Map) collectEffects(row['effects']);
+    }
+    collectEffects(masterState['effects']);
+    if (lockedEffects.isEmpty) return;
+    final names = (lockedEffects.toList()..sort())
+        .map((name) => L10n.translate(context, name))
+        .join(', ');
+    _projectLoadIssues.add(
+      _ProjectLoadIssue(
+        type: _ProjectLoadIssueType.planLimit,
+        title: L10n.translate(context, 'Project includes plan-locked effects'),
+        detail: L10n.translateWithParams(
+          context,
+          'Restored effects: {effects}. They will be preserved when you save. Free cannot add these effects to a new chain.',
+          <String, String>{'effects': names},
+        ),
+      ),
+    );
   }
 
   AudioTrack? _primarySelectedClipOrNull() {
@@ -30078,72 +30161,80 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _buildInstrumentPickerRow({
     required Map<String, dynamic> spec,
+    required bool isLocked,
     required VoidCallback onTap,
   }) {
     final category = _instrumentPickerCategory(spec);
     final accent = _instrumentPickerAccent(category);
     final name = (spec['name'] as String?) ?? 'Instrument';
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          child: Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(10),
+    return Opacity(
+      opacity: isLocked ? 0.46 : 1.0,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    _instrumentPickerIcon(category),
+                    color: accent,
+                    size: 17,
+                  ),
                 ),
-                child: Icon(
-                  _instrumentPickerIcon(category),
-                  color: accent,
-                  size: 17,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFFF4F4F4),
-                        fontSize: 13.6,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Pretendard',
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 13.6,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'Pretendard',
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _instrumentPickerCategoryLabel(context, category),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFFF4F4F4).withValues(alpha: 0.62),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        fontFamily: 'Pretendard',
+                      const SizedBox(height: 2),
+                      Text(
+                        isLocked
+                            ? L10n.translate(context, 'Upgrade plan')
+                            : _instrumentPickerCategoryLabel(context, category),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: const Color(
+                            0xFFF4F4F4,
+                          ).withValues(alpha: 0.62),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          fontFamily: 'Pretendard',
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Icon(
-                Icons.chevron_right_rounded,
-                size: 18,
-                color: const Color(0xFFF4F4F4).withValues(alpha: 0.36),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Icon(
+                  isLocked ? Icons.lock_rounded : Icons.chevron_right_rounded,
+                  size: isLocked ? 16 : 18,
+                  color: const Color(0xFFF4F4F4).withValues(alpha: 0.36),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -30517,9 +30608,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ),
                                       itemBuilder: (_, index) {
                                         final spec = filtered[index];
+                                        final id =
+                                            (spec['id'] as String? ?? '').trim();
+                                        final isLocked =
+                                            !_canUseInstrumentForCurrentPlan(id);
                                         return _buildInstrumentPickerRow(
                                           spec: spec,
-                                          onTap: () => Navigator.pop(ctx, spec),
+                                          isLocked: isLocked,
+                                          onTap: () {
+                                            if (!isLocked) {
+                                              Navigator.pop(ctx, spec);
+                                              return;
+                                            }
+                                            unawaited(
+                                              showAppUpgradeDialog(
+                                                context: context,
+                                                title: L10n.translateWithParams(
+                                                  context,
+                                                  'Upgrade to use {name}',
+                                                  <String, String>{
+                                                    'name': L10n.translate(
+                                                      context,
+                                                      (spec['name'] as String? ??
+                                                              '')
+                                                          .trim(),
+                                                    ),
+                                                  },
+                                                ),
+                                                message:
+                                                    'Additional Mixroom instruments are available on Starter and higher plans.',
+                                                icon: Icons.piano_rounded,
+                                                onUpgrade:
+                                                    widget.onUpgradeRequested,
+                                              ),
+                                            );
+                                          },
                                         );
                                       },
                                     ),
@@ -34887,8 +35010,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   children: [
                     Row(
                       children: [
-                        Icon(
-                          _iconForMasterGainStagingRow(rowInfo.iconId),
+                        buildTrackRowIcon(
+                          rowInfo.iconId,
                           size: 18,
                           color: Colors.white.withOpacity(0.88),
                         ),
@@ -35059,23 +35182,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       child: child,
     );
-  }
-
-  IconData _iconForMasterGainStagingRow(int iconId) {
-    switch (iconId) {
-      case 1:
-        return Icons.piano;
-      case 2:
-        return Icons.graphic_eq;
-      case 3:
-        return Icons.queue_music;
-      case 4:
-        return Icons.music_note;
-      case 5:
-        return Icons.podcasts;
-      default:
-        return Icons.audio_file;
-    }
   }
 
   String _technicalLevelLabel(double peakDb) {
@@ -38338,7 +38444,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       clip.engineClipId >= 0 ? clip.engineClipId : idx,
                     ),
                     clip: clip,
-                    availableInstruments: _uiInstrumentCatalog(),
+                    availableInstruments: _instrumentCatalogForCurrentPlan(
+                      _uiInstrumentCatalog(),
+                    ),
                     bpm: _tempo,
                     projectPlayheadMs: clock.inMilliseconds.toDouble(),
                     isPlaying: _isPlaying,
@@ -81720,7 +81828,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           ),
                                           clip: clip,
                                           availableInstruments:
-                                              _uiInstrumentCatalog(),
+                                              _instrumentCatalogForCurrentPlan(
+                                                _uiInstrumentCatalog(),
+                                              ),
                                           bpm: _tempo,
                                           projectPlayheadMs: clock
                                               .inMilliseconds
