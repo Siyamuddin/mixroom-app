@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'dart:math' as math;
 import 'package:mixroom/models/models.dart';
-import 'package:material_symbols_icons/symbols.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
@@ -22,6 +21,7 @@ import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/track_group_reconciler.dart';
+import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
@@ -13171,23 +13171,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  IconData _iconForRow(int iconId) {
-    switch (iconId) {
-      case 1:
-        return Icons.piano;
-      case 2:
-        return Icons.graphic_eq;
-      case 3:
-        return Icons.queue_music;
-      case 4:
-        return Symbols.music_note;
-      case 5:
-        return Symbols.podcasts;
-      default:
-        return Symbols.audio_file;
-    }
-  }
-
   Future<void> _showRowMenu(int row) async {
     final isInstrumentLane =
         row >= 0 &&
@@ -13569,10 +13552,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
 
     if (action == 'icon') {
+      final currentIconId = widget.rows[row].iconId;
       final selectedIconId = await showDialog<int>(
         context: context,
         builder: (ctx) {
-          const ids = [0, 1, 2, 3, 4, 5];
+          const ids = kTrackRowIconIds;
+          final scrollController = ScrollController();
+          final viewport = MediaQuery.of(ctx).size;
+          final dialogWidth = math.min(264.0, viewport.width - 80.0);
+          final gridHeight = math.min(
+            300.0,
+            math.max(180.0, viewport.height - 260.0),
+          );
           return AlertDialog(
             backgroundColor: const Color(0xFF5F666D),
             surfaceTintColor: Colors.transparent,
@@ -13587,31 +13578,58 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 color: _kTimelineShellText,
               ),
             ),
-            content: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: ids
-                  .map(
-                    (id) => InkWell(
-                      onTap: () => Navigator.pop(ctx, id),
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          color: _kTimelineShellFill,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.12),
+            content: SizedBox(
+              width: dialogWidth,
+              height: gridHeight,
+              child: Scrollbar(
+                controller: scrollController,
+                thumbVisibility: PlatformCapabilities.current.isDesktop,
+                child: GridView.builder(
+                  controller: scrollController,
+                  primary: false,
+                  padding: const EdgeInsets.only(right: 16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 5,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                  ),
+                  itemCount: ids.length,
+                  itemBuilder: (_, index) {
+                    final id = ids[index];
+                    final selected = id == currentIconId;
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => Navigator.pop(ctx, id),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? Colors.white.withValues(alpha: 0.16)
+                                : _kTimelineShellFill,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: selected
+                                  ? const Color(0xFFBDEFE3)
+                                  : Colors.white.withValues(alpha: 0.12),
+                              width: selected ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: Center(
+                            child: buildTrackRowIcon(
+                              id,
+                              size: 22,
+                              color: selected
+                                  ? const Color(0xFFBDEFE3)
+                                  : _kTimelineShellText,
+                            ),
                           ),
                         ),
-                        child: Icon(
-                          _iconForRow(id),
-                          color: _kTimelineShellText,
-                        ),
                       ),
-                    ),
-                  )
-                  .toList(),
+                    );
+                  },
+                ),
+              ),
             ),
           );
         },
@@ -14912,19 +14930,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           ),
         );
       }
+      final leadingIcon = isInstrumentLane
+          ? Icon(
+              Icons.piano_outlined,
+              color: Colors.white,
+              size: headerIconSize,
+            )
+          : buildTrackRowIcon(
+              rowInfo.iconId,
+              size: headerIconSize,
+              color: Colors.white,
+            );
       return SizedBox(
         width: headerIconBox,
         child: Stack(
           clipBehavior: Clip.none,
           alignment: Alignment.center,
           children: [
-            Icon(
-              isInstrumentLane
-                  ? Icons.piano_outlined
-                  : _iconForRow(rowInfo.iconId),
-              color: Colors.white,
-              size: headerIconSize,
-            ),
+            leadingIcon,
             if (frozenRowDescription != null)
               Positioned(
                 right: -5,
@@ -15625,13 +15648,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           borderRadius: BorderRadius.circular(99),
                         ),
                       ),
-                    Icon(
-                      isInstrumentLane
-                          ? Icons.piano_outlined
-                          : _iconForRow(widget.rows[row].iconId),
-                      color: Colors.white,
-                      size: 20,
-                    ),
+                    isInstrumentLane
+                        ? const Icon(
+                            Icons.piano_outlined,
+                            color: Colors.white,
+                            size: 20,
+                          )
+                        : buildTrackRowIcon(
+                            widget.rows[row].iconId,
+                            size: 20,
+                            color: Colors.white,
+                          ),
                     if (frozenRowDescription != null)
                       Tooltip(
                         message: frozenRowDescription,

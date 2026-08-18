@@ -3655,9 +3655,229 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final locationSelectorKey = GlobalObjectKey(
       'cloud_location_selector_${selectedDestination.workspaceId}',
     );
+    final storageDetails = <String>[
+      if (_cloudStorageDetailLabel() != null) _cloudStorageDetailLabel()!,
+      if (_cloudProjectCountDetailLabel() != null)
+        _cloudProjectCountDetailLabel()!,
+    ].join(' • ');
+    Widget buildLocationControl() {
+      return Row(
+        children: [
+          const Icon(Icons.storage_rounded, color: Color(0xFFA4C2FF), size: 16),
+          const SizedBox(width: 8),
+          Text(
+            L10n.translate(context, 'Cloud Location'),
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.78),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Material(
+              key: locationSelectorKey,
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => unawaited(
+                  _showCloudLocationSelector(
+                    destinations,
+                    anchorKey: locationSelectorKey,
+                  ),
+                ),
+                child: Container(
+                  height: 34,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.10),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          selectedDestination.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: Colors.white.withValues(alpha: 0.72),
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget buildSyncControl() {
+      Widget buildModeOption(CloudSyncMode mode) {
+        final selected = _cloudSyncMode == mode;
+        return Expanded(
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => _setCloudSyncMode(mode),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? Colors.white.withValues(alpha: 0.20)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  L10n.translate(
+                    context,
+                    mode == CloudSyncMode.auto ? 'Auto' : 'Manual',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: selected
+                        ? const Color(0xFFF4F4F4)
+                        : Colors.white.withValues(alpha: 0.60),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      return Row(
+        children: [
+          const Icon(Icons.sync_rounded, color: Color(0xFFA4C2FF), size: 16),
+          const SizedBox(width: 8),
+          Text(
+            L10n.translate(context, 'Cloud Sync'),
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.78),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 5),
+          Tooltip(
+            key: _cloudSyncTooltipKey,
+            triggerMode: TooltipTriggerMode.manual,
+            showDuration: const Duration(seconds: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            margin: const EdgeInsets.symmetric(horizontal: 18),
+            decoration: BoxDecoration(
+              color: const Color(0xFF11131A).withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.28),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            richMessage: TextSpan(
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.72),
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                height: 1.42,
+              ),
+              children: [
+                TextSpan(
+                  text: L10n.translate(context, 'Auto'),
+                  style: const TextStyle(
+                    color: Color(0xFFA4C2FF),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const TextSpan(text: ': '),
+                TextSpan(
+                  text: L10n.translate(
+                    context,
+                    'Syncs projects to cloud storage automatically.',
+                  ),
+                ),
+                const TextSpan(text: '\n'),
+                TextSpan(
+                  text: L10n.translate(context, 'Manual'),
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.88),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const TextSpan(text: ': '),
+                TextSpan(
+                  text: L10n.translate(
+                    context,
+                    'Uploads only when you choose "Sync to Cloud" in project settings.',
+                  ),
+                ),
+              ],
+            ),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () =>
+                  _cloudSyncTooltipKey.currentState?.ensureTooltipVisible(),
+              child: SizedBox(
+                width: 20,
+                height: 24,
+                child: Icon(
+                  Icons.info_outline_rounded,
+                  color: Colors.white.withValues(alpha: 0.58),
+                  size: 16,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Container(
+              height: 34,
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.10)),
+              ),
+              child: Row(
+                children: [
+                  buildModeOption(CloudSyncMode.auto),
+                  buildModeOption(CloudSyncMode.manual),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
     return MixroomShellSurface(
-      radius: 24,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      radius: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       color: const Color.fromRGBO(244, 244, 244, 0.16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3667,9 +3887,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               const Icon(
                 Icons.cloud_queue_rounded,
                 color: Color(0xFFA4C2FF),
-                size: 19,
+                size: 18,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3685,23 +3905,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    if (_cloudStorageDetailLabel() != null) ...[
-                      const SizedBox(height: 3),
+                    if (storageDetails.isNotEmpty) ...[
+                      const SizedBox(height: 2),
                       Text(
-                        _cloudStorageDetailLabel()!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontFamily: 'Pretendard',
-                          color: Colors.white.withValues(alpha: 0.72),
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                    if (_cloudProjectCountDetailLabel() != null) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        _cloudProjectCountDetailLabel()!,
+                        storageDetails,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -3712,7 +3919,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       ),
                     ],
                     if (_cloudStorageUsageFraction() != null) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 9),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(99),
                         child: SizedBox(
@@ -3747,8 +3954,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 ),
               ),
               SizedBox(
-                width: 40,
-                height: 40,
+                width: 36,
+                height: 36,
                 child: Center(
                   child: _cloudLoading
                       ? const SizedBox(
@@ -3760,8 +3967,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           onPressed: _refresh,
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints.tightFor(
-                            width: 40,
-                            height: 40,
+                            width: 36,
+                            height: 36,
                           ),
                           icon: const Icon(
                             Icons.refresh_rounded,
@@ -3774,192 +3981,32 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               ),
             ],
           ),
-          if (destinations.length > 1) ...[
+          if (destinations.length > 1 || canConfigureCloudSync) ...[
             const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(
-                  Icons.storage_rounded,
-                  color: Color(0xFFA4C2FF),
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  L10n.translate(context, 'Cloud Location'),
-                  style: TextStyle(
-                    fontFamily: 'Pretendard',
-                    color: Colors.white.withValues(alpha: 0.78),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Material(
-                    key: locationSelectorKey,
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () => unawaited(
-                        _showCloudLocationSelector(
-                          destinations,
-                          anchorKey: locationSelectorKey,
-                        ),
-                      ),
-                      child: Container(
-                        height: 38,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.10),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                selectedDestination.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Icon(
-                              Icons.keyboard_arrow_down_rounded,
-                              color: Colors.white.withValues(alpha: 0.72),
-                              size: 18,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (canConfigureCloudSync) ...[
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                const Icon(
-                  Icons.sync_rounded,
-                  color: Color(0xFFA4C2FF),
-                  size: 18,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  L10n.translate(context, 'Cloud Sync'),
-                  style: TextStyle(
-                    fontFamily: 'Pretendard',
-                    color: Colors.white.withValues(alpha: 0.78),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Tooltip(
-                  key: _cloudSyncTooltipKey,
-                  triggerMode: TooltipTriggerMode.manual,
-                  showDuration: const Duration(seconds: 5),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  margin: const EdgeInsets.symmetric(horizontal: 18),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF11131A).withValues(alpha: 0.96),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.12),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.28),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  richMessage: TextSpan(
-                    style: TextStyle(
-                      fontFamily: 'Pretendard',
-                      color: Colors.white.withValues(alpha: 0.72),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      height: 1.42,
-                    ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final useSingleRow =
+                    destinations.length > 1 &&
+                    canConfigureCloudSync &&
+                    constraints.maxWidth >= 600;
+                if (useSingleRow) {
+                  return Row(
                     children: [
-                      TextSpan(
-                        text: L10n.translate(context, 'Auto'),
-                        style: const TextStyle(
-                          color: Color(0xFFA4C2FF),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const TextSpan(text: ': '),
-                      TextSpan(
-                        text: L10n.translate(
-                          context,
-                          'Syncs projects to cloud storage automatically.',
-                        ),
-                      ),
-                      const TextSpan(text: '\n'),
-                      TextSpan(
-                        text: L10n.translate(context, 'Manual'),
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.88),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const TextSpan(text: ': '),
-                      TextSpan(
-                        text: L10n.translate(
-                          context,
-                          'Uploads only when you choose "Sync to Cloud" in project settings.',
-                        ),
-                      ),
+                      Expanded(child: buildLocationControl()),
+                      const SizedBox(width: 16),
+                      Expanded(child: buildSyncControl()),
                     ],
-                  ),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _cloudSyncTooltipKey.currentState
-                        ?.ensureTooltipVisible(),
-                    child: SizedBox(
-                      width: 20,
-                      height: 24,
-                      child: Icon(
-                        Icons.info_outline_rounded,
-                        color: Colors.white.withValues(alpha: 0.58),
-                        size: 16,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: MixroomShellSegmentedControl<CloudSyncMode>(
-                    value: _cloudSyncMode,
-                    options: const <CloudSyncMode>[
-                      CloudSyncMode.auto,
-                      CloudSyncMode.manual,
-                    ],
-                    labelBuilder: (mode) => L10n.translate(
-                      context,
-                      mode == CloudSyncMode.auto ? 'Auto' : 'Manual',
-                    ),
-                    onChanged: _setCloudSyncMode,
-                  ),
-                ),
-              ],
+                  );
+                }
+                return Column(
+                  children: [
+                    if (destinations.length > 1) buildLocationControl(),
+                    if (destinations.length > 1 && canConfigureCloudSync)
+                      const SizedBox(height: 6),
+                    if (canConfigureCloudSync) buildSyncControl(),
+                  ],
+                );
+              },
             ),
           ],
         ],
@@ -4195,26 +4242,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                 builder: (context, constraints) {
                                   final useCompactProjectMenus =
                                       constraints.maxWidth < 520;
-                                  return ShaderMask(
-                                    shaderCallback: (Rect bounds) {
-                                      const fadeHeight = 32.0;
-                                      final fadeStart =
-                                          ((bounds.height - fadeHeight)
-                                              .clamp(0.0, bounds.height)
-                                              .toDouble()) /
-                                          bounds.height;
-                                      return LinearGradient(
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                        colors: const <Color>[
-                                          Color(0xFFFFFFFF),
-                                          Color(0xFFFFFFFF),
-                                          Color(0x00FFFFFF),
-                                        ],
-                                        stops: <double>[0.0, fadeStart, 1.0],
-                                      ).createShader(bounds);
-                                    },
-                                    blendMode: BlendMode.dstIn,
+                                  return _ProjectListBottomFade(
+                                    controller: _libraryScrollControllers[tab]!,
                                     child: ListView.separated(
                                       key: ValueKey<String>(
                                         'projects_list_${tab.name}',
@@ -4981,11 +5010,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               if (tab == _ProjectLibraryTab.cloudProjects) ...[
-                                const SizedBox(height: 12),
+                                const SizedBox(height: 6),
                                 _buildCloudStoragePanel(
                                   canConfigureCloudSync: canConfigureCloudSync,
                                 ),
-                                const SizedBox(height: 18),
+                                const SizedBox(height: 10),
                               ] else
                                 const SizedBox(height: 18),
                               Expanded(child: tabBody),
@@ -5344,6 +5373,81 @@ class _CloudProjectDetailRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ProjectListBottomFade extends StatefulWidget {
+  const _ProjectListBottomFade({required this.controller, required this.child});
+
+  final ScrollController controller;
+  final Widget child;
+
+  @override
+  State<_ProjectListBottomFade> createState() => _ProjectListBottomFadeState();
+}
+
+class _ProjectListBottomFadeState extends State<_ProjectListBottomFade> {
+  bool _hasMoreBelow = true;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_updateExtent);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateExtent());
+  }
+
+  @override
+  void didUpdateWidget(covariant _ProjectListBottomFade oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_updateExtent);
+      widget.controller.addListener(_updateExtent);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateExtent());
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_updateExtent);
+    super.dispose();
+  }
+
+  void _updateExtent() {
+    if (!mounted || !widget.controller.hasClients) return;
+    final hasMoreBelow = widget.controller.position.extentAfter > 2;
+    if (hasMoreBelow == _hasMoreBelow) return;
+    setState(() => _hasMoreBelow = hasMoreBelow);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ShaderMask(
+      shaderCallback: (Rect bounds) {
+        if (!_hasMoreBelow) {
+          return const LinearGradient(
+            colors: <Color>[Color(0xFFFFFFFF), Color(0xFFFFFFFF)],
+          ).createShader(bounds);
+        }
+        const fadeHeight = 28.0;
+        final fadeStart =
+            ((bounds.height - fadeHeight)
+                .clamp(0.0, bounds.height)
+                .toDouble()) /
+            bounds.height;
+        return LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: const <Color>[
+            Color(0xFFFFFFFF),
+            Color(0xFFFFFFFF),
+            Color(0x00FFFFFF),
+          ],
+          stops: <double>[0.0, fadeStart, 1.0],
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.dstIn,
+      child: widget.child,
     );
   }
 }

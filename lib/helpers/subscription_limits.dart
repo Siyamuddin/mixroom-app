@@ -19,6 +19,7 @@ class SubscriptionLimits {
     'Transient Shaper',
     'Chorus',
     'Limiter',
+    'Volume Shaper',
   };
 
   static const Set<String> freeBuiltInInstrumentIds = <String>{
