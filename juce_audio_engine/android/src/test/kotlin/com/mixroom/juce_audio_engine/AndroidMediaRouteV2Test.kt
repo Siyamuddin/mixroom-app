@@ -200,6 +200,49 @@ internal class AndroidMediaRouteV2Test {
   }
 
   @Test
+  fun removedBluetoothRecoveryAcceptsVerifiedSystemSelectedBuiltInReplacement() {
+    val preOpenSpeaker = endpoint(2, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+    val routedSpeaker = endpoint(3, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+
+    assertEquals(
+      "route_unstable",
+      AndroidLiveRouteValidatorV2.validate(
+        AndroidMediaRouteResolutionV2(preOpenSpeaker, "ok"),
+        AndroidMediaRouteResolutionV2(preOpenSpeaker, "ok"),
+        routedSpeaker,
+        validStream(routedSpeaker.id),
+      ),
+    )
+    assertEquals(
+      "ok",
+      AndroidLiveRouteValidatorV2.validate(
+        AndroidMediaRouteResolutionV2(preOpenSpeaker, "ok"),
+        AndroidMediaRouteResolutionV2(preOpenSpeaker, "ok"),
+        routedSpeaker,
+        validStream(routedSpeaker.id),
+        acceptSystemSelectedReplacement = true,
+      ),
+    )
+  }
+
+  @Test
+  fun removedBluetoothRecoveryRejectsUnrelatedReplacementClass() {
+    val speaker = endpoint(2, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+    val wired = endpoint(9, AudioDeviceInfo.TYPE_WIRED_HEADPHONES)
+
+    assertEquals(
+      "route_unstable",
+      AndroidLiveRouteValidatorV2.validate(
+        AndroidMediaRouteResolutionV2(speaker, "ok"),
+        AndroidMediaRouteResolutionV2(speaker, "ok"),
+        wired,
+        validStream(wired.id),
+        acceptSystemSelectedReplacement = true,
+      ),
+    )
+  }
+
+  @Test
   fun liveTransitionRejectsRouteChangesAndDuplexRoutes() {
     val bluetooth = endpoint(17, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
     val changed = endpoint(18, AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
@@ -246,6 +289,76 @@ internal class AndroidMediaRouteV2Test {
         route,
         bluetooth,
         validStream(17).copy(performanceMode = "LowLatency"),
+      ),
+    )
+  }
+
+  @Test
+  fun bluetoothDuplexRequiresExactCommunicationRouteAndNativeStreams() {
+    val source = AndroidRouteEndpointV2(
+      17,
+      AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+      "media",
+      2,
+    )
+    val output = AndroidRouteEndpointV2(
+      19,
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      "communication-output",
+      1,
+    )
+    val input = AndroidRouteEndpointV2(
+      20,
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      "communication-input",
+      1,
+    )
+    val stream = AndroidOboeOutputFactsV2(
+      available = true,
+      running = true,
+      routedDeviceId = output.id,
+      sampleRateHz = 16000,
+      bufferFrames = 256,
+      bufferCapacityFrames = 512,
+      framesPerBurst = 128,
+      audioBackend = "AAudio",
+      performanceMode = "None",
+      sharingMode = "Shared",
+      channelCount = 1,
+    )
+    val facts = AndroidBluetoothDuplexFactsV2(
+      apiLevel = 31,
+      sourceOutput = source,
+      selectedCommunicationOutput = output,
+      actualInput = input,
+      actualOutput = output,
+      audioMode = android.media.AudioManager.MODE_IN_COMMUNICATION,
+      communicationDeviceId = output.id,
+      deviceOpen = true,
+      callbackAttached = true,
+      activeInputChannels = 1,
+      activeOutputChannels = 1,
+      sampleRateHz = 16000.0,
+      bufferFrames = 256,
+      inputStream = stream.copy(routedDeviceId = input.id),
+      outputStream = stream,
+    )
+
+    assertEquals("ok", AndroidBluetoothDuplexReadinessV2.validate(facts))
+    assertEquals(
+      "recording_route_unsupported",
+      AndroidBluetoothDuplexReadinessV2.validate(facts.copy(apiLevel = 30)),
+    )
+    assertEquals(
+      "route_unstable",
+      AndroidBluetoothDuplexReadinessV2.validate(
+        facts.copy(communicationDeviceId = 99),
+      ),
+    )
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidBluetoothDuplexReadinessV2.validate(
+        facts.copy(inputStream = facts.inputStream.copy(performanceMode = "LowLatency")),
       ),
     )
   }

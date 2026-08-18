@@ -16,8 +16,10 @@ object JuceBridge {
     @JvmStatic external fun quiescePlaybackV2JNI(closeDevice: Boolean): Boolean
     @JvmStatic external fun reconfigurePlaybackV2JNI(): Boolean
     @JvmStatic external fun prepareRecordingV2JNI(): Boolean
+    @JvmStatic external fun prepareBluetoothDuplexProbeV2JNI(): Boolean
     @JvmStatic external fun waitForV2CallbackReadyJNI(timeoutMs: Int): Boolean
     @JvmStatic external fun setBluetoothMediaPlaybackPolicyV2JNI(enabled: Boolean)
+    @JvmStatic external fun setAndroidStreamPolicyV2JNI(policy: Int)
     @JvmStatic external fun resetPlaybackPolicyV2JNI()
     @JvmStatic external fun getOboeOutputStreamFactsV2JNI(): HashMap<String, Any>
     @JvmStatic external fun getOboeInputStreamFactsV2JNI(): HashMap<String, Any>

@@ -151,4 +151,79 @@ internal class AndroidRecordingRouteV2Test {
       ),
     )
   }
+
+  @Test
+  fun explicitBluetoothTransactionIgnoresPlaybackActivityAndInventoryAdditions() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.INFORMATIONAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.INFORMATIONAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.DEVICE_ADDED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+  }
+
+  @Test
+  fun explicitBluetoothTransactionOnlyTerminatesForOwnedEndpointRemoval() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
+        removedDeviceIds = setOf(21),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
+        removedDeviceIds = setOf(22),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.INFORMATIONAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
+        removedDeviceIds = setOf(99),
+      ),
+    )
+  }
+
+  @Test
+  fun routeSignalsRemainOrdinaryOutsideTheExplicitTransaction() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.ORDINARY,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = false,
+        operationEndpointIds = null,
+        signal = AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = null,
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
+        removedDeviceIds = setOf(21),
+      ),
+    )
+  }
 }

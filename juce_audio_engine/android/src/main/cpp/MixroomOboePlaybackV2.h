@@ -5,6 +5,13 @@
 
 namespace mixroom::android_audio_v2
 {
+enum class StreamPolicy : int32_t
+{
+    normal = 0,
+    bluetoothMedia = 1,
+    bluetoothCommunicationDuplex = 2,
+};
+
 constexpr int conservativeBufferTarget (int framesPerBurst, int capacity)
 {
     if (framesPerBurst <= 0 || capacity <= 0)
@@ -44,8 +51,11 @@ using OutputStreamFacts = StreamFacts;
 using InputStreamFacts = StreamFacts;
 
 void setBluetoothMediaPolicyEnabled (bool enabled);
+void setStreamPolicy (StreamPolicy policy);
 void resetPlaybackPolicy();
 bool isBluetoothMediaPolicyEnabled();
+bool isBluetoothCommunicationDuplexPolicyEnabled();
+StreamPolicy getStreamPolicy();
 OutputStreamFacts getOutputStreamFacts();
 InputStreamFacts getInputStreamFacts();
 } // namespace mixroom::android_audio_v2

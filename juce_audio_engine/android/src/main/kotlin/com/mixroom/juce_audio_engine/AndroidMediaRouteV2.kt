@@ -168,6 +168,7 @@ internal object AndroidLiveRouteValidatorV2 {
     actual: AndroidMediaRouteResolutionV2,
     actualEndpoint: AndroidRouteEndpointV2?,
     stream: AndroidOboeOutputFactsV2,
+    acceptSystemSelectedReplacement: Boolean = false,
   ): String {
     if (expected.diagnosticCode != "ok") return expected.diagnosticCode
     if (actual.diagnosticCode != "ok") return actual.diagnosticCode
@@ -188,11 +189,19 @@ internal object AndroidLiveRouteValidatorV2 {
     val expectedEndpoint = expected.endpoint
     if (expectedEndpoint != null) {
       val actualResolved = actual.endpoint ?: return "route_unstable"
-      if (
-        actualResolved.fingerprint != expectedEndpoint.fingerprint ||
-        stream.routedDeviceId != expectedEndpoint.id
-      ) {
-        return "route_unstable"
+      val exactRoute =
+        actualResolved.fingerprint == expectedEndpoint.fingerprint &&
+          stream.routedDeviceId == expectedEndpoint.id
+      if (!exactRoute) {
+        val routedEndpoint = actualEndpoint ?: return "route_unstable"
+        val systemReplacementIsVerified =
+          acceptSystemSelectedReplacement &&
+            !expected.isBluetooth &&
+            actualResolved.kind == expectedEndpoint.kind &&
+            routedEndpoint.kind == expectedEndpoint.kind &&
+            routedEndpoint.kind != AndroidRouteKindV2.BLUETOOTH_DUPLEX &&
+            stream.routedDeviceId == routedEndpoint.id
+        if (!systemReplacementIsVerified) return "route_unstable"
       }
       if (expectedEndpoint.kind == AndroidRouteKindV2.BLUETOOTH_DUPLEX) {
         return "bluetooth_duplex_forbidden"

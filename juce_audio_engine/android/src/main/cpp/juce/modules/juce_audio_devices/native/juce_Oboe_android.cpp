@@ -52,7 +52,9 @@ namespace juce
 
 namespace
 {
-std::atomic<bool> mixroomBluetoothMediaPolicyV2 { false };
+std::atomic<int32_t> mixroomStreamPolicyV2 {
+    static_cast<int32_t> (mixroom::android_audio_v2::StreamPolicy::normal)
+};
 std::mutex mixroomOutputStreamMutexV2;
 std::weak_ptr<oboe::AudioStream> mixroomOutputStreamV2;
 int mixroomRequestedSampleRateV2 = 0;
@@ -111,7 +113,13 @@ namespace mixroom::android_audio_v2
 {
 void setBluetoothMediaPolicyEnabled (bool enabled)
 {
-    juce::mixroomBluetoothMediaPolicyV2.store (enabled, std::memory_order_release);
+    setStreamPolicy (enabled ? StreamPolicy::bluetoothMedia : StreamPolicy::normal);
+}
+
+void setStreamPolicy (StreamPolicy policy)
+{
+    juce::mixroomStreamPolicyV2.store (static_cast<int32_t> (policy),
+                                       std::memory_order_release);
 }
 
 void resetPlaybackPolicy()
@@ -131,7 +139,18 @@ void resetPlaybackPolicy()
 
 bool isBluetoothMediaPolicyEnabled()
 {
-    return juce::mixroomBluetoothMediaPolicyV2.load (std::memory_order_acquire);
+    return getStreamPolicy() == StreamPolicy::bluetoothMedia;
+}
+
+bool isBluetoothCommunicationDuplexPolicyEnabled()
+{
+    return getStreamPolicy() == StreamPolicy::bluetoothCommunicationDuplex;
+}
+
+StreamPolicy getStreamPolicy()
+{
+    return static_cast<StreamPolicy> (
+        juce::mixroomStreamPolicyV2.load (std::memory_order_acquire));
 }
 
 OutputStreamFacts getOutputStreamFacts()
@@ -410,7 +429,8 @@ public:
 
         deviceOpen = session != nullptr;
 
-        if (deviceOpen && mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled())
+        if (deviceOpen && (mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled()
+                           || mixroom::android_audio_v2::isBluetoothCommunicationDuplexPolicyEnabled()))
         {
             const auto facts = mixroom::android_audio_v2::getOutputStreamFacts();
             sampleRate = facts.sampleRate;
@@ -640,8 +660,11 @@ private:
                     oboe::AudioStreamCallback* callbackIn = nullptr)
         {
             streamDirection = direction;
+            streamPolicyV2 = mixroom::android_audio_v2::getStreamPolicy();
             usesBluetoothMediaPolicyV2 = direction == oboe::Direction::Output
-                                         && mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled();
+                                         && streamPolicyV2 == mixroom::android_audio_v2::StreamPolicy::bluetoothMedia;
+            usesBluetoothCommunicationDuplexPolicyV2 =
+                streamPolicyV2 == mixroom::android_audio_v2::StreamPolicy::bluetoothCommunicationDuplex;
             open (deviceId, direction, sharingMode, audioApi, performanceMode, channelCount,
                   format, sampleRateIn, bufferSize, callbackIn);
         }
@@ -732,21 +755,29 @@ private:
             builder.setSharingMode (sharingMode);
             builder.setChannelCount (channelCount);
             builder.setFormat (format);
-            builder.setSampleRate (usesBluetoothMediaPolicyV2 ? oboe::kUnspecified : newSampleRate);
-            builder.setPerformanceMode (usesBluetoothMediaPolicyV2
+            const bool routeNativePolicy = usesBluetoothMediaPolicyV2
+                                           || usesBluetoothCommunicationDuplexPolicyV2;
+            builder.setSampleRate (routeNativePolicy ? oboe::kUnspecified : newSampleRate);
+            builder.setPerformanceMode (routeNativePolicy
                                             ? oboe::PerformanceMode::None
                                             : performanceMode);
 
             if (direction == oboe::Direction::Output)
             {
-                builder.setUsage (oboe::Usage::Media);
-                builder.setContentType (oboe::ContentType::Music);
+                builder.setUsage (usesBluetoothCommunicationDuplexPolicyV2
+                                      ? oboe::Usage::VoiceCommunication
+                                      : oboe::Usage::Media);
+                builder.setContentType (usesBluetoothCommunicationDuplexPolicyV2
+                                            ? oboe::ContentType::Speech
+                                            : oboe::ContentType::Music);
             }
             else
             {
                 // Oboe defaults to VoiceRecognition for inputs, which can push
                 // Android onto voice-oriented preprocessing/duplex behavior.
-                builder.setInputPreset (oboe::InputPreset::Generic);
+                builder.setInputPreset (usesBluetoothCommunicationDuplexPolicyV2
+                                            ? oboe::InputPreset::VoiceCommunication
+                                            : oboe::InputPreset::Generic);
             }
 
            #if JUCE_USE_ANDROID_OBOE_STABILIZED_CALLBACK
@@ -774,7 +805,7 @@ private:
             JUCE_OBOE_LOG ("Building Oboe stream with result: " + getOboeString (openResult)
                  + "\nStream state = " + (stream != nullptr ? getOboeString (stream->getState()) : String ("?")));
 
-            int requestedBufferFrames = newBufferSize;
+            int requestedBufferFrames = routeNativePolicy ? 0 : newBufferSize;
             if (stream != nullptr && openResult == oboe::Result::OK && usesBluetoothMediaPolicyV2)
             {
                 const auto capacity = stream->getBufferCapacityInFrames();
@@ -788,7 +819,9 @@ private:
                     stream->setBufferSizeInFrames (target);
                 }
             }
-            else if (stream != nullptr && newBufferSize != 0)
+            else if (stream != nullptr
+                     && ! usesBluetoothCommunicationDuplexPolicyV2
+                     && newBufferSize != 0)
             {
                 JUCE_OBOE_LOG ("Setting the bufferSizeInFrames to " + String (newBufferSize));
                 stream->setBufferSizeInFrames (newBufferSize);
@@ -797,12 +830,12 @@ private:
             if (stream != nullptr && openResult == oboe::Result::OK
                 && direction == oboe::Direction::Output)
                 setMixroomOutputStreamV2 (stream,
-                                          usesBluetoothMediaPolicyV2 ? 0 : newSampleRate,
+                                          routeNativePolicy ? 0 : newSampleRate,
                                           requestedBufferFrames);
             else if (stream != nullptr && openResult == oboe::Result::OK
                      && direction == oboe::Direction::Input)
                 setMixroomInputStreamV2 (stream,
-                                         newSampleRate,
+                                         routeNativePolicy ? 0 : newSampleRate,
                                          requestedBufferFrames);
 
             JUCE_OBOE_LOG (String ("Stream details:")
@@ -842,6 +875,9 @@ private:
         oboe::Result openResult;
         oboe::Direction streamDirection = oboe::Direction::Output;
         bool usesBluetoothMediaPolicyV2 = false;
+        bool usesBluetoothCommunicationDuplexPolicyV2 = false;
+        mixroom::android_audio_v2::StreamPolicy streamPolicyV2 =
+            mixroom::android_audio_v2::StreamPolicy::normal;
     };
 
     //==============================================================================
@@ -893,10 +929,12 @@ private:
               streamFormat (streamFormatToUse),
               bitDepth (bitDepthToUse),
               outputSharingMode (oboe::SharingMode::Shared),
-              outputAudioApi (mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled()
+              outputAudioApi ((mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled()
+                               || mixroom::android_audio_v2::isBluetoothCommunicationDuplexPolicyEnabled())
                                   ? oboe::AudioApi::Unspecified
                                   : oboe::AudioApi::AAudio),
-              outputPerformanceMode (mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled()
+              outputPerformanceMode ((mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled()
+                                      || mixroom::android_audio_v2::isBluetoothCommunicationDuplexPolicyEnabled())
                                           ? oboe::PerformanceMode::None
                                           : oboe::PerformanceMode::LowLatency),
               outputStream (new OboeStream (outputDeviceId,
@@ -912,11 +950,15 @@ private:
         {
             if (numInputChannels > 0)
             {
+                const bool communicationDuplex =
+                    mixroom::android_audio_v2::isBluetoothCommunicationDuplexPolicyEnabled();
                 inputStream.reset (new OboeStream (inputDeviceId,
                                                    oboe::Direction::Input,
-                                                   oboe::SharingMode::Exclusive,
+                                                   communicationDuplex ? oboe::SharingMode::Shared
+                                                                       : oboe::SharingMode::Exclusive,
                                                    oboe::AudioApi::Unspecified,
-                                                   oboe::PerformanceMode::LowLatency,
+                                                   communicationDuplex ? oboe::PerformanceMode::None
+                                                                       : oboe::PerformanceMode::LowLatency,
                                                    numInputChannels,
                                                    streamFormatToUse,
                                                    sampleRateToUse,
@@ -935,11 +977,13 @@ private:
                 }
 
                 checkStreamSetup (inputStream.get(), inputDeviceId, numInputChannels,
-                                  sampleRate, bufferSize, streamFormat);
+                                  communicationDuplex ? 0 : sampleRate,
+                                  bufferSize, streamFormat);
             }
 
             checkStreamSetup (outputStream.get(), outputDeviceId, numOutputChannels,
-                              mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled() ? 0 : sampleRate,
+                              (mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled()
+                               || mixroom::android_audio_v2::isBluetoothCommunicationDuplexPolicyEnabled()) ? 0 : sampleRate,
                               bufferSize, streamFormat);
         }
 

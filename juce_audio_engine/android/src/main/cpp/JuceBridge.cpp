@@ -1368,6 +1368,19 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexProbeV2JNI(
+    JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().prepareBluetoothDuplexProbeV2Android(); });
+    else
+        success = JuceEngine::get().prepareBluetoothDuplexProbeV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForV2CallbackReadyJNI(
     JNIEnv *, jclass, jint timeoutMs)
 {
@@ -1381,6 +1394,19 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setBluetoothMediaPlaybackPolicyV
     JNIEnv *, jclass, jboolean enabled)
 {
     mixroom::android_audio_v2::setBluetoothMediaPolicyEnabled(enabled != JNI_FALSE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAndroidStreamPolicyV2JNI(
+    JNIEnv *, jclass, jint policy)
+{
+    using Policy = mixroom::android_audio_v2::StreamPolicy;
+    const auto selected = policy == static_cast<jint> (Policy::bluetoothMedia)
+                              ? Policy::bluetoothMedia
+                              : policy == static_cast<jint> (Policy::bluetoothCommunicationDuplex)
+                                    ? Policy::bluetoothCommunicationDuplex
+                                    : Policy::normal;
+    mixroom::android_audio_v2::setStreamPolicy(selected);
 }
 
 extern "C" JNIEXPORT void JNICALL
