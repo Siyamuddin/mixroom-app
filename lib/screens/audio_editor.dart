@@ -58,6 +58,7 @@ import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/magnitude_predictor.dart';
 import 'package:mixroom/ai/magnitude_predictor_flags.dart';
+import 'package:mixroom/ai/one_button_mix_profiles.dart';
 import 'package:mixroom/ai/onnx_magnitude_predictor.dart';
 import 'package:mixroom/ai/producer_data_collector.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
@@ -4702,24 +4703,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     resampleQuality: _ExportResampleQuality.best,
   );
   _AudioExportSettings? _activeAudioExportSettings;
-  static const List<String> _kOneButtonMixProfiles = <String>[
-    'Mixroom Producer',
-  ];
   static const Color _kOneButtonMixAccentColor = Color.fromRGBO(
     0,
     149,
     255,
     0.60,
   );
-  String _selectedOneButtonMixProfile = 'Mixroom Producer';
+  String _selectedOneButtonMixProfileId = OneButtonMixProfiles.producerId;
 
-  String _localizedOneButtonMixProfile(BuildContext context, String profile) {
-    switch (profile) {
-      case 'Mixroom Producer':
-        return L10n.translate(context, 'Mixroom Producer');
-      default:
-        return profile;
-    }
+  String _localizedOneButtonMixProfile(BuildContext context, String profileId) {
+    return L10n.translate(
+      context,
+      OneButtonMixProfiles.byId(profileId).label,
+    );
   }
 
   List<int> _exportSampleRatesForFormat(_ExportAudioFormat format) {
@@ -72159,7 +72155,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _confirmOneButtonMix({BuildContext? anchorContext}) async {
-    var selectedProfile = _selectedOneButtonMixProfile;
+    var selectedProfile = _selectedOneButtonMixProfileId;
     final routeAnchorContext = anchorContext ?? context;
     final shouldRun = await showMixroomGlassDropdown<bool>(
       anchorContext: routeAnchorContext,
@@ -72195,7 +72191,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _buildMixroomDropdownField<String>(
                   label: 'Profile',
                   value: selectedProfile,
-                  options: _kOneButtonMixProfiles,
+                  options: OneButtonMixProfiles.all
+                      .map((profile) => profile.id)
+                      .toList(growable: false),
                   textBuilder: (profile) =>
                       _localizedOneButtonMixProfile(context, profile),
                   onChanged: (value) {
@@ -72212,7 +72210,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 Text(
                   L10n.translate(
                     context,
-                    'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.',
+                    OneButtonMixProfiles.byId(selectedProfile).description,
                   ),
                   style: TextStyle(
                     fontFamily: 'Pretendard',
@@ -72220,6 +72218,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     fontWeight: FontWeight.w400,
                     height: 1.4,
                     color: Colors.white.withValues(alpha: 0.86),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  L10n.translate(
+                    context,
+                    'You can undo everything after it runs.',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    height: 1.35,
+                    color: Colors.white.withValues(alpha: 0.66),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -72262,7 +72274,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     Expanded(
                       child: TextButton(
                         onPressed: () {
-                          _selectedOneButtonMixProfile = selectedProfile;
+                          _selectedOneButtonMixProfileId = selectedProfile;
                           Navigator.pop(context, true);
                         },
                         style: TextButton.styleFrom(
@@ -72532,11 +72544,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       persist: false,
     );
 
-    final prompt =
-        "Make this mix sound like a finished, professional release. "
-        "Balance levels, reduce masking, tame harshness, and set tasteful space. "
-        "Keep it natural and avoid extreme changes, and don't make it that quiet, prefer loud over soft. "
-        "This is not a proposal but an execution. You may proceed without my approval";
+    final selectedProfile =
+        OneButtonMixProfiles.byId(_selectedOneButtonMixProfileId);
+    final prompt = OneButtonMixProfiles.buildPrompt(selectedProfile.id);
     const aiFeature = 'one_button_mix';
     final promptTraceId = const Uuid().v4();
     final promptCycleStopwatch = Stopwatch()..start();
@@ -72612,6 +72622,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clientStateDigest: _freshAiV3StateFingerprint(),
         autoApplyProposals: true, // <-- key
         bypassLearnedMagnitudes: _producerDataMode,
+        oneButtonMixProfileId: selectedProfile.id,
       );
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'one_button_pipeline');

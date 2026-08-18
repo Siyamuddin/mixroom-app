@@ -1652,6 +1652,15 @@ class L10n {
           'Refresh audio devices': 'Refresh audio devices',
           'Profile': 'Profile',
           'Mixroom Producer': 'Mixroom Producer',
+          'Warm & Spacious': 'Warm & Spacious',
+          'Punchy & Energetic': 'Punchy & Energetic',
+          'Balanced, clear, and natural.': 'Balanced, clear, and natural.',
+          'Rounder tone, softer edges, and deeper space.':
+              'Rounder tone, softer edges, and deeper space.',
+          'Tighter lows, stronger transients, and forward energy.':
+              'Tighter lows, stronger transients, and forward energy.',
+          'You can undo everything after it runs.':
+              'You can undo everything after it runs.',
           'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.':
               'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.',
           'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.':
@@ -3626,6 +3635,14 @@ class L10n {
           'Refresh audio devices': '오디오 장치 새로고침',
           'Profile': '프로필',
           'Mixroom Producer': '믹스룸 프로듀서',
+          'Warm & Spacious': '따뜻하고 공간감 있게',
+          'Punchy & Energetic': '펀치감 있고 에너지 넘치게',
+          'Balanced, clear, and natural.': '균형 잡히고 선명하며 자연스럽게 믹싱합니다.',
+          'Rounder tone, softer edges, and deeper space.':
+              '더 둥근 톤과 부드러운 질감, 깊은 공간감을 만듭니다.',
+          'Tighter lows, stronger transients, and forward energy.':
+              '저역을 단단하게 하고 트랜지언트와 에너지를 앞으로 끌어냅니다.',
+          'You can undo everything after it runs.': '실행 후에는 모든 변경을 되돌릴 수 있습니다.',
           'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.':
               '레벨 밸런스를 맞추고 마스킹을 줄여 선명도를 높입니다.\n실행 후에는 모든 변경을 되돌릴 수 있습니다.',
           'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.':
@@ -4758,6 +4775,13 @@ class L10n {
           'Select Icon': '选择图标',
           'Profile': '配置',
           'Mixroom Producer': 'Mixroom 制作人',
+          'Warm & Spacious': '温暖宽广',
+          'Punchy & Energetic': '有力活跃',
+          'Balanced, clear, and natural.': '平衡、清晰且自然。',
+          'Rounder tone, softer edges, and deeper space.': '音色更圆润、边缘更柔和、空间更深。',
+          'Tighter lows, stronger transients, and forward energy.':
+              '低频更紧实、瞬态更强、能量更靠前。',
+          'You can undo everything after it runs.': '执行后你仍可撤销所有更改。',
           'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.':
               '平衡电平、减少掩蔽并提升清晰度。\n执行后你仍可撤销所有更改。',
           'Audition folders and drag and drop': '预听文件夹并拖放',
@@ -6342,6 +6366,14 @@ class L10n {
           'S-Curve Crossfade': 'Sカーブクロスフェード',
           'Profile': 'プロファイル',
           'Mixroom Producer': 'Mixroom プロデューサー',
+          'Warm & Spacious': 'ウォーム＆スペーシャス',
+          'Punchy & Energetic': 'パンチー＆エネルギッシュ',
+          'Balanced, clear, and natural.': 'バランスよく、クリアで自然に仕上げます。',
+          'Rounder tone, softer edges, and deeper space.':
+              '丸みのある音色、柔らかな輪郭、深い空間を作ります。',
+          'Tighter lows, stronger transients, and forward energy.':
+              '低域を引き締め、トランジェントと前向きなエネルギーを強めます。',
+          'You can undo everything after it runs.': '実行後でもすべて元に戻せます。',
           'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.':
               'レベルを整え、マスキングを減らし、明瞭さを高めます。\n実行後でもすべて元に戻せます。',
           'Audition folders and drag and drop': 'フォルダー試聴とドラッグ&ドロップ',
