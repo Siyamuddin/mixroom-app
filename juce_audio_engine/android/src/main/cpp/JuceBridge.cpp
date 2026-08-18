@@ -1368,15 +1368,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexProbeV2JNI(
-    JNIEnv *, jclass)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexV2JNI(
+    JNIEnv *, jclass, jboolean recordingCapable)
 {
     bool success = false;
     if (auto *mm = juce::MessageManager::getInstance())
-        mm->callSync([&success]
-                     { success = JuceEngine::get().prepareBluetoothDuplexProbeV2Android(); });
+        mm->callSync([&success, recordingCapable]
+                     { success = JuceEngine::get().prepareBluetoothDuplexV2Android(recordingCapable == JNI_TRUE); });
     else
-        success = JuceEngine::get().prepareBluetoothDuplexProbeV2Android();
+        success = JuceEngine::get().prepareBluetoothDuplexV2Android(recordingCapable == JNI_TRUE);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -1387,6 +1387,33 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForV2CallbackReadyJNI(
     return JuceEngine::get().waitForV2CallbackReady((int)timeoutMs)
                ? JNI_TRUE
                : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginBluetoothMediaRouteMigrationV2JNI(
+    JNIEnv *, jclass)
+{
+    return static_cast<jlong> (
+        mixroom::android_audio_v2::beginBluetoothMediaRouteMigration());
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForBluetoothMediaRouteMigrationV2JNI(
+    JNIEnv *, jclass, jlong token, jint timeoutMs)
+{
+    return mixroom::android_audio_v2::waitForBluetoothMediaRouteMigration (
+               static_cast<uint64_t> (token),
+               juce::jlimit (1, 5000, static_cast<int> (timeoutMs)))
+               ? JNI_TRUE
+               : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_finishBluetoothMediaRouteMigrationV2JNI(
+    JNIEnv *, jclass, jlong token)
+{
+    mixroom::android_audio_v2::finishBluetoothMediaRouteMigration (
+        static_cast<uint64_t> (token));
 }
 
 extern "C" JNIEXPORT void JNICALL

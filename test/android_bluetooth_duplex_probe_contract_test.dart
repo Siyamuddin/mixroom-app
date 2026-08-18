@@ -26,7 +26,7 @@ void main() {
   });
 
   test('API 31 probe selects one SCO sink without names or addresses', () {
-    final start = plugin.indexOf('private fun prepareBluetoothDuplexProbeV2(');
+    final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
     final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
     final probe = plugin.substring(start, end);
 
@@ -41,7 +41,7 @@ void main() {
   });
 
   test('selection is event-driven with one bounded operation deadline', () {
-    final start = plugin.indexOf('private fun prepareBluetoothDuplexProbeV2(');
+    final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
     final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
     final probe = plugin.substring(start, end);
 
@@ -71,7 +71,7 @@ void main() {
 
   test('probe proves the project callback but cannot record', () {
     final start = engine.indexOf(
-      'bool JuceEngine::prepareBluetoothDuplexProbeV2Android()',
+      'bool JuceEngine::prepareBluetoothDuplexV2Android(bool recordingCapable)',
     );
     final end = engine.indexOf(
       'bool JuceEngine::waitForV2CallbackReady',
@@ -87,6 +87,8 @@ void main() {
       contains('deviceManager.addAudioCallback(metronomeCallback.get())'),
     );
     expect(probe, isNot(contains('startRecordingToWav')));
+    expect(probe, contains('androidV2RecordingPrepared = recordingCapable'));
+    expect(probe, contains('androidV2DuplexProbePrepared = !recordingCapable'));
     expect(
       engine,
       contains('wavCapture.isActive() || androidV2DuplexProbePrepared'),
@@ -138,6 +140,65 @@ void main() {
       restore.indexOf('addOnCommunicationDeviceChangedListener('),
       lessThan(restore.indexOf('preparePlaybackOnlyModeV2()')),
     );
+    expect(
+      restore.indexOf('preparePlaybackOnlyModeV2()'),
+      lessThan(
+        restore.indexOf('audioManager.communicationDevice?.id != target.id'),
+      ),
+    );
+    expect(
+      restore.indexOf('audioManager.communicationDevice?.id != target.id'),
+      lessThan(restore.indexOf('releaseSignal.first.await(')),
+    );
+    final playbackCallbackStart = plugin.indexOf(
+      'private val audioPlaybackCallbackV2',
+    );
+    final playbackCallbackEnd = plugin.indexOf(
+      'private var eventsSink',
+      playbackCallbackStart,
+    );
+    final playbackCallback = plugin.substring(
+      playbackCallbackStart,
+      playbackCallbackEnd,
+    );
+    expect(
+      playbackCallback,
+      contains('AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY'),
+    );
+    expect(playbackCallback, isNot(contains('lifecycleSignal')));
+    expect(playbackCallback, isNot(contains('sourceOutput.id')));
+    expect(
+      restore,
+      contains('JuceBridge.beginBluetoothMediaRouteMigrationV2JNI()'),
+    );
+    expect(
+      restore,
+      contains('JuceBridge.waitForBluetoothMediaRouteMigrationV2JNI('),
+    );
+    expect(
+      restore,
+      contains('JuceBridge.finishBluetoothMediaRouteMigrationV2JNI('),
+    );
+    final reopenMatches =
+        'JuceBridge.reconfigurePlaybackV2JNI()'.allMatches(restore).toList();
+    final migrationWaitIndex = restore.indexOf(
+      'JuceBridge.waitForBluetoothMediaRouteMigrationV2JNI(',
+    );
+    expect(reopenMatches, hasLength(2));
+    expect(
+      reopenMatches.first.start,
+      lessThan(migrationWaitIndex),
+    );
+    expect(
+      migrationWaitIndex,
+      lessThan(reopenMatches.last.start),
+    );
+    expect(
+      reopenMatches.last.start,
+      lessThan(restore.indexOf('AndroidPlaybackReadinessV2.validate(')),
+    );
+    expect(oboe, contains('signalMixroomMediaRouteMigrationV2();'));
+    expect(oboe, contains('waitForBluetoothMediaRouteMigration'));
     expect(
       restore,
       contains(

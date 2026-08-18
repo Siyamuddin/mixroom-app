@@ -39,6 +39,8 @@
 #include "MixroomOboePlaybackV2.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <mutex>
 
 #if JUCE_OBOE_LOG_ENABLED
@@ -63,6 +65,11 @@ std::mutex mixroomInputStreamMutexV2;
 std::weak_ptr<oboe::AudioStream> mixroomInputStreamV2;
 int mixroomInputRequestedSampleRateV2 = 0;
 int mixroomInputRequestedBufferFramesV2 = 0;
+std::mutex mixroomMediaRouteMigrationMutexV2;
+std::condition_variable mixroomMediaRouteMigrationConditionV2;
+uint64_t mixroomMediaRouteMigrationEpochV2 = 0;
+bool mixroomMediaRouteMigrationArmedV2 = false;
+bool mixroomMediaRouteMigrationSignalledV2 = false;
 
 void setMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream,
                                int requestedSampleRate,
@@ -104,6 +111,16 @@ void clearMixroomInputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream
         mixroomInputRequestedSampleRateV2 = 0;
         mixroomInputRequestedBufferFramesV2 = 0;
     }
+}
+
+void signalMixroomMediaRouteMigrationV2()
+{
+    const std::lock_guard<std::mutex> lock (mixroomMediaRouteMigrationMutexV2);
+    if (! mixroomMediaRouteMigrationArmedV2)
+        return;
+
+    mixroomMediaRouteMigrationSignalledV2 = true;
+    mixroomMediaRouteMigrationConditionV2.notify_all();
 }
 }
 
@@ -221,6 +238,41 @@ InputStreamFacts getInputStreamFacts()
     facts.sharingMode = oboe::convertToText (stream->getSharingMode());
     facts.streamState = oboe::convertToText (stream->getState());
     return facts;
+}
+
+uint64_t beginBluetoothMediaRouteMigration()
+{
+    const std::lock_guard<std::mutex> lock (juce::mixroomMediaRouteMigrationMutexV2);
+    ++juce::mixroomMediaRouteMigrationEpochV2;
+    juce::mixroomMediaRouteMigrationArmedV2 = true;
+    juce::mixroomMediaRouteMigrationSignalledV2 = false;
+    return juce::mixroomMediaRouteMigrationEpochV2;
+}
+
+bool waitForBluetoothMediaRouteMigration (uint64_t token, int timeoutMs)
+{
+    std::unique_lock<std::mutex> lock (juce::mixroomMediaRouteMigrationMutexV2);
+    const auto completed = juce::mixroomMediaRouteMigrationConditionV2.wait_for (
+        lock,
+        std::chrono::milliseconds (timeoutMs),
+        [token]
+        {
+            return juce::mixroomMediaRouteMigrationEpochV2 != token
+                || juce::mixroomMediaRouteMigrationSignalledV2;
+        });
+    return completed
+        && juce::mixroomMediaRouteMigrationEpochV2 == token
+        && juce::mixroomMediaRouteMigrationSignalledV2;
+}
+
+void finishBluetoothMediaRouteMigration (uint64_t token)
+{
+    const std::lock_guard<std::mutex> lock (juce::mixroomMediaRouteMigrationMutexV2);
+    if (juce::mixroomMediaRouteMigrationEpochV2 != token)
+        return;
+
+    juce::mixroomMediaRouteMigrationArmedV2 = false;
+    juce::mixroomMediaRouteMigrationSignalledV2 = false;
 }
 } // namespace mixroom::android_audio_v2
 
@@ -1245,7 +1297,15 @@ private:
             if (error == oboe::Result::ErrorDisconnected)
             {
                 if (mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled())
+                {
+                    // Android can temporarily open media on the speaker after
+                    // releasing a communication route, then disconnect that
+                    // stream when A2DP becomes authoritative. The explicit V2
+                    // lifecycle owner must re-open the JUCE device so its
+                    // sample-rate, buffer and graph facts match the new route.
+                    signalMixroomMediaRouteMigrationV2();
                     return;
+                }
                 const SpinLock::ScopedTryLockType streamRestartLock { streamRestartMutex };
 
                 if (streamRestartLock.isLocked())

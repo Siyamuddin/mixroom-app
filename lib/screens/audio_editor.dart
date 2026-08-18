@@ -5683,7 +5683,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _iosSystemSelectedRouteProbeRunning = false;
   bool _androidBluetoothDuplexProbeRunning = false;
-  bool _iosBluetoothRecordingNoticeShown = false;
+  bool _bluetoothRecordingQualityNoticeShown = false;
   bool _v2AudioSessionInvalidated = false;
   bool _v2AudioSessionRecoveryInProgress = false;
   bool _iosV2ForegroundRecoveryPending = false;
@@ -20843,6 +20843,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    var v2IntentOperation = AudioRouteIntentOperationV2.standard;
     if (_isBluetoothV2Session && Platform.isAndroid) {
       final coordinator = _audioRouteCoordinatorV2;
       if (_v2AudioSessionInvalidated ||
@@ -20860,11 +20861,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           source.intent != AudioRouteIntentV2.playbackOnly ||
           source.inputs.isNotEmpty ||
           source.juce.activeInputChannels != 0 ||
-          sourceOutput?.normalizedKind != AudioRouteKindV2.builtIn) {
+          sourceOutput == null) {
         _showSmallNotice(
-          'Recording is available only with the built-in Android audio route in this checkpoint.',
+          'Recording is unavailable for the current Android audio route.',
         );
         return false;
+      }
+      switch (sourceOutput.normalizedKind) {
+        case AudioRouteKindV2.builtIn:
+          break;
+        case AudioRouteKindV2.bluetoothMedia:
+          v2IntentOperation =
+              AudioRouteIntentOperationV2.systemSelectedRecording;
+          break;
+        default:
+          _showSmallNotice(
+            'Recording is unavailable for the current Android audio route.',
+          );
+          return false;
       }
     }
     if (!await _ensureMicrophonePermissionForRecording()) {
@@ -20900,7 +20914,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         AudioRouteIntentV2.preparingRecording,
         operation: Platform.isIOS
             ? AudioRouteIntentOperationV2.systemSelectedRecording
-            : AudioRouteIntentOperationV2.standard,
+            : v2IntentOperation,
       );
       if (_recordStartCancelRequested) return false;
       if (!result.succeeded) {
@@ -20908,6 +20922,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _showSmallNotice(
             Platform.isIOS
                 ? 'Recording is unavailable for the current iOS audio route.'
+                : v2IntentOperation ==
+                      AudioRouteIntentOperationV2.systemSelectedRecording
+                ? 'Bluetooth recording is unavailable for the current headset.'
                 : result.diagnosticCode == 'bluetooth_input_forbidden'
                 ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
                 : 'Recording with the built-in device microphone is unavailable for the current output.',
@@ -20927,10 +20944,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final usingBluetoothDuplex =
           verifiedInput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex &&
           verifiedOutput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex;
-      if (Platform.isIOS &&
-          usingBluetoothDuplex &&
-          !_iosBluetoothRecordingNoticeShown) {
-        _iosBluetoothRecordingNoticeShown = true;
+      if (usingBluetoothDuplex && !_bluetoothRecordingQualityNoticeShown) {
+        _bluetoothRecordingQualityNoticeShown = true;
         _showSmallNotice(
           'Bluetooth microphone in use. Playback quality is reduced while recording.',
         );

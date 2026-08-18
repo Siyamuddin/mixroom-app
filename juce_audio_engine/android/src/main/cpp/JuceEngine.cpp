@@ -1324,7 +1324,7 @@ bool JuceEngine::prepareRecordingV2Android()
 #endif
 }
 
-bool JuceEngine::prepareBluetoothDuplexProbeV2Android()
+bool JuceEngine::prepareBluetoothDuplexV2Android(bool recordingCapable)
 {
 #if JUCE_ANDROID
     if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
@@ -1352,7 +1352,7 @@ bool JuceEngine::prepareBluetoothDuplexProbeV2Android()
         device->getCurrentBufferSizeSamples() > 0;
     if (!valid)
     {
-        juceLogToFlutter(("Android V2 Bluetooth duplex probe open failed: " + initError).toRawUTF8());
+        juceLogToFlutter(("Android V2 Bluetooth duplex open failed: " + initError).toRawUTF8());
         androidV2CallbackProofPending.store(false, std::memory_order_release);
         deviceManager.closeAudioDevice();
         return false;
@@ -1368,8 +1368,11 @@ bool JuceEngine::prepareBluetoothDuplexProbeV2Android()
     deviceManager.addAudioCallback(metronomeCallback.get());
     audioCallbackAttached = true;
     v2PlaybackCallbackDetached = false;
-    androidV2DuplexProbePrepared = true;
-    logCurrentAudioDeviceState("android-v2-bluetooth-duplex-probe");
+    androidV2RecordingPrepared = recordingCapable;
+    androidV2DuplexProbePrepared = !recordingCapable;
+    logCurrentAudioDeviceState(recordingCapable
+                                   ? "android-v2-bluetooth-recording"
+                                   : "android-v2-bluetooth-duplex-probe");
     return true;
 #else
     return false;

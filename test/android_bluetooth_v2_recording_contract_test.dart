@@ -22,6 +22,11 @@ void main() {
     expect(plugin, contains('"abortRecordingV2"'));
     expect(plugin, contains('audioLifecycleExecutorV2'));
     expect(plugin, contains('prepareBuiltInRecordingV2(generation)'));
+    expect(
+      plugin,
+      contains('prepareBluetoothDuplexV2(generation, operationMode)'),
+    );
+    expect(plugin, contains('"systemSelectedRecording"'));
     expect(plugin, contains('restoreRecordingPlaybackV2(generation)'));
     expect(plugin, contains('recordingCancellationRequestedV2'));
     expect(plugin, contains('cleanupClaimed.compareAndSet(false, true)'));
@@ -63,7 +68,7 @@ void main() {
   );
 
   test(
-    'editor validates built-in source before permission and restores on Stop',
+    'editor chooses built-in or Bluetooth recording before permission and restores on Stop',
     () {
       final preflightStart = editor.indexOf(
         'Future<bool> _prepareAudioRecordingStartPreflight()',
@@ -77,9 +82,11 @@ void main() {
       final stopEnd = editor.indexOf('\n  Future<', stopStart + 20);
       final stop = editor.substring(stopStart, stopEnd);
 
+      expect(preflight, contains('case AudioRouteKindV2.builtIn:'));
+      expect(preflight, contains('case AudioRouteKindV2.bluetoothMedia:'));
       expect(
         preflight,
-        contains('sourceOutput?.normalizedKind != AudioRouteKindV2.builtIn'),
+        contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
       );
       expect(
         preflight.indexOf('getAudioRouteSnapshotV2()'),
@@ -132,6 +139,62 @@ void main() {
       expect(capture, isNot(contains(forbidden)));
     }
     expect(capture, contains('JuceBridge.startRecordingJNI'));
+    expect(capture, contains('!operation.mode.allowsCapture()'));
+  });
+
+  test(
+    'Bluetooth production uses the verified SCO device without reopening',
+    () {
+      final prepareStart = plugin.indexOf(
+        'private fun prepareBluetoothDuplexV2(',
+      );
+      final prepareEnd = plugin.indexOf(
+        'private fun verifyRecordingIntentV2',
+        prepareStart,
+      );
+      final prepare = plugin.substring(prepareStart, prepareEnd);
+      final validateStart = plugin.indexOf(
+        'private fun validatePreparedRecordingV2(',
+      );
+      final validateEnd = plugin.indexOf(
+        'private fun audioModeName',
+        validateStart,
+      );
+      final validate = plugin.substring(validateStart, validateEnd);
+
+      expect(
+        prepare,
+        contains(
+          'JuceBridge.prepareBluetoothDuplexV2JNI(mode.allowsCapture())',
+        ),
+      );
+      expect(prepare, contains('AndroidBluetoothDuplexReadinessV2.validate'));
+      expect(validate, contains('operation.mode.usesBluetoothDuplexRoute()'));
+      expect(validate, contains('currentBluetoothDuplexFactsV2(operation)'));
+      expect(validate, contains('facts.actualInput?.fingerprint'));
+      expect(validate, contains('facts.actualOutput?.fingerprint'));
+      expect(validate, isNot(contains('prepareBluetoothDuplexV2JNI')));
+    },
+  );
+
+  test('Bluetooth quality notice is route-proven and shown once per editor', () {
+    final preflightStart = editor.indexOf(
+      'Future<bool> _prepareAudioRecordingStartPreflight()',
+    );
+    final recordingStart = editor.indexOf(
+      'Future<void> _startAudioRecordingJuce()',
+      preflightStart,
+    );
+    final preflight = editor.substring(preflightStart, recordingStart);
+
+    expect(preflight, contains('usingBluetoothDuplex'));
+    expect(preflight, contains('_bluetoothRecordingQualityNoticeShown'));
+    expect(
+      preflight,
+      contains(
+        'Bluetooth microphone in use. Playback quality is reduced while recording.',
+      ),
+    );
   });
 
   test('V2 transport accepts only the verified active recording input', () {

@@ -58,4 +58,7 @@ bool isBluetoothCommunicationDuplexPolicyEnabled();
 StreamPolicy getStreamPolicy();
 OutputStreamFacts getOutputStreamFacts();
 InputStreamFacts getInputStreamFacts();
+uint64_t beginBluetoothMediaRouteMigration();
+bool waitForBluetoothMediaRouteMigration (uint64_t token, int timeoutMs);
+void finishBluetoothMediaRouteMigration (uint64_t token);
 } // namespace mixroom::android_audio_v2
