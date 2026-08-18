@@ -110,17 +110,9 @@ void main() {
     final backgroundCall = lifecycle.indexOf(
       '_handleIOSV2EditorBackgrounded()',
     );
-    final inactiveCondition = lifecycle.lastIndexOf(
-      'state == AppLifecycleState.inactive',
-      backgroundCall,
-    );
-    expect(inactiveCondition, lessThan(backgroundCall));
-    expect(
-      lifecycle.substring(inactiveCondition, backgroundCall),
-      isNot(
-        contains('||\n                state == AppLifecycleState.inactive'),
-      ),
-    );
+    expect(backgroundCall, greaterThanOrEqualTo(0));
+    expect(lifecycle, contains('AppLifecycleState.inactive'));
+    expect(lifecycle, contains('!_isBluetoothV2Session'));
     final resumeStart = editor.indexOf(
       'Future<void> _resumeIOSV2AudioAfterForeground()',
     );

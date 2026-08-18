@@ -1355,6 +1355,27 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_reconfigurePlaybackV2JNI(JNIEnv 
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().prepareRecordingV2Android(); });
+    else
+        success = JuceEngine::get().prepareRecordingV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForV2CallbackReadyJNI(
+    JNIEnv *, jclass, jint timeoutMs)
+{
+    return JuceEngine::get().waitForV2CallbackReady((int)timeoutMs)
+               ? JNI_TRUE
+               : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setBluetoothMediaPlaybackPolicyV2JNI(
     JNIEnv *, jclass, jboolean enabled)
@@ -1378,6 +1399,35 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeOutputStreamFactsV2JNI(JN
     if (facts.available)
     {
         values.set("routedDeviceId", facts.routedDeviceId);
+        values.set("channelCount", facts.channelCount);
+        values.set("requestedSampleRateHz", facts.requestedSampleRate);
+        values.set("sampleRateHz", facts.sampleRate);
+        values.set("requestedBufferFrames", facts.requestedBufferSizeFrames);
+        values.set("bufferFrames", facts.bufferSizeFrames);
+        values.set("bufferCapacityFrames", facts.bufferCapacityFrames);
+        values.set("framesPerBurst", facts.framesPerBurst);
+        values.set("framesPerCallback", facts.framesPerCallback);
+        if (facts.xRunCount >= 0)
+            values.set("xRunCount", facts.xRunCount);
+        values.set("audioBackend", juce::String(facts.audioApi));
+        values.set("performanceMode", juce::String(facts.performanceMode));
+        values.set("sharingMode", juce::String(facts.sharingMode));
+        values.set("streamState", juce::String(facts.streamState));
+    }
+    return namedValueStatsToJavaMap(env, values);
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeInputStreamFactsV2JNI(JNIEnv *env, jclass)
+{
+    const auto facts = mixroom::android_audio_v2::getInputStreamFacts();
+    juce::NamedValueSet values;
+    values.set("available", facts.available);
+    values.set("running", facts.running);
+    if (facts.available)
+    {
+        values.set("routedDeviceId", facts.routedDeviceId);
+        values.set("channelCount", facts.channelCount);
         values.set("requestedSampleRateHz", facts.requestedSampleRate);
         values.set("sampleRateHz", facts.sampleRate);
         values.set("requestedBufferFrames", facts.requestedBufferSizeFrames);
@@ -3315,6 +3365,12 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRest
     juce::MessageManager::getInstance()->callSync([]
                                                   { JuceEngine::get().completeRecordingStop(false); });
     return namedValueStatsToJavaMap(env, result.toNamedValueSet());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_discardRecordingCaptureV2JNI(JNIEnv *, jclass)
+{
+    JuceEngine::get().discardRecordingCaptureV2Android();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

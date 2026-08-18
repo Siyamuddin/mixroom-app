@@ -509,6 +509,7 @@ void main() {
 
   for (final platform in <TargetPlatform>[
     TargetPlatform.macOS,
+    TargetPlatform.android,
     TargetPlatform.iOS,
   ]) {
     test('V2 recording intent uses the isolated native contract on $platform',
@@ -529,18 +530,6 @@ void main() {
       );
     });
   }
-
-  test('recording intent remains native-call-free on Android', () async {
-    final result = await JuceAudioEngine.setAudioRouteIntentV2(
-      AudioRouteIntentV2.preparingRecording,
-      generation: 2,
-      platformOverride: TargetPlatform.android,
-    );
-
-    expect(result.succeeded, isFalse);
-    expect(result.diagnosticCode, 'recording_route_unsupported');
-    expect(calls, isEmpty);
-  });
 
   test('iOS system-selected probe reuses the existing intent contract',
       () async {

@@ -4603,6 +4603,8 @@ public:
     bool initialisePlaybackV2Android();
     bool quiescePlaybackV2Android(bool closeDevice);
     bool reconfigurePlaybackV2Android();
+    bool prepareRecordingV2Android();
+    bool waitForV2CallbackReady(int timeoutMs);
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -4894,6 +4896,7 @@ public:
     RealtimeWavCapture::StopResult finalizeRecordingCapture();
     void completeRecordingStop(bool restorePlaybackRoute);
     RealtimeWavCapture::StopResult stopRecording(bool restorePlaybackRoute = true);
+    void discardRecordingCaptureV2Android();
     bool isRecording() const;
     void captureInput(const float *const *input,
                       int numInputChannels,
@@ -4992,6 +4995,9 @@ private:
     bool formatsRegistered = false; // will only be flipped once to true
     bool audioCallbackAttached = false;
     bool v2PlaybackCallbackDetached = false;
+    bool androidV2RecordingPrepared = false;
+    juce::WaitableEvent androidV2CallbackReady;
+    std::atomic<bool> androidV2CallbackProofPending{false};
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
@@ -5672,8 +5678,14 @@ public:
     // ===== AudioIODeviceCallback =====
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
+        callbackReady.store(false, std::memory_order_release);
         sampleRate = device->getCurrentSampleRate();
-        graphRenderBlockSize = juce::jmax(1, device->getCurrentBufferSizeSamples());
+        const int preparedBlockCapacity = device->getCurrentBufferSizeSamples();
+        const int preparedInputChannels =
+            device->getActiveInputChannels().countNumberOfSetBits();
+        const int preparedOutputChannels =
+            device->getActiveOutputChannels().countNumberOfSetBits();
+        graphRenderBlockSize = juce::jmax(1, preparedBlockCapacity);
         updateMsPerBeat();
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
         engine.clearOutputSafetyState();
@@ -5681,10 +5693,20 @@ public:
         player.audioDeviceAboutToStart(device);
         engine.prepareLiveClipProcessorsForCurrentDevice();
         alignToTransport();
+        expectedBlockCapacity.store(preparedBlockCapacity, std::memory_order_relaxed);
+        expectedInputChannels.store(preparedInputChannels, std::memory_order_relaxed);
+        expectedOutputChannels.store(preparedOutputChannels, std::memory_order_relaxed);
+        callbackReady.store(
+            preparedBlockCapacity > 0 && preparedOutputChannels > 0,
+            std::memory_order_release);
     }
 
     void audioDeviceStopped() override
     {
+        callbackReady.store(false, std::memory_order_release);
+        expectedBlockCapacity.store(0, std::memory_order_relaxed);
+        expectedInputChannels.store(0, std::memory_order_relaxed);
+        expectedOutputChannels.store(0, std::memory_order_relaxed);
         player.audioDeviceStopped();
     }
 
@@ -5696,6 +5718,34 @@ public:
         int numSamples,
         const juce::AudioIODeviceCallbackContext &context) override
     {
+        const int knownBlockCapacity =
+            expectedBlockCapacity.load(std::memory_order_relaxed);
+        const int knownInputs = expectedInputChannels.load(std::memory_order_relaxed);
+        const int knownOutputs = expectedOutputChannels.load(std::memory_order_relaxed);
+        bool pointersValid = inputChannelData != nullptr || numInputChannels == 0;
+        pointersValid = pointersValid && (outputChannelData != nullptr || numOutputChannels == 0);
+        for (int ch = 0; pointersValid && ch < numInputChannels; ++ch)
+            pointersValid = inputChannelData[ch] != nullptr;
+        for (int ch = 0; pointersValid && ch < numOutputChannels; ++ch)
+            pointersValid = outputChannelData[ch] != nullptr;
+        const bool unexpectedCallbackShape =
+            !callbackReady.load(std::memory_order_acquire) ||
+            !pointersValid ||
+            numSamples <= 0 ||
+            numSamples > knownBlockCapacity ||
+            numInputChannels != knownInputs ||
+            numOutputChannels != knownOutputs;
+        if (unexpectedCallbackShape)
+        {
+            if (outputChannelData != nullptr && numSamples > 0)
+            {
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                    if (outputChannelData[ch] != nullptr)
+                        juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+            }
+            return;
+        }
+
         const auto callbackStartTicks = juce::Time::getHighResolutionTicks();
 
         engine.captureInput(inputChannelData, numInputChannels, numSamples);
@@ -5881,6 +5931,10 @@ private:
     int beatUnit = 4;
 
     double sampleRate = 44100.0;
+    std::atomic<bool> callbackReady{false};
+    std::atomic<int> expectedBlockCapacity{0};
+    std::atomic<int> expectedInputChannels{0};
+    std::atomic<int> expectedOutputChannels{0};
     double msPerBeat = 500.0;
     double transportMs = 0.0;
     double nextBeatMs = 0.0;

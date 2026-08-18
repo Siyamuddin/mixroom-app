@@ -79,7 +79,7 @@ void main() {
     );
   });
 
-  test('editor shares V2 intents across macOS and iOS without polling', () {
+  test('editor shares V2 intents across supported platforms without polling', () {
     final preflightStart = editor.indexOf(
       'Future<bool> _prepareAudioRecordingStartPreflight()',
     );
@@ -96,7 +96,7 @@ void main() {
       pollingStart,
     );
 
-    expect(lifecycle, contains('(Platform.isMacOS || Platform.isIOS)'));
+    expect(lifecycle, contains('_supportsV2AudioRecording'));
     expect(lifecycle, contains('AudioRouteIntentV2.preparingRecording'));
     expect(lifecycle, contains('AudioRouteIntentV2.recording'));
     expect(lifecycle, contains('AudioRouteIntentV2.playbackOnly'));
@@ -143,10 +143,9 @@ void main() {
       editor.substring(preflightStart, intentIndex + 2500),
       contains('Recording is unavailable for the current iOS audio route.'),
     );
-    expect(
-      editor.substring(preflightStart, intentIndex),
-      isNot(contains('getAudioRouteSnapshotV2')),
-    );
+    final androidSourceGuard = editor.substring(preflightStart, permissionIndex);
+    expect(androidSourceGuard, contains('Platform.isAndroid'));
+    expect(androidSourceGuard, contains('getAudioRouteSnapshotV2'));
     expect(
       editor.substring(intentIndex, intentIndex + 2500),
       contains(

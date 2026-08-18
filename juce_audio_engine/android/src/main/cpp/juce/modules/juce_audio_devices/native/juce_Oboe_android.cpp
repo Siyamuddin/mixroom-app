@@ -57,6 +57,10 @@ std::mutex mixroomOutputStreamMutexV2;
 std::weak_ptr<oboe::AudioStream> mixroomOutputStreamV2;
 int mixroomRequestedSampleRateV2 = 0;
 int mixroomRequestedBufferFramesV2 = 0;
+std::mutex mixroomInputStreamMutexV2;
+std::weak_ptr<oboe::AudioStream> mixroomInputStreamV2;
+int mixroomInputRequestedSampleRateV2 = 0;
+int mixroomInputRequestedBufferFramesV2 = 0;
 
 void setMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream,
                                int requestedSampleRate,
@@ -68,6 +72,16 @@ void setMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream,
     mixroomRequestedBufferFramesV2 = requestedBufferFrames;
 }
 
+void setMixroomInputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream,
+                              int requestedSampleRate,
+                              int requestedBufferFrames)
+{
+    const std::lock_guard<std::mutex> lock (mixroomInputStreamMutexV2);
+    mixroomInputStreamV2 = stream;
+    mixroomInputRequestedSampleRateV2 = requestedSampleRate;
+    mixroomInputRequestedBufferFramesV2 = requestedBufferFrames;
+}
+
 void clearMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream)
 {
     const std::lock_guard<std::mutex> lock (mixroomOutputStreamMutexV2);
@@ -76,6 +90,17 @@ void clearMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& strea
         mixroomOutputStreamV2.reset();
         mixroomRequestedSampleRateV2 = 0;
         mixroomRequestedBufferFramesV2 = 0;
+    }
+}
+
+void clearMixroomInputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream)
+{
+    const std::lock_guard<std::mutex> lock (mixroomInputStreamMutexV2);
+    if (mixroomInputStreamV2.lock() == stream)
+    {
+        mixroomInputStreamV2.reset();
+        mixroomInputRequestedSampleRateV2 = 0;
+        mixroomInputRequestedBufferFramesV2 = 0;
     }
 }
 }
@@ -96,6 +121,12 @@ void resetPlaybackPolicy()
     juce::mixroomOutputStreamV2.reset();
     juce::mixroomRequestedSampleRateV2 = 0;
     juce::mixroomRequestedBufferFramesV2 = 0;
+    {
+        const std::lock_guard<std::mutex> inputLock (juce::mixroomInputStreamMutexV2);
+        juce::mixroomInputStreamV2.reset();
+        juce::mixroomInputRequestedSampleRateV2 = 0;
+        juce::mixroomInputRequestedBufferFramesV2 = 0;
+    }
 }
 
 bool isBluetoothMediaPolicyEnabled()
@@ -121,6 +152,42 @@ OutputStreamFacts getOutputStreamFacts()
     facts.available = true;
     facts.running = stream->getState() == oboe::StreamState::Started;
     facts.routedDeviceId = stream->getDeviceId();
+    facts.channelCount = stream->getChannelCount();
+    facts.requestedSampleRate = requestedSampleRate;
+    facts.sampleRate = stream->getSampleRate();
+    facts.requestedBufferSizeFrames = requestedBufferFrames;
+    facts.bufferSizeFrames = stream->getBufferSizeInFrames();
+    facts.bufferCapacityFrames = stream->getBufferCapacityInFrames();
+    facts.framesPerBurst = stream->getFramesPerBurst();
+    facts.framesPerCallback = stream->getFramesPerCallback();
+    if (const auto xruns = stream->getXRunCount())
+        facts.xRunCount = xruns.value();
+    facts.audioApi = oboe::convertToText (stream->getAudioApi());
+    facts.performanceMode = oboe::convertToText (stream->getPerformanceMode());
+    facts.sharingMode = oboe::convertToText (stream->getSharingMode());
+    facts.streamState = oboe::convertToText (stream->getState());
+    return facts;
+}
+
+InputStreamFacts getInputStreamFacts()
+{
+    InputStreamFacts facts;
+    std::shared_ptr<oboe::AudioStream> stream;
+    int requestedSampleRate = 0;
+    int requestedBufferFrames = 0;
+    {
+        const std::lock_guard<std::mutex> lock (juce::mixroomInputStreamMutexV2);
+        stream = juce::mixroomInputStreamV2.lock();
+        requestedSampleRate = juce::mixroomInputRequestedSampleRateV2;
+        requestedBufferFrames = juce::mixroomInputRequestedBufferFramesV2;
+    }
+    if (stream == nullptr)
+        return facts;
+
+    facts.available = true;
+    facts.running = stream->getState() == oboe::StreamState::Started;
+    facts.routedDeviceId = stream->getDeviceId();
+    facts.channelCount = stream->getChannelCount();
     facts.requestedSampleRate = requestedSampleRate;
     facts.sampleRate = stream->getSampleRate();
     facts.requestedBufferSizeFrames = requestedBufferFrames;
@@ -572,6 +639,7 @@ private:
                     int32 sampleRateIn, int32 bufferSize,
                     oboe::AudioStreamCallback* callbackIn = nullptr)
         {
+            streamDirection = direction;
             usesBluetoothMediaPolicyV2 = direction == oboe::Direction::Output
                                          && mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled();
             open (deviceId, direction, sharingMode, audioApi, performanceMode, channelCount,
@@ -731,6 +799,11 @@ private:
                 setMixroomOutputStreamV2 (stream,
                                           usesBluetoothMediaPolicyV2 ? 0 : newSampleRate,
                                           requestedBufferFrames);
+            else if (stream != nullptr && openResult == oboe::Result::OK
+                     && direction == oboe::Direction::Input)
+                setMixroomInputStreamV2 (stream,
+                                         newSampleRate,
+                                         requestedBufferFrames);
 
             JUCE_OBOE_LOG (String ("Stream details:")
                  + "\nUses AAudio = " + (stream != nullptr ? String ((int) stream->usesAAudio()) : String ("?"))
@@ -753,7 +826,10 @@ private:
         {
             if (stream != nullptr)
             {
-                clearMixroomOutputStreamV2 (stream);
+                if (streamDirection == oboe::Direction::Input)
+                    clearMixroomInputStreamV2 (stream);
+                else
+                    clearMixroomOutputStreamV2 (stream);
                 [[maybe_unused]] oboe::Result result = stream->close();
                 JUCE_OBOE_LOG ("Requested Oboe stream close with result: " + getOboeString (result));
             }
@@ -764,6 +840,7 @@ private:
         std::unique_ptr<oboe::StabilizedCallback> stabilizedCallback;
        #endif
         oboe::Result openResult;
+        oboe::Direction streamDirection = oboe::Direction::Output;
         bool usesBluetoothMediaPolicyV2 = false;
     };
 

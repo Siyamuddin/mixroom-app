@@ -20,11 +20,12 @@ static_assert (conservativeBufferTarget (512, 4096) == 2048);
 static_assert (conservativeBufferTarget (128, 768) == 768);
 static_assert (conservativeBufferTarget (0, 2048) == 0);
 
-struct OutputStreamFacts
+struct StreamFacts
 {
     bool available = false;
     bool running = false;
     int32_t routedDeviceId = 0;
+    int32_t channelCount = 0;
     int32_t requestedSampleRate = 0;
     int32_t sampleRate = 0;
     int32_t requestedBufferSizeFrames = 0;
@@ -39,8 +40,12 @@ struct OutputStreamFacts
     std::string streamState;
 };
 
+using OutputStreamFacts = StreamFacts;
+using InputStreamFacts = StreamFacts;
+
 void setBluetoothMediaPolicyEnabled (bool enabled);
 void resetPlaybackPolicy();
 bool isBluetoothMediaPolicyEnabled();
 OutputStreamFacts getOutputStreamFacts();
+InputStreamFacts getInputStreamFacts();
 } // namespace mixroom::android_audio_v2

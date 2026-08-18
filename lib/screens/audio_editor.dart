@@ -5801,6 +5801,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool get _isBluetoothV2Session =>
       _bluetoothImplementationSessionV2?.active == BluetoothImplementationV2.v2;
 
+  bool get _supportsV2AudioRecording =>
+      Platform.isMacOS || Platform.isAndroid || Platform.isIOS;
+
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
   String? _selectedDevice;
@@ -12501,7 +12504,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final coordinator = _audioRouteCoordinatorV2;
     _audioRouteCoordinatorV2 = null;
     if (_isBluetoothV2Session &&
-        (Platform.isMacOS || Platform.isIOS) &&
+        _supportsV2AudioRecording &&
         coordinator?.intent != AudioRouteIntentV2.playbackOnly) {
       await JuceAudioEngine.abortRecordingV2();
     }
@@ -12515,21 +12518,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (state == AppLifecycleState.resumed) {
         debugPrint("App Resumed on Android - Re-initializing.");
         unawaited(_handleAndroidEditorResumed());
-      } else if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.inactive ||
-          state == AppLifecycleState.hidden ||
-          state == AppLifecycleState.detached) {
+      } else if (_isEditorBackgroundState(state) ||
+          (state == AppLifecycleState.inactive && !_isBluetoothV2Session)) {
         _markProjectDirty(immediate: true);
         _scheduleCloudAutoSync(reason: 'background', immediate: true);
         _flushAndRequestLocalVersionSnapshot(
           reason: ProjectVersionReason.background,
           minInterval: const Duration(minutes: 10),
         );
-        debugPrint("App Paused or Inactive on Android - Disposing.");
-        unawaited(_pausePlayback());
-        setState(() {
-          _isPlaying = false;
-        });
+        final coordinator = _audioRouteCoordinatorV2;
+        final v2RecordingActive =
+            _isBluetoothV2Session &&
+            _supportsV2AudioRecording &&
+            coordinator != null &&
+            (_isRecording ||
+                _recordStartVisualPending ||
+                coordinator.intent != AudioRouteIntentV2.playbackOnly);
+        if (v2RecordingActive) {
+          unawaited(_handleAndroidV2EditorBackgrounded());
+        } else {
+          debugPrint('App Backgrounded on Android - Pausing playback.');
+          unawaited(_pausePlayback());
+          setState(() {
+            _isPlaying = false;
+          });
+        }
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
@@ -12540,10 +12553,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           unawaited(_refreshMicrophonePermissionAndInputs());
           unawaited(_refreshAudioRouteInfo());
         }
-      } else if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.inactive ||
-          state == AppLifecycleState.hidden ||
-          state == AppLifecycleState.detached) {
+      } else if (_isEditorBackgroundState(state) ||
+          (state == AppLifecycleState.inactive && !_isBluetoothV2Session)) {
         _markProjectDirty(immediate: true);
         _scheduleCloudAutoSync(reason: 'background', immediate: true);
         _flushAndRequestLocalVersionSnapshot(
@@ -12561,6 +12572,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       }
     }
+  }
+
+  bool _isEditorBackgroundState(AppLifecycleState state) =>
+      state == AppLifecycleState.paused ||
+      state == AppLifecycleState.hidden ||
+      state == AppLifecycleState.detached;
+
+  Future<void> _handleAndroidV2EditorBackgrounded() async {
+    if (!mounted ||
+        !_isBluetoothV2Session ||
+        _audioRouteCoordinatorV2 == null ||
+        _v2AudioSessionInvalidated) {
+      return;
+    }
+    _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
+    final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
+      notice: 'Recording stopped because Mixroom went to the background.',
+    );
+    final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
+      shouldAttemptSystemOutputRecovery: true,
+      unpublishedRecordingPath: unpublishedRecordingPath,
+      cleanupBeforeRecovery: true,
+      successNotice:
+          'Recording stopped because Mixroom went to the background.',
+    );
+    _trackV2AudioSessionRecovery(recovery);
+    await recovery;
   }
 
   Future<void> _handleIOSV2EditorBackgrounded() async {
@@ -12703,9 +12741,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleAudioRouteIntentInvalidatedV2(AudioRouteChangeEventV2 event) {
-    if (!mounted ||
-        (!Platform.isMacOS && !Platform.isIOS) ||
-        !_isBluetoothV2Session) {
+    if (!mounted || !_supportsV2AudioRecording || !_isBluetoothV2Session) {
       return;
     }
     if (_v2AudioSessionInvalidated) {
@@ -12733,7 +12769,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         event.cause == 'audioInterruptionEnded' ||
         event.cause == 'audioInterrupted';
     final shouldAttemptSystemOutputRecovery =
-        Platform.isIOS && event.cause != 'shutdown';
+        (Platform.isIOS || Platform.isAndroid) && event.cause != 'shutdown';
     final recordingWasActive =
         _isRecording ||
         _recordStartVisualPending ||
@@ -12752,7 +12788,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
       shouldAttemptSystemOutputRecovery: shouldAttemptSystemOutputRecovery,
       unpublishedRecordingPath: unpublishedRecordingPath,
-      cleanupBeforeRecovery: interruption,
+      cleanupBeforeRecovery: interruption || Platform.isAndroid,
       successNotice: interruption
           ? 'Audio is ready. Press Play to continue.'
           : 'Audio output changed. Press Play to continue.',
@@ -12944,6 +12980,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleAndroidEditorResumed() async {
+    final recovery = _v2AudioSessionRecoveryFuture;
+    if (recovery != null) {
+      try {
+        await recovery;
+      } catch (_) {
+        // The existing recovery path owns its failure state and user notice.
+      }
+    }
+    if (!mounted) return;
     await _requestAndroidRouteRefresh(reason: 'appResumed');
     await _refreshMicrophonePermissionAndInputs();
     await _refreshAudioRouteInfo(refreshNativeRoute: false);
@@ -20760,7 +20805,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _startRecordingJuce() async {
     if (_isBluetoothV2Session) {
-      if (!Platform.isMacOS && !Platform.isIOS) {
+      if (!_supportsV2AudioRecording) {
         _showSmallNotice(
           'Only audio recording with the built-in device microphone is available in this Bluetooth 2.0 checkpoint.',
         );
@@ -20797,13 +20842,36 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    if (_isBluetoothV2Session && Platform.isAndroid) {
+      final coordinator = _audioRouteCoordinatorV2;
+      if (_v2AudioSessionInvalidated ||
+          coordinator == null ||
+          coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+          coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+        _showSmallNotice('Audio output is changing. Please wait.');
+        return false;
+      }
+      final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
+      final sourceOutput = source.outputs.length == 1
+          ? source.outputs.single
+          : null;
+      if (source.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
+          source.intent != AudioRouteIntentV2.playbackOnly ||
+          source.inputs.isNotEmpty ||
+          source.juce.activeInputChannels != 0 ||
+          sourceOutput?.normalizedKind != AudioRouteKindV2.builtIn) {
+        _showSmallNotice(
+          'Recording is available only with the built-in Android audio route in this checkpoint.',
+        );
+        return false;
+      }
+    }
     if (!await _ensureMicrophonePermissionForRecording()) {
       return false;
     }
 
     if (_isBluetoothV2Session) {
-      if ((!Platform.isMacOS && !Platform.isIOS) ||
-          _v2AudioSessionInvalidated) {
+      if (!_supportsV2AudioRecording || _v2AudioSessionInvalidated) {
         return false;
       }
       final coordinator = _audioRouteCoordinatorV2;
@@ -20982,7 +21050,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // starts from the settled position. Other recording paths retain their
       // established preflight timing.
       final captureStartAfterRoutePreparation =
-          _isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS);
+          _isBluetoothV2Session && _supportsV2AudioRecording;
       if (!captureStartAfterRoutePreparation) {
         _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
       }
@@ -20996,11 +21064,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       final startPlaybackAfterRecorder =
-          Platform.isIOS || (_isBluetoothV2Session && Platform.isMacOS);
+          Platform.isIOS || _isBluetoothV2Session;
 
-      // 3) Keep Android's working order: start transport before arming the native
-      // recorder. iOS uses the opposite order to avoid route churn between input
-      // arm and recorder start.
+      // Legacy Android retains its established transport-first order. V2 starts
+      // capture only after the prepared route is verified.
       if (!startPlaybackAfterRecorder && !_isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       }
@@ -21032,7 +21099,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
 
       if (!ok) {
-        if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
+        if (_isBluetoothV2Session && _supportsV2AudioRecording) {
           await _restoreV2PlaybackOnlyAfterRecording();
         }
         _liveInputMonitoringEffective = null;
@@ -21047,7 +21114,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         return;
       }
-      if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
+      if (_isBluetoothV2Session && _supportsV2AudioRecording) {
         final coordinator = _audioRouteCoordinatorV2;
         final recordingResult = await coordinator?.transitionIntent(
           AudioRouteIntentV2.recording,
@@ -21087,7 +21154,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await JuceAudioEngine.stopRecording();
         await _deleteUncommittedRecordingFile(filePath);
-        if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
+        if (_isBluetoothV2Session && _supportsV2AudioRecording) {
           await _restoreV2PlaybackOnlyAfterRecording();
         }
         if (mounted) {
@@ -21153,7 +21220,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (mounted &&
           _isBluetoothV2Session &&
-          (Platform.isMacOS || Platform.isIOS) &&
+          _supportsV2AudioRecording &&
           !_isRecording &&
           !_v2AudioSessionInvalidated &&
           _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
@@ -21263,7 +21330,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final resumePlaybackAfterStop = keepPlaying && _isPlaying;
       final hadBluetoothInputRoute = _audioRouteInfo.inputIsBluetoothHeadset;
       final needsBluetoothStopRecovery =
-          Platform.isAndroid && hadBluetoothInputRoute;
+          !_isBluetoothV2Session &&
+          Platform.isAndroid &&
+          hadBluetoothInputRoute;
       Future<void>? deferredBluetoothRestore;
 
       _recordingPeakTimer?.cancel();
@@ -21302,7 +21371,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } else {
         captureResult = await JuceAudioEngine.stopRecording();
       }
-      if (_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS)) {
+      if (_isBluetoothV2Session && _supportsV2AudioRecording) {
         final restored = await _restoreV2PlaybackOnlyAfterRecording();
         if (!restored) {
           _v2AudioSessionInvalidated = true;
@@ -44860,7 +44929,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
     if (_isBluetoothV2Session) {
-      if (!Platform.isMacOS && !Platform.isIOS) {
+      if (!_supportsV2AudioRecording) {
         _showSmallNotice(
           'Recording is not available in this Bluetooth 2.0 checkpoint.',
         );
@@ -44879,7 +44948,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         });
       }
       if (_isBluetoothV2Session &&
-          Platform.isIOS &&
+          (Platform.isIOS || Platform.isAndroid) &&
           _audioRouteCoordinatorV2?.state ==
               AudioRouteCoordinatorStateV2.preparingInput) {
         await JuceAudioEngine.abortRecordingV2(cancelOnly: true);

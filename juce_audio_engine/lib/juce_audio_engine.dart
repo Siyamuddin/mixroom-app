@@ -543,7 +543,9 @@ class JuceAudioEngine {
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
-        (platform != TargetPlatform.macOS && platform != TargetPlatform.iOS)) {
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
       return _unavailableRouteTransitionV2(
         generation,
         'recording_route_unsupported',
@@ -599,7 +601,9 @@ class JuceAudioEngine {
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
-        (platform != TargetPlatform.macOS && platform != TargetPlatform.iOS)) {
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
       return;
     }
     try {

@@ -19,7 +19,8 @@ internal data class AndroidRouteEndpointV2(
   val channelCount: Int?,
 ) {
   val kind: AndroidRouteKindV2 get() = classifyAndroidRouteKindV2(type)
-  val fingerprint: String get() = "$id:$type"
+  val fingerprint: String
+    get() = "$id:$type:${kind.wireValue}:${channelCount ?: -1}"
 }
 
 internal data class AndroidMediaRouteResolutionV2(
@@ -42,6 +43,7 @@ internal data class AndroidOboeOutputFactsV2(
   val audioBackend: String?,
   val performanceMode: String?,
   val sharingMode: String?,
+  val channelCount: Int? = null,
 ) {
   companion object {
     fun fromMap(map: Map<String, Any>) = AndroidOboeOutputFactsV2(
@@ -55,11 +57,13 @@ internal data class AndroidOboeOutputFactsV2(
       audioBackend = map["audioBackend"]?.toString(),
       performanceMode = map["performanceMode"]?.toString(),
       sharingMode = map["sharingMode"]?.toString(),
+      channelCount = (map["channelCount"] as? Number)?.toInt(),
     )
   }
 }
 
 internal fun classifyAndroidRouteKindV2(type: Int): AndroidRouteKindV2 = when (type) {
+  AudioDeviceInfo.TYPE_BUILTIN_MIC,
   AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
   AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
   AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE -> AndroidRouteKindV2.BUILT_IN
