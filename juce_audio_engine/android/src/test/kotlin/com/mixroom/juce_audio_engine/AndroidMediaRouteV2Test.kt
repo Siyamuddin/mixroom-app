@@ -21,6 +21,7 @@ internal class AndroidMediaRouteV2Test {
     audioBackend = "AAudio",
     performanceMode = "None",
     sharingMode = "Shared",
+    streamEpoch = deviceId.toLong() + 1000L,
   )
 
   @Test
@@ -288,6 +289,15 @@ internal class AndroidMediaRouteV2Test {
         route,
         route,
         bluetooth,
+        validStream(17).copy(streamEpoch = null),
+      ),
+    )
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidLiveRouteValidatorV2.validate(
+        route,
+        route,
+        bluetooth,
         validStream(17).copy(performanceMode = "LowLatency"),
       ),
     )
@@ -325,6 +335,7 @@ internal class AndroidMediaRouteV2Test {
       performanceMode = "None",
       sharingMode = "Shared",
       channelCount = 1,
+      streamEpoch = 77L,
     )
     val facts = AndroidBluetoothDuplexFactsV2(
       apiLevel = 31,
@@ -361,5 +372,63 @@ internal class AndroidMediaRouteV2Test {
         facts.copy(inputStream = facts.inputStream.copy(performanceMode = "LowLatency")),
       ),
     )
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidBluetoothDuplexReadinessV2.validate(
+        facts.copy(outputStream = facts.outputStream.copy(streamEpoch = null)),
+      ),
+    )
+  }
+
+  @Test
+  fun nativeDisconnectMatchesOnlyThePositiveVerifiedStreamEpoch() {
+    assertTrue(AndroidNativeStreamEpochV2.matches(expected = 77L, observed = 77L))
+    assertFalse(AndroidNativeStreamEpochV2.matches(expected = 77L, observed = 78L))
+    assertFalse(AndroidNativeStreamEpochV2.matches(expected = null, observed = 77L))
+    assertFalse(AndroidNativeStreamEpochV2.matches(expected = 77L, observed = 0L))
+  }
+
+  @Test
+  fun activeOperationNeverFallsBackToThePreviousPlaybackEpoch() {
+    val gate = AndroidNativeStreamEpochGateV2()
+
+    assertFalse(gate.observe(77L))
+    assertFalse(gate.commit(88L))
+    assertFalse(gate.observe(77L))
+    assertTrue(gate.observe(88L))
+  }
+
+  @Test
+  fun disconnectDuringVerificationIsDeliveredOnlyForTheCommittedEpoch() {
+    val currentStream = AndroidNativeStreamEpochGateV2()
+    val delayedOldStream = AndroidNativeStreamEpochGateV2()
+
+    assertFalse(currentStream.observe(88L))
+    assertTrue(currentStream.commit(88L))
+
+    assertFalse(delayedOldStream.observe(77L))
+    assertFalse(delayedOldStream.commit(88L))
+    assertTrue(delayedOldStream.observe(88L))
+  }
+
+  @Test
+  fun disconnectDuringCallbackWaitMatchesTheEarlyCommittedEpoch() {
+    val gate = AndroidNativeStreamEpochGateV2()
+
+    assertFalse(gate.commit(88L))
+    assertTrue(gate.observe(88L))
+    assertFalse(gate.observe(77L))
+  }
+
+  @Test
+  fun deliberateCloseClearsTheOldEpochBeforeReplacementCommit() {
+    val gate = AndroidNativeStreamEpochGateV2()
+
+    assertFalse(gate.commit(77L))
+    gate.clear()
+    assertFalse(gate.observe(77L))
+    assertFalse(gate.commit(88L))
+    assertFalse(gate.observe(77L))
+    assertTrue(gate.observe(88L))
   }
 }

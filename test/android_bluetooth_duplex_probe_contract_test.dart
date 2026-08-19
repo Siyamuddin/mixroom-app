@@ -128,7 +128,39 @@ void main() {
 
     expect(
       cleanup,
-      contains('restorePlaybackOnlyV2(operation.sourceOutput, operation)'),
+      contains('AndroidRecordingCleanupDispositionV2.RESTORE_EXACT ->'),
+    );
+    expect(cleanup, contains('operation.sourceOutput,'));
+    expect(cleanup, contains('cleanupDeadlineNanos,'));
+    expect(
+      deliver.indexOf('val completedPlaybackRecovery ='),
+      greaterThan(deliver.indexOf('deliveredOutcome = IntentOutcomeV2(')),
+    );
+    expect(
+      deliver,
+      contains('deliveredOutcome.status == "success"'),
+    );
+    expect(
+      restore,
+      contains('acceptSystemSelectedReplacement = expectedOutput == null'),
+    );
+    expect(
+      restore,
+      contains('val recoveringCurrentOutput ='),
+    );
+    expect(
+      restore,
+      contains('!recoveringCurrentOutput &&'),
+    );
+    expect(
+      restore.indexOf('val recoveringCurrentOutput ='),
+      lessThan(restore.indexOf('releaseSignal.first.await(')),
+    );
+    expect(
+      restore,
+      contains(
+        'expectedPlaybackTransitionV2 = AndroidMediaRouteResolutionV2(actualOutput, "ok")',
+      ),
     );
     expect(cleanup, contains('preparePlaybackOnlyModeV2()'));
     expect(cleanup, contains('operation.routeInvalidated.get()'));
@@ -154,7 +186,7 @@ void main() {
       'private val audioPlaybackCallbackV2',
     );
     final playbackCallbackEnd = plugin.indexOf(
-      'private var eventsSink',
+      'private fun handleCommunicationDeviceChangedV2',
       playbackCallbackStart,
     );
     final playbackCallback = plugin.substring(
@@ -173,31 +205,70 @@ void main() {
     );
     expect(
       restore,
+      contains('expectedRoute.isBluetooth && restorationDeadlineNanos == null'),
+    );
+    expect(
+      restore,
+      contains('expectedRoute.endpoint?.id'),
+    );
+    expect(
+      plugin,
+      contains(
+        'restorePlaybackOnlyV2(expectedOutput = null, operation = operation)',
+      ),
+    );
+    expect(
+      restore,
       contains('JuceBridge.waitForBluetoothMediaRouteMigrationV2JNI('),
     );
     expect(
       restore,
       contains('JuceBridge.finishBluetoothMediaRouteMigrationV2JNI('),
     );
-    final reopenMatches =
-        'JuceBridge.reconfigurePlaybackV2JNI()'.allMatches(restore).toList();
+    expect(
+      oboe,
+      contains('mixroomMediaRouteMigrationStreamEpochV2 = streamEpoch;'),
+    );
+    expect(
+      oboe,
+      isNot(
+        contains(
+          'mixroomMediaRouteMigrationStreamEpochV2 == 0)\n'
+          '            mixroomMediaRouteMigrationStreamEpochV2 = streamEpoch;',
+        ),
+      ),
+    );
+    final reopenMatches = 'JuceBridge.reconfigurePlaybackV2JNI()'
+        .allMatches(restore)
+        .toList();
     final migrationWaitIndex = restore.indexOf(
       'JuceBridge.waitForBluetoothMediaRouteMigrationV2JNI(',
     );
     expect(reopenMatches, hasLength(2));
-    expect(
-      reopenMatches.first.start,
-      lessThan(migrationWaitIndex),
-    );
-    expect(
-      migrationWaitIndex,
-      lessThan(reopenMatches.last.start),
-    );
+    expect(reopenMatches.first.start, lessThan(migrationWaitIndex));
+    expect(migrationWaitIndex, lessThan(reopenMatches.last.start));
     expect(
       reopenMatches.last.start,
       lessThan(restore.indexOf('AndroidPlaybackReadinessV2.validate(')),
     );
-    expect(oboe, contains('signalMixroomMediaRouteMigrationV2();'));
+    expect(
+      oboe,
+      contains('signalMixroomMediaRouteMigrationV2 (disconnectedStreamEpoch)'),
+    );
+    expect(
+      oboe,
+      contains(
+        'notifyAndroidBluetoothDuplexDisconnectedV2 (disconnectedStreamEpoch)',
+      ),
+    );
+    expect(
+      oboe.indexOf('signalMixroomMediaRouteMigrationV2 (disconnectedStreamEpoch)'),
+      lessThan(
+        oboe.indexOf(
+          'notifyAndroidBluetoothDuplexDisconnectedV2 (disconnectedStreamEpoch)',
+        ),
+      ),
+    );
     expect(oboe, contains('waitForBluetoothMediaRouteMigration'));
     expect(
       restore,
@@ -231,16 +302,49 @@ void main() {
     );
     final observer = plugin.substring(observerStart, observerEnd);
     expect(
+      observer.indexOf(
+        'AndroidIntentRouteObserverV2.isSelfGeneratedPlaybackActivity(',
+      ),
+      lessThan(observer.indexOf('AndroidIntentRouteObserverV2.classify(')),
+    );
+    expect(observer, contains('lifecycleTransitionInProgressV2'));
+    expect(observer, contains('operation?.cleanupClaimed?.get() == true'));
+    expect(
       observer.indexOf('AndroidIntentRouteObserverV2.classify('),
       lessThan(observer.indexOf('currentEffectiveRouteStateV2()')),
     );
     expect(plugin, contains('operation.routeInvalidated.set(true)'));
+    expect(
+      observer,
+      contains('operation.routeInvalidated.compareAndSet(false, true)'),
+    );
+    expect(
+      plugin,
+      contains('onNativeBluetoothDuplexDisconnectedV2(streamEpoch: Long)'),
+    );
+    expect(
+      plugin,
+      contains('AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED'),
+    );
     expect(cleanup, isNot(contains('recordingOperationV2 = null')));
     expect(
       cleanup,
       contains('audioRouteIntentV2 = AudioRouteIntentV2.PLAYBACK_ONLY'),
     );
-    expect(deliver, contains('recordingOperationV2 = null'));
+    expect(deliver, contains('completed.phase = "playbackCommitted"'));
+    expect(deliver, contains('completedPlaybackRecovery'));
+    expect(
+      deliver,
+      contains('completed.routeInvalidated.get() && completedPlaybackRecovery'),
+    );
+    expect(
+      observer,
+      contains('AndroidCommittedRecoveryOwnershipV2.ownsLateSignal('),
+    );
+    expect(
+      observer,
+      contains('adoptCurrentPlaybackAfterCommittedRecoveryV2()'),
+    );
     expect(plugin, contains('"selectionMode" to "androidCommunicationDevice"'));
     expect(plugin, contains('"duplexProbe" to duplexProbeFactsV2'));
   });

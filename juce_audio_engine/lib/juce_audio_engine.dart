@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -337,6 +339,7 @@ class JuceAudioEngine {
   static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
       MethodChannelAudioRouteSnapshotProviderV2();
   static AudioRouteSnapshotV2? _v2StartupSnapshot;
+  static Future<void>? _shutdownInFlight;
 
   static final Stream<Map<String, dynamic>> _events = _eventCh
       .receiveBroadcastStream()
@@ -349,32 +352,6 @@ class JuceAudioEngine {
   static Stream<AudioRouteChangeEventV2> get audioRouteChangeEventsV2 => _events
       .where((event) => event['event'] == 'audioRouteChangedV2')
       .map(AudioRouteChangeEventV2.fromMap);
-
-  static void initialiseEventListeners() {
-    try {
-      _events.listen(
-        (event) {
-          if (event['event'] == 'pluginLoaded') {
-            final track = event['track'] as int;
-            final path = event['path'] as String;
-            final success = event['success'] as bool;
-            debugPrint("Plugin loaded: $success for $path on track $track");
-          }
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          if (error is MissingPluginException || error is PlatformException) {
-            _logError('initialiseEventListeners', error);
-            return;
-          }
-          _logError('initialiseEventListeners', error);
-        },
-      );
-    } on MissingPluginException {
-      return;
-    } on PlatformException catch (e) {
-      _logError('initialiseEventListeners', e);
-    }
-  }
 
   // -------------------------------
   // Helpers
@@ -398,11 +375,18 @@ class JuceAudioEngine {
   // -------------------------------
   // Core controls
   // -------------------------------
-  static Future<void> initialise() async {
+  static Future<bool> initialise() async {
+    final shutdown = _shutdownInFlight;
+    if (shutdown != null) await shutdown;
     try {
       await _ch.invokeMethod('initialise');
+      return true;
+    } on MissingPluginException catch (e) {
+      _logError('initialise', e);
+      return false;
     } on PlatformException catch (e) {
       _logError('initialise', e);
+      return false;
     }
   }
 
@@ -414,13 +398,14 @@ class JuceAudioEngine {
       _v2StartupSnapshot = result.success ? result.snapshot : null;
       return result.success;
     }
-    await initialise();
-    return true;
+    return initialise();
   }
 
   static Future<AudioPlaybackStartupResultV2> initialisePlaybackV2({
     TargetPlatform? platformOverride,
   }) async {
+    final shutdown = _shutdownInFlight;
+    if (shutdown != null) await shutdown;
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
         (platform != TargetPlatform.macOS &&
@@ -720,9 +705,33 @@ class JuceAudioEngine {
     return expected.name.isNotEmpty && expected.name == actual.name;
   }
 
-  static Future<void> shutdown() async {
+  static Future<void> shutdown() {
+    final existing = _shutdownInFlight;
+    if (existing != null) return existing;
+    final shutdown = _performShutdown();
+    _shutdownInFlight = shutdown;
+    unawaited(
+      shutdown.then<void>(
+        (_) {
+          if (identical(_shutdownInFlight, shutdown)) {
+            _shutdownInFlight = null;
+          }
+        },
+        onError: (Object _, StackTrace __) {
+          if (identical(_shutdownInFlight, shutdown)) {
+            _shutdownInFlight = null;
+          }
+        },
+      ),
+    );
+    return shutdown;
+  }
+
+  static Future<void> _performShutdown() async {
     try {
       await _ch.invokeMethod('shutdown');
+    } on MissingPluginException catch (e) {
+      _logError('shutdown', e);
     } on PlatformException catch (e) {
       _logError('shutdown', e);
     } finally {

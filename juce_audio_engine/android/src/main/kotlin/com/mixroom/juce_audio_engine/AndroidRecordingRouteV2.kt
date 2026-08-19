@@ -1,6 +1,120 @@
 package com.mixroom.juce_audio_engine
 
 import android.media.AudioManager
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+
+internal enum class EngineOwnership {
+  NONE,
+  LEGACY,
+  V2_SESSION;
+
+  val ownsNativeEngine: Boolean
+    get() = this != NONE
+}
+
+internal enum class AndroidRecordingCleanupDispositionV2 {
+  RESTORE_EXACT,
+  CLOSE_ONLY,
+}
+
+/**
+ * Records teardown intent before a waiter is cancelled or released.
+ *
+ * Safety-oriented requests may strengthen an unclaimed plan. Closing always
+ * wins over restoring an endpoint that may already have disappeared. Current-
+ * output recovery is a later coordinator-owned playback transition, not a
+ * second recording-cleanup mode. The cleanup CAS winner snapshots this plan.
+ */
+internal class AndroidRecordingCleanupPlanV2 {
+  private val selected =
+    AtomicReference<AndroidRecordingCleanupDispositionV2?>(null)
+
+  fun select(
+    requested: AndroidRecordingCleanupDispositionV2,
+  ): AndroidRecordingCleanupDispositionV2 {
+    while (true) {
+      val current = selected.get()
+      val resolved = AndroidRecordingCleanupPolicyV2.resolve(current, requested)
+      if (current == resolved || selected.compareAndSet(current, resolved)) {
+        return resolved
+      }
+    }
+  }
+
+  fun snapshotForCleanupWinner(): AndroidRecordingCleanupDispositionV2 =
+    selected.get() ?: AndroidRecordingCleanupDispositionV2.CLOSE_ONLY
+}
+
+internal object AndroidRecordingCleanupPolicyV2 {
+  fun resolve(
+    current: AndroidRecordingCleanupDispositionV2?,
+    requested: AndroidRecordingCleanupDispositionV2,
+  ): AndroidRecordingCleanupDispositionV2 = when {
+    current == AndroidRecordingCleanupDispositionV2.CLOSE_ONLY ||
+      requested == AndroidRecordingCleanupDispositionV2.CLOSE_ONLY ->
+      AndroidRecordingCleanupDispositionV2.CLOSE_ONLY
+    else -> AndroidRecordingCleanupDispositionV2.RESTORE_EXACT
+  }
+}
+
+internal class AndroidLifecycleTeardownGateV2 {
+  companion object {
+    const val STARTUP_TIMEOUT_MILLIS = 6000L
+  }
+
+  internal class Completion internal constructor() {
+    internal val completed = AtomicBoolean(false)
+  }
+
+  private val lock = Any()
+  private var pendingCount = 0
+  private var clearSignal = CountDownLatch(0)
+
+  fun publish(): Completion {
+    val completion = Completion()
+    synchronized(lock) {
+      if (pendingCount == 0) clearSignal = CountDownLatch(1)
+      pendingCount += 1
+    }
+    return completion
+  }
+
+  fun complete(completion: Completion) {
+    if (!completion.completed.compareAndSet(false, true)) return
+    val signal = synchronized(lock) {
+      check(pendingCount > 0)
+      pendingCount -= 1
+      if (pendingCount == 0) clearSignal else null
+    }
+    signal?.countDown()
+  }
+
+  fun isClear(): Boolean = synchronized(lock) { pendingCount == 0 }
+
+  fun awaitClear(
+    timeoutMillis: Long = STARTUP_TIMEOUT_MILLIS,
+  ): Boolean {
+    val deadlineNanos = System.nanoTime() +
+      TimeUnit.MILLISECONDS.toNanos(timeoutMillis.coerceAtLeast(0L))
+    while (true) {
+      val signal = synchronized(lock) {
+        if (pendingCount == 0) return true
+        clearSignal
+      }
+      val remainingNanos = deadlineNanos - System.nanoTime()
+      if (remainingNanos <= 0L) return false
+      try {
+        if (!signal.await(remainingNanos, TimeUnit.NANOSECONDS)) return false
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        return false
+      }
+    }
+  }
+}
 
 internal data class AndroidRecordingFactsV2(
   val ownedByV2: Boolean,

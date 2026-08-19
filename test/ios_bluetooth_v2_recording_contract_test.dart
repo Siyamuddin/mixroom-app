@@ -79,33 +79,36 @@ void main() {
     );
   });
 
-  test('editor shares V2 intents across supported platforms without polling', () {
-    final preflightStart = editor.indexOf(
-      'Future<bool> _prepareAudioRecordingStartPreflight()',
-    );
-    final permissionStart = editor.indexOf(
-      'Future<bool> _ensureMicrophonePermissionForRecording()',
-      preflightStart,
-    );
-    final lifecycle = editor.substring(preflightStart, permissionStart);
-    final pollingStart = editor.indexOf(
-      'void _startRecordingRoutePolicyPolling()',
-    );
-    final pollingEnd = editor.indexOf(
-      'void _stopRecordingRoutePolicyPolling()',
-      pollingStart,
-    );
+  test(
+    'editor shares V2 intents across supported platforms without polling',
+    () {
+      final preflightStart = editor.indexOf(
+        'Future<bool> _prepareAudioRecordingStartPreflight()',
+      );
+      final permissionStart = editor.indexOf(
+        'Future<bool> _ensureMicrophonePermissionForRecording()',
+        preflightStart,
+      );
+      final lifecycle = editor.substring(preflightStart, permissionStart);
+      final pollingStart = editor.indexOf(
+        'void _startRecordingRoutePolicyPolling()',
+      );
+      final pollingEnd = editor.indexOf(
+        'void _stopRecordingRoutePolicyPolling()',
+        pollingStart,
+      );
 
-    expect(lifecycle, contains('_supportsV2AudioRecording'));
-    expect(lifecycle, contains('AudioRouteIntentV2.preparingRecording'));
-    expect(lifecycle, contains('AudioRouteIntentV2.recording'));
-    expect(lifecycle, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(lifecycle, contains('_restoreV2PlaybackOnlyAfterRecording'));
-    expect(
-      editor.substring(pollingStart, pollingEnd),
-      contains('if (_isBluetoothV2Session) return;'),
-    );
-  });
+      expect(lifecycle, contains('_supportsV2AudioRecording'));
+      expect(lifecycle, contains('AudioRouteIntentV2.preparingRecording'));
+      expect(lifecycle, contains('AudioRouteIntentV2.recording'));
+      expect(lifecycle, contains('AudioRouteIntentV2.playbackOnly'));
+      expect(lifecycle, contains('_restoreV2PlaybackOnlyAfterRecording'));
+      expect(
+        editor.substring(pollingStart, pollingEnd),
+        contains('if (_isBluetoothV2Session) return;'),
+      );
+    },
+  );
 
   test('all iOS V2 recording uses the system-selected intent path', () {
     final preflightStart = editor.indexOf(
@@ -143,7 +146,10 @@ void main() {
       editor.substring(preflightStart, intentIndex + 2500),
       contains('Recording is unavailable for the current iOS audio route.'),
     );
-    final androidSourceGuard = editor.substring(preflightStart, permissionIndex);
+    final androidSourceGuard = editor.substring(
+      preflightStart,
+      permissionIndex,
+    );
     expect(androidSourceGuard, contains('Platform.isAndroid'));
     expect(androidSourceGuard, contains('getAudioRouteSnapshotV2'));
     expect(
@@ -406,7 +412,7 @@ void main() {
     );
 
     final shutdownStart = editor.indexOf(
-      'Future<void> _shutdownAudioEngineV2Aware() async',
+      'Future<void> _shutdownAudioEngineV2Aware()',
     );
     final shutdownEnd = editor.indexOf(
       '@override\n  void didChangeAppLifecycleState',
@@ -419,6 +425,25 @@ void main() {
       shutdown.indexOf('await routeRecovery;'),
       lessThan(shutdown.indexOf('await coordinator?.dispose()')),
     );
+
+    final startup = editor.substring(
+      editor.indexOf(
+        'WidgetsBinding.instance.addPostFrameCallback((_) async {',
+      ),
+      editor.indexOf('_juceEngineEventSubscription ??='),
+    );
+    final sessionLoaded = startup.indexOf('.loadSession()');
+    final teardownWait = startup.indexOf('await priorShutdown');
+    final initialization = startup.indexOf(
+      'JuceAudioEngine.initialiseForImplementation',
+    );
+    expect(
+      sessionLoaded,
+      allOf(greaterThanOrEqualTo(0), lessThan(teardownWait)),
+    );
+    expect(teardownWait, lessThan(initialization));
+    expect(startup, contains('final latestShutdown ='));
+    expect(startup, contains('identical(latestShutdown, priorShutdown)'));
 
     final playbackIntentStart = plugin.indexOf(
       'NSDictionary<NSString *, id> *recordingSourceOutput =',
@@ -535,7 +560,14 @@ void main() {
         '          await JuceAudioEngine.getEstimatedRecordingLatencyMs();',
       ),
     );
-    expect(stop, contains('if (!mounted) {\n        final unpublishedPath ='));
+    expect(
+      stop,
+      contains(
+        'if (!mounted) {\n'
+        '        await _discardPendingUnpublishedRecordingFile(',
+      ),
+    );
+    expect(stop, contains('expectedPath: recordingPath'));
     expect(
       stop,
       contains("if (mounted) {\n          ScaffoldMessenger.of(context)"),

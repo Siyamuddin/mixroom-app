@@ -58,6 +58,22 @@ class AudioRouteCoordinatorV2 {
 
   AudioRouteIntentV2 get intent => _intent;
 
+  bool get _inputLifecycleOwned =>
+      _intent != AudioRouteIntentV2.playbackOnly ||
+      (_transitioningIntent != null &&
+          _transitioningIntent != AudioRouteIntentV2.playbackOnly);
+
+  void _schedulePendingDrain() {
+    if (_disposed ||
+        _shutdownCancellation ||
+        _interruptionActive ||
+        _pending == null) {
+      return;
+    }
+    _settlingTimer?.cancel();
+    _settlingTimer = Timer(settlingDelay, _drain);
+  }
+
   void _beginInvalidationEpisode() {
     _invalidationEpisode += 1;
     _completedInvalidationRecovery = null;
@@ -149,17 +165,12 @@ class AudioRouteCoordinatorV2 {
       return;
     }
 
-    final terminalEvent = event.cause == 'oldDeviceUnavailable' ||
-        event.cause == 'noSuitableRoute';
-    if (!terminalEvent &&
-        event.fingerprint.isNotEmpty &&
-        event.fingerprint == _lastFingerprint) {
-      if (_pending != null) _pending = event;
-      return;
-    }
-    _lastFingerprint = event.fingerprint;
-    final effectiveIntent = _transitioningIntent ?? _intent;
-    if (effectiveIntent != AudioRouteIntentV2.playbackOnly) {
+    // A route event owns recording safety until playback-only has actually
+    // committed. Event causes are diagnostics, not lifecycle policy: a new or
+    // platform-specific cause must not bypass capture invalidation merely
+    // because its endpoint fingerprint stayed the same.
+    if (_inputLifecycleOwned) {
+      _lastFingerprint = event.fingerprint;
       _pending = null;
       _settlingTimer?.cancel();
       _settlingTimer = null;
@@ -167,10 +178,16 @@ class AudioRouteCoordinatorV2 {
       onIntentInvalidated?.call(event);
       return;
     }
+    if (!event.requiresReconfiguration &&
+        event.fingerprint.isNotEmpty &&
+        event.fingerprint == _lastFingerprint) {
+      if (_pending != null) _pending = event;
+      return;
+    }
+    _lastFingerprint = event.fingerprint;
     _pending = event;
     _setState(AudioRouteCoordinatorStateV2.reconfiguring);
-    _settlingTimer?.cancel();
-    _settlingTimer = Timer(settlingDelay, _drain);
+    _schedulePendingDrain();
   }
 
   Future<void> _drain() async {
@@ -209,10 +226,7 @@ class AudioRouteCoordinatorV2 {
       onTransition?.call(result);
     }
 
-    if (_pending != null) {
-      _settlingTimer?.cancel();
-      _settlingTimer = Timer(settlingDelay, _drain);
-    }
+    _schedulePendingDrain();
   }
 
   Future<AudioRouteTransitionResultV2> transitionIntent(
@@ -258,42 +272,40 @@ class AudioRouteCoordinatorV2 {
       }
     }
 
-    if (_disposed) {
+    try {
+      if (_disposed) {
+        return _localFailure(intent, 'coordinator_disposed');
+      }
+      final restoredPlaybackAfterPreparation =
+          intent == AudioRouteIntentV2.preparingRecording &&
+              result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
+              result.snapshot.juce.deviceOpen == true &&
+              result.snapshot.juce.activeInputChannels == 0 &&
+              (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
+      final stale = result.generation != generation ||
+          _latestGeneration != generation ||
+          (result.diagnosticCode == 'stale_generation' &&
+              !restoredPlaybackAfterPreparation);
+      if (stale) {
+        _setState(AudioRouteCoordinatorStateV2.failed);
+        return result.diagnosticCode == 'stale_generation'
+            ? result
+            : _localFailure(intent, 'stale_generation');
+      }
+      if (result.succeeded) {
+        _intent = intent;
+        _setState(AudioRouteCoordinatorStateV2.stable);
+      } else if (restoredPlaybackAfterPreparation) {
+        _intent = AudioRouteIntentV2.playbackOnly;
+        _setState(AudioRouteCoordinatorStateV2.stable);
+      } else {
+        _setState(AudioRouteCoordinatorStateV2.failed);
+      }
+      return result;
+    } finally {
       finishTransition();
-      return _localFailure(intent, 'coordinator_disposed');
+      _schedulePendingDrain();
     }
-    final restoredPlaybackAfterPreparation =
-        intent == AudioRouteIntentV2.preparingRecording &&
-            result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
-            result.snapshot.juce.deviceOpen == true &&
-            result.snapshot.juce.activeInputChannels == 0 &&
-            (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
-    final stale = result.generation != generation ||
-        _latestGeneration != generation ||
-        (result.diagnosticCode == 'stale_generation' &&
-            !restoredPlaybackAfterPreparation);
-    if (stale) {
-      _setState(AudioRouteCoordinatorStateV2.failed);
-      finishTransition();
-      return result.diagnosticCode == 'stale_generation'
-          ? result
-          : _localFailure(intent, 'stale_generation');
-    }
-    if (result.succeeded) {
-      _intent = intent;
-      _setState(AudioRouteCoordinatorStateV2.stable);
-    } else if (restoredPlaybackAfterPreparation) {
-      _intent = AudioRouteIntentV2.playbackOnly;
-      _setState(AudioRouteCoordinatorStateV2.stable);
-    } else {
-      _setState(AudioRouteCoordinatorStateV2.failed);
-    }
-    if (_pending != null) {
-      _settlingTimer?.cancel();
-      _settlingTimer = Timer(settlingDelay, _drain);
-    }
-    finishTransition();
-    return result;
   }
 
   /// Serializes a playback-only recovery behind an intent transition that was

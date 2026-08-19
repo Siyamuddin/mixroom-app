@@ -127,4 +127,24 @@ void main() {
     );
     expect(restore, contains('await JuceAudioEngine.abortRecordingV2()'));
   });
+
+  test('macOS editor startup follows the latest process teardown', () {
+    final source = File('lib/screens/audio_editor.dart').readAsStringSync();
+    final startup = source.substring(
+      source.indexOf(
+        'WidgetsBinding.instance.addPostFrameCallback((_) async {',
+      ),
+      source.indexOf('_juceEngineEventSubscription ??='),
+    );
+    final sessionLoaded = startup.indexOf('.loadSession()');
+    final teardownWait = startup.indexOf('await priorShutdown');
+    final initialization = startup.indexOf(
+      'JuceAudioEngine.initialiseForImplementation',
+    );
+
+    expect(sessionLoaded, lessThan(teardownWait));
+    expect(teardownWait, lessThan(initialization));
+    expect(startup, contains('final latestShutdown ='));
+    expect(startup, contains('identical(latestShutdown, priorShutdown)'));
+  });
 }

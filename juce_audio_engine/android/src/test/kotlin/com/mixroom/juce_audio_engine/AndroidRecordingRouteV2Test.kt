@@ -4,6 +4,8 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 internal class AndroidRecordingRouteV2Test {
   private val input = AndroidRouteEndpointV2(
@@ -31,6 +33,7 @@ internal class AndroidRecordingRouteV2Test {
     performanceMode = "None",
     sharingMode = "Shared",
     channelCount = channelCount,
+    streamEpoch = deviceId.toLong() + 100L,
   )
 
   private fun validFacts() = AndroidRecordingFactsV2(
@@ -153,7 +156,7 @@ internal class AndroidRecordingRouteV2Test {
   }
 
   @Test
-  fun explicitBluetoothTransactionIgnoresPlaybackActivityAndInventoryAdditions() {
+  fun explicitBluetoothTransactionIgnoresPlaybackActivityAndOwnedDuplexAdditions() {
     assertEquals(
       AndroidIntentRouteDecisionV2.INFORMATIONAL,
       AndroidIntentRouteObserverV2.classify(
@@ -170,6 +173,170 @@ internal class AndroidRecordingRouteV2Test {
         operationEndpointIds = setOf(21, 22),
         signal = AndroidRouteSignalKindV2.DEVICE_ADDED,
         removedDeviceIds = emptySet(),
+        expectedCommunicationDeviceType = AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        addedDevices = listOf(
+          AndroidRouteDeviceChangeV2(
+            22,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            isSource = false,
+            isSink = true,
+          ),
+          AndroidRouteDeviceChangeV2(
+            23,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            isSource = true,
+            isSink = false,
+          ),
+        ),
+      ),
+    )
+  }
+
+  @Test
+  fun explicitBluetoothTransactionDoesNotHideUnrelatedDeviceAddition() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.DEVICE_ADDED,
+        removedDeviceIds = emptySet(),
+        expectedCommunicationDeviceType = AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        addedDevices = listOf(
+          AndroidRouteDeviceChangeV2(
+            99,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            isSource = false,
+            isSink = true,
+          ),
+        ),
+      ),
+    )
+  }
+
+  @Test
+  fun explicitBluetoothTransactionDoesNotHideUnknownScoSinkAddition() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.DEVICE_ADDED,
+        removedDeviceIds = emptySet(),
+        expectedCommunicationDeviceType = AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        addedDevices = listOf(
+          AndroidRouteDeviceChangeV2(
+            23,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            isSource = false,
+            isSink = true,
+          ),
+        ),
+      ),
+    )
+  }
+
+  @Test
+  fun processTeardownGateFailsStartupClosedUntilNativeShutdownCompletes() {
+    val gate = AndroidLifecycleTeardownGateV2()
+
+    assertEquals(true, gate.isClear())
+    assertEquals(true, gate.awaitClear(1L))
+
+    val completion = gate.publish()
+    assertEquals(false, gate.isClear())
+    assertEquals(false, gate.awaitClear(1L))
+
+    gate.complete(completion)
+    assertEquals(true, gate.isClear())
+    assertEquals(true, gate.awaitClear(1L))
+  }
+
+  @Test
+  fun onlyAnAcquiredEngineOwnerMayShutDownNativeState() {
+    assertEquals(false, EngineOwnership.NONE.ownsNativeEngine)
+    assertEquals(true, EngineOwnership.LEGACY.ownsNativeEngine)
+    assertEquals(true, EngineOwnership.V2_SESSION.ownsNativeEngine)
+  }
+
+  @Test
+  fun processTeardownGateRetainsEveryOverlappingOwner() {
+    val gate = AndroidLifecycleTeardownGateV2()
+    val first = gate.publish()
+    val second = gate.publish()
+
+    gate.complete(second)
+    gate.complete(second)
+    assertEquals(false, gate.isClear())
+    assertEquals(false, gate.awaitClear(1L))
+
+    gate.complete(first)
+    assertEquals(true, gate.isClear())
+    assertEquals(true, gate.awaitClear(1L))
+  }
+
+  @Test
+  fun cleanupPlanStrengthensToSafeTerminalDispositionBeforeClaim() {
+    val plan = AndroidRecordingCleanupPlanV2()
+
+    assertEquals(
+      AndroidRecordingCleanupDispositionV2.RESTORE_EXACT,
+      plan.select(AndroidRecordingCleanupDispositionV2.RESTORE_EXACT),
+    )
+    assertEquals(
+      AndroidRecordingCleanupDispositionV2.CLOSE_ONLY,
+      plan.select(AndroidRecordingCleanupDispositionV2.CLOSE_ONLY),
+    )
+    assertEquals(
+      AndroidRecordingCleanupDispositionV2.CLOSE_ONLY,
+      plan.select(AndroidRecordingCleanupDispositionV2.RESTORE_EXACT),
+    )
+    assertEquals(
+      AndroidRecordingCleanupDispositionV2.CLOSE_ONLY,
+      plan.snapshotForCleanupWinner(),
+    )
+  }
+
+  @Test
+  fun cleanupWinnerDefaultsToCloseWhenNoCallerSelectedAPlan() {
+    assertEquals(
+      AndroidRecordingCleanupDispositionV2.CLOSE_ONLY,
+      AndroidRecordingCleanupPlanV2().snapshotForCleanupWinner(),
+    )
+  }
+
+  @Test
+  fun explicitLifecycleMutationOwnsOnlyItsPlaybackActivityNoise() {
+    assertEquals(
+      true,
+      AndroidIntentRouteObserverV2.isSelfGeneratedPlaybackActivity(
+        lifecycleMutationActive = true,
+        cleanupClaimed = false,
+        signal = AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY,
+      ),
+    )
+    assertEquals(
+      true,
+      AndroidIntentRouteObserverV2.isSelfGeneratedPlaybackActivity(
+        lifecycleMutationActive = false,
+        cleanupClaimed = true,
+        signal = AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY,
+      ),
+    )
+    assertEquals(
+      false,
+      AndroidIntentRouteObserverV2.isSelfGeneratedPlaybackActivity(
+        lifecycleMutationActive = true,
+        cleanupClaimed = true,
+        signal = AndroidRouteSignalKindV2.DEVICE_ADDED,
+      ),
+    )
+    assertEquals(
+      false,
+      AndroidIntentRouteObserverV2.isSelfGeneratedPlaybackActivity(
+        lifecycleMutationActive = true,
+        cleanupClaimed = true,
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
       ),
     )
   }
@@ -206,6 +373,50 @@ internal class AndroidRecordingRouteV2Test {
   }
 
   @Test
+  fun verifiedCommunicationDeviceChangeIsTerminalForBluetoothTransaction() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(17, 19, 20),
+        signal = AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.ORDINARY,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = false,
+        operationEndpointIds = null,
+        signal = AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+  }
+
+  @Test
+  fun nativeDuplexStreamLossIsTerminalOnlyInsideTheExplicitTransaction() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(17, 19, 20),
+        signal = AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.ORDINARY,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = false,
+        operationEndpointIds = null,
+        signal = AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+  }
+
+  @Test
   fun routeSignalsRemainOrdinaryOutsideTheExplicitTransaction() {
     assertEquals(
       AndroidIntentRouteDecisionV2.ORDINARY,
@@ -223,6 +434,38 @@ internal class AndroidRecordingRouteV2Test {
         operationEndpointIds = null,
         signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
         removedDeviceIds = setOf(21),
+      ),
+    )
+  }
+
+  @Test
+  fun completedRecoveryOwnsOnlyLateSignalsFromItsOldEndpoints() {
+    assertTrue(
+      AndroidCommittedRecoveryOwnershipV2.ownsLateSignal(
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
+        removedDeviceIds = setOf(21, 22),
+        completedOperationEndpointIds = setOf(21, 22, 23),
+      ),
+    )
+    assertTrue(
+      AndroidCommittedRecoveryOwnershipV2.ownsLateSignal(
+        signal = AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED,
+        removedDeviceIds = emptySet(),
+        completedOperationEndpointIds = setOf(21, 22, 23),
+      ),
+    )
+    assertFalse(
+      AndroidCommittedRecoveryOwnershipV2.ownsLateSignal(
+        signal = AndroidRouteSignalKindV2.DEVICE_REMOVED,
+        removedDeviceIds = setOf(99),
+        completedOperationEndpointIds = setOf(21, 22, 23),
+      ),
+    )
+    assertFalse(
+      AndroidCommittedRecoveryOwnershipV2.ownsLateSignal(
+        signal = AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED,
+        removedDeviceIds = emptySet(),
+        completedOperationEndpointIds = setOf(21, 22, 23),
       ),
     )
   }

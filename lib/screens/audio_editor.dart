@@ -5588,6 +5588,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _isMidiClipRecording = false;
   double _recordingStartMs = 0; // project time where the recording starts
   String? _recordingFilePath; // temp recorded file (m4a/wav/etc)
+  String? _pendingUnpublishedRecordingPath;
   Timer? _recordingPeakTimer;
   Timer? _midiInputPollTimer;
   Timer? _midiHeldNoteRefreshTimer;
@@ -5686,8 +5687,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _bluetoothRecordingQualityNoticeShown = false;
   bool _v2AudioSessionInvalidated = false;
   bool _v2AudioSessionRecoveryInProgress = false;
+  bool _androidV2ForegroundRecoveryPending = false;
   bool _iosV2ForegroundRecoveryPending = false;
   Future<void>? _v2AudioSessionRecoveryFuture;
+  Future<void>? _audioEngineShutdownFuture;
+  static Future<void>? _processAudioEngineShutdownFuture;
   String _v2AudioSessionInvalidationNotice =
       'Audio output changed during recording. Reopen the audio editor to continue.';
   StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
@@ -9242,6 +9246,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {
         _bluetoothImplementationSessionV2 = bluetoothSession;
       });
+      while (true) {
+        final priorShutdown = _processAudioEngineShutdownFuture;
+        if (priorShutdown == null) break;
+        try {
+          await priorShutdown;
+        } catch (_) {
+          if (!mounted) return;
+          _showSmallNotice('Bluetooth 2.0 playback is not available yet.');
+          setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+        if (!mounted) return;
+        final latestShutdown = _processAudioEngineShutdownFuture;
+        if (latestShutdown == null ||
+            identical(latestShutdown, priorShutdown)) {
+          break;
+        }
+      }
+      if (!mounted) return;
       final engineInitialised =
           await JuceAudioEngine.initialiseForImplementation(
             bluetoothSession.active,
@@ -9252,7 +9275,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         setState(() => _isLoadingNextScreen = false);
         return;
       }
-      JuceAudioEngine.initialiseEventListeners();
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
@@ -12492,25 +12514,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     super.dispose();
   }
 
-  Future<void> _shutdownAudioEngineV2Aware() async {
-    final routeRecovery = _v2AudioSessionRecoveryFuture;
-    _audioRouteCoordinatorV2?.cancelPendingRecoveryForShutdown();
-    if (routeRecovery != null) {
-      try {
-        await routeRecovery;
-      } catch (_) {
-        // Shutdown must still close the coordinator and engine if recovery fails.
+  Future<void> _shutdownAudioEngineV2Aware() {
+    _androidV2ForegroundRecoveryPending = false;
+    final existing = _audioEngineShutdownFuture;
+    if (existing != null) return existing;
+    final priorShutdown = _processAudioEngineShutdownFuture;
+    final shutdown = (() async {
+      if (priorShutdown != null) {
+        try {
+          await priorShutdown;
+        } catch (_) {
+          // This editor must still close its own coordinator and engine.
+        }
+      }
+      await _performAudioEngineShutdownV2Aware();
+    })();
+    _audioEngineShutdownFuture = shutdown;
+    _processAudioEngineShutdownFuture = shutdown;
+    unawaited(
+      shutdown.then<void>(
+        (_) {
+          if (identical(_processAudioEngineShutdownFuture, shutdown)) {
+            _processAudioEngineShutdownFuture = null;
+          }
+        },
+        onError: (Object _, StackTrace __) {
+          if (identical(_processAudioEngineShutdownFuture, shutdown)) {
+            _processAudioEngineShutdownFuture = null;
+          }
+        },
+      ),
+    );
+    return shutdown;
+  }
+
+  Future<void> _performAudioEngineShutdownV2Aware() async {
+    final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
+    try {
+      final routeRecovery = _v2AudioSessionRecoveryFuture;
+      _audioRouteCoordinatorV2?.cancelPendingRecoveryForShutdown();
+      if (routeRecovery != null) {
+        try {
+          await routeRecovery;
+        } catch (_) {
+          // Shutdown must still close the coordinator and engine if recovery fails.
+        }
+      }
+      final coordinator = _audioRouteCoordinatorV2;
+      _audioRouteCoordinatorV2 = null;
+      if (_isBluetoothV2Session &&
+          _supportsV2AudioRecording &&
+          coordinator?.intent != AudioRouteIntentV2.playbackOnly) {
+        await JuceAudioEngine.abortRecordingV2();
+      }
+      await coordinator?.dispose();
+      await JuceAudioEngine.shutdown();
+    } finally {
+      if (unpublishedRecordingPath != null) {
+        await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
       }
     }
-    final coordinator = _audioRouteCoordinatorV2;
-    _audioRouteCoordinatorV2 = null;
-    if (_isBluetoothV2Session &&
-        _supportsV2AudioRecording &&
-        coordinator?.intent != AudioRouteIntentV2.playbackOnly) {
-      await JuceAudioEngine.abortRecordingV2();
-    }
-    await coordinator?.dispose();
-    await JuceAudioEngine.shutdown();
   }
 
   @override
@@ -12583,23 +12646,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _handleAndroidV2EditorBackgrounded() async {
     if (!mounted ||
         !_isBluetoothV2Session ||
-        _audioRouteCoordinatorV2 == null ||
-        _v2AudioSessionInvalidated) {
+        _audioRouteCoordinatorV2 == null) {
       return;
     }
+    _androidV2ForegroundRecoveryPending = true;
+    if (_v2AudioSessionInvalidated) return;
     _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
     final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
       notice: 'Recording stopped because Mixroom went to the background.',
     );
-    final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
-      shouldAttemptSystemOutputRecovery: true,
+    final cleanup = _cleanupV2InterruptedAudio(
       unpublishedRecordingPath: unpublishedRecordingPath,
-      cleanupBeforeRecovery: true,
-      successNotice:
-          'Recording stopped because Mixroom went to the background.',
     );
-    _trackV2AudioSessionRecovery(recovery);
-    await recovery;
+    _trackV2AudioSessionRecovery(cleanup);
+    await cleanup;
   }
 
   Future<void> _handleIOSV2EditorBackgrounded() async {
@@ -12801,7 +12861,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final pausedPosition = _isPlaying
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
-    final unpublishedRecordingPath = _recordingFilePath;
+    final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
     _v2AudioSessionInvalidationNotice = notice;
     _v2AudioSessionInvalidated = true;
     _v2AudioSessionRecoveryInProgress = true;
@@ -12855,11 +12915,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       unpublishedRecordingPath = null;
     }
+    if (_shouldDeferAndroidV2RecoveryUntilForeground) return;
     AudioRouteTransitionResultV2? recoveryResult;
     if (shouldAttemptSystemOutputRecovery) {
       recoveryResult = await _audioRouteCoordinatorV2
           ?.recoverPlaybackAfterIntentInvalidation();
     }
+    if (_shouldDeferAndroidV2RecoveryUntilForeground) return;
     if (recoveryResult != null && recoveryResult.succeeded) {
       if (unpublishedRecordingPath != null) {
         await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
@@ -12981,19 +13043,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleAndroidEditorResumed() async {
-    final recovery = _v2AudioSessionRecoveryFuture;
-    if (recovery != null) {
-      try {
-        await recovery;
-      } catch (_) {
-        // The existing recovery path owns its failure state and user notice.
-      }
+    if (_isBluetoothV2Session) {
+      await _resumeAndroidV2AudioAfterForeground();
+    } else {
+      await _requestAndroidRouteRefresh(reason: 'appResumed');
     }
     if (!mounted) return;
-    await _requestAndroidRouteRefresh(reason: 'appResumed');
     await _refreshMicrophonePermissionAndInputs();
     await _refreshAudioRouteInfo(refreshNativeRoute: false);
   }
+
+  Future<void> _resumeAndroidV2AudioAfterForeground() async {
+    if (!_androidV2ForegroundRecoveryPending || !mounted) return;
+    final cleanup = _v2AudioSessionRecoveryFuture;
+    if (cleanup != null) await cleanup;
+    if (!mounted ||
+        !_androidV2ForegroundRecoveryPending ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _androidV2ForegroundRecoveryPending = false;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (!_v2AudioSessionInvalidated || coordinator == null) return;
+    coordinator.beginLocalInvalidationEpisode();
+    final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
+      shouldAttemptSystemOutputRecovery: true,
+      unpublishedRecordingPath: null,
+      successNotice:
+          'Recording stopped because Mixroom went to the background.',
+    );
+    _trackV2AudioSessionRecovery(recovery);
+    await recovery;
+  }
+
+  bool get _shouldDeferAndroidV2RecoveryUntilForeground =>
+      defaultTargetPlatform == TargetPlatform.android &&
+      _androidV2ForegroundRecoveryPending;
 
   Uri _producerCaptureUiAccessUri() {
     final base = AppApiConfig.apiBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
@@ -21106,6 +21191,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         audioDir.path,
         'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav',
       );
+      _claimPendingUnpublishedRecordingPath(filePath);
 
       // 5) Arm the native recorder.
       final ok = await JuceAudioEngine.startRecording(
@@ -21115,6 +21201,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
 
       if (!ok) {
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         if (_isBluetoothV2Session && _supportsV2AudioRecording) {
           await _restoreV2PlaybackOnlyAfterRecording();
         }
@@ -21137,7 +21224,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         if (recordingResult == null || !recordingResult.succeeded) {
           await JuceAudioEngine.stopRecording();
-          await _deleteUncommittedRecordingFile(filePath);
+          await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
           await _restoreV2PlaybackOnlyAfterRecording();
           if (mounted) {
             _showSmallNotice('Failed to verify the recording input.');
@@ -21148,7 +21235,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
-        await _deleteUncommittedRecordingFile(filePath);
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -21169,7 +21256,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await JuceAudioEngine.stopRecording();
-        await _deleteUncommittedRecordingFile(filePath);
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         if (_isBluetoothV2Session && _supportsV2AudioRecording) {
           await _restoreV2PlaybackOnlyAfterRecording();
         }
@@ -21182,7 +21269,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
-        await _deleteUncommittedRecordingFile(filePath);
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -21198,7 +21285,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       if (!mounted) {
         await JuceAudioEngine.stopRecording();
-        await _deleteUncommittedRecordingFile(filePath);
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         return;
       }
 
@@ -21241,6 +21328,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           !_v2AudioSessionInvalidated &&
           _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
         await _restoreV2PlaybackOnlyAfterRecording();
+      }
+      if (!_isRecording) {
+        await _discardPendingUnpublishedRecordingFile();
       }
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
@@ -21322,6 +21412,48 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     await _stopAudioRecordingJuce(keepPlaying: keepPlaying);
+  }
+
+  void _claimPendingUnpublishedRecordingPath(String path) {
+    final normalized = path.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'Recording path is empty');
+    }
+    final existing = _pendingUnpublishedRecordingPath;
+    if (existing != null && existing != normalized) {
+      throw StateError('pending_recording_path_already_owned');
+    }
+    _pendingUnpublishedRecordingPath = normalized;
+    _recordingFilePath = normalized;
+  }
+
+  String? _detachPendingUnpublishedRecordingPath({String? expectedPath}) {
+    final pending = _pendingUnpublishedRecordingPath;
+    if (pending == null || (expectedPath != null && pending != expectedPath)) {
+      return null;
+    }
+    _pendingUnpublishedRecordingPath = null;
+    if (_recordingFilePath == pending) _recordingFilePath = null;
+    return pending;
+  }
+
+  bool _ownsPendingUnpublishedRecordingPath(String path) =>
+      _pendingUnpublishedRecordingPath == path;
+
+  void _releasePendingRecordingForPublication(String path) {
+    final detached = _detachPendingUnpublishedRecordingPath(expectedPath: path);
+    if (detached == null) {
+      throw StateError('pending_recording_path_not_owned');
+    }
+  }
+
+  Future<void> _discardPendingUnpublishedRecordingFile({
+    String? expectedPath,
+  }) async {
+    final path = _detachPendingUnpublishedRecordingPath(
+      expectedPath: expectedPath,
+    );
+    if (path != null) await _deleteUncommittedRecordingFile(path);
   }
 
   Future<void> _deleteUncommittedRecordingFile(String path) async {
@@ -21421,18 +21553,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (deferredBluetoothRestore != null) {
           await deferredBluetoothRestore;
         }
-        final failedPath = _recordingFilePath;
-        if (failedPath != null) {
-          final partialFile = File(failedPath);
-          if (await partialFile.exists()) {
-            try {
-              await partialFile.delete();
-            } catch (_) {
-              // Native finalization already made the take unpublished. A later
-              // project cleanup may remove a filesystem entry that is locked.
-            }
-          }
-        }
+        await _discardPendingUnpublishedRecordingFile();
         if (mounted) {
           setState(() {
             _recordingFilePath = null;
@@ -21444,8 +21565,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
 
-      if (_recordingFilePath == null ||
-          !File(_recordingFilePath!).existsSync()) {
+      final recordingPath = _recordingFilePath;
+      if (recordingPath == null || !File(recordingPath).existsSync()) {
+        _detachPendingUnpublishedRecordingPath(expectedPath: recordingPath);
         if (mounted) {
           setState(() {
             _isRecording = false;
@@ -21479,14 +21601,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final compensatedStartMs = math.max(0.0, startMs - recordingLatencyMs);
       final appliedAlignmentOffsetMs = compensatedStartMs - startMs;
       if (!mounted) {
-        final unpublishedPath = _recordingFilePath;
-        if (unpublishedPath != null) {
-          await _deleteUncommittedRecordingFile(unpublishedPath);
-        }
+        await _discardPendingUnpublishedRecordingFile(
+          expectedPath: recordingPath,
+        );
         return;
       }
 
+      if (_v2AudioSessionInvalidated ||
+          !_ownsPendingUnpublishedRecordingPath(recordingPath)) {
+        // A route-safety episode that overlaps Stop owns disposal of this take.
+        // Never publish it after recovery, even if native finalization happened
+        // to finish successfully before the invalidation was observed.
+        await _discardPendingUnpublishedRecordingFile(
+          expectedPath: recordingPath,
+        );
+        return;
+      }
+
+      // A route-safety episode during asynchronous publication owns transport
+      // state. It may recover the output, but playback must remain paused until
+      // the user explicitly resumes it.
+      final publicationTransportSerial = _transportCommandSerial;
+
       // 2) Insert recorded clip (UNCHANGED)
+      // Capture recovery no longer owns the finalized file once publication
+      // begins. Route invalidation may run concurrently with the async clip
+      // insert, but it must never delete a file that the timeline can adopt.
+      _releasePendingRecordingForPublication(recordingPath);
+      var recordingPublished = false;
       try {
         await _undoManager.execute(
           AddAudioTrackAction(
@@ -21508,14 +21650,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
             tracks: _audioTracks,
             restoreTrack: _addClipFromUndoPayload,
-            file: File(_recordingFilePath!),
+            file: File(recordingPath),
             row: row,
             timeMs: compensatedStartMs,
             onRemove: _syncRemovedClipFadesAfterUndo,
           ),
         );
+        recordingPublished = _audioTracks.any(
+          (track) => track.file.path == recordingPath,
+        );
       } catch (e) {
         debugPrint("Error adding recorded track: $e");
+        recordingPublished = _audioTracks.any(
+          (track) => track.file.path == recordingPath,
+        );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -21526,13 +21674,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
         }
       }
+      if (!recordingPublished) {
+        await _deleteUncommittedRecordingFile(recordingPath);
+      }
 
       // 3) Restore the intended playback state after the clip is inserted.
       if (deferredBluetoothRestore != null &&
           (resumePlaybackAfterStop || Platform.isIOS)) {
         await deferredBluetoothRestore;
       }
-      if (resumePlaybackAfterStop && mounted && !_isPlaying) {
+      if (resumePlaybackAfterStop &&
+          mounted &&
+          !_isPlaying &&
+          publicationTransportSerial == _transportCommandSerial &&
+          !_v2AudioSessionInvalidated &&
+          !_v2AudioSessionRecoveryInProgress) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       } else if (!keepPlaying && _isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);

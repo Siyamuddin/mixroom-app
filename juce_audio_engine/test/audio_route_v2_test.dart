@@ -203,85 +203,6 @@ void main() {
     expect(reparsed.juce.inputOpen, isFalse);
   });
 
-  test('playback policy is output-only and Bluetooth stability-oriented', () {
-    final configuration = const AudioRoutePolicyV2().resolve(
-      snapshot: snapshot(
-        outputs: const <AudioRouteEndpointV2>[
-          AudioRouteEndpointV2(
-            direction: AudioRouteDirectionV2.output,
-            nativePortType: 'BluetoothA2DPOutput',
-            normalizedKind: AudioRouteKindV2.bluetooth,
-            uid: 'output-a',
-            name: 'Headphones',
-            channelCount: 2,
-          ),
-        ],
-      ),
-      intent: AudioRouteIntentV2.playbackOnly,
-    );
-
-    expect(configuration.supported, isTrue);
-    expect(configuration.desiredInputChannels, 0);
-    expect(configuration.requireNonBluetoothInput, isFalse);
-    expect(configuration.monitoringAllowed, isFalse);
-    expect(
-      configuration.hardwareRatePolicy,
-      AudioHardwareRatePolicyV2.prefer48000,
-    );
-    expect(
-      configuration.bufferPolicy,
-      AudioBufferPolicyV2.conservativeBluetooth,
-    );
-  });
-
-  test('Bluetooth monitoring is rejected and input must be non-Bluetooth', () {
-    final configuration = const AudioRoutePolicyV2().resolve(
-      snapshot: snapshot(
-        outputs: const <AudioRouteEndpointV2>[
-          AudioRouteEndpointV2(
-            direction: AudioRouteDirectionV2.output,
-            nativePortType: 'BluetoothA2DPOutput',
-            normalizedKind: AudioRouteKindV2.bluetoothMedia,
-            uid: 'output-a',
-            name: 'Headphones',
-            channelCount: 2,
-          ),
-        ],
-      ),
-      intent: AudioRouteIntentV2.monitoring,
-    );
-
-    expect(configuration.supported, isFalse);
-    expect(configuration.rejectionCode, 'bluetooth_monitoring_unsupported');
-    expect(configuration.desiredInputChannels, 1);
-    expect(configuration.requireNonBluetoothInput, isTrue);
-    expect(configuration.monitoringAllowed, isFalse);
-  });
-
-  test('Bluetooth recording defers exact input verification to native intent',
-      () {
-    final configuration = const AudioRoutePolicyV2().resolve(
-      snapshot: snapshot(
-        outputs: const <AudioRouteEndpointV2>[
-          AudioRouteEndpointV2(
-            direction: AudioRouteDirectionV2.output,
-            nativePortType: 'BluetoothA2DPOutput',
-            normalizedKind: AudioRouteKindV2.bluetoothMedia,
-            uid: 'output-a',
-            name: 'Headphones',
-            channelCount: 2,
-          ),
-        ],
-      ),
-      intent: AudioRouteIntentV2.preparingRecording,
-    );
-
-    expect(configuration.supported, isTrue);
-    expect(configuration.desiredInputChannels, 1);
-    expect(configuration.requireNonBluetoothInput, isFalse);
-    expect(configuration.monitoringAllowed, isFalse);
-  });
-
   test('playback startup result preserves verified snapshot and future fields',
       () {
     final result = AudioPlaybackStartupResultV2.fromMap(<String, dynamic>{
@@ -339,7 +260,25 @@ void main() {
     expect(event.generation, 7);
     expect(event.fingerprint, 'output-7');
     expect(event.transportWasPlaying, isTrue);
+    expect(event.requiresReconfiguration, isFalse);
     expect(event.snapshot.implementation, BluetoothImplementationV2.v2);
+  });
+
+  test('route-change event carries explicit forced reconfiguration evidence',
+      () {
+    final event = AudioRouteChangeEventV2.fromMap(<String, dynamic>{
+      'generation': 8,
+      'cause': 'nativeStreamDisconnected',
+      'fingerprint': 'unchanged-output',
+      'requiresReconfiguration': true,
+      'snapshot': <String, dynamic>{
+        'implementation': 'v2',
+        'generation': 8,
+        'captureConsistency': 'stable',
+      },
+    });
+
+    expect(event.requiresReconfiguration, isTrue);
   });
 
   test('interruption diagnostics are optional and forward compatible', () {

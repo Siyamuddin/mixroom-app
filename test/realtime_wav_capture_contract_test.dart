@@ -149,12 +149,16 @@ void main() {
       editor,
       contains('Recording could not be saved reliably. Please try again.'),
     );
-    expect(editor, contains('_deleteUncommittedRecordingFile(filePath)'));
     final failure = editor.indexOf('if (!captureResult.success)');
     final insert = editor.indexOf('// 2) Insert recorded clip', failure);
     expect(failure, greaterThanOrEqualTo(0));
     expect(insert, greaterThan(failure));
-    expect(editor.substring(failure, insert), contains('return;'));
+    final rejectedCapture = editor.substring(failure, insert);
+    expect(
+      rejectedCapture,
+      contains('await _discardPendingUnpublishedRecordingFile()'),
+    );
+    expect(rejectedCapture, contains('return;'));
   });
 
   test('only the bounded capture diagnostic vocabulary is used', () {

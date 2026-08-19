@@ -70,6 +70,7 @@ internal object AndroidBluetoothDuplexReadinessV2 {
       inputStream.sharingMode != "Shared" ||
       !outputStream.available ||
       !outputStream.running ||
+      (outputStream.streamEpoch ?: 0L) <= 0L ||
       outputStream.routedDeviceId != output.id ||
       outputStream.channelCount != 1 ||
       (outputStream.sampleRateHz ?: 0) <= 0 ||
@@ -92,9 +93,18 @@ internal object AndroidBluetoothDuplexReadinessV2 {
 internal enum class AndroidRouteSignalKindV2 {
   DEVICE_ADDED,
   DEVICE_REMOVED,
+  COMMUNICATION_DEVICE_CHANGED,
+  NATIVE_STREAM_DISCONNECTED,
   PLAYBACK_ACTIVITY,
   STARTUP,
 }
+
+internal data class AndroidRouteDeviceChangeV2(
+  val id: Int,
+  val type: Int,
+  val isSource: Boolean,
+  val isSink: Boolean,
+)
 
 internal enum class AndroidIntentRouteDecisionV2 {
   ORDINARY,
@@ -103,18 +113,40 @@ internal enum class AndroidIntentRouteDecisionV2 {
 }
 
 internal object AndroidIntentRouteObserverV2 {
+  fun isSelfGeneratedPlaybackActivity(
+    lifecycleMutationActive: Boolean,
+    cleanupClaimed: Boolean,
+    signal: AndroidRouteSignalKindV2,
+  ): Boolean =
+    signal == AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY &&
+      (lifecycleMutationActive || cleanupClaimed)
+
   fun classify(
     explicitTransactionActive: Boolean,
     operationEndpointIds: Set<Int>?,
     signal: AndroidRouteSignalKindV2,
     removedDeviceIds: Set<Int>,
+    expectedCommunicationDeviceType: Int? = null,
+    addedDevices: List<AndroidRouteDeviceChangeV2> = emptyList(),
   ): AndroidIntentRouteDecisionV2 {
     if (!explicitTransactionActive) return AndroidIntentRouteDecisionV2.ORDINARY
 
     return when (signal) {
-      AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY,
-      AndroidRouteSignalKindV2.DEVICE_ADDED ->
+      AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY ->
         AndroidIntentRouteDecisionV2.INFORMATIONAL
+      AndroidRouteSignalKindV2.DEVICE_ADDED -> {
+        val ownedAddition =
+          addedDevices.isNotEmpty() &&
+            addedDevices.all { device ->
+              device.id in operationEndpointIds.orEmpty() ||
+                (expectedCommunicationDeviceType != null &&
+                  device.type == expectedCommunicationDeviceType &&
+                  device.isSource &&
+                  !device.isSink)
+            }
+        if (ownedAddition) AndroidIntentRouteDecisionV2.INFORMATIONAL
+        else AndroidIntentRouteDecisionV2.TERMINAL
+      }
       AndroidRouteSignalKindV2.DEVICE_REMOVED -> {
         if (
           operationEndpointIds == null ||
@@ -125,7 +157,33 @@ internal object AndroidIntentRouteObserverV2 {
           AndroidIntentRouteDecisionV2.INFORMATIONAL
         }
       }
+      AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED ->
+        AndroidIntentRouteDecisionV2.TERMINAL
+      AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED ->
+        AndroidIntentRouteDecisionV2.TERMINAL
       AndroidRouteSignalKindV2.STARTUP -> AndroidIntentRouteDecisionV2.TERMINAL
     }
+  }
+}
+
+/**
+ * Owns only notifications that can be delivered late for an already completed
+ * recording-disconnect recovery. A new loss of the committed playback output
+ * is deliberately excluded so it can start an ordinary route episode.
+ */
+internal object AndroidCommittedRecoveryOwnershipV2 {
+  fun ownsLateSignal(
+    signal: AndroidRouteSignalKindV2,
+    removedDeviceIds: Set<Int>,
+    completedOperationEndpointIds: Set<Int>,
+  ): Boolean = when (signal) {
+    AndroidRouteSignalKindV2.DEVICE_REMOVED ->
+      removedDeviceIds.isNotEmpty() &&
+        removedDeviceIds.all(completedOperationEndpointIds::contains)
+    AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED -> true
+    AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY -> true
+    AndroidRouteSignalKindV2.DEVICE_ADDED,
+    AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED,
+    AndroidRouteSignalKindV2.STARTUP -> false
   }
 }

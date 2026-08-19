@@ -37,7 +37,9 @@
 #endif
 
 #include "MixroomOboePlaybackV2.h"
+#include "JuceLogBridge.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -57,36 +59,107 @@ namespace
 std::atomic<int32_t> mixroomStreamPolicyV2 {
     static_cast<int32_t> (mixroom::android_audio_v2::StreamPolicy::normal)
 };
+std::atomic<uint64_t> mixroomStreamEpochCounterV2 { 0 };
 std::mutex mixroomOutputStreamMutexV2;
 std::weak_ptr<oboe::AudioStream> mixroomOutputStreamV2;
+uint64_t mixroomOutputStreamEpochV2 = 0;
 int mixroomRequestedSampleRateV2 = 0;
 int mixroomRequestedBufferFramesV2 = 0;
 std::mutex mixroomInputStreamMutexV2;
 std::weak_ptr<oboe::AudioStream> mixroomInputStreamV2;
+uint64_t mixroomInputStreamEpochV2 = 0;
 int mixroomInputRequestedSampleRateV2 = 0;
 int mixroomInputRequestedBufferFramesV2 = 0;
 std::mutex mixroomMediaRouteMigrationMutexV2;
 std::condition_variable mixroomMediaRouteMigrationConditionV2;
 uint64_t mixroomMediaRouteMigrationEpochV2 = 0;
+uint64_t mixroomMediaRouteMigrationStreamEpochV2 = 0;
 bool mixroomMediaRouteMigrationArmedV2 = false;
 bool mixroomMediaRouteMigrationSignalledV2 = false;
 
+enum class DisconnectedStreamAction
+{
+    restartNormally,
+    signalMediaMigration,
+    notifyRouteLoss,
+};
+
+constexpr DisconnectedStreamAction getDisconnectedStreamAction (
+    mixroom::android_audio_v2::StreamPolicy policy)
+{
+    return policy == mixroom::android_audio_v2::StreamPolicy::bluetoothMedia
+               ? DisconnectedStreamAction::signalMediaMigration
+               : policy == mixroom::android_audio_v2::StreamPolicy::bluetoothCommunicationDuplex
+                     ? DisconnectedStreamAction::notifyRouteLoss
+                     : DisconnectedStreamAction::restartNormally;
+}
+
+constexpr int boundedInputReadFrames (int requestedFrames, int actualFrames)
+{
+    return requestedFrames <= 0 || actualFrames <= 0 ? 0
+                             : actualFrames < requestedFrames ? actualFrames
+                                                              : requestedFrames;
+}
+
+constexpr bool isTerminalInputReadError (oboe::Result error)
+{
+    return error != oboe::Result::ErrorTimeout
+        && error != oboe::Result::ErrorWouldBlock;
+}
+
+static_assert (getDisconnectedStreamAction (mixroom::android_audio_v2::StreamPolicy::normal)
+               == DisconnectedStreamAction::restartNormally);
+static_assert (getDisconnectedStreamAction (mixroom::android_audio_v2::StreamPolicy::bluetoothMedia)
+               == DisconnectedStreamAction::signalMediaMigration);
+static_assert (getDisconnectedStreamAction (mixroom::android_audio_v2::StreamPolicy::bluetoothCommunicationDuplex)
+               == DisconnectedStreamAction::notifyRouteLoss);
+static_assert (boundedInputReadFrames (256, -1) == 0);
+static_assert (boundedInputReadFrames (256, 0) == 0);
+static_assert (boundedInputReadFrames (0, 64) == 0);
+static_assert (boundedInputReadFrames (256, 64) == 64);
+static_assert (boundedInputReadFrames (256, 512) == 256);
+static_assert (! isTerminalInputReadError (oboe::Result::ErrorTimeout));
+static_assert (! isTerminalInputReadError (oboe::Result::ErrorWouldBlock));
+static_assert (isTerminalInputReadError (oboe::Result::ErrorDisconnected));
+
+uint64_t nextMixroomStreamEpochV2()
+{
+    return mixroomStreamEpochCounterV2.fetch_add (1, std::memory_order_relaxed) + 1;
+}
+
 void setMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream,
+                               uint64_t streamEpoch,
                                int requestedSampleRate,
                                int requestedBufferFrames)
 {
-    const std::lock_guard<std::mutex> lock (mixroomOutputStreamMutexV2);
-    mixroomOutputStreamV2 = stream;
-    mixroomRequestedSampleRateV2 = requestedSampleRate;
-    mixroomRequestedBufferFramesV2 = requestedBufferFrames;
+    {
+        const std::lock_guard<std::mutex> lock (mixroomOutputStreamMutexV2);
+        mixroomOutputStreamV2 = stream;
+        mixroomOutputStreamEpochV2 = streamEpoch;
+        mixroomRequestedSampleRateV2 = requestedSampleRate;
+        mixroomRequestedBufferFramesV2 = requestedBufferFrames;
+    }
+    {
+        const std::lock_guard<std::mutex> lock (mixroomMediaRouteMigrationMutexV2);
+        if (mixroomMediaRouteMigrationArmedV2)
+        {
+            // JUCE may open a short-lived discovery stream before installing
+            // the real device stream. The armed transaction owns the newest
+            // output it opened; binding permanently to the discovery epoch
+            // would make the real route-migration disconnect unobservable.
+            mixroomMediaRouteMigrationStreamEpochV2 = streamEpoch;
+        }
+    }
 }
 
 void setMixroomInputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream,
+                              uint64_t streamEpoch,
                               int requestedSampleRate,
                               int requestedBufferFrames)
 {
     const std::lock_guard<std::mutex> lock (mixroomInputStreamMutexV2);
     mixroomInputStreamV2 = stream;
+    mixroomInputStreamEpochV2 = streamEpoch;
     mixroomInputRequestedSampleRateV2 = requestedSampleRate;
     mixroomInputRequestedBufferFramesV2 = requestedBufferFrames;
 }
@@ -97,6 +170,7 @@ void clearMixroomOutputStreamV2 (const std::shared_ptr<oboe::AudioStream>& strea
     if (mixroomOutputStreamV2.lock() == stream)
     {
         mixroomOutputStreamV2.reset();
+        mixroomOutputStreamEpochV2 = 0;
         mixroomRequestedSampleRateV2 = 0;
         mixroomRequestedBufferFramesV2 = 0;
     }
@@ -108,19 +182,22 @@ void clearMixroomInputStreamV2 (const std::shared_ptr<oboe::AudioStream>& stream
     if (mixroomInputStreamV2.lock() == stream)
     {
         mixroomInputStreamV2.reset();
+        mixroomInputStreamEpochV2 = 0;
         mixroomInputRequestedSampleRateV2 = 0;
         mixroomInputRequestedBufferFramesV2 = 0;
     }
 }
 
-void signalMixroomMediaRouteMigrationV2()
+bool signalMixroomMediaRouteMigrationV2 (uint64_t streamEpoch)
 {
     const std::lock_guard<std::mutex> lock (mixroomMediaRouteMigrationMutexV2);
-    if (! mixroomMediaRouteMigrationArmedV2)
-        return;
+    if (! mixroomMediaRouteMigrationArmedV2
+        || mixroomMediaRouteMigrationStreamEpochV2 != streamEpoch)
+        return false;
 
     mixroomMediaRouteMigrationSignalledV2 = true;
     mixroomMediaRouteMigrationConditionV2.notify_all();
+    return true;
 }
 }
 
@@ -144,11 +221,13 @@ void resetPlaybackPolicy()
     setBluetoothMediaPolicyEnabled (false);
     const std::lock_guard<std::mutex> lock (juce::mixroomOutputStreamMutexV2);
     juce::mixroomOutputStreamV2.reset();
+    juce::mixroomOutputStreamEpochV2 = 0;
     juce::mixroomRequestedSampleRateV2 = 0;
     juce::mixroomRequestedBufferFramesV2 = 0;
     {
         const std::lock_guard<std::mutex> inputLock (juce::mixroomInputStreamMutexV2);
         juce::mixroomInputStreamV2.reset();
+        juce::mixroomInputStreamEpochV2 = 0;
         juce::mixroomInputRequestedSampleRateV2 = 0;
         juce::mixroomInputRequestedBufferFramesV2 = 0;
     }
@@ -174,11 +253,13 @@ OutputStreamFacts getOutputStreamFacts()
 {
     OutputStreamFacts facts;
     std::shared_ptr<oboe::AudioStream> stream;
+    uint64_t streamEpoch = 0;
     int requestedSampleRate = 0;
     int requestedBufferFrames = 0;
     {
         const std::lock_guard<std::mutex> lock (juce::mixroomOutputStreamMutexV2);
         stream = juce::mixroomOutputStreamV2.lock();
+        streamEpoch = juce::mixroomOutputStreamEpochV2;
         requestedSampleRate = juce::mixroomRequestedSampleRateV2;
         requestedBufferFrames = juce::mixroomRequestedBufferFramesV2;
     }
@@ -186,6 +267,7 @@ OutputStreamFacts getOutputStreamFacts()
         return facts;
 
     facts.available = true;
+    facts.streamEpoch = streamEpoch;
     facts.running = stream->getState() == oboe::StreamState::Started;
     facts.routedDeviceId = stream->getDeviceId();
     facts.channelCount = stream->getChannelCount();
@@ -209,11 +291,13 @@ InputStreamFacts getInputStreamFacts()
 {
     InputStreamFacts facts;
     std::shared_ptr<oboe::AudioStream> stream;
+    uint64_t streamEpoch = 0;
     int requestedSampleRate = 0;
     int requestedBufferFrames = 0;
     {
         const std::lock_guard<std::mutex> lock (juce::mixroomInputStreamMutexV2);
         stream = juce::mixroomInputStreamV2.lock();
+        streamEpoch = juce::mixroomInputStreamEpochV2;
         requestedSampleRate = juce::mixroomInputRequestedSampleRateV2;
         requestedBufferFrames = juce::mixroomInputRequestedBufferFramesV2;
     }
@@ -221,6 +305,7 @@ InputStreamFacts getInputStreamFacts()
         return facts;
 
     facts.available = true;
+    facts.streamEpoch = streamEpoch;
     facts.running = stream->getState() == oboe::StreamState::Started;
     facts.routedDeviceId = stream->getDeviceId();
     facts.channelCount = stream->getChannelCount();
@@ -244,6 +329,7 @@ uint64_t beginBluetoothMediaRouteMigration()
 {
     const std::lock_guard<std::mutex> lock (juce::mixroomMediaRouteMigrationMutexV2);
     ++juce::mixroomMediaRouteMigrationEpochV2;
+    juce::mixroomMediaRouteMigrationStreamEpochV2 = 0;
     juce::mixroomMediaRouteMigrationArmedV2 = true;
     juce::mixroomMediaRouteMigrationSignalledV2 = false;
     return juce::mixroomMediaRouteMigrationEpochV2;
@@ -273,6 +359,7 @@ void finishBluetoothMediaRouteMigration (uint64_t token)
 
     juce::mixroomMediaRouteMigrationArmedV2 = false;
     juce::mixroomMediaRouteMigrationSignalledV2 = false;
+    juce::mixroomMediaRouteMigrationStreamEpochV2 = 0;
 }
 } // namespace mixroom::android_audio_v2
 
@@ -770,6 +857,16 @@ private:
             return stream;
         }
 
+        mixroom::android_audio_v2::StreamPolicy getStreamPolicyV2() const noexcept
+        {
+            return streamPolicyV2;
+        }
+
+        uint64_t getStreamEpochV2() const noexcept
+        {
+            return streamEpochV2;
+        }
+
         int getXRunCount() const
         {
             if (stream != nullptr)
@@ -882,11 +979,13 @@ private:
             if (stream != nullptr && openResult == oboe::Result::OK
                 && direction == oboe::Direction::Output)
                 setMixroomOutputStreamV2 (stream,
+                                          streamEpochV2,
                                           routeNativePolicy ? 0 : newSampleRate,
                                           requestedBufferFrames);
             else if (stream != nullptr && openResult == oboe::Result::OK
                      && direction == oboe::Direction::Input)
                 setMixroomInputStreamV2 (stream,
+                                         streamEpochV2,
                                          routeNativePolicy ? 0 : newSampleRate,
                                          requestedBufferFrames);
 
@@ -928,6 +1027,7 @@ private:
         oboe::Direction streamDirection = oboe::Direction::Output;
         bool usesBluetoothMediaPolicyV2 = false;
         bool usesBluetoothCommunicationDuplexPolicyV2 = false;
+        uint64_t streamEpochV2 = nextMixroomStreamEpochV2();
         mixroom::android_audio_v2::StreamPolicy streamPolicyV2 =
             mixroom::android_audio_v2::StreamPolicy::normal;
     };
@@ -1126,6 +1226,17 @@ private:
         int getInputLatencyInSamples() override     { return inputLatency; }
 
     private:
+        bool claimNativeRouteLossV2()
+        {
+            return ! nativeRouteLossHandledV2.exchange (true, std::memory_order_acq_rel);
+        }
+
+        void notifyNativeRouteLossOnceV2 (uint64_t streamEpoch)
+        {
+            if (claimNativeRouteLossV2())
+                notifyAndroidBluetoothDuplexDisconnectedV2 (streamEpoch);
+        }
+
         bool isLatencyDetectionSupported (OboeStream* stream)
         {
             if (stream == nullptr || ! openedOk())
@@ -1165,21 +1276,43 @@ private:
                         return oboe::DataCallbackResult::Continue;
                     }
 
+                    const auto nativeSamplesRequested = static_cast<size_t> (numInputChannels)
+                                                      * static_cast<size_t> (jmax (0, numFrames));
+                    std::fill_n (inputStreamNativeBuffer.data(), nativeSamplesRequested, SampleType {});
+
+                    const auto referringDirectlyToOboeData = OboeAudioIODeviceBufferHelpers<SampleType>
+                                                                 ::referAudioBufferDirectlyToOboeIfPossible (
+                                                                     inputStreamNativeBuffer.data(),
+                                                                     inputStreamSampleBuffer,
+                                                                     numFrames);
+                    if (! referringDirectlyToOboeData)
+                    {
+                        if (inputStreamSampleBuffer.getNumSamples() < numFrames)
+                        {
+                            JUCE_OBOE_LOG ("Input callback exceeded prepared capacity");
+                            notifyNativeRouteLossOnceV2 (outputStream->getStreamEpochV2());
+                            return oboe::DataCallbackResult::Stop;
+                        }
+                        inputStreamSampleBuffer.clear();
+                    }
+
                     auto result = nativeInputStream->read (inputStreamNativeBuffer.data(), numFrames, 0);
 
                     if (result)
                     {
-                        auto referringDirectlyToOboeData = OboeAudioIODeviceBufferHelpers<SampleType>
-                                                             ::referAudioBufferDirectlyToOboeIfPossible (inputStreamNativeBuffer.data(),
-                                                                                                         inputStreamSampleBuffer,
-                                                                                                         result.value());
-
-                        if (! referringDirectlyToOboeData)
-                            OboeAudioIODeviceBufferHelpers<SampleType>::convertFromOboe (inputStreamNativeBuffer.data(), inputStreamSampleBuffer, result.value());
+                        const auto framesRead = boundedInputReadFrames (numFrames, result.value());
+                        if (! referringDirectlyToOboeData && framesRead > 0)
+                            OboeAudioIODeviceBufferHelpers<SampleType>::convertFromOboe (
+                                inputStreamNativeBuffer.data(), inputStreamSampleBuffer, framesRead);
                     }
                     else
                     {
                         JUCE_OBOE_LOG ("Failed to read from input stream: " + getOboeString (result.error()));
+                        if (isTerminalInputReadError (result.error()))
+                        {
+                            notifyNativeRouteLossOnceV2 (outputStream->getStreamEpochV2());
+                            return oboe::DataCallbackResult::Stop;
+                        }
                     }
 
                     if (isInputLatencyDetectionSupported)
@@ -1296,14 +1429,42 @@ private:
 
             if (error == oboe::Result::ErrorDisconnected)
             {
-                if (mixroom::android_audio_v2::isBluetoothMediaPolicyEnabled())
+                auto disconnectedStreamPolicy = mixroom::android_audio_v2::StreamPolicy::normal;
+                uint64_t disconnectedStreamEpoch = 0;
+                {
+                    const SpinLock::ScopedLockType audioCallbackLock { audioCallbackMutex };
+                    const auto currentOutput = outputStream != nullptr
+                                                   ? outputStream->getNativeStream()
+                                                   : std::shared_ptr<oboe::AudioStream> {};
+                    if (currentOutput == nullptr || currentOutput.get() != stream)
+                    {
+                        // A replacement/teardown already owns the device. Never let
+                        // an old stream's delayed callback act on its successor.
+                        return;
+                    }
+
+                    disconnectedStreamPolicy = outputStream->getStreamPolicyV2();
+                    disconnectedStreamEpoch = outputStream->getStreamEpochV2();
+                }
+
+                const auto action = getDisconnectedStreamAction (disconnectedStreamPolicy);
+                if (action == DisconnectedStreamAction::notifyRouteLoss)
+                {
+                    // Explicit duplex teardown and current-output recovery are
+                    // owned by the V2 lifecycle transaction.
+                    notifyNativeRouteLossOnceV2 (disconnectedStreamEpoch);
+                    return;
+                }
+                if (action == DisconnectedStreamAction::signalMediaMigration)
                 {
                     // Android can temporarily open media on the speaker after
                     // releasing a communication route, then disconnect that
                     // stream when A2DP becomes authoritative. The explicit V2
                     // lifecycle owner must re-open the JUCE device so its
                     // sample-rate, buffer and graph facts match the new route.
-                    signalMixroomMediaRouteMigrationV2();
+                    if (claimNativeRouteLossV2()
+                        && ! signalMixroomMediaRouteMigrationV2 (disconnectedStreamEpoch))
+                        notifyAndroidBluetoothDuplexDisconnectedV2 (disconnectedStreamEpoch);
                     return;
                 }
                 const SpinLock::ScopedTryLockType streamRestartLock { streamRestartMutex };
@@ -1314,6 +1475,10 @@ private:
                     // Use default device id, to let the OS pick the best ID (since our was disconnected).
 
                     const SpinLock::ScopedLockType audioCallbackLock { audioCallbackMutex };
+
+                    if (outputStream == nullptr
+                        || outputStream->getNativeStream().get() != stream)
+                        return;
 
                     outputStream = nullptr;
                     outputStream.reset (new OboeStream (oboe::kUnspecified,
@@ -1336,6 +1501,7 @@ private:
         AudioBuffer<float> inputStreamSampleBuffer,
                            outputStreamSampleBuffer;
         SpinLock audioCallbackMutex, streamRestartMutex;
+        std::atomic<bool> nativeRouteLossHandledV2 { false };
 
         bool isInputLatencyDetectionSupported = false;
         int inputLatency = -1;

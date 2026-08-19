@@ -31,6 +31,7 @@ struct StreamFacts
 {
     bool available = false;
     bool running = false;
+    uint64_t streamEpoch = 0;
     int32_t routedDeviceId = 0;
     int32_t channelCount = 0;
     int32_t requestedSampleRate = 0;

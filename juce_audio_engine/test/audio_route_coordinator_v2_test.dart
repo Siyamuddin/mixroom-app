@@ -48,12 +48,14 @@ AudioRouteChangeEventV2 _event(
   String fingerprint, {
   String cause = 'defaultOutputChanged',
   bool interruptionWasSuspended = false,
+  bool requiresReconfiguration = false,
 }) {
   return AudioRouteChangeEventV2(
     generation: generation,
     cause: cause,
     fingerprint: fingerprint,
     transportWasPlaying: true,
+    requiresReconfiguration: requiresReconfiguration,
     snapshot: _snapshot(
       generation: generation,
       interruptionWasSuspended: interruptionWasSuspended,
@@ -163,7 +165,8 @@ void main() {
     await coordinator.dispose();
   });
 
-  test('same-fingerprint terminal events are never suppressed', () async {
+  test('same-fingerprint playback events are coalesced regardless of cause',
+      () async {
     final adapter = _FakeAdapter();
     final coordinator = AudioRouteCoordinatorV2(
       adapter: adapter,
@@ -182,7 +185,149 @@ void main() {
     await _flush();
     await _flush();
 
+    expect(adapter.appliedGenerations, <int>[1]);
+    await coordinator.dispose();
+  });
+
+  test('explicit native reconfiguration bypasses playback fingerprint dedupe',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    adapter.controller.add(_event(1, 'same'));
+    await _flush();
+    await _flush();
+    adapter.controller.add(
+      _event(
+        2,
+        'same',
+        cause: 'nativeStreamDisconnected',
+        requiresReconfiguration: true,
+      ),
+    );
+    await _flush();
+    await _flush();
+
     expect(adapter.appliedGenerations, <int>[1, 2]);
+    await coordinator.dispose();
+  });
+
+  test('same-fingerprint inventory change invalidates built-in recording',
+      () async {
+    final adapter = _FakeAdapter();
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+
+    adapter.controller.add(_event(1, 'speaker'));
+    await _flush();
+    await _flush();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+
+    adapter.controller.add(
+      _event(2, 'speaker', cause: 'deviceInventoryChanged'),
+    );
+    await _flush();
+
+    expect(invalidated, hasLength(1));
+    expect(invalidated.single.cause, 'deviceInventoryChanged');
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
+    await coordinator.dispose();
+  });
+
+  test('recording ownership persists until playback-only commits', () async {
+    final adapter = _FakeAdapter();
+    final stopping = Completer<AudioRouteTransitionResultV2>();
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+    adapter.intentResults[AudioRouteIntentV2.playbackOnly] = stopping.future;
+
+    final stop = coordinator.transitionIntent(AudioRouteIntentV2.playbackOnly);
+    await _flush();
+    adapter.controller.add(
+      _event(1, 'speaker', cause: 'deviceRemoved'),
+    );
+    await _flush();
+
+    expect(invalidated, hasLength(1));
+    expect(adapter.appliedGenerations, isEmpty);
+    stopping.complete(_result(0));
+    expect((await stop).diagnosticCode, 'stale_generation');
+
+    adapter.intentResults[AudioRouteIntentV2.playbackOnly] =
+        Future.value(_result(1));
+    final recovery = await coordinator.recoverPlaybackAfterIntentInvalidation();
+    expect(recovery.succeeded, isTrue);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    await coordinator.dispose();
+  });
+
+  test('stale playback intent completion rearms a consumed pending drain',
+      () async {
+    final adapter = _FakeAdapter();
+    final transition = Completer<AudioRouteTransitionResultV2>();
+    adapter.intentResults[AudioRouteIntentV2.playbackOnly] = transition.future;
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final playbackIntent =
+        coordinator.transitionIntent(AudioRouteIntentV2.playbackOnly);
+    await _flush();
+    adapter.controller.add(_event(1, 'headset'));
+    await _flush();
+    expect(adapter.appliedGenerations, isEmpty);
+
+    transition.complete(_result(0));
+    expect((await playbackIntent).diagnosticCode, 'stale_generation');
+    await _flush();
+    await _flush();
+
+    expect(adapter.appliedGenerations, <int>[1]);
+    await coordinator.dispose();
+  });
+
+  test('same-fingerprint native stream loss invalidates active recording',
+      () async {
+    final adapter = _FakeAdapter();
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+
+    adapter.controller.add(_event(
+      1,
+      'same',
+      cause: 'nativeStreamDisconnected',
+    ));
+    await _flush();
+
+    expect(invalidated, hasLength(1));
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
     await coordinator.dispose();
   });
 

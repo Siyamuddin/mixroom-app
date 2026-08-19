@@ -1451,6 +1451,7 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeOutputStreamFactsV2JNI(JN
     values.set("running", facts.running);
     if (facts.available)
     {
+        values.set("streamEpoch", static_cast<juce::int64>(facts.streamEpoch));
         values.set("routedDeviceId", facts.routedDeviceId);
         values.set("channelCount", facts.channelCount);
         values.set("requestedSampleRateHz", facts.requestedSampleRate);
@@ -1479,6 +1480,7 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeInputStreamFactsV2JNI(JNI
     values.set("running", facts.running);
     if (facts.available)
     {
+        values.set("streamEpoch", static_cast<juce::int64>(facts.streamEpoch));
         values.set("routedDeviceId", facts.routedDeviceId);
         values.set("channelCount", facts.channelCount);
         values.set("requestedSampleRateHz", facts.requestedSampleRate);

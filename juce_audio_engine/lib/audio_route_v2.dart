@@ -23,7 +23,6 @@ enum AudioRouteIntentV2 {
   playbackOnly,
   preparingRecording,
   recording,
-  monitoring,
 }
 
 /// Private execution context for an existing V2 intent transition.
@@ -35,10 +34,6 @@ enum AudioRouteIntentOperationV2 {
   systemSelectedProbe,
   systemSelectedRecording,
 }
-
-enum AudioHardwareRatePolicyV2 { native, prefer48000 }
-
-enum AudioBufferPolicyV2 { routeNative, conservativeBluetooth }
 
 enum AudioRouteCoordinatorStateV2 {
   stable,
@@ -635,6 +630,7 @@ class AudioRouteChangeEventV2 {
     required this.fingerprint,
     required this.transportWasPlaying,
     required this.snapshot,
+    this.requiresReconfiguration = false,
   });
 
   final int generation;
@@ -642,6 +638,7 @@ class AudioRouteChangeEventV2 {
   final String fingerprint;
   final bool transportWasPlaying;
   final AudioRouteSnapshotV2 snapshot;
+  final bool requiresReconfiguration;
 
   factory AudioRouteChangeEventV2.fromMap(Map<String, dynamic> map) {
     final rawSnapshot = map['snapshot'];
@@ -650,6 +647,7 @@ class AudioRouteChangeEventV2 {
       cause: map['cause']?.toString() ?? 'unknown',
       fingerprint: map['fingerprint']?.toString() ?? '',
       transportWasPlaying: map['transportWasPlaying'] == true,
+      requiresReconfiguration: map['requiresReconfiguration'] == true,
       snapshot: AudioRouteSnapshotV2.fromMap(
         rawSnapshot is Map
             ? Map<String, dynamic>.from(rawSnapshot)
@@ -709,63 +707,6 @@ class AudioRouteTransitionResultV2 {
                 },
               },
       ),
-    );
-  }
-}
-
-class DesiredAudioRouteConfigurationV2 {
-  const DesiredAudioRouteConfigurationV2({
-    required this.intent,
-    required this.supported,
-    required this.rejectionCode,
-    required this.desiredInputChannels,
-    required this.requireNonBluetoothInput,
-    required this.hardwareRatePolicy,
-    required this.bufferPolicy,
-    required this.monitoringAllowed,
-  });
-
-  final AudioRouteIntentV2 intent;
-  final bool supported;
-  final String? rejectionCode;
-  final int desiredInputChannels;
-  final bool requireNonBluetoothInput;
-  final AudioHardwareRatePolicyV2 hardwareRatePolicy;
-  final AudioBufferPolicyV2 bufferPolicy;
-  final bool monitoringAllowed;
-}
-
-class AudioRoutePolicyV2 {
-  const AudioRoutePolicyV2();
-
-  DesiredAudioRouteConfigurationV2 resolve({
-    required AudioRouteSnapshotV2 snapshot,
-    required AudioRouteIntentV2 intent,
-  }) {
-    final bluetoothOutput = snapshot.hasBluetoothOutput;
-    final wantsInput = intent != AudioRouteIntentV2.playbackOnly;
-    final unsupportedBluetoothMonitoring =
-        bluetoothOutput && intent == AudioRouteIntentV2.monitoring;
-
-    return DesiredAudioRouteConfigurationV2(
-      intent: intent,
-      supported: !unsupportedBluetoothMonitoring,
-      rejectionCode: unsupportedBluetoothMonitoring
-          ? 'bluetooth_monitoring_unsupported'
-          : null,
-      desiredInputChannels: wantsInput ? 1 : 0,
-      // Recording input identity is verified by the platform-specific intent
-      // transition. Monitoring remains the only globally forbidden Bluetooth
-      // input mode.
-      requireNonBluetoothInput: intent == AudioRouteIntentV2.monitoring,
-      hardwareRatePolicy: bluetoothOutput
-          ? AudioHardwareRatePolicyV2.prefer48000
-          : AudioHardwareRatePolicyV2.native,
-      bufferPolicy: bluetoothOutput
-          ? AudioBufferPolicyV2.conservativeBluetooth
-          : AudioBufferPolicyV2.routeNative,
-      monitoringAllowed:
-          !bluetoothOutput && intent == AudioRouteIntentV2.monitoring,
     );
   }
 }

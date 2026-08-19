@@ -1,6 +1,7 @@
 package com.mixroom.juce_audio_engine
 
 import android.media.AudioDeviceInfo
+import java.util.concurrent.ConcurrentHashMap
 
 internal enum class AndroidRouteKindV2(val wireValue: String) {
   BUILT_IN("builtIn"),
@@ -44,6 +45,7 @@ internal data class AndroidOboeOutputFactsV2(
   val performanceMode: String?,
   val sharingMode: String?,
   val channelCount: Int? = null,
+  val streamEpoch: Long? = null,
 ) {
   companion object {
     fun fromMap(map: Map<String, Any>) = AndroidOboeOutputFactsV2(
@@ -58,7 +60,53 @@ internal data class AndroidOboeOutputFactsV2(
       performanceMode = map["performanceMode"]?.toString(),
       sharingMode = map["sharingMode"]?.toString(),
       channelCount = (map["channelCount"] as? Number)?.toInt(),
+      streamEpoch = (map["streamEpoch"] as? Number)?.toLong(),
     )
+  }
+}
+
+internal object AndroidNativeStreamEpochV2 {
+  fun matches(expected: Long?, observed: Long): Boolean =
+    expected != null && expected > 0L && observed > 0L && expected == observed
+}
+
+/**
+ * Defers native disconnects until this operation owns its newly opened output
+ * epoch. Route/callback readiness later validates that the epoch stayed stable.
+ * The commit and observation paths both remove the matching deferred epoch, so
+ * exactly one side reports a disconnect across their final race.
+ */
+internal class AndroidNativeStreamEpochGateV2 {
+  @Volatile private var expectedEpoch: Long? = null
+  private val deferredEpochs = ConcurrentHashMap.newKeySet<Long>()
+
+  fun expected(): Long? = expectedEpoch
+
+  fun observe(observed: Long): Boolean {
+    if (observed <= 0L) return false
+    val alreadyVerified = expectedEpoch
+    if (alreadyVerified != null) {
+      return AndroidNativeStreamEpochV2.matches(alreadyVerified, observed)
+    }
+
+    deferredEpochs.add(observed)
+    val verifiedDuringObservation = expectedEpoch ?: return false
+    val ownsDeferredEpoch = deferredEpochs.remove(observed)
+    return ownsDeferredEpoch &&
+      AndroidNativeStreamEpochV2.matches(verifiedDuringObservation, observed)
+  }
+
+  fun commit(opened: Long?): Boolean {
+    val accepted = opened?.takeIf { it > 0L }
+    expectedEpoch = accepted
+    val matchedDeferred = accepted != null && deferredEpochs.remove(accepted)
+    deferredEpochs.clear()
+    return matchedDeferred
+  }
+
+  fun clear() {
+    expectedEpoch = null
+    deferredEpochs.clear()
   }
 }
 
@@ -175,6 +223,7 @@ internal object AndroidLiveRouteValidatorV2 {
     if (
       !stream.available ||
       !stream.running ||
+      (stream.streamEpoch ?: 0L) <= 0L ||
       (stream.routedDeviceId ?: 0) <= 0 ||
       (stream.sampleRateHz ?: 0) <= 0 ||
       (stream.bufferFrames ?: 0) <= 0 ||

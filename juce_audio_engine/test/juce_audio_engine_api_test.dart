@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
@@ -250,6 +252,75 @@ void main() {
     expect(legacy, isTrue);
     expect(calls, hasLength(1));
     expect(calls.single.method, 'initialise');
+  });
+
+  test('legacy initialization reports native startup failure', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      throw PlatformException(code: 'coordinator_disposed');
+    });
+
+    final legacy = await JuceAudioEngine.initialiseForImplementation(
+      BluetoothImplementationV2.legacy,
+    );
+
+    expect(legacy, isFalse);
+    expect(calls, hasLength(1));
+    expect(calls.single.method, 'initialise');
+  });
+
+  test('legacy initialization reports a missing native plugin', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+
+    final legacy = await JuceAudioEngine.initialiseForImplementation(
+      BluetoothImplementationV2.legacy,
+    );
+
+    expect(legacy, isFalse);
+    expect(calls, isEmpty);
+  });
+
+  test('initialization joins one process-wide shutdown', () async {
+    final shutdownEntered = Completer<void>();
+    final releaseShutdown = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'shutdown') {
+        if (!shutdownEntered.isCompleted) shutdownEntered.complete();
+        await releaseShutdown.future;
+      }
+      return null;
+    });
+
+    final firstShutdown = JuceAudioEngine.shutdown();
+    await shutdownEntered.future;
+    final secondShutdown = JuceAudioEngine.shutdown();
+    final initialization = JuceAudioEngine.initialiseForImplementation(
+      BluetoothImplementationV2.legacy,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(calls.map((call) => call.method), <String>['shutdown']);
+
+    releaseShutdown.complete();
+    await Future.wait(<Future<void>>[firstShutdown, secondShutdown]);
+    expect(await initialization, isTrue);
+    expect(
+      calls.map((call) => call.method),
+      <String>['shutdown', 'initialise'],
+    );
+  });
+
+  test('initialization does not yield when no shutdown is active', () async {
+    final initialization = JuceAudioEngine.initialiseForImplementation(
+      BluetoothImplementationV2.legacy,
+    );
+
+    expect(calls.map((call) => call.method), <String>['initialise']);
+    expect(await initialization, isTrue);
   });
 
   test('V2 playback initialization uses only its dedicated native method',

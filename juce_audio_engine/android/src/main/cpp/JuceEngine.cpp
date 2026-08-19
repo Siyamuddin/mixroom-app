@@ -1170,7 +1170,7 @@ bool JuceEngine::initialisePlaybackV2Android()
     androidV2RecordingPrepared = false;
     androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
-    androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
+    androidV2CallbackProofPending.store(false, std::memory_order_release);
     ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
 
     registerFormatsIfNeeded();
@@ -1185,15 +1185,23 @@ bool JuceEngine::initialisePlaybackV2Android()
         device->getActiveInputChannels().countNumberOfSetBits() != 0)
     {
         juceLogToFlutter(("Android V2 output-only initialise failed: " + initError).toRawUTF8());
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
         deviceManager.closeAudioDevice();
         return false;
     }
 
     deviceManager.removeChangeListener(this);
+    androidV2CallbackProofPending.store(true, std::memory_order_release);
     initialiseSharedPlaybackGraph();
     v2PlaybackCallbackDetached = false;
     logCurrentAudioDeviceState("android-v2-initialise");
-    return engineInitialized && audioCallbackAttached;
+    const bool initialised = engineInitialized && audioCallbackAttached;
+    if (!initialised)
+    {
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
+        androidV2CallbackReady.reset();
+    }
+    return initialised;
 #else
     return false;
 #endif
