@@ -1,6 +1,9 @@
 package com.mixroom.juce_audio_engine
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.AssetManager
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
@@ -55,12 +58,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val generation: Long,
     val sourceOutput: AndroidRouteEndpointV2,
     val mode: IntentOperationModeV2 = IntentOperationModeV2.STANDARD,
+    val bluetoothSelectionMode: AndroidBluetoothRouteSelectionModeV2? = null,
     val startedNanos: Long = SystemClock.elapsedRealtimeNanos(),
     val cancelled: AtomicBoolean = AtomicBoolean(false),
     val routeInvalidated: AtomicBoolean = AtomicBoolean(false),
     val cleanupClaimed: AtomicBoolean = AtomicBoolean(false),
     val cleanupPlan: AndroidRecordingCleanupPlanV2 = AndroidRecordingCleanupPlanV2(),
     val communicationRouteSelected: AtomicBoolean = AtomicBoolean(false),
+    val legacyScoState: AndroidLegacyScoStateV2 = AndroidLegacyScoStateV2(),
     val nativeOutputEpochGate: AndroidNativeStreamEpochGateV2 =
       AndroidNativeStreamEpochGateV2(),
     @Volatile var verifiedInput: AndroidRouteEndpointV2? = null,
@@ -71,6 +76,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     @Volatile var terminalCause: String? = null,
     @Volatile var cleanupOutcome: String = "pending",
     @Volatile var lifecycleSignal: CountDownLatch? = null,
+    @Volatile var legacyScoReceiver: BroadcastReceiver? = null,
   )
 
   private lateinit var methodChannel: MethodChannel
@@ -826,7 +832,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       "terminalCause" to operation.terminalCause,
       "actualCallbackCount" to operation.callbackCount,
       "cleanupOutcome" to operation.cleanupOutcome,
-      "selectionMode" to "androidCommunicationDevice",
+      "selectionMode" to
+        operation.bluetoothSelectionMode?.diagnosticName,
+      "physicalValidationPending" to
+        (operation.bluetoothSelectionMode ==
+          AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO),
       "operationId" to operation.id,
       "elapsedMs" to
         ((SystemClock.elapsedRealtimeNanos() - operation.startedNanos) / 1_000_000L).toInt(),
@@ -1140,6 +1150,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       AndroidRouteSignalKindV2.DEVICE_REMOVED -> "deviceRemoved"
       AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED ->
         "communicationDeviceChanged"
+      AndroidRouteSignalKindV2.LEGACY_SCO_STATE_CHANGED ->
+        "legacyScoDisconnected"
       AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED ->
         "nativeStreamDisconnected"
       AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY -> "mediaRouteChanged"
@@ -1322,14 +1334,19 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     val audioManager =
       applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    val releaseSignal = bluetoothOperation?.let { activeOperation ->
-      activeOperation.expectedCommunicationOutput?.let { target ->
-        val released = CountDownLatch(1)
-        released to AudioManager.OnCommunicationDeviceChangedListener { device ->
-          if (device?.id != target.id) released.countDown()
+    val releaseSignal = bluetoothOperation
+      ?.takeIf {
+        it.bluetoothSelectionMode ==
+          AndroidBluetoothRouteSelectionModeV2.COMMUNICATION_DEVICE
+      }
+      ?.let { activeOperation ->
+        activeOperation.expectedCommunicationOutput?.let { target ->
+          val released = CountDownLatch(1)
+          released to AudioManager.OnCommunicationDeviceChangedListener { device ->
+            if (device?.id != target.id) released.countDown()
+          }
         }
       }
-    }
     var mediaRouteMigrationToken = 0L
     var reopenedOperationEpoch: Long? = null
     fun finishMediaRouteMigrationV2() {
@@ -1358,7 +1375,20 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     return try {
       if (lifecycleDisposedV2) return "coordinator_disposed"
       if (bluetoothOperation != null) JuceBridge.quiescePlaybackV2JNI(true)
+      var legacyReleaseCode = "ok"
+      if (
+        bluetoothOperation?.bluetoothSelectionMode ==
+        AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO
+      ) {
+        legacyReleaseCode = releaseLegacyScoRouteV2(
+          bluetoothOperation,
+          audioManager,
+          requireNotNull(restorationDeadlineNanos),
+          waitForRelease = true,
+        )
+      }
       preparePlaybackOnlyModeV2()
+      if (legacyReleaseCode != "ok") return legacyReleaseCode
 
       // Communication-device release, not playback activity, is the settling
       // boundary for this explicit transaction. Oboe route readback below
@@ -1560,6 +1590,12 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (operation.lifecycleSignal === releaseSignal?.first) {
           operation.lifecycleSignal = null
         }
+        if (
+          operation.bluetoothSelectionMode ==
+          AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO
+        ) {
+          unregisterLegacyScoReceiverV2(operation)
+        }
       }
     }
   }
@@ -1591,6 +1627,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         )
       AndroidRecordingCleanupDispositionV2.CLOSE_ONLY -> {
         JuceBridge.quiescePlaybackV2JNI(true)
+        val audioManager =
+          applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        releaseLegacyScoRouteV2(
+          operation,
+          audioManager,
+          cleanupDeadlineNanos,
+          waitForRelease = false,
+        )
         preparePlaybackOnlyModeV2()
         setAndroidStreamPolicyV2(AndroidStreamPolicyV2.NORMAL)
         JuceBridge.resetPlaybackPolicyV2JNI()
@@ -1769,6 +1813,224 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     return IntentOutcomeV2("failure", finalCode)
   }
 
+  private fun bluetoothCommunicationCandidatesV2(
+    audioManager: AudioManager,
+    selectionMode: AndroidBluetoothRouteSelectionModeV2,
+  ): List<AudioDeviceInfo> = try {
+    val devices = when (selectionMode) {
+      AndroidBluetoothRouteSelectionModeV2.COMMUNICATION_DEVICE ->
+        audioManager.availableCommunicationDevices
+      AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO ->
+        audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+    }
+    devices
+      .filter { it.isSink && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+      .distinctBy { it.id }
+  } catch (_: SecurityException) {
+    emptyList()
+  } catch (_: IllegalStateException) {
+    emptyList()
+  }
+
+  private fun acquireCommunicationDeviceRouteV2(
+    operation: RecordingOperationV2,
+    audioManager: AudioManager,
+    candidate: AudioDeviceInfo,
+    deadlineNanos: Long,
+  ): String {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+      return "recording_route_unsupported"
+    }
+    val selected = CountDownLatch(1)
+    operation.lifecycleSignal = selected
+    val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
+      if (device?.id == candidate.id) selected.countDown()
+    }
+    return try {
+      audioManager.addOnCommunicationDeviceChangedListener(
+        applicationContext.mainExecutor,
+        listener,
+      )
+      audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+      if (!audioManager.setCommunicationDevice(candidate)) {
+        return "recording_route_unsupported"
+      }
+      val remainingNanos = deadlineNanos - SystemClock.elapsedRealtimeNanos()
+      if (
+        remainingNanos <= 0L ||
+        !selected.await(remainingNanos, TimeUnit.NANOSECONDS)
+      ) {
+        return "actual_state_unavailable"
+      }
+      operation.communicationRouteSelected.set(true)
+      if (audioManager.communicationDevice?.id != candidate.id) {
+        return "route_unstable"
+      }
+      "ok"
+    } catch (_: SecurityException) {
+      "recording_route_unsupported"
+    } catch (_: IllegalStateException) {
+      "actual_state_unavailable"
+    } finally {
+      operation.lifecycleSignal = null
+      try {
+        audioManager.removeOnCommunicationDeviceChangedListener(listener)
+      } catch (_: IllegalArgumentException) {
+      }
+    }
+  }
+
+  private fun handleLegacyScoEventV2(
+    operation: RecordingOperationV2,
+    event: AndroidLegacyScoEventV2,
+  ) {
+    when (event) {
+      AndroidLegacyScoEventV2.ACQUIRED,
+      AndroidLegacyScoEventV2.ACQUISITION_FAILED,
+      AndroidLegacyScoEventV2.RELEASED -> operation.lifecycleSignal?.countDown()
+      AndroidLegacyScoEventV2.TERMINAL_LOSS -> {
+        if (
+          recordingOperationV2 === operation &&
+          !operation.cleanupClaimed.get()
+        ) {
+          handleAudioRouteSignalV2(
+            AndroidRouteSignalKindV2.LEGACY_SCO_STATE_CHANGED,
+            emptySet(),
+            requiresReconfiguration = true,
+          )
+        }
+      }
+      AndroidLegacyScoEventV2.NONE -> Unit
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun acquireLegacyScoRouteV2(
+    operation: RecordingOperationV2,
+    audioManager: AudioManager,
+    deadlineNanos: Long,
+  ): String {
+    if (Build.VERSION.SDK_INT !in 29..30) return "recording_route_unsupported"
+    val acquired = CountDownLatch(1)
+    operation.lifecycleSignal = acquired
+    val receiver = object : BroadcastReceiver() {
+      override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent?.action != AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) return
+        val state = intent.getIntExtra(
+          AudioManager.EXTRA_SCO_AUDIO_STATE,
+          AudioManager.SCO_AUDIO_STATE_ERROR,
+        )
+        handleLegacyScoEventV2(operation, operation.legacyScoState.observe(state))
+      }
+    }
+    operation.legacyScoReceiver = receiver
+    return try {
+      val sticky = applicationContext.registerReceiver(
+        receiver,
+        IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED),
+      )
+      val stickyState = sticky?.getIntExtra(
+        AudioManager.EXTRA_SCO_AUDIO_STATE,
+        AudioManager.SCO_AUDIO_STATE_ERROR,
+      ) ?: AudioManager.SCO_AUDIO_STATE_ERROR
+      val initialEvent = operation.legacyScoState.beginAcquisition(stickyState)
+      audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+      operation.legacyScoState.markRequestStarted()
+      audioManager.startBluetoothSco()
+      audioManager.isBluetoothScoOn = true
+      handleLegacyScoEventV2(operation, initialEvent)
+
+      val remainingNanos = deadlineNanos - SystemClock.elapsedRealtimeNanos()
+      if (
+        remainingNanos <= 0L ||
+        !acquired.await(remainingNanos, TimeUnit.NANOSECONDS)
+      ) {
+        return "actual_state_unavailable"
+      }
+      if (!operation.legacyScoState.isConnected() || !audioManager.isBluetoothScoOn) {
+        return "actual_state_unavailable"
+      }
+      operation.communicationRouteSelected.set(true)
+      "ok"
+    } catch (_: SecurityException) {
+      "recording_route_unsupported"
+    } catch (_: IllegalStateException) {
+      "actual_state_unavailable"
+    } finally {
+      operation.lifecycleSignal = null
+    }
+  }
+
+  private fun acquireBluetoothRouteV2(
+    operation: RecordingOperationV2,
+    audioManager: AudioManager,
+    candidate: AudioDeviceInfo,
+    deadlineNanos: Long,
+  ): String = when (operation.bluetoothSelectionMode) {
+    AndroidBluetoothRouteSelectionModeV2.COMMUNICATION_DEVICE ->
+      acquireCommunicationDeviceRouteV2(
+        operation,
+        audioManager,
+        candidate,
+        deadlineNanos,
+      )
+    AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO ->
+      acquireLegacyScoRouteV2(operation, audioManager, deadlineNanos)
+    null -> "recording_route_unsupported"
+  }
+
+  private fun unregisterLegacyScoReceiverV2(operation: RecordingOperationV2) {
+    val receiver = operation.legacyScoReceiver ?: return
+    operation.legacyScoReceiver = null
+    try {
+      applicationContext.unregisterReceiver(receiver)
+    } catch (_: IllegalArgumentException) {
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun releaseLegacyScoRouteV2(
+    operation: RecordingOperationV2,
+    audioManager: AudioManager,
+    deadlineNanos: Long,
+    waitForRelease: Boolean,
+  ): String {
+    if (
+      operation.bluetoothSelectionMode !=
+      AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO
+    ) {
+      return "ok"
+    }
+    operation.phase = "releasingLegacySco"
+    val released = CountDownLatch(1)
+    operation.lifecycleSignal = released
+    val shouldWait = operation.legacyScoState.beginRelease()
+    return try {
+      audioManager.isBluetoothScoOn = false
+      if (operation.legacyScoState.claimStopRequest()) {
+        audioManager.stopBluetoothSco()
+      }
+      if (!shouldWait || !waitForRelease) released.countDown()
+      val remainingNanos = deadlineNanos - SystemClock.elapsedRealtimeNanos()
+      if (
+        remainingNanos <= 0L ||
+        !released.await(remainingNanos, TimeUnit.NANOSECONDS)
+      ) {
+        "actual_state_unavailable"
+      } else {
+        "ok"
+      }
+    } catch (_: SecurityException) {
+      "actual_state_unavailable"
+    } catch (_: IllegalStateException) {
+      "actual_state_unavailable"
+    } finally {
+      operation.lifecycleSignal = null
+      unregisterLegacyScoReceiverV2(operation)
+    }
+  }
+
+  @Suppress("DEPRECATION")
   private fun currentBluetoothDuplexFactsV2(
     operation: RecordingOperationV2,
   ): AndroidBluetoothDuplexFactsV2 {
@@ -1790,12 +2052,17 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     return AndroidBluetoothDuplexFactsV2(
       apiLevel = Build.VERSION.SDK_INT,
+      selectionMode = operation.bluetoothSelectionMode
+        ?: AndroidBluetoothRouteSelectionModeV2.forApiLevel(Build.VERSION.SDK_INT),
       sourceOutput = operation.sourceOutput,
       selectedCommunicationOutput = operation.expectedCommunicationOutput,
       actualInput = input,
       actualOutput = output,
       audioMode = audioManager.mode,
       communicationDeviceId = communicationDeviceId,
+      legacyScoConnected = operation.legacyScoState.isConnected(),
+      legacyScoRoutingEnabled =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S && audioManager.isBluetoothScoOn,
       deviceOpen = diagnostics["deviceOpen"] == true,
       callbackAttached = diagnostics["audioCallbackAttached"] == true,
       activeInputChannels =
@@ -1816,7 +2083,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     if (!mode.usesBluetoothDuplexRoute()) {
       return IntentOutcomeV2("failure", "recording_route_unsupported")
     }
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+    if (Build.VERSION.SDK_INT < 29) {
+      return IntentOutcomeV2("failure", "recording_route_unsupported")
+    }
+    if (
+      Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
+      mode.allowsCapture()
+    ) {
       return IntentOutcomeV2("failure", "recording_route_unsupported")
     }
     if (
@@ -1839,26 +2112,21 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       return IntentOutcomeV2("failure", "recording_route_unsupported")
     }
 
+    val selectionMode =
+      AndroidBluetoothRouteSelectionModeV2.forApiLevel(Build.VERSION.SDK_INT)
     val operation = RecordingOperationV2(
       id = recordingOperationIdV2.incrementAndGet(),
       generation = generation,
       sourceOutput = sourceOutput,
       mode = mode,
+      bluetoothSelectionMode = selectionMode,
     )
     recordingOperationV2 = operation
     duplexProbeFactsV2 = null
     audioRouteIntentV2 = AudioRouteIntentV2.PREPARING_RECORDING
     val audioManager =
       applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-    val candidates = try {
-      audioManager.availableCommunicationDevices
-        .filter { it.isSink && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
-        .distinctBy { it.id }
-    } catch (_: SecurityException) {
-      emptyList()
-    } catch (_: IllegalStateException) {
-      emptyList()
-    }
+    val candidates = bluetoothCommunicationCandidatesV2(audioManager, selectionMode)
     if (candidates.size != 1) {
       operation.phase = "communicationDeviceUnavailable"
       return failBluetoothDuplexV2(operation, "recording_route_unsupported")
@@ -1867,44 +2135,20 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     operation.expectedCommunicationOutput = candidate.toRouteEndpointV2()
     operation.phase = "selectingCommunicationDevice"
 
-    val selected = CountDownLatch(1)
-    operation.lifecycleSignal = selected
-    val listener = AudioManager.OnCommunicationDeviceChangedListener { device ->
-      if (device?.id == candidate.id) selected.countDown()
-    }
-    try {
-      audioManager.addOnCommunicationDeviceChangedListener(
-        applicationContext.mainExecutor,
-        listener,
-      )
-      audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-      if (!audioManager.setCommunicationDevice(candidate)) {
-        operation.phase = "communicationDeviceSelection"
-        return failBluetoothDuplexV2(operation, "recording_route_unsupported")
+    val deadlineNanos = operation.startedNanos + TimeUnit.SECONDS.toNanos(5)
+    val selectionCode = acquireBluetoothRouteV2(
+      operation,
+      audioManager,
+      candidate,
+      deadlineNanos,
+    )
+    if (selectionCode != "ok") {
+      operation.phase = when (selectionCode) {
+        "recording_route_unsupported" -> "communicationDeviceSelection"
+        "route_unstable" -> "communicationRouteChanged"
+        else -> "communicationDeviceTimeout"
       }
-      val deadlineNanos = operation.startedNanos + TimeUnit.SECONDS.toNanos(5)
-      val remainingNanos = deadlineNanos - SystemClock.elapsedRealtimeNanos()
-      if (remainingNanos <= 0L || !selected.await(remainingNanos, TimeUnit.NANOSECONDS)) {
-        operation.phase = "communicationDeviceTimeout"
-        return failBluetoothDuplexV2(operation, "actual_state_unavailable")
-      }
-      operation.communicationRouteSelected.set(true)
-      if (audioManager.communicationDevice?.id != candidate.id) {
-        operation.phase = "communicationDeviceSelection"
-        return failBluetoothDuplexV2(operation, "route_unstable")
-      }
-    } catch (_: SecurityException) {
-      operation.phase = "communicationDeviceSelection"
-      return failBluetoothDuplexV2(operation, "recording_route_unsupported")
-    } catch (_: IllegalStateException) {
-      operation.phase = "communicationDeviceSelection"
-      return failBluetoothDuplexV2(operation, "actual_state_unavailable")
-    } finally {
-      operation.lifecycleSignal = null
-      try {
-        audioManager.removeOnCommunicationDeviceChangedListener(listener)
-      } catch (_: IllegalArgumentException) {
-      }
+      return failBluetoothDuplexV2(operation, selectionCode)
     }
 
     if (

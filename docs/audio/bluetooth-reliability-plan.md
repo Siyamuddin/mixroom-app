@@ -1403,6 +1403,38 @@ listener, stops RemoteIO before disposal, and rejects notifications for an
 owner that is no longer live. Rebuilt device and simulator archives passed the
 same hardware case without a crash or freeze.
 
+#### Checkpoint 7M — Android 12+ communication-device recording
+
+Android 12+ V2 uses one operation-owned communication-device transaction for
+both the writer-free route check and headset recording. Mixroom selects the
+single observable SCO communication sink by native ID, while Android supplies
+the matching input. JUCE/Oboe readback, the native stream epoch, and one real
+project callback—not playback-activity notifications—prove the duplex route.
+Ordinary Stop finalizes capture before clearing the communication device and
+verifying the exact original A2DP output. Physical loss discards unpublished
+capture and performs one recovery to Android's current media output.
+
+The Android 12+ physical gate passed repeated writer-free checks, short and
+30-second headset recordings, cancellation, active/preparation disconnect,
+background cleanup, built-in recording, and speaker recovery without editor
+reopen. Delayed self-generated playback and removal notifications remain owned
+through the verified playback commit so they cannot create a second recovery.
+
+#### Checkpoint 7N — Android 10–11 legacy SCO proof
+
+Android 10–11 reuses the same transaction, native duplex policy, callback
+proof, cleanup, and diagnostics through a private legacy routing adapter. The
+adapter registers the sticky SCO-state receiver before requesting SCO, retains
+it until cleanup, and calls `startBluetoothSco()`/`stopBluetoothSco()` exactly
+once per owned request. Broadcast state proves only acquisition and release;
+actual endpoint IDs and JUCE/Oboe stream facts remain authoritative.
+
+This path is intentionally limited to the debug-only writer-free check until a
+real Android 10 or 11 device passes the physical gate. Schema-version 1 reports
+identify `selectionMode: androidLegacySco` and
+`physicalValidationPending: true`. Production Bluetooth recording remains
+unsupported on API 29–30; Android 12+ behavior is unchanged.
+
 ### Phase 8 — Complete A/B hardware validation
 
 Run Legacy and V2 with the same build, project, device, headset, actions, and

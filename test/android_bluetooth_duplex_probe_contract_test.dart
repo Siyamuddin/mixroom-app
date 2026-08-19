@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   late String plugin;
   late String routeFacts;
+  late String legacySco;
   late String engine;
   late String oboe;
   late String editor;
@@ -16,6 +17,9 @@ void main() {
     routeFacts = File(
       'juce_audio_engine/android/src/main/kotlin/com/mixroom/juce_audio_engine/AndroidBluetoothDuplexRouteV2.kt',
     ).readAsStringSync();
+    legacySco = File(
+      'juce_audio_engine/android/src/main/kotlin/com/mixroom/juce_audio_engine/AndroidLegacyScoRouteV2.kt',
+    ).readAsStringSync();
     engine = File(
       'juce_audio_engine/android/src/main/cpp/JuceEngine.cpp',
     ).readAsStringSync();
@@ -25,33 +29,105 @@ void main() {
     editor = File('lib/screens/audio_editor.dart').readAsStringSync();
   });
 
-  test('API 31 probe selects one SCO sink without names or addresses', () {
+  test(
+    'API families share one transaction and select SCO only by type and ID',
+    () {
+      final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
+      final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
+      final probe = plugin.substring(start, end);
+
+      expect(
+        probe,
+        contains('AndroidBluetoothRouteSelectionModeV2.forApiLevel'),
+      );
+      expect(probe, contains('bluetoothCommunicationCandidatesV2('));
+      expect(probe, contains('acquireBluetoothRouteV2('));
+      expect(probe, contains('candidates.size != 1'));
+      expect(probe, isNot(contains('productName')));
+      expect(probe, isNot(contains('address')));
+      expect(plugin, contains('audioManager.availableCommunicationDevices'));
+      expect(plugin, contains('AudioManager.GET_DEVICES_OUTPUTS'));
+      expect(plugin, contains('AudioDeviceInfo.TYPE_BLUETOOTH_SCO'));
+      expect(plugin, contains('distinctBy { it.id }'));
+      expect(
+        plugin,
+        contains('audioManager.setCommunicationDevice(candidate)'),
+      );
+      expect(legacySco, contains('COMMUNICATION_DEVICE'));
+      expect(legacySco, contains('LEGACY_SCO'));
+    },
+  );
+
+  test(
+    'both selection adapters are event-driven under one bounded deadline',
+    () {
+      final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
+      final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
+      final probe = plugin.substring(start, end);
+
+      expect(plugin, contains('OnCommunicationDeviceChangedListener'));
+      expect(plugin, contains('ACTION_SCO_AUDIO_STATE_UPDATED'));
+      expect(plugin, contains('applicationContext.registerReceiver('));
+      expect(plugin, contains('audioManager.startBluetoothSco()'));
+      expect(plugin, contains('audioManager.stopBluetoothSco()'));
+      expect(probe, contains('TimeUnit.SECONDS.toNanos(5)'));
+      expect(probe, contains('waitForV2CallbackReadyJNI(remainingMillis)'));
+      expect(probe, isNot(contains('Thread.sleep')));
+      expect(probe, isNot(contains('postDelayed')));
+      expect(probe, isNot(contains('while (')));
+      expect(
+        plugin,
+        contains('operation.legacyScoState.beginAcquisition(stickyState)'),
+      );
+      expect(plugin, contains('operation.legacyScoState.claimStopRequest()'));
+      final legacyAcquireStart = plugin.indexOf(
+        'private fun acquireLegacyScoRouteV2(',
+      );
+      final legacyAcquireEnd = plugin.indexOf(
+        'private fun acquireBluetoothRouteV2(',
+        legacyAcquireStart,
+      );
+      final legacyAcquire = plugin.substring(
+        legacyAcquireStart,
+        legacyAcquireEnd,
+      );
+      final legacyReleaseStart = plugin.indexOf(
+        'private fun releaseLegacyScoRouteV2(',
+      );
+      final legacyReleaseEnd = plugin.indexOf(
+        'private fun currentBluetoothDuplexFactsV2(',
+        legacyReleaseStart,
+      );
+      final legacyRelease = plugin.substring(
+        legacyReleaseStart,
+        legacyReleaseEnd,
+      );
+      expect(legacyAcquire, isNot(contains('unregisterReceiver')));
+      expect(legacyAcquire, isNot(contains('Thread.sleep')));
+      expect(legacyAcquire, isNot(contains('while (')));
+      expect(
+        legacyRelease,
+        contains('unregisterLegacyScoReceiverV2(operation)'),
+      );
+      expect(legacyRelease, isNot(contains('Thread.sleep')));
+      expect(legacyRelease, isNot(contains('while (')));
+    },
+  );
+
+  test('legacy route remains probe-only until physical validation', () {
     final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
     final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
     final probe = plugin.substring(start, end);
 
-    expect(probe, contains('Build.VERSION.SDK_INT < Build.VERSION_CODES.S'));
-    expect(probe, contains('audioManager.availableCommunicationDevices'));
-    expect(probe, contains('AudioDeviceInfo.TYPE_BLUETOOTH_SCO'));
-    expect(probe, contains('distinctBy { it.id }'));
-    expect(probe, contains('candidates.size != 1'));
-    expect(probe, contains('audioManager.setCommunicationDevice(candidate)'));
-    expect(probe, isNot(contains('productName')));
-    expect(probe, isNot(contains('address')));
-  });
-
-  test('selection is event-driven with one bounded operation deadline', () {
-    final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
-    final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
-    final probe = plugin.substring(start, end);
-
-    expect(probe, contains('OnCommunicationDeviceChangedListener'));
-    expect(probe, contains('CountDownLatch(1)'));
-    expect(probe, contains('TimeUnit.SECONDS.toNanos(5)'));
-    expect(probe, contains('waitForV2CallbackReadyJNI(remainingMillis)'));
-    expect(probe, isNot(contains('Thread.sleep')));
-    expect(probe, isNot(contains('postDelayed')));
-    expect(probe, isNot(contains('while (')));
+    expect(
+      probe,
+      contains(
+        'Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&\n'
+        '      mode.allowsCapture()',
+      ),
+    );
+    expect(plugin, contains('"physicalValidationPending" to'));
+    expect(plugin, contains('AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO'));
   });
 
   test('communication policy is mono route-native shared voice audio', () {
@@ -136,22 +212,13 @@ void main() {
       deliver.indexOf('val completedPlaybackRecovery ='),
       greaterThan(deliver.indexOf('deliveredOutcome = IntentOutcomeV2(')),
     );
-    expect(
-      deliver,
-      contains('deliveredOutcome.status == "success"'),
-    );
+    expect(deliver, contains('deliveredOutcome.status == "success"'));
     expect(
       restore,
       contains('acceptSystemSelectedReplacement = expectedOutput == null'),
     );
-    expect(
-      restore,
-      contains('val recoveringCurrentOutput ='),
-    );
-    expect(
-      restore,
-      contains('!recoveringCurrentOutput &&'),
-    );
+    expect(restore, contains('val recoveringCurrentOutput ='));
+    expect(restore, contains('!recoveringCurrentOutput &&'));
     expect(
       restore.indexOf('val recoveringCurrentOutput ='),
       lessThan(restore.indexOf('releaseSignal.first.await(')),
@@ -207,10 +274,7 @@ void main() {
       restore,
       contains('expectedRoute.isBluetooth && restorationDeadlineNanos == null'),
     );
-    expect(
-      restore,
-      contains('expectedRoute.endpoint?.id'),
-    );
+    expect(restore, contains('expectedRoute.endpoint?.id'));
     expect(
       plugin,
       contains(
@@ -262,7 +326,9 @@ void main() {
       ),
     );
     expect(
-      oboe.indexOf('signalMixroomMediaRouteMigrationV2 (disconnectedStreamEpoch)'),
+      oboe.indexOf(
+        'signalMixroomMediaRouteMigrationV2 (disconnectedStreamEpoch)',
+      ),
       lessThan(
         oboe.indexOf(
           'notifyAndroidBluetoothDuplexDisconnectedV2 (disconnectedStreamEpoch)',
@@ -345,7 +411,10 @@ void main() {
       observer,
       contains('adoptCurrentPlaybackAfterCommittedRecoveryV2()'),
     );
-    expect(plugin, contains('"selectionMode" to "androidCommunicationDevice"'));
+    expect(
+      plugin,
+      contains('operation.bluetoothSelectionMode?.diagnosticName'),
+    );
     expect(plugin, contains('"duplexProbe" to duplexProbeFactsV2'));
   });
 }

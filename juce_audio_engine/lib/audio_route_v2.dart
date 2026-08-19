@@ -491,6 +491,7 @@ class AudioRouteDuplexProbeFactsV2 {
     this.actualCallbackCount,
     this.cleanupOutcome,
     this.selectionMode,
+    this.physicalValidationPending,
     required this.operationId,
     required this.elapsedMs,
     this.sourceOutput,
@@ -508,6 +509,7 @@ class AudioRouteDuplexProbeFactsV2 {
   final int? actualCallbackCount;
   final String? cleanupOutcome;
   final String? selectionMode;
+  final bool? physicalValidationPending;
   final int? operationId;
   final int? elapsedMs;
   final AudioRouteEndpointV2? sourceOutput;
@@ -537,6 +539,7 @@ class AudioRouteDuplexProbeFactsV2 {
       actualCallbackCount: _nullableInt(map['actualCallbackCount']),
       cleanupOutcome: map['cleanupOutcome']?.toString(),
       selectionMode: map['selectionMode']?.toString(),
+      physicalValidationPending: map['physicalValidationPending'] as bool?,
       operationId: _nullableInt(map['operationId']),
       elapsedMs: _nullableInt(map['elapsedMs']),
       sourceOutput: endpoint('sourceOutput'),
@@ -556,6 +559,7 @@ class AudioRouteDuplexProbeFactsV2 {
         'actualCallbackCount': actualCallbackCount,
         'cleanupOutcome': cleanupOutcome,
         'selectionMode': selectionMode,
+        'physicalValidationPending': physicalValidationPending,
         'operationId': operationId,
         'elapsedMs': elapsedMs,
         'sourceOutput': sourceOutput?.toRawMap(),

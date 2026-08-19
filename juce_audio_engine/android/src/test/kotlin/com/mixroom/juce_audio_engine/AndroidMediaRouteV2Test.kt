@@ -339,12 +339,15 @@ internal class AndroidMediaRouteV2Test {
     )
     val facts = AndroidBluetoothDuplexFactsV2(
       apiLevel = 31,
+      selectionMode = AndroidBluetoothRouteSelectionModeV2.COMMUNICATION_DEVICE,
       sourceOutput = source,
       selectedCommunicationOutput = output,
       actualInput = input,
       actualOutput = output,
       audioMode = android.media.AudioManager.MODE_IN_COMMUNICATION,
       communicationDeviceId = output.id,
+      legacyScoConnected = false,
+      legacyScoRoutingEnabled = false,
       deviceOpen = true,
       callbackAttached = true,
       activeInputChannels = 1,
@@ -358,7 +361,36 @@ internal class AndroidMediaRouteV2Test {
     assertEquals("ok", AndroidBluetoothDuplexReadinessV2.validate(facts))
     assertEquals(
       "recording_route_unsupported",
-      AndroidBluetoothDuplexReadinessV2.validate(facts.copy(apiLevel = 30)),
+      AndroidBluetoothDuplexReadinessV2.validate(
+        facts.copy(
+          apiLevel = 30,
+          selectionMode = AndroidBluetoothRouteSelectionModeV2.COMMUNICATION_DEVICE,
+        ),
+      ),
+    )
+    assertEquals(
+      "ok",
+      AndroidBluetoothDuplexReadinessV2.validate(
+        facts.copy(
+          apiLevel = 30,
+          selectionMode = AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO,
+          communicationDeviceId = null,
+          legacyScoConnected = true,
+          legacyScoRoutingEnabled = true,
+        ),
+      ),
+    )
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidBluetoothDuplexReadinessV2.validate(
+        facts.copy(
+          apiLevel = 30,
+          selectionMode = AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO,
+          communicationDeviceId = null,
+          legacyScoConnected = false,
+          legacyScoRoutingEnabled = true,
+        ),
+      ),
     )
     assertEquals(
       "route_unstable",

@@ -5,12 +5,15 @@ import android.media.AudioManager
 
 internal data class AndroidBluetoothDuplexFactsV2(
   val apiLevel: Int,
+  val selectionMode: AndroidBluetoothRouteSelectionModeV2,
   val sourceOutput: AndroidRouteEndpointV2?,
   val selectedCommunicationOutput: AndroidRouteEndpointV2?,
   val actualInput: AndroidRouteEndpointV2?,
   val actualOutput: AndroidRouteEndpointV2?,
   val audioMode: Int,
   val communicationDeviceId: Int?,
+  val legacyScoConnected: Boolean,
+  val legacyScoRoutingEnabled: Boolean,
   val deviceOpen: Boolean,
   val callbackAttached: Boolean,
   val activeInputChannels: Int,
@@ -23,7 +26,7 @@ internal data class AndroidBluetoothDuplexFactsV2(
 
 internal object AndroidBluetoothDuplexReadinessV2 {
   fun validate(facts: AndroidBluetoothDuplexFactsV2): String {
-    if (facts.apiLevel < 31) return "recording_route_unsupported"
+    if (facts.apiLevel < 29) return "recording_route_unsupported"
     val source = facts.sourceOutput ?: return "no_output"
     if (source.kind != AndroidRouteKindV2.BLUETOOTH_MEDIA) {
       return "recording_route_unsupported"
@@ -40,10 +43,21 @@ internal object AndroidBluetoothDuplexReadinessV2 {
     if (
       input.kind != AndroidRouteKindV2.BLUETOOTH_DUPLEX ||
       output.kind != AndroidRouteKindV2.BLUETOOTH_DUPLEX ||
-      output.fingerprint != selected.fingerprint ||
-      facts.communicationDeviceId != selected.id
+      output.fingerprint != selected.fingerprint
     ) {
       return "route_unstable"
+    }
+    when (facts.selectionMode) {
+      AndroidBluetoothRouteSelectionModeV2.COMMUNICATION_DEVICE -> {
+        if (facts.apiLevel < 31) return "recording_route_unsupported"
+        if (facts.communicationDeviceId != selected.id) return "route_unstable"
+      }
+      AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO -> {
+        if (facts.apiLevel !in 29..30) return "recording_route_unsupported"
+        if (!facts.legacyScoConnected || !facts.legacyScoRoutingEnabled) {
+          return "actual_state_unavailable"
+        }
+      }
     }
     if (
       facts.audioMode != AudioManager.MODE_IN_COMMUNICATION ||
@@ -94,6 +108,7 @@ internal enum class AndroidRouteSignalKindV2 {
   DEVICE_ADDED,
   DEVICE_REMOVED,
   COMMUNICATION_DEVICE_CHANGED,
+  LEGACY_SCO_STATE_CHANGED,
   NATIVE_STREAM_DISCONNECTED,
   PLAYBACK_ACTIVITY,
   STARTUP,
@@ -159,6 +174,8 @@ internal object AndroidIntentRouteObserverV2 {
       }
       AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED ->
         AndroidIntentRouteDecisionV2.TERMINAL
+      AndroidRouteSignalKindV2.LEGACY_SCO_STATE_CHANGED ->
+        AndroidIntentRouteDecisionV2.TERMINAL
       AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED ->
         AndroidIntentRouteDecisionV2.TERMINAL
       AndroidRouteSignalKindV2.STARTUP -> AndroidIntentRouteDecisionV2.TERMINAL
@@ -181,6 +198,7 @@ internal object AndroidCommittedRecoveryOwnershipV2 {
       removedDeviceIds.isNotEmpty() &&
         removedDeviceIds.all(completedOperationEndpointIds::contains)
     AndroidRouteSignalKindV2.COMMUNICATION_DEVICE_CHANGED -> true
+    AndroidRouteSignalKindV2.LEGACY_SCO_STATE_CHANGED -> true
     AndroidRouteSignalKindV2.PLAYBACK_ACTIVITY -> true
     AndroidRouteSignalKindV2.DEVICE_ADDED,
     AndroidRouteSignalKindV2.NATIVE_STREAM_DISCONNECTED,

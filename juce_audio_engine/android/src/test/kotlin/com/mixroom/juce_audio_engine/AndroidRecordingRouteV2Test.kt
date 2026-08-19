@@ -193,6 +193,28 @@ internal class AndroidRecordingRouteV2Test {
   }
 
   @Test
+  fun unexpectedLegacyScoLossIsTerminalOnlyInsideTheExplicitTransaction() {
+    assertEquals(
+      AndroidIntentRouteDecisionV2.TERMINAL,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = true,
+        operationEndpointIds = setOf(21, 22),
+        signal = AndroidRouteSignalKindV2.LEGACY_SCO_STATE_CHANGED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+    assertEquals(
+      AndroidIntentRouteDecisionV2.ORDINARY,
+      AndroidIntentRouteObserverV2.classify(
+        explicitTransactionActive = false,
+        operationEndpointIds = null,
+        signal = AndroidRouteSignalKindV2.LEGACY_SCO_STATE_CHANGED,
+        removedDeviceIds = emptySet(),
+      ),
+    )
+  }
+
+  @Test
   fun explicitBluetoothTransactionDoesNotHideUnrelatedDeviceAddition() {
     assertEquals(
       AndroidIntentRouteDecisionV2.TERMINAL,

@@ -307,6 +307,31 @@ void main() {
     expect(withoutFacts.interruption, isNull);
   });
 
+  test('legacy SCO probe diagnostics preserve the physical validation gate',
+      () {
+    final snapshot = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'implementation': 'v2',
+      'captureConsistency': 'stable',
+      'duplexProbe': <String, dynamic>{
+        'status': 'restored',
+        'diagnosticCode': 'ok',
+        'validationStage': 'complete',
+        'categoryOptions': <String>[],
+        'selectionMode': 'androidLegacySco',
+        'physicalValidationPending': true,
+        'operationId': 4,
+        'elapsedMs': 1700,
+      },
+    });
+
+    expect(snapshot.duplexProbe?.selectionMode, 'androidLegacySco');
+    expect(snapshot.duplexProbe?.physicalValidationPending, isTrue);
+    expect(
+      snapshot.duplexProbe?.toRawMap()['physicalValidationPending'],
+      isTrue,
+    );
+  });
+
   test('transition result parses fallback and fails closed without snapshot',
       () {
     final fallback = AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
