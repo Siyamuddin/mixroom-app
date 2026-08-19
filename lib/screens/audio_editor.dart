@@ -14477,6 +14477,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       await _prepareNativeEngineStateForExport((_) {});
+      final clipSnapshotJson = _buildNativeExportClipSnapshotJson();
       await ProjectCompatibilityService.audioDirectoryFor(
         _projectDir,
       ).create(recursive: true);
@@ -14556,12 +14557,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (!boundaryStartSeconds.isFinite) return;
         final fileName = 'compatibility/audio/$outputName.wav';
         final output = File(p.join(_projectDir.path, fileName));
+        // AudioFormatWriter overwrites an existing WAV but does not guarantee
+        // truncation when the replacement is shorter. Start from a fresh file
+        // so a compatibility artifact cannot retain stale audio or an invalid
+        // trailing data chunk from an earlier render.
+        if (await output.exists()) {
+          await output.delete();
+        }
         final rendered = await JuceAudioEngine.exportMix(
           output.path,
           format: 'wav',
           sampleRate: _preferredDawSampleRate,
           wavBitDepth: 32,
           wavDithering: false,
+          // The Dart snapshot is the export authority for MIDI timing,
+          // resolved source tempo, and the latest hosted-instrument state.
+          // Omitting it can leave a newly-created offline plug-in instance
+          // with stale MIDI metadata and produce a silent frozen instrument.
+          clipSnapshotJson: clipSnapshotJson,
           audibleClipIds: clipIds.toList(growable: false),
           timelineStartSeconds: boundaryStartSeconds,
           bypassMasterProcessing: true,
@@ -14656,12 +14669,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (masterDependencies.isNotEmpty) {
         referenceMix = 'compatibility/audio/original_mix_reference.wav';
         final reference = File(p.join(_projectDir.path, referenceMix));
+        if (await reference.exists()) {
+          await reference.delete();
+        }
         final rendered = await JuceAudioEngine.exportMix(
           reference.path,
           format: 'wav',
           sampleRate: _preferredDawSampleRate,
           wavBitDepth: 32,
           wavDithering: false,
+          clipSnapshotJson: clipSnapshotJson,
           preserveRealtimePlayback: true,
         );
         if (rendered.isEmpty || !await reference.exists()) {
@@ -14751,6 +14768,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _compatibilityAudioError = '';
     });
     try {
+      await _projectAutosaveCoordinator.flush();
+      // Persist every hosted instrument's current state before reading the
+      // canonical source and constructing the offline export snapshot. The
+      // ordinary autosave path captures only the active MIDI instrument.
+      await _refreshHostedInstrumentStatesForPersistence();
+      _projectAutosaveCoordinator.markDirty();
       await _projectAutosaveCoordinator.flush();
       await _ensureCompatibilityAudioForPublish();
       await _refreshCompatibilityAudioStatus();
