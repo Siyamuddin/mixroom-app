@@ -4604,7 +4604,7 @@ public:
     bool quiescePlaybackV2Android(bool closeDevice);
     bool reconfigurePlaybackV2Android();
     bool prepareRecordingV2Android();
-    bool prepareSystemSelectedMediaDuplexV2Android();
+    bool prepareSystemSelectedMediaDuplexV2Android(bool recordingCapable);
     bool prepareBluetoothDuplexV2Android(bool recordingCapable);
     bool waitForV2CallbackReady(int timeoutMs);
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)

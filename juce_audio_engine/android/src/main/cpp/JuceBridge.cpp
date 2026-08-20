@@ -1369,14 +1369,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, 
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(
-    JNIEnv *, jclass)
+    JNIEnv *, jclass, jboolean recordingCapable)
 {
+    const bool canRecord = recordingCapable == JNI_TRUE;
     bool success = false;
     if (auto *mm = juce::MessageManager::getInstance())
-        mm->callSync([&success]
-                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(); });
+        mm->callSync([&success, canRecord]
+                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(canRecord); });
     else
-        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android();
+        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(canRecord);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 

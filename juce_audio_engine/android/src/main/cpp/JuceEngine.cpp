@@ -1281,9 +1281,9 @@ bool JuceEngine::prepareRecordingV2Android()
     return prepareDefaultDuplexV2Android(true);
 }
 
-bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android()
+bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android(bool recordingCapable)
 {
-    return prepareDefaultDuplexV2Android(false);
+    return prepareDefaultDuplexV2Android(recordingCapable);
 }
 
 bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)

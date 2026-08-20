@@ -20,6 +20,26 @@ internal enum class AndroidRecordingCleanupDispositionV2 {
   CLOSE_ONLY,
 }
 
+internal enum class AndroidRecordingRouteAdapterV2 {
+  BUILT_IN,
+  BLUETOOTH_COMMUNICATION,
+  SYSTEM_SELECTED_MEDIA,
+}
+
+/** Selects one A2DP recording adapter before any route mutation occurs. */
+internal object AndroidSystemRecordingRouteResolverV2 {
+  fun resolveA2dp(
+    apiLevel: Int,
+    communicationCandidateCount: Int,
+  ): AndroidRecordingRouteAdapterV2? = when {
+    communicationCandidateCount == 0 ->
+      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA
+    apiLevel >= 31 && communicationCandidateCount == 1 ->
+      AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION
+    else -> null
+  }
+}
+
 /**
  * Records teardown intent before a waiter is cancelled or released.
  *

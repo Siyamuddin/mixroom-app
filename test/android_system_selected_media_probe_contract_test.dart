@@ -30,9 +30,7 @@ void main() {
     expect(plugin, contains('"systemSelectedMediaProbe" ->'));
     expect(
       plugin,
-      contains(
-        'prepareSystemSelectedMediaDuplexProbeV2(generation, operationMode)',
-      ),
+      contains('prepareSystemSelectedMediaDuplexV2(generation, operationMode)'),
     );
     expect(plugin, contains('audioLifecycleExecutorV2.execute'));
     expect(plugin, contains('TimeUnit.SECONDS.toNanos(5)'));
@@ -45,7 +43,7 @@ void main() {
 
   test('media probe never selects communication routing or capture', () {
     final start = plugin.indexOf(
-      'private fun prepareSystemSelectedMediaDuplexProbeV2(',
+      'private fun prepareSystemSelectedMediaDuplexV2(',
     );
     final end = plugin.indexOf(
       'private fun bluetoothCommunicationCandidatesV2(',
@@ -60,7 +58,10 @@ void main() {
         'setAndroidStreamPolicyV2(AndroidStreamPolicyV2.BLUETOOTH_MEDIA)',
       ),
     );
-    expect(probe, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
+    expect(
+      probe,
+      contains('prepareSystemSelectedMediaDuplexV2JNI(mode.allowsCapture())'),
+    );
     expect(probe, contains('waitForV2CallbackReadyJNI(callbackTimeoutMillis)'));
     expect(
       probe,
@@ -85,7 +86,10 @@ void main() {
     'native open uses the normal media policy and is not record capable',
     () {
       expect(bridge, contains('prepareSystemSelectedMediaDuplexV2JNI'));
-      expect(engine, contains('return prepareDefaultDuplexV2Android(false);'));
+      expect(
+        engine,
+        contains('return prepareDefaultDuplexV2Android(recordingCapable);'),
+      );
       final start = engine.indexOf(
         'bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)',
       );
@@ -137,6 +141,66 @@ void main() {
     );
     expect(recordingRoute, contains('!facts.callbackAttached'));
   });
+
+  test(
+    'production resolves one adapter and makes the shared open capture capable',
+    () {
+      final resolverStart = plugin.indexOf(
+        'private fun prepareSystemSelectedRecordingV2(',
+      );
+      final resolverEnd = plugin.indexOf(
+        'private fun prepareBluetoothDuplexV2(',
+        resolverStart,
+      );
+      final resolver = plugin.substring(resolverStart, resolverEnd);
+      final validationStart = plugin.indexOf(
+        'private fun validatePreparedRecordingV2(',
+      );
+      final validationEnd = plugin.indexOf(
+        'private fun audioModeName(',
+        validationStart,
+      );
+      final validation = plugin.substring(validationStart, validationEnd);
+
+      expect(
+        recordingRoute,
+        contains('object AndroidSystemRecordingRouteResolverV2'),
+      );
+      expect(resolver, contains('bluetoothCommunicationCandidatesV2'));
+      expect(resolver, contains('resolveA2dp('));
+      expect(
+        resolver,
+        contains('prepareSystemSelectedMediaDuplexV2(generation, mode)'),
+      );
+      expect(resolver, contains('prepareBluetoothDuplexV2('));
+      expect(resolver, contains('communicationCandidates.single()'));
+      for (final forbidden in <String>[
+        'Thread.sleep',
+        'postDelayed',
+        'while (',
+        'productName',
+        'address',
+      ]) {
+        expect(resolver, isNot(contains(forbidden)));
+      }
+      expect(
+        validation,
+        contains('AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA'),
+      );
+      expect(
+        validation,
+        contains('AndroidSystemSelectedMediaDuplexReadinessV2.validate'),
+      );
+      expect(
+        engine,
+        contains('return prepareDefaultDuplexV2Android(recordingCapable);'),
+      );
+      expect(
+        plugin,
+        contains('prepareSystemSelectedMediaDuplexV2JNI(mode.allowsCapture())'),
+      );
+    },
+  );
 
   test('debug action restores playback and cannot start a writer', () {
     final start = editor.indexOf(

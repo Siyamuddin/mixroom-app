@@ -21010,7 +21010,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ? 'Recording is unavailable for the current iOS audio route.'
                 : v2IntentOperation ==
                       AudioRouteIntentOperationV2.systemSelectedRecording
-                ? 'Bluetooth recording is unavailable for the current headset.'
+                ? 'Recording is unavailable for the current Android audio route.'
                 : result.diagnosticCode == 'bluetooth_input_forbidden'
                 ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
                 : 'Recording with the built-in device microphone is unavailable for the current output.',

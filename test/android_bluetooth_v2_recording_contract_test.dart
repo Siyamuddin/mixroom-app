@@ -169,10 +169,13 @@ void main() {
         ),
       );
       expect(prepare, contains('AndroidBluetoothDuplexReadinessV2.validate'));
-      expect(validate, contains('operation.mode.usesBluetoothDuplexRoute()'));
+      expect(
+        validate,
+        contains('AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION'),
+      );
       expect(validate, contains('currentBluetoothDuplexFactsV2(operation)'));
-      expect(validate, contains('facts.actualInput?.fingerprint'));
-      expect(validate, contains('facts.actualOutput?.fingerprint'));
+      expect(validate, contains('actualInput?.fingerprint'));
+      expect(validate, contains('actualOutput?.fingerprint'));
       expect(validate, isNot(contains('prepareBluetoothDuplexV2JNI')));
     },
   );

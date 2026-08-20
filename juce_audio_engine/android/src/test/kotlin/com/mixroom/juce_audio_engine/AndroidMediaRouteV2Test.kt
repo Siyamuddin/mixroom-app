@@ -25,6 +25,45 @@ internal class AndroidMediaRouteV2Test {
   )
 
   @Test
+  fun systemRecordingResolvesOneAdapterBeforeMutation() {
+    assertEquals(
+      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 29,
+        communicationCandidateCount = 0,
+      ),
+    )
+    assertEquals(
+      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 36,
+        communicationCandidateCount = 0,
+      ),
+    )
+    assertEquals(
+      AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 31,
+        communicationCandidateCount = 1,
+      ),
+    )
+    assertEquals(
+      null,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 30,
+        communicationCandidateCount = 1,
+      ),
+    )
+    assertEquals(
+      null,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 36,
+        communicationCandidateCount = 2,
+      ),
+    )
+  }
+
+  @Test
   fun api33UsesOneExactMediaRoute() {
     val route = AndroidMediaRouteResolverV2.resolve(
       apiLevel = 33,
