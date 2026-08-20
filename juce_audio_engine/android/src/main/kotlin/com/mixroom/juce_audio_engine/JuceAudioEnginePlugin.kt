@@ -2290,12 +2290,6 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       return IntentOutcomeV2("failure", "recording_route_unsupported")
     }
     if (
-      Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&
-      mode.allowsCapture()
-    ) {
-      return IntentOutcomeV2("failure", "recording_route_unsupported")
-    }
-    if (
       lifecycleDisposedV2 ||
       recordingCancellationRequestedV2.get() ||
       !audioRouteMonitoringV2 ||

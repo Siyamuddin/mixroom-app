@@ -34,7 +34,7 @@ internal object AndroidSystemRecordingRouteResolverV2 {
   ): AndroidRecordingRouteAdapterV2? = when {
     communicationCandidateCount == 0 ->
       AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA
-    apiLevel >= 31 && communicationCandidateCount == 1 ->
+    apiLevel >= 29 && communicationCandidateCount == 1 ->
       AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION
     else -> null
   }

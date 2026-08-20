@@ -125,4 +125,37 @@ internal class AndroidLegacyScoRouteV2Test {
     assertTrue(state.claimStopRequest())
     assertFalse(state.claimStopRequest())
   }
+
+  @Test
+  fun reversedAndDuplicateBroadcastsCannotAdvanceTheLifecycleTwice() {
+    val state = AndroidLegacyScoStateV2()
+
+    assertEquals(
+      AndroidLegacyScoEventV2.NONE,
+      state.observe(AudioManager.SCO_AUDIO_STATE_CONNECTED),
+    )
+    state.beginAcquisition(AudioManager.SCO_AUDIO_STATE_DISCONNECTED)
+    state.markRequestStarted()
+    assertEquals(
+      AndroidLegacyScoEventV2.ACQUIRED,
+      state.observe(AudioManager.SCO_AUDIO_STATE_CONNECTED),
+    )
+    assertEquals(
+      AndroidLegacyScoEventV2.NONE,
+      state.observe(AudioManager.SCO_AUDIO_STATE_CONNECTED),
+    )
+    assertEquals(
+      AndroidLegacyScoEventV2.NONE,
+      state.observe(AudioManager.SCO_AUDIO_STATE_ERROR),
+    )
+    assertTrue(state.beginRelease())
+    assertEquals(
+      AndroidLegacyScoEventV2.RELEASED,
+      state.observe(AudioManager.SCO_AUDIO_STATE_DISCONNECTED),
+    )
+    assertEquals(
+      AndroidLegacyScoEventV2.NONE,
+      state.observe(AudioManager.SCO_AUDIO_STATE_DISCONNECTED),
+    )
+  }
 }

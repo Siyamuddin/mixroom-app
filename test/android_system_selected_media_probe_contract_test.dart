@@ -166,6 +166,10 @@ void main() {
         recordingRoute,
         contains('object AndroidSystemRecordingRouteResolverV2'),
       );
+      expect(
+        recordingRoute,
+        contains('apiLevel >= 29 && communicationCandidateCount == 1'),
+      );
       expect(resolver, contains('bluetoothCommunicationCandidatesV2'));
       expect(resolver, contains('resolveA2dp('));
       expect(

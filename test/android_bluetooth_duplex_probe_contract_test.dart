@@ -114,20 +114,45 @@ void main() {
     },
   );
 
-  test('legacy route remains probe-only until physical validation', () {
+  test('legacy route supports capture but remains physically unvalidated', () {
     final start = plugin.indexOf('private fun prepareBluetoothDuplexV2(');
     final end = plugin.indexOf('private fun verifyRecordingIntentV2', start);
-    final probe = plugin.substring(start, end);
+    final transaction = plugin.substring(start, end);
 
     expect(
-      probe,
-      contains(
-        'Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&\n'
-        '      mode.allowsCapture()',
+      transaction,
+      isNot(
+        contains(
+          'Build.VERSION.SDK_INT < Build.VERSION_CODES.S &&\n'
+          '      mode.allowsCapture()',
+        ),
       ),
+    );
+    expect(
+      transaction,
+      contains('prepareBluetoothDuplexV2JNI(mode.allowsCapture())'),
     );
     expect(plugin, contains('"physicalValidationPending" to'));
     expect(plugin, contains('AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO'));
+  });
+
+  test('Android 12+ remains isolated from legacy SCO routing', () {
+    final modernStart = plugin.indexOf(
+      'private fun acquireCommunicationDeviceRouteV2(',
+    );
+    final modernEnd = plugin.indexOf(
+      'private fun handleLegacyScoEventV2(',
+      modernStart,
+    );
+    final modern = plugin.substring(modernStart, modernEnd);
+
+    expect(modern, contains('audioManager.setCommunicationDevice(candidate)'));
+    expect(modern, isNot(contains('startBluetoothSco')));
+    expect(modern, isNot(contains('stopBluetoothSco')));
+    expect(
+      legacySco,
+      contains('if (apiLevel >= 31) COMMUNICATION_DEVICE else LEGACY_SCO'),
+    );
   });
 
   test('communication policy is mono route-native shared voice audio', () {

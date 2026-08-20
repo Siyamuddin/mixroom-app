@@ -48,9 +48,23 @@ internal class AndroidMediaRouteV2Test {
       ),
     )
     assertEquals(
-      null,
+      AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 29,
+        communicationCandidateCount = 1,
+      ),
+    )
+    assertEquals(
+      AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION,
       AndroidSystemRecordingRouteResolverV2.resolveA2dp(
         apiLevel = 30,
+        communicationCandidateCount = 1,
+      ),
+    )
+    assertEquals(
+      null,
+      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+        apiLevel = 28,
         communicationCandidateCount = 1,
       ),
     )
