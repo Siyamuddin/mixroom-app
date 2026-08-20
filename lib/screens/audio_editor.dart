@@ -5684,6 +5684,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _iosSystemSelectedRouteProbeRunning = false;
   bool _androidBluetoothDuplexProbeRunning = false;
+  bool _androidSystemSelectedMediaProbeRunning = false;
   bool _bluetoothRecordingQualityNoticeShown = false;
   bool _v2AudioSessionInvalidated = false;
   bool _v2AudioSessionRecoveryInProgress = false;
@@ -41487,7 +41488,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _runAndroidBluetoothDuplexProbeV2() async {
     if (!kDebugMode || !Platform.isAndroid || !_isBluetoothV2Session) return;
-    if (_androidBluetoothDuplexProbeRunning) return;
+    if (_androidBluetoothDuplexProbeRunning ||
+        _androidSystemSelectedMediaProbeRunning) {
+      return;
+    }
 
     final coordinator = _audioRouteCoordinatorV2;
     if (_isPlaying || _transportDesiredPlaying) {
@@ -41585,6 +41589,129 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (mounted) {
         setState(() {
           _androidBluetoothDuplexProbeRunning = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _runAndroidSystemSelectedMediaProbeV2() async {
+    if (!kDebugMode || !Platform.isAndroid || !_isBluetoothV2Session) return;
+    if (_androidBluetoothDuplexProbeRunning ||
+        _androidSystemSelectedMediaProbeRunning) {
+      return;
+    }
+
+    final coordinator = _audioRouteCoordinatorV2;
+    if (_isPlaying || _transportDesiredPlaying) {
+      _showSmallNotice('Stop playback before running the Bluetooth check.');
+      return;
+    }
+    if (coordinator == null ||
+        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
+      return;
+    }
+
+    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    if (!mounted) return;
+    final sourceReady =
+        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
+        source.outputs.length == 1 &&
+        source.outputs.single.normalizedKind ==
+            AudioRouteKindV2.bluetoothMedia &&
+        source.inputs.isEmpty &&
+        source.juce.deviceOpen == true &&
+        source.juce.audioCallbackAttached == true &&
+        source.juce.activeInputChannels == 0 &&
+        (source.juce.activeOutputChannels ?? 0) > 0;
+    if (!sourceReady) {
+      _showSmallNotice('Select a Bluetooth media output before the check.');
+      return;
+    }
+    if (!await _ensureMicrophonePermissionForRecording()) return;
+    if (!mounted) return;
+
+    final sourceOutput = source.outputs.single;
+    setState(() {
+      _androidSystemSelectedMediaProbeRunning = true;
+    });
+    await _letRecordingVisualStatePaint();
+
+    try {
+      final duplexResult = await coordinator.transitionIntent(
+        AudioRouteIntentV2.preparingRecording,
+        operation: AudioRouteIntentOperationV2.systemSelectedMediaProbe,
+      );
+      if (!mounted) return;
+      if (!duplexResult.succeeded) {
+        _showSmallNotice(
+          duplexResult.diagnosticCode == 'route_unstable'
+              ? 'The audio device disconnected during the check.'
+              : 'The system-selected recording route is unavailable.',
+        );
+        return;
+      }
+
+      final duplex = duplexResult.snapshot;
+      final duplexOutput = duplex.outputs.length == 1
+          ? duplex.outputs.single
+          : null;
+      final exactSourceOutput =
+          duplexOutput?.uid == sourceOutput.uid &&
+          duplexOutput?.nativePortType == sourceOutput.nativePortType &&
+          duplexOutput?.normalizedKind == sourceOutput.normalizedKind &&
+          duplexOutput?.channelCount == sourceOutput.channelCount;
+      final inputKind = duplex.inputs.length == 1
+          ? duplex.inputs.single.normalizedKind
+          : AudioRouteKindV2.unknown;
+      final acceptedInputKind = <AudioRouteKindV2>{
+        AudioRouteKindV2.builtIn,
+        AudioRouteKindV2.wired,
+        AudioRouteKindV2.external,
+      }.contains(inputKind);
+      final duplexVerified =
+          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
+          duplex.inputs.length == 1 &&
+          duplex.outputs.length == 1 &&
+          acceptedInputKind &&
+          exactSourceOutput &&
+          duplex.juce.deviceOpen == true &&
+          duplex.juce.audioCallbackAttached == true &&
+          duplex.juce.activeInputChannels == 1 &&
+          (duplex.juce.activeOutputChannels ?? 0) > 0 &&
+          (duplex.juce.sampleRateHz ?? 0) > 0 &&
+          (duplex.juce.bufferFrames ?? 0) > 0;
+      if (!duplexVerified) {
+        final restoreResult = await coordinator.transitionIntent(
+          AudioRouteIntentV2.playbackOnly,
+        );
+        if (restoreResult.succeeded) {
+          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
+        } else {
+          await JuceAudioEngine.abortRecordingV2();
+        }
+        _showSmallNotice('System recording-route verification failed.');
+        return;
+      }
+
+      final restoreResult = await coordinator.transitionIntent(
+        AudioRouteIntentV2.playbackOnly,
+      );
+      if (!mounted) return;
+      if (!restoreResult.succeeded) {
+        await JuceAudioEngine.abortRecordingV2();
+        _showSmallNotice(
+          'Bluetooth playback could not be restored. Reopen the audio editor.',
+        );
+        return;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
+      _showSmallNotice('System recording route verified. Playback restored.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _androidSystemSelectedMediaProbeRunning = false;
         });
       }
     }
@@ -41703,7 +41830,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             SizedBox(
               width: double.infinity,
               child: OutlinedButton(
-                onPressed: _androidBluetoothDuplexProbeRunning
+                onPressed:
+                    _androidBluetoothDuplexProbeRunning ||
+                        _androidSystemSelectedMediaProbeRunning
+                    ? null
+                    : () => unawaited(_runAndroidSystemSelectedMediaProbeV2()),
+                child: Text(
+                  _androidSystemSelectedMediaProbeRunning
+                      ? 'Checking System Recording Route…'
+                      : 'Run System Recording Route Check',
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed:
+                    _androidBluetoothDuplexProbeRunning ||
+                        _androidSystemSelectedMediaProbeRunning
                     ? null
                     : () => unawaited(_runAndroidBluetoothDuplexProbeV2()),
                 child: Text(

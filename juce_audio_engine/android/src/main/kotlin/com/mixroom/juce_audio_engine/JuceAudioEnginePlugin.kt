@@ -37,6 +37,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private enum class IntentOperationModeV2 {
     STANDARD,
     SYSTEM_SELECTED_PROBE,
+    SYSTEM_SELECTED_MEDIA_PROBE,
     SYSTEM_SELECTED_RECORDING,
   }
 
@@ -44,8 +45,18 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     this == IntentOperationModeV2.SYSTEM_SELECTED_PROBE ||
       this == IntentOperationModeV2.SYSTEM_SELECTED_RECORDING
 
+  private fun IntentOperationModeV2.usesSystemSelectedMediaRoute(): Boolean =
+    this == IntentOperationModeV2.SYSTEM_SELECTED_MEDIA_PROBE
+
+  private fun IntentOperationModeV2.ownsExplicitRouteTransaction(): Boolean =
+    usesBluetoothDuplexRoute() || usesSystemSelectedMediaRoute()
+
+  private fun IntentOperationModeV2.reportsDuplexFacts(): Boolean =
+    this != IntentOperationModeV2.STANDARD
+
   private fun IntentOperationModeV2.allowsCapture(): Boolean =
-    this != IntentOperationModeV2.SYSTEM_SELECTED_PROBE
+    this != IntentOperationModeV2.SYSTEM_SELECTED_PROBE &&
+      this != IntentOperationModeV2.SYSTEM_SELECTED_MEDIA_PROBE
 
   private enum class AndroidStreamPolicyV2(val nativeValue: Int) {
     NORMAL(0),
@@ -823,7 +834,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     diagnosticCode: String,
     restoredOutput: AndroidRouteEndpointV2? = null,
   ) {
-    if (!operation.mode.usesBluetoothDuplexRoute()) return
+    if (!operation.mode.reportsDuplexFacts()) return
     duplexProbeFactsV2 = mapOf(
       "status" to status,
       "diagnosticCode" to diagnosticCode,
@@ -833,7 +844,11 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       "actualCallbackCount" to operation.callbackCount,
       "cleanupOutcome" to operation.cleanupOutcome,
       "selectionMode" to
-        operation.bluetoothSelectionMode?.diagnosticName,
+        if (operation.mode.usesSystemSelectedMediaRoute()) {
+          "androidSystemSelectedMedia"
+        } else {
+          operation.bluetoothSelectionMode?.diagnosticName
+        },
       "physicalValidationPending" to
         (operation.bluetoothSelectionMode ==
           AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO),
@@ -1126,7 +1141,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     val decision = AndroidIntentRouteObserverV2.classify(
       explicitTransactionActive =
-        operation?.mode?.usesBluetoothDuplexRoute() == true,
+        operation?.mode?.ownsExplicitRouteTransaction() == true,
       operationEndpointIds = operationEndpointIds,
       signal = signal,
       removedDeviceIds = removedDeviceIds,
@@ -1813,6 +1828,126 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     return IntentOutcomeV2("failure", finalCode)
   }
 
+  private fun prepareSystemSelectedMediaDuplexProbeV2(
+    generation: Long,
+    mode: IntentOperationModeV2,
+  ): IntentOutcomeV2 {
+    if (!mode.usesSystemSelectedMediaRoute()) {
+      return IntentOutcomeV2("failure", "recording_route_unsupported")
+    }
+    if (
+      lifecycleDisposedV2 ||
+      recordingCancellationRequestedV2.get() ||
+      !audioRouteMonitoringV2 ||
+      engineOwnership != EngineOwnership.V2_SESSION
+    ) {
+      return IntentOutcomeV2("failure", "coordinator_disposed")
+    }
+    if (generation != audioRouteGenerationV2) {
+      return IntentOutcomeV2("failure", "stale_generation")
+    }
+    if (AndroidPlaybackReadinessV2.validate(currentPlaybackFactsV2()) != "ok") {
+      return IntentOutcomeV2("failure", "actual_state_unavailable")
+    }
+    val sourceOutput = resolveActualOutputV2()
+      ?: return IntentOutcomeV2("failure", "no_output")
+    if (sourceOutput.kind != AndroidRouteKindV2.BLUETOOTH_MEDIA) {
+      return IntentOutcomeV2("failure", "recording_route_unsupported")
+    }
+
+    val operation = RecordingOperationV2(
+      id = recordingOperationIdV2.incrementAndGet(),
+      generation = generation,
+      sourceOutput = sourceOutput,
+      mode = mode,
+    )
+    recordingOperationV2 = operation
+    duplexProbeFactsV2 = null
+    audioRouteIntentV2 = AudioRouteIntentV2.PREPARING_RECORDING
+    val deadlineNanos = operation.startedNanos + TimeUnit.SECONDS.toNanos(5)
+
+    preparePlaybackOnlyModeV2()
+    setAndroidStreamPolicyV2(AndroidStreamPolicyV2.BLUETOOTH_MEDIA)
+    if (
+      operation.cancelled.get() ||
+      operation.routeInvalidated.get() ||
+      generation != audioRouteGenerationV2
+    ) {
+      operation.phase = if (operation.routeInvalidated.get()) {
+        "physicalRouteInvalidation"
+      } else {
+        "cancelled"
+      }
+      return failBluetoothDuplexV2(operation, "route_unstable")
+    }
+
+    operation.phase = "openingSystemSelectedMediaDuplex"
+    if (!JuceBridge.prepareSystemSelectedMediaDuplexV2JNI()) {
+      operation.phase = "juceOpen"
+      return failBluetoothDuplexV2(operation, "juce_reopen_failed")
+    }
+    val openedOutputEpoch = verifiedOutputEpochV2(currentOboeFactsV2())
+    if (openedOutputEpoch == null) {
+      operation.phase = "juceOpenFacts"
+      return failBluetoothDuplexV2(operation, "actual_state_unavailable")
+    }
+    if (commitRecordingOutputEpochV2(operation, openedOutputEpoch)) {
+      selectCleanupDispositionV2(
+        operation,
+        AndroidRecordingCleanupDispositionV2.CLOSE_ONLY,
+      )
+      operation.cancelled.set(true)
+      postDeferredNativeDisconnectV2(operation, openedOutputEpoch)
+      operation.phase = "physicalRouteInvalidation"
+      return failBluetoothDuplexV2(operation, "route_unstable")
+    }
+    val openedFacts = currentRecordingFactsV2(sourceOutput)
+    operation.verifiedInput = openedFacts.actualInput
+    operation.verifiedOutput = openedFacts.actualOutput
+
+    val remainingNanos = deadlineNanos - SystemClock.elapsedRealtimeNanos()
+    if (remainingNanos <= 0L) {
+      operation.phase = "callbackTimeout"
+      return failBluetoothDuplexV2(operation, "actual_state_unavailable")
+    }
+    val callbackTimeoutMillis = TimeUnit.NANOSECONDS.toMillis(remainingNanos)
+      .coerceIn(1L, 5000L)
+      .toInt()
+    if (!JuceBridge.waitForV2CallbackReadyJNI(callbackTimeoutMillis)) {
+      operation.phase = "callback"
+      return failBluetoothDuplexV2(operation, "actual_state_unavailable")
+    }
+    operation.callbackCount = 1
+    if (
+      operation.cancelled.get() ||
+      operation.routeInvalidated.get() ||
+      generation != audioRouteGenerationV2
+    ) {
+      operation.phase = if (operation.routeInvalidated.get()) {
+        "physicalRouteInvalidation"
+      } else {
+        "cancelled"
+      }
+      return failBluetoothDuplexV2(operation, "route_unstable")
+    }
+
+    val facts = currentRecordingFactsV2(sourceOutput)
+    val readiness = AndroidSystemSelectedMediaDuplexReadinessV2.validate(facts)
+    if (readiness != "ok") {
+      operation.phase = "duplexValidation"
+      return failBluetoothDuplexV2(operation, readiness)
+    }
+    operation.verifiedInput = facts.actualInput
+    operation.verifiedOutput = facts.actualOutput
+    if (facts.outputStream.streamEpoch != openedOutputEpoch) {
+      operation.phase = "duplexEpochChanged"
+      return failBluetoothDuplexV2(operation, "route_unstable")
+    }
+    operation.phase = "duplexVerified"
+    updateDuplexProbeFactsV2(operation, "duplexVerified", "ok")
+    return IntentOutcomeV2("success", "ok")
+  }
+
   private fun bluetoothCommunicationCandidatesV2(
     audioManager: AudioManager,
     selectionMode: AndroidBluetoothRouteSelectionModeV2,
@@ -2330,11 +2465,23 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       "recording" -> AudioRouteIntentV2.RECORDING
       else -> null
     }
-    val operationMode = when (args.stringValue("intentOperation")) {
+    val requestedOperation = args.stringValue("intentOperation")
+    val operationMode = when (requestedOperation) {
       "systemSelectedProbe" -> IntentOperationModeV2.SYSTEM_SELECTED_PROBE
+      "systemSelectedMediaProbe" ->
+        IntentOperationModeV2.SYSTEM_SELECTED_MEDIA_PROBE
       "systemSelectedRecording" -> IntentOperationModeV2.SYSTEM_SELECTED_RECORDING
       else -> IntentOperationModeV2.STANDARD
     }
+    if (operationMode.reportsDuplexFacts()) {
+      // A report captured during this request must never retain evidence from
+      // an earlier probe that happened to use a different route adapter.
+      duplexProbeFactsV2 = null
+    }
+    Log.i(
+      "JuceAudioEngine",
+      "Android V2 intent=$requestedIntent operation=${requestedOperation ?: "standard"}",
+    )
     if (requestedIntent == null) {
       result.success(
         routeTransitionResultV2(
@@ -2355,6 +2502,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           AudioRouteIntentV2.PREPARING_RECORDING -> when {
             operationMode.usesBluetoothDuplexRoute() ->
               prepareBluetoothDuplexV2(generation, operationMode)
+            operationMode.usesSystemSelectedMediaRoute() ->
+              prepareSystemSelectedMediaDuplexProbeV2(generation, operationMode)
             else -> prepareBuiltInRecordingV2(generation)
           }
           AudioRouteIntentV2.RECORDING -> verifyRecordingIntentV2(generation)

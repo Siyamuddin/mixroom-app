@@ -32,6 +32,7 @@ enum AudioRouteIntentV2 {
 enum AudioRouteIntentOperationV2 {
   standard,
   systemSelectedProbe,
+  systemSelectedMediaProbe,
   systemSelectedRecording,
 }
 

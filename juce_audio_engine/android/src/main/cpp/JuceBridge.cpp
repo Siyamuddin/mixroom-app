@@ -1368,6 +1368,19 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(
+    JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(); });
+    else
+        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexV2JNI(
     JNIEnv *, jclass, jboolean recordingCapable)
 {

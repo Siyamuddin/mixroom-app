@@ -198,6 +198,81 @@ internal object AndroidRecordingReadinessV2 {
   }
 }
 
+/**
+ * Verifies Android's default non-communication input while preserving an
+ * already-selected Bluetooth media output. This deliberately accepts only
+ * observable microphone-capable route classes and never infers identity from
+ * a product name or Bluetooth address.
+ */
+internal object AndroidSystemSelectedMediaDuplexReadinessV2 {
+  fun validate(facts: AndroidRecordingFactsV2): String {
+    if (!facts.ownedByV2) return "implementation_conflict"
+    val source = facts.sourceOutput ?: return "no_output"
+    if (source.kind != AndroidRouteKindV2.BLUETOOTH_MEDIA) {
+      return "recording_route_unsupported"
+    }
+
+    val input = facts.actualInput ?: return "no_input"
+    val output = facts.actualOutput ?: return "no_output"
+    if (
+      input.kind !in setOf(
+        AndroidRouteKindV2.BUILT_IN,
+        AndroidRouteKindV2.WIRED,
+        AndroidRouteKindV2.EXTERNAL,
+      ) ||
+      output.fingerprint != source.fingerprint
+    ) {
+      return "route_unstable"
+    }
+    if (
+      facts.audioMode != AudioManager.MODE_NORMAL ||
+      facts.bluetoothCommunicationDeviceSelected ||
+      facts.bluetoothScoActive
+    ) {
+      return "actual_state_unavailable"
+    }
+    if (
+      !facts.deviceOpen ||
+      !facts.callbackAttached ||
+      facts.activeInputChannels != 1 ||
+      facts.activeOutputChannels <= 0 ||
+      facts.sampleRateHz <= 0.0 ||
+      facts.bufferFrames <= 0
+    ) {
+      return "actual_state_unavailable"
+    }
+
+    val inputStream = facts.inputStream
+    val outputStream = facts.outputStream
+    if (
+      !inputStream.available ||
+      !inputStream.running ||
+      inputStream.routedDeviceId != input.id ||
+      inputStream.channelCount != 1 ||
+      (inputStream.sampleRateHz ?: 0) <= 0 ||
+      (inputStream.bufferFrames ?: 0) <= 0 ||
+      !outputStream.available ||
+      !outputStream.running ||
+      (outputStream.streamEpoch ?: 0L) <= 0L ||
+      outputStream.routedDeviceId != output.id ||
+      outputStream.channelCount != facts.activeOutputChannels ||
+      (outputStream.sampleRateHz ?: 0) <= 0 ||
+      (outputStream.bufferFrames ?: 0) <= 0 ||
+      outputStream.performanceMode != "None" ||
+      outputStream.sharingMode != "Shared"
+    ) {
+      return "actual_state_unavailable"
+    }
+    if (
+      inputStream.sampleRateHz != outputStream.sampleRateHz ||
+      inputStream.sampleRateHz?.toDouble() != facts.sampleRateHz
+    ) {
+      return "actual_state_unavailable"
+    }
+    return "ok"
+  }
+}
+
 internal object AndroidPlaybackTransitionOwnershipV2 {
   fun ownsNotification(
     expected: AndroidMediaRouteResolutionV2?,

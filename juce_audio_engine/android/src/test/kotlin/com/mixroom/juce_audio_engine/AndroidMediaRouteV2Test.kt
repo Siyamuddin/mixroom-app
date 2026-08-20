@@ -413,6 +413,115 @@ internal class AndroidMediaRouteV2Test {
   }
 
   @Test
+  fun systemSelectedMediaDuplexPreservesA2dpAndAcceptsDefaultInputs() {
+    val source = AndroidRouteEndpointV2(
+      17,
+      AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+      "media",
+      2,
+    )
+    val builtInInput = AndroidRouteEndpointV2(
+      3,
+      AudioDeviceInfo.TYPE_BUILTIN_MIC,
+      "built-in",
+      1,
+    )
+    val outputStream = validStream(source.id).copy(channelCount = 2)
+    val inputStream = validStream(builtInInput.id).copy(
+      channelCount = 1,
+      performanceMode = "LowLatency",
+      sharingMode = "Exclusive",
+      streamEpoch = null,
+    )
+    val facts = AndroidRecordingFactsV2(
+      ownedByV2 = true,
+      sourceOutput = source,
+      actualInput = builtInInput,
+      actualOutput = source,
+      audioMode = android.media.AudioManager.MODE_NORMAL,
+      bluetoothCommunicationDeviceSelected = false,
+      bluetoothScoActive = false,
+      deviceOpen = true,
+      callbackAttached = true,
+      activeInputChannels = 1,
+      activeOutputChannels = 2,
+      sampleRateHz = 48000.0,
+      bufferFrames = 1024,
+      inputStream = inputStream,
+      outputStream = outputStream,
+    )
+
+    assertEquals(
+      "ok",
+      AndroidSystemSelectedMediaDuplexReadinessV2.validate(facts),
+    )
+    assertEquals(
+      "ok",
+      AndroidSystemSelectedMediaDuplexReadinessV2.validate(
+        facts.copy(
+          actualInput = builtInInput.copy(type = AudioDeviceInfo.TYPE_USB_DEVICE),
+          inputStream = inputStream.copy(routedDeviceId = builtInInput.id),
+        ),
+      ),
+    )
+  }
+
+  @Test
+  fun systemSelectedMediaDuplexRejectsCommunicationAndRouteChanges() {
+    val source = AndroidRouteEndpointV2(
+      17,
+      AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+      "media",
+      2,
+    )
+    val input = AndroidRouteEndpointV2(
+      3,
+      AudioDeviceInfo.TYPE_BUILTIN_MIC,
+      "built-in",
+      1,
+    )
+    val inputStream = validStream(input.id).copy(channelCount = 1, streamEpoch = null)
+    val outputStream = validStream(source.id).copy(channelCount = 2)
+    val facts = AndroidRecordingFactsV2(
+      ownedByV2 = true,
+      sourceOutput = source,
+      actualInput = input,
+      actualOutput = source,
+      audioMode = android.media.AudioManager.MODE_NORMAL,
+      bluetoothCommunicationDeviceSelected = false,
+      bluetoothScoActive = false,
+      deviceOpen = true,
+      callbackAttached = true,
+      activeInputChannels = 1,
+      activeOutputChannels = 2,
+      sampleRateHz = 48000.0,
+      bufferFrames = 1024,
+      inputStream = inputStream,
+      outputStream = outputStream,
+    )
+
+    val invalid = listOf(
+      facts.copy(
+        actualInput = input.copy(type = AudioDeviceInfo.TYPE_BLUETOOTH_SCO),
+      ),
+      facts.copy(
+        actualOutput = source.copy(id = 18),
+        outputStream = outputStream.copy(routedDeviceId = 18),
+      ),
+      facts.copy(audioMode = android.media.AudioManager.MODE_IN_COMMUNICATION),
+      facts.copy(bluetoothCommunicationDeviceSelected = true),
+      facts.copy(inputStream = inputStream.copy(running = false)),
+      facts.copy(outputStream = outputStream.copy(performanceMode = "LowLatency")),
+      facts.copy(callbackAttached = false),
+    )
+    for (candidate in invalid) {
+      assertTrue(
+        AndroidSystemSelectedMediaDuplexReadinessV2.validate(candidate) != "ok",
+      )
+    }
+  }
+
+  @Test
   fun nativeDisconnectMatchesOnlyThePositiveVerifiedStreamEpoch() {
     assertTrue(AndroidNativeStreamEpochV2.matches(expected = 77L, observed = 77L))
     assertFalse(AndroidNativeStreamEpochV2.matches(expected = 77L, observed = 78L))

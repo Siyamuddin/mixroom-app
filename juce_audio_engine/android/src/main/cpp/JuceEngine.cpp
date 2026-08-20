@@ -1278,6 +1278,16 @@ bool JuceEngine::reconfigurePlaybackV2Android()
 
 bool JuceEngine::prepareRecordingV2Android()
 {
+    return prepareDefaultDuplexV2Android(true);
+}
+
+bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android()
+{
+    return prepareDefaultDuplexV2Android(false);
+}
+
+bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)
+{
 #if JUCE_ANDROID
     if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
         return false;
@@ -1324,8 +1334,11 @@ bool JuceEngine::prepareRecordingV2Android()
     deviceManager.addAudioCallback(metronomeCallback.get());
     audioCallbackAttached = true;
     v2PlaybackCallbackDetached = false;
-    androidV2RecordingPrepared = true;
-    logCurrentAudioDeviceState("android-v2-recording-prepared");
+    androidV2RecordingPrepared = recordingCapable;
+    androidV2DuplexProbePrepared = !recordingCapable;
+    logCurrentAudioDeviceState(recordingCapable
+                                   ? "android-v2-recording-prepared"
+                                   : "android-v2-system-selected-media-probe");
     return true;
 #else
     return false;
