@@ -5883,8 +5883,18 @@ public:
     bool pausePlaybackForRouteChangeV2();
     bool quiescePlaybackRouteV2(bool closeRemovedDevice);
     bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
+    bool beginMacPlaybackRoutePhaseV2(const juce::String &outputDeviceName,
+                                      double preferredSampleRateHz);
     bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                      const juce::String &inputDeviceName);
+    bool beginMacSystemSelectedDuplexPhaseV2(
+        const juce::String &outputDeviceName,
+        const juce::String &inputDeviceName,
+        int outputChannels);
+    bool waitForMacRoutePhaseCallbackV2(int timeoutMilliseconds) noexcept;
+    void cancelMacRoutePhaseCallbackWaitV2() noexcept;
+    juce::NamedValueSet getMacRoutePhaseFactsV2();
+    void closeMacRoutePhaseV2();
     bool prepareBluetoothDuplexSessionV2();
     bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
     bool prepareSystemSelectedDuplexSessionV2();
@@ -6339,7 +6349,8 @@ private:
         iosBluetoothDuplexProbeCallback;
     bool iosBluetoothDuplexProbeCallbackAttached = false;
     void detachIOSBluetoothDuplexProbeCallback() noexcept;
-    bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName);
+    bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
+                                  double preferredSampleRateHz = 0.0);
     bool openRecordingInputV2(const juce::String &outputDeviceName,
                               const juce::String &inputDeviceName,
                               bool bluetoothHfp = false);
@@ -7062,10 +7073,32 @@ public:
 
     bool waitForFirstValidCallback(int timeoutMilliseconds) noexcept
     {
-        if (hasCompletedFirstValidCallback())
-            return true;
-        return firstValidCallback.wait(timeoutMilliseconds) &&
-            hasCompletedFirstValidCallback();
+        const double deadlineMs = juce::Time::getMillisecondCounterHiRes() +
+            juce::jmax(0, timeoutMilliseconds);
+        while (firstValidCallbackRequested.load(std::memory_order_acquire))
+        {
+            if (hasCompletedFirstValidCallback())
+            {
+                firstValidCallbackRequested.store(
+                    false, std::memory_order_release);
+                return true;
+            }
+
+            const int remainingMs = static_cast<int>(juce::jmax(
+                0.0, deadlineMs - juce::Time::getMillisecondCounterHiRes()));
+            if (remainingMs <= 0 || !firstValidCallback.wait(remainingMs))
+                break;
+        }
+
+        firstValidCallbackRequested.store(false, std::memory_order_release);
+        return false;
+    }
+
+    void cancelFirstValidCallbackProofWait() noexcept
+    {
+        firstValidCallbackRequested.store(false, std::memory_order_release);
+        firstValidCallbackCompleted.store(false, std::memory_order_release);
+        firstValidCallback.signal();
     }
 
     bool hasCompletedFirstValidCallback() const noexcept
@@ -7106,11 +7139,13 @@ public:
     void audioDeviceStopped() override
     {
         callbackReady.store(false, std::memory_order_release);
-        firstValidCallbackRequested.store(false, std::memory_order_release);
         firstValidCallbackCompleted.store(false, std::memory_order_release);
         expectedBlockCapacity.store(0, std::memory_order_relaxed);
         expectedInputChannels.store(0, std::memory_order_relaxed);
         expectedOutputChannels.store(0, std::memory_order_relaxed);
+        // CoreAudio may stop and restart an owned device while a Bluetooth
+        // profile settles. Keep an active proof armed for the restarted
+        // callback; explicit cancellation or its bounded deadline ends it.
         firstValidCallback.signal();
         player.audioDeviceStopped();
     }
@@ -7313,8 +7348,7 @@ public:
 private:
     void completeFirstValidCallbackProof() noexcept
     {
-        if (!firstValidCallbackRequested.exchange(
-                false, std::memory_order_acq_rel))
+        if (!firstValidCallbackRequested.load(std::memory_order_acquire))
             return;
         firstValidCallbackCount.fetch_add(1, std::memory_order_relaxed);
         firstValidCallbackCompleted.store(true, std::memory_order_release);

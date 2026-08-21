@@ -7,8 +7,21 @@
 + (BOOL)pausePlaybackForRouteChangeV2ObjC;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
++ (BOOL)beginMacPlaybackRoutePhaseV2ObjC:
+            (NSString * _Nonnull)outputDeviceName
+                              sampleRate:(double)preferredSampleRateHz;
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;
++ (BOOL)beginMacSystemSelectedDuplexPhaseV2ObjC:
+            (NSString * _Nonnull)outputDeviceName
+                                             inputName:
+            (NSString * _Nonnull)inputDeviceName
+                                        outputChannels:(NSInteger)outputChannels;
++ (BOOL)waitForMacRoutePhaseCallbackV2ObjC:
+            (NSInteger)timeoutMilliseconds;
++ (void)cancelMacRoutePhaseCallbackWaitV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)macRoutePhaseFactsV2ObjC;
++ (void)closeMacRoutePhaseV2ObjC;
 + (BOOL)prepareBluetoothDuplexSessionV2ObjC;
 + (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds;
 + (BOOL)prepareSystemSelectedDuplexSessionV2ObjC;

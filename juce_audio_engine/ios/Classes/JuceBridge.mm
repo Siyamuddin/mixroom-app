@@ -2342,6 +2342,58 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 @end
 
+#if JUCE_MAC && !JUCE_IOS
+static BOOL MixroomCallBoolOnJuceMessageThreadSync(
+    const std::function<bool()> &work)
+{
+    auto *messageManager = juce::MessageManager::getInstance();
+    if (messageManager == nullptr)
+        return NO;
+    if (messageManager->isThisTheMessageThread())
+        return work() ? YES : NO;
+
+    bool value = false;
+    messageManager->callSync([&value, &work] { value = work(); });
+    return value ? YES : NO;
+}
+
+static void MixroomCallVoidOnJuceMessageThreadSync(
+    const std::function<void()> &work)
+{
+    auto *messageManager = juce::MessageManager::getInstance();
+    if (messageManager == nullptr)
+        return;
+    if (messageManager->isThisTheMessageThread())
+    {
+        work();
+        return;
+    }
+    messageManager->callSync(work);
+}
+
+static NSDictionary<NSString *, id> *MixroomDictionaryFromNamedValues(
+    const juce::NamedValueSet &values)
+{
+    NSMutableDictionary<NSString *, id> *result = [NSMutableDictionary dictionary];
+    for (const auto &entry : values)
+    {
+        NSString *key = [NSString stringWithUTF8String:
+            entry.name.toString().toRawUTF8()] ?: @"";
+        const auto value = entry.value;
+        if (value.isBool())
+            result[key] = @((BOOL)static_cast<bool>(value));
+        else if (value.isInt() || value.isInt64())
+            result[key] = @((long long)static_cast<juce::int64>(value));
+        else if (value.isDouble())
+            result[key] = @((double)static_cast<double>(value));
+        else
+            result[key] = [NSString stringWithUTF8String:
+                value.toString().toRawUTF8()] ?: @"";
+    }
+    return [[result copy] autorelease];
+}
+#endif
+
 @implementation JuceBridge
 
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath
@@ -2382,21 +2434,119 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice
 {
+#if JUCE_MAC && !JUCE_IOS
+    return MixroomCallBoolOnJuceMessageThreadSync([closeRemovedDevice] {
+        return JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+    });
+#else
     return JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+#endif
 }
 
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString *)outputDeviceName
 {
+#if JUCE_MAC && !JUCE_IOS
+    const auto outputName = juceStringFromNSString(outputDeviceName);
+    return MixroomCallBoolOnJuceMessageThreadSync([outputName] {
+        return JuceEngine::get().reconfigurePlaybackRouteV2(outputName);
+    });
+#else
     return JuceEngine::get().reconfigurePlaybackRouteV2(
         juceStringFromNSString(outputDeviceName));
+#endif
+}
+
++ (BOOL)beginMacPlaybackRoutePhaseV2ObjC:(NSString *)outputDeviceName
+                              sampleRate:(double)preferredSampleRateHz
+{
+#if JUCE_MAC && !JUCE_IOS
+    const auto outputName = juceStringFromNSString(outputDeviceName);
+    return MixroomCallBoolOnJuceMessageThreadSync(
+        [outputName, preferredSampleRateHz] {
+        return JuceEngine::get().beginMacPlaybackRoutePhaseV2(
+            outputName, preferredSampleRateHz);
+    });
+#else
+    juce::ignoreUnused(outputDeviceName, preferredSampleRateHz);
+    return NO;
+#endif
 }
 
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString *)outputDeviceName
                               inputName:(NSString *)inputDeviceName
 {
+#if JUCE_MAC && !JUCE_IOS
+    const auto outputName = juceStringFromNSString(outputDeviceName);
+    const auto inputName = juceStringFromNSString(inputDeviceName);
+    return MixroomCallBoolOnJuceMessageThreadSync([outputName, inputName] {
+        return JuceEngine::get().reconfigureRecordingRouteV2(
+            outputName, inputName);
+    });
+#else
     return JuceEngine::get().reconfigureRecordingRouteV2(
         juceStringFromNSString(outputDeviceName),
         juceStringFromNSString(inputDeviceName));
+#endif
+}
+
++ (BOOL)beginMacSystemSelectedDuplexPhaseV2ObjC:
+            (NSString *)outputDeviceName
+                                             inputName:(NSString *)inputDeviceName
+                                        outputChannels:(NSInteger)outputChannels
+{
+#if JUCE_MAC && !JUCE_IOS
+    const auto outputName = juceStringFromNSString(outputDeviceName);
+    const auto inputName = juceStringFromNSString(inputDeviceName);
+    return MixroomCallBoolOnJuceMessageThreadSync(
+        [outputName, inputName, outputChannels] {
+            return JuceEngine::get().beginMacSystemSelectedDuplexPhaseV2(
+                outputName, inputName, static_cast<int>(outputChannels));
+        });
+#else
+    juce::ignoreUnused(outputDeviceName, inputDeviceName, outputChannels);
+    return NO;
+#endif
+}
+
++ (BOOL)waitForMacRoutePhaseCallbackV2ObjC:(NSInteger)timeoutMilliseconds
+{
+#if JUCE_MAC && !JUCE_IOS
+    return JuceEngine::get().waitForMacRoutePhaseCallbackV2(
+        static_cast<int>(timeoutMilliseconds));
+#else
+    juce::ignoreUnused(timeoutMilliseconds);
+    return NO;
+#endif
+}
+
++ (void)cancelMacRoutePhaseCallbackWaitV2ObjC
+{
+#if JUCE_MAC && !JUCE_IOS
+    JuceEngine::get().cancelMacRoutePhaseCallbackWaitV2();
+#endif
+}
+
++ (NSDictionary<NSString *, id> *)macRoutePhaseFactsV2ObjC
+{
+#if JUCE_MAC && !JUCE_IOS
+    NSDictionary<NSString *, id> *facts = nil;
+    MixroomCallVoidOnJuceMessageThreadSync([&facts] {
+        facts = [MixroomDictionaryFromNamedValues(
+            JuceEngine::get().getMacRoutePhaseFactsV2()) retain];
+    });
+    return [facts autorelease] ?: @{};
+#else
+    return @{};
+#endif
+}
+
++ (void)closeMacRoutePhaseV2ObjC
+{
+#if JUCE_MAC && !JUCE_IOS
+    MixroomCallVoidOnJuceMessageThreadSync([] {
+        JuceEngine::get().closeMacRoutePhaseV2();
+    });
+#endif
 }
 
 + (BOOL)reconfigureBluetoothDuplexRouteV2ObjC

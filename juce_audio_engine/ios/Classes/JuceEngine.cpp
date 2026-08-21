@@ -2361,8 +2361,6 @@ void JuceEngine::clearMidiInputCallbacks()
 // ============================================================
 void JuceEngine::initialiseEngine(const juce::String &v2OutputDeviceName)
 {
-    GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
-
     juceLogToFlutter("Hello from JuceEngine::initialiseEngine()");
 
     if (engineInitialized)
@@ -2450,9 +2448,18 @@ void JuceEngine::initialiseEngine(const juce::String &v2OutputDeviceName)
         logCurrentAudioDeviceState("initialise");
     }
 
-    deviceManager.removeChangeListener(this);
+    // The CoreAudio device may invoke its first IO callback synchronously while
+    // start() is still returning. Do not hold AudioDeviceManager's callback lock
+    // across the device open, or that callback and the startup thread can wait on
+    // each other. No Mixroom callback is attached yet, so opening here is silent.
+    GraphMutationScope renderLock(
+        deviceManager.getAudioCallbackLock(), graphRenderMutex);
+
     if (!isV2PlaybackSession())
+    {
+        deviceManager.removeChangeListener(this);
         deviceManager.addChangeListener(this);
+    }
 
     const double hostRate = getKnownDeviceSampleRate(deviceManager, 44100.0);
     const int blockSize = getKnownDeviceBufferSize(deviceManager, 512);
@@ -2527,7 +2534,8 @@ bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName)
 #endif
 }
 
-bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
+bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
+                                          double preferredSampleRateHz)
 {
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
 #if JUCE_MAC && !JUCE_IOS
@@ -2541,6 +2549,10 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
     // Close under the currently installed policy before selecting the policy
     // that will own the next device/session open.
     deviceManager.closeAudioDevice();
+#if JUCE_MAC && !JUCE_IOS
+    if (auto *deviceType = deviceManager.getCurrentDeviceTypeObject())
+        deviceType->scanForDevices();
+#endif
 #if JUCE_IOS
     mixroomIOSSetAudioSessionPolicy(
         MixroomIOSAudioSessionPolicy::v2PlaybackOnly);
@@ -2549,7 +2561,9 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName)
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.inputDeviceName = {};
     setup.outputDeviceName = outputDeviceName;
-    setup.sampleRate = 0.0;
+    setup.sampleRate = preferredSampleRateHz > 1000.0
+        ? preferredSampleRateHz
+        : 0.0;
     setup.bufferSize = 0;
     setup.useDefaultInputChannels = false;
     setup.inputChannels.clear();
@@ -2728,6 +2742,38 @@ bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName
 #endif
 }
 
+bool JuceEngine::beginMacPlaybackRoutePhaseV2(
+    const juce::String &outputDeviceName,
+    double preferredSampleRateHz)
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession() ||
+        outputDeviceName.isEmpty())
+        return false;
+
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    quiescePlaybackRouteV2(false);
+    if (!openPlaybackOutputOnlyV2(outputDeviceName, preferredSampleRateHz) ||
+        metronomeCallback == nullptr)
+        return false;
+
+    auto *device = deviceManager.getCurrentAudioDevice();
+    hostSampleRateAtomic.store(
+        device->getCurrentSampleRate(), std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute();
+    metronomeCallback->beginFirstValidCallbackProof();
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    v2PlaybackCallbackDetached = false;
+    logCurrentAudioDeviceState("v2-macos-output-phase-opened");
+    return true;
+#else
+    juce::ignoreUnused(outputDeviceName, preferredSampleRateHz);
+    return false;
+#endif
+}
+
 bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                               const juce::String &inputDeviceName)
 {
@@ -2752,6 +2798,147 @@ bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceNam
 #else
     juce::ignoreUnused(outputDeviceName, inputDeviceName);
     return false;
+#endif
+}
+
+bool JuceEngine::beginMacSystemSelectedDuplexPhaseV2(
+    const juce::String &outputDeviceName,
+    const juce::String &inputDeviceName,
+    int outputChannels)
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (!engineInitialized || !isV2PlaybackSession() ||
+        outputDeviceName.isEmpty() || inputDeviceName.isEmpty() ||
+        outputChannels <= 0)
+        return false;
+
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+
+    quiescePlaybackRouteV2(false);
+    deviceManager.closeAudioDevice();
+    if (auto *deviceType = deviceManager.getCurrentDeviceTypeObject())
+        deviceType->scanForDevices();
+
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    setup.inputDeviceName = inputDeviceName;
+    setup.outputDeviceName = outputDeviceName;
+    setup.sampleRate = 0.0;
+    setup.bufferSize = 0;
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    setup.inputChannels.setBit(0);
+    setup.useDefaultOutputChannels = false;
+    setup.outputChannels.clear();
+    for (int channel = 0; channel < juce::jlimit(1, 2, outputChannels); ++channel)
+        setup.outputChannels.setBit(channel);
+
+    const auto error = deviceManager.initialise(
+        1,
+        juce::jlimit(1, 2, outputChannels),
+        nullptr,
+        false,
+        {},
+        &setup);
+    if (error.isNotEmpty())
+    {
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    liveInputMonitoringEnabled = false;
+    auto *device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr ||
+        device->getActiveInputChannels().countNumberOfSetBits() != 1 ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        device->getCurrentSampleRate() <= 1000.0 ||
+        device->getCurrentBufferSizeSamples() <= 0 ||
+        metronomeCallback == nullptr)
+    {
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    hostSampleRateAtomic.store(
+        device->getCurrentSampleRate(), std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute();
+    metronomeCallback->beginFirstValidCallbackProof();
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    v2PlaybackCallbackDetached = false;
+    logCurrentAudioDeviceState("v2-macos-system-selected-duplex-phase-opened");
+    return true;
+#else
+    juce::ignoreUnused(outputDeviceName, inputDeviceName,
+                       outputChannels);
+    return false;
+#endif
+}
+
+bool JuceEngine::waitForMacRoutePhaseCallbackV2(
+    int timeoutMilliseconds) noexcept
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (timeoutMilliseconds <= 0 || metronomeCallback == nullptr)
+        return false;
+
+    // This wait is intentionally owned by the serial lifecycle worker. The
+    // JUCE message thread must remain free to service CoreAudio device timers.
+    jassert(!juce::MessageManager::getInstance()->isThisTheMessageThread());
+    return metronomeCallback->waitForFirstValidCallback(timeoutMilliseconds);
+#else
+    juce::ignoreUnused(timeoutMilliseconds);
+    return false;
+#endif
+}
+
+void JuceEngine::cancelMacRoutePhaseCallbackWaitV2() noexcept
+{
+#if JUCE_MAC && !JUCE_IOS
+    if (metronomeCallback != nullptr)
+        metronomeCallback->cancelFirstValidCallbackProofWait();
+#endif
+}
+
+juce::NamedValueSet JuceEngine::getMacRoutePhaseFactsV2()
+{
+    juce::NamedValueSet facts;
+#if JUCE_MAC && !JUCE_IOS
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const auto setup = deviceManager.getAudioDeviceSetup();
+    const bool callbackAttached =
+        !v2PlaybackCallbackDetached && metronomeCallback != nullptr;
+
+    facts.set("deviceOpen", device != nullptr);
+    facts.set("audioCallbackAttached", callbackAttached);
+    facts.set("inputDeviceName", setup.inputDeviceName);
+    facts.set("outputDeviceName", setup.outputDeviceName);
+    facts.set("inputChannelCount", device == nullptr ? 0 :
+        device->getActiveInputChannels().countNumberOfSetBits());
+    facts.set("outputChannelCount", device == nullptr ? 0 :
+        device->getActiveOutputChannels().countNumberOfSetBits());
+    facts.set("sampleRate", device == nullptr ? 0.0 :
+        device->getCurrentSampleRate());
+    facts.set("bufferSize", device == nullptr ? 0 :
+        device->getCurrentBufferSizeSamples());
+    facts.set("duplexProbeCallbackCount",
+        static_cast<juce::int64>(metronomeCallback == nullptr ? 0 :
+            metronomeCallback->getFirstValidCallbackCount()));
+    facts.set("routePhaseCallbackReady", metronomeCallback != nullptr &&
+        metronomeCallback->hasCompletedFirstValidCallback());
+#endif
+    return facts;
+}
+
+void JuceEngine::closeMacRoutePhaseV2()
+{
+#if JUCE_MAC && !JUCE_IOS
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    if (!engineInitialized || !isV2PlaybackSession())
+        return;
+    quiescePlaybackRouteV2(false);
+    deviceManager.closeAudioDevice();
 #endif
 }
 
@@ -8051,6 +8238,12 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
         isBluetoothDuplexProjectCallbackReadyV2());
     out.set(
         "bluetoothDuplexProjectCallbackCount",
+        juce::var((juce::int64)(metronomeCallback != nullptr
+            ? metronomeCallback->getFirstValidCallbackCount()
+            : 0)));
+#elif JUCE_MAC
+    out.set(
+        "duplexProbeCallbackCount",
         juce::var((juce::int64)(metronomeCallback != nullptr
             ? metronomeCallback->getFirstValidCallbackCount()
             : 0)));
