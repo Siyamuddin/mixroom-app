@@ -44,6 +44,29 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @property (atomic, copy) NSString *currentAudioRouteIntentV2;
 @property (atomic, copy) NSDictionary<NSString *, id> *iosRecordingOutputV2;
 @property (atomic, copy) NSDictionary<NSString *, id> *iosRecordingInputV2;
+#if TARGET_OS_OSX
+@property (atomic, assign) BOOL macIntentOperationActiveV2;
+@property (atomic, assign) BOOL macIntentOperationCancelledV2;
+@property (atomic, assign) BOOL macIntentCleanupClaimedV2;
+@property (atomic, assign) BOOL macLifecycleTransitionActiveV2;
+@property (atomic, assign) BOOL macLifecycleReconcilePendingV2;
+@property (atomic, assign) BOOL macIntentListenersInstalledV2;
+@property (atomic, assign) uint64_t macIntentOperationIdV2;
+@property (atomic, assign) uint64_t macIntentOperationGenerationV2;
+@property (atomic, assign) uint32_t macIntentObservedInputDeviceV2;
+@property (atomic, assign) uint32_t macIntentObservedOutputDeviceV2;
+@property (atomic, assign) double macIntentOperationStartedAtMsV2;
+@property (atomic, copy) NSString *macIntentLifecyclePhaseV2;
+@property (atomic, copy) NSString *macIntentTerminalCauseV2;
+@property (atomic, copy) NSString *macIntentSourceFingerprintV2;
+@property (atomic, copy) NSDictionary<NSString *, id> *macIntentSourceOutputV2;
+@property (atomic, copy) NSDictionary<NSString *, id> *macIntentTargetInputV2;
+@property (atomic, copy) NSDictionary<NSString *, id> *macIntentTargetOutputV2;
+@property (atomic, copy) NSDictionary<NSString *, id> *macIntentVerifiedOutputV2;
+@property (atomic, copy) NSDictionary<NSString *, id> *macIntentInputFactsV2;
+@property (atomic, retain) NSCondition *macIntentRouteConditionV2;
+@property (atomic, assign) BOOL macIntentRouteConditionSignalledV2;
+#endif
 @property (atomic, assign) uint64_t iosIntentOperationIdV2;
 @property (atomic, assign) uint64_t iosIntentOperationGenerationV2;
 @property (atomic, assign) BOOL iosIntentOperationActiveV2;
@@ -77,9 +100,14 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 - (NSDictionary<NSString *, id> *)startAudioRouteMonitoringV2;
 - (NSDictionary<NSString *, id> *)applyAudioRouteConfigurationV2:(NSDictionary *)args;
 - (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args;
-#if !TARGET_OS_OSX
 - (void)setAudioRouteIntentV2:(NSDictionary *)args
                    completion:(void (^)(NSDictionary<NSString *, id> *))completion;
+#if TARGET_OS_OSX
+- (void)signalMacIntentRouteConditionV2;
+- (BOOL)installMacIntentDeviceListenersV2;
+- (void)removeMacIntentDeviceListenersV2;
+- (BOOL)claimMacIntentCleanupV2;
+#else
 - (void)signalIOSIntentRouteConditionV2;
 - (BOOL)claimIOSIntentCleanupV2;
 #endif
@@ -107,8 +135,20 @@ static OSStatus MixroomAudioRoutePropertyListenerV2(
         addresses[0].mSelector == kAudioHardwarePropertyDefaultOutputDevice) {
         cause = @"defaultOutputChanged";
     } else if (addresses != NULL &&
+               addresses[0].mSelector == kAudioHardwarePropertyDefaultInputDevice) {
+        cause = @"defaultInputChanged";
+    } else if (addresses != NULL &&
                addresses[0].mSelector == kAudioDevicePropertyDeviceIsAlive) {
-        cause = @"activeOutputRemoved";
+        cause = @"activeDeviceRemoved";
+    } else if (addresses != NULL &&
+               addresses[0].mSelector == kAudioDevicePropertyNominalSampleRate) {
+        cause = @"nominalSampleRateChanged";
+    } else if (addresses != NULL &&
+               addresses[0].mSelector == kAudioDevicePropertyBufferFrameSize) {
+        cause = @"bufferFrameSizeChanged";
+    } else if (addresses != NULL &&
+               addresses[0].mSelector == kAudioDevicePropertyStreamConfiguration) {
+        cause = @"streamConfigurationChanged";
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         [plugin handleAudioRoutePropertyChangeV2:cause];
@@ -174,6 +214,8 @@ static dispatch_queue_t MixroomPluginScanQueue(void) {
 }
 
 #if TARGET_OS_OSX
+static const void *MixroomMacLifecycleQueueKey = &MixroomMacLifecycleQueueKey;
+
 static dispatch_queue_t MixroomMacPlaybackStartupQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
@@ -188,8 +230,18 @@ static dispatch_queue_t MixroomMacPlaybackStartupQueue(void) {
             "com.mixroom.juce_audio_engine.macos_v2_startup",
             attr
         );
+        dispatch_queue_set_specific(
+            queue,
+            MixroomMacLifecycleQueueKey,
+            (void *)MixroomMacLifecycleQueueKey,
+            NULL
+        );
     });
     return queue;
+}
+
+static BOOL MixroomIsOnMacLifecycleQueue(void) {
+    return dispatch_get_specific(MixroomMacLifecycleQueueKey) != NULL;
 }
 #endif
 
@@ -1001,6 +1053,39 @@ static NSDictionary<NSString *, id> *MixroomOutputForDeviceID(
     return nil;
 }
 
+static NSDictionary<NSString *, id> *MixroomInputForDeviceID(
+    NSArray<NSDictionary<NSString *, id> *> *inventory,
+    AudioDeviceID deviceID
+) {
+    for (NSDictionary<NSString *, id> *device in inventory) {
+        NSNumber *channels = device[@"inputChannels"];
+        if ([device[@"deviceID"] unsignedIntValue] == deviceID &&
+            (id)channels != [NSNull null] &&
+            channels.integerValue > 0) {
+            return device;
+        }
+    }
+    return nil;
+}
+
+static NSDictionary<NSString *, id> *MixroomOutputForUID(
+    NSArray<NSDictionary<NSString *, id> *> *inventory,
+    NSString *uid
+) {
+    if (uid.length == 0) {
+        return nil;
+    }
+    for (NSDictionary<NSString *, id> *device in inventory) {
+        NSNumber *channels = device[@"outputChannels"];
+        if ([device[@"uid"] isEqualToString:uid] &&
+            (id)channels != [NSNull null] &&
+            channels.integerValue > 0) {
+            return device;
+        }
+    }
+    return nil;
+}
+
 static NSDictionary<NSString *, id> *MixroomUniqueBuiltInOutput(
     NSArray<NSDictionary<NSString *, id> *> *inventory
 ) {
@@ -1083,10 +1168,12 @@ static NSString *MixroomEffectiveOutputFingerprint(void) {
     NSString *identity = [device[@"uid"] length] > 0
         ? device[@"uid"]
         : [device[@"deviceID"] stringValue];
-    return [NSString stringWithFormat:@"%@|%@|%@|%@",
+    return [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@",
             identity,
             device[@"rawTransport"],
             device[@"outputChannels"],
+            device[@"sampleRateHz"],
+            device[@"bufferFrames"],
             MixroomCoreAudioDeviceIsAlive(deviceID) ? @"alive" : @"dead"];
 }
 
@@ -1215,6 +1302,46 @@ static BOOL MixroomEndpointMatchesCoreAudioDevice(
     return [endpoint[@"uid"] isEqualToString:device[@"uid"]] &&
         [endpoint[@"nativePortType"] isEqualToString:device[@"rawTransport"]] &&
         [endpoint[@"normalizedKind"] isEqualToString:expectedKind];
+}
+
+static BOOL MixroomCoreAudioOutputHasNativeClock(
+    NSDictionary<NSString *, id> *output
+) {
+    return output != nil && [output[@"uid"] length] > 0 &&
+        [output[@"outputChannels"] integerValue] > 0 &&
+        [output[@"sampleRateHz"] doubleValue] > 1000.0 &&
+        [output[@"bufferFrames"] integerValue] > 0;
+}
+
+static BOOL MixroomMacPlaybackSnapshotMatchesPlan(
+    NSDictionary<NSString *, id> *snapshot,
+    NSDictionary<NSString *, id> *output,
+    double callbackRate,
+    NSInteger callbackFrames,
+    unsigned long long callbackCount
+) {
+    NSDictionary *juce = [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+        ? snapshot[@"juce"] : @{};
+    NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
+        ? snapshot[@"outputs"] : @[];
+    NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
+    const double nativeRate = [output[@"sampleRateHz"] doubleValue];
+    const NSInteger nativeBuffer = [output[@"bufferFrames"] integerValue];
+    return MixroomCoreAudioOutputHasNativeClock(output) &&
+        [snapshot[@"captureConsistency"] isEqualToString:@"stable"] &&
+        [juce[@"deviceOpen"] boolValue] &&
+        [juce[@"audioCallbackAttached"] boolValue] &&
+        [juce[@"activeInputChannels"] integerValue] == 0 &&
+        [juce[@"activeOutputChannels"] integerValue] > 0 &&
+        [juce[@"activeOutputChannels"] integerValue] <=
+            [output[@"outputChannels"] integerValue] &&
+        fabs([juce[@"sampleRateHz"] doubleValue] - nativeRate) < 1.0 &&
+        [juce[@"bufferFrames"] integerValue] == nativeBuffer &&
+        fabs([juce[@"projectGraphSampleRateHz"] doubleValue] - nativeRate) < 1.0 &&
+        [juce[@"projectGraphBufferFrames"] integerValue] == nativeBuffer &&
+        callbackCount > 0 && fabs(callbackRate - nativeRate) < 1.0 &&
+        callbackFrames == nativeBuffer &&
+        MixroomEndpointMatchesCoreAudioDevice(actualOutput, output, NO);
 }
 
 static BOOL MixroomSnapshotMatchesRecordingRoute(
@@ -1352,18 +1479,25 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const double startedAtMs = MixroomMonotonicMilliseconds();
     NSArray<NSDictionary<NSString *, id> *> *firstInventory =
         MixroomCoreAudioDeviceInventory();
+    const BOOL lifecycleTransitionInProgress =
+        self.macLifecycleTransitionActiveV2 &&
+        !MixroomIsOnMacLifecycleQueue();
     NSDictionary<NSString *, id> *firstDiagnostics =
-        [JuceBridge getEngineDiagnosticsObjC];
+        lifecycleTransitionInProgress
+            ? nil : [JuceBridge getEngineDiagnosticsObjC];
     NSArray<NSDictionary<NSString *, id> *> *secondInventory =
         MixroomCoreAudioDeviceInventory();
     NSDictionary<NSString *, id> *secondDiagnostics =
-        [JuceBridge getEngineDiagnosticsObjC];
+        lifecycleTransitionInProgress
+            ? nil : [JuceBridge getEngineDiagnosticsObjC];
 
     NSMutableDictionary<NSString *, NSString *> *unavailable =
         [NSMutableDictionary dictionary];
     NSString *captureConsistency = @"unavailable";
     if (firstInventory == nil || secondInventory == nil) {
         unavailable[@"coreAudio.inventory"] = @"coreAudioReadFailed";
+    } else if (lifecycleTransitionInProgress) {
+        unavailable[@"snapshot"] = @"lifecycleTransitionInProgress";
     } else if (firstDiagnostics == nil || secondDiagnostics == nil) {
         unavailable[@"juce.route"] = @"juceDiagnosticsReadFailed";
     } else {
@@ -1408,8 +1542,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             : @"selectedJuceDeviceNameIsAmbiguous";
     }
 
-    NSDictionary<NSString *, id> *selectedInput =
-        inputMatches.count == 1 ? inputMatches.firstObject : nil;
+    const BOOL independentInputActive =
+        self.macIntentOperationActiveV2 &&
+        [self.macIntentInputFactsV2[@"running"] boolValue];
+    NSDictionary<NSString *, id> *selectedInput = independentInputActive
+        ? self.macIntentTargetInputV2
+        : (inputMatches.count == 1 ? inputMatches.firstObject : nil);
     NSDictionary<NSString *, id> *selectedOutput =
         outputMatches.count == 1 ? outputMatches.firstObject : nil;
     NSNumber *activeInputChannels =
@@ -1419,8 +1557,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const BOOL selectedInputIsBluetooth = selectedInput != nil &&
         MixroomTransportIsBluetooth([selectedInput[@"transport"] unsignedIntValue]);
     const BOOL bluetoothInputActive = selectedInputIsBluetooth &&
-        activeInputChannels != nil &&
-        activeInputChannels.integerValue > 0;
+        (independentInputActive ||
+         (activeInputChannels != nil && activeInputChannels.integerValue > 0));
     const BOOL selectedOutputIsUnspecifiedBluetooth = selectedOutput != nil &&
         [selectedOutput[@"transport"] unsignedIntValue] ==
             kAudioDeviceTransportTypeBluetooth &&
@@ -1495,7 +1633,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"ioBufferDurationSeconds": nativeBufferDuration ?: [NSNull null],
         @"inputChannelCount": selectedInput == nil
             ? [NSNull null]
-            : selectedInput[@"inputChannels"],
+            : (independentInputActive
+                ? @1 : selectedInput[@"inputChannels"]),
         @"outputChannelCount": selectedOutput == nil
             ? [NSNull null]
             : selectedOutput[@"outputChannels"],
@@ -1507,6 +1646,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"audioCallbackAttached": diagnosticNumber(@"audioCallbackAttached"),
         @"sampleRateHz": openDeviceNumber(@"sampleRate"),
         @"bufferFrames": openDeviceNumber(@"bufferSize"),
+        @"projectGraphSampleRateHz": openDeviceNumber(@"projectGraphSampleRate"),
+        @"projectGraphBufferFrames": openDeviceNumber(@"projectGraphBufferFrames"),
+        @"outputCallbackProofSampleRateHz": diagnosticNumber(
+            @"outputCallbackProofSampleRate"),
+        @"outputCallbackProofFrames": diagnosticNumber(
+            @"outputCallbackProofFrames"),
         @"activeInputChannels": diagnosticNumber(@"inputChannelCount"),
         @"activeOutputChannels": diagnosticNumber(@"outputChannelCount"),
         @"inputDeviceName": inputDeviceName,
@@ -1551,6 +1696,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         @"intent": [implementation isEqualToString:@"v2"]
             ? (self.currentAudioRouteIntentV2 ?: @"playbackOnly")
             : @"playbackOnly",
+        @"duplexProbe": self.iosLastDuplexProbeV2 ?: [NSNull null],
+        @"interruption": [NSNull null],
         @"captureConsistency": captureConsistency,
         @"inputs": inputs,
         @"outputs": outputs,
@@ -1732,7 +1879,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         MixroomOutputForDeviceID(inventory, expectedDefault);
     const BOOL targetUsable = target != nil &&
         MixroomCoreAudioDeviceIsAlive(expectedDefault) &&
-        MixroomOutputNameIsUnique(inventory, target);
+        MixroomOutputNameIsUnique(inventory, target) &&
+        MixroomCoreAudioOutputHasNativeClock(target);
     if (!targetUsable) {
         return @{
             @"success": @NO,
@@ -1741,13 +1889,19 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         };
     }
     NSString *expectedFingerprint = MixroomEffectiveOutputFingerprint();
-    if (![JuceBridge initialisePlaybackV2ObjC:target[@"name"]]) {
+    if (![JuceBridge
+            initialiseMacPlaybackV2ObjC:target[@"name"]
+            sampleRate:[target[@"sampleRateHz"] doubleValue]
+            bufferFrames:[target[@"bufferFrames"] integerValue]]) {
         return @{
             @"success": @NO,
             @"diagnosticCode": @"juce_open_failed",
             @"snapshot": [self buildAudioRouteSnapshotV2],
         };
     }
+    [JuceBridge beginMacOutputCallbackProofV2ObjC];
+    const BOOL callbackReady =
+        [JuceBridge waitForMacOutputCallbackProofV2ObjC:2000];
 
     NSDictionary<NSString *, id> *snapshot = [self buildAudioRouteSnapshotV2];
     NSDictionary<NSString *, id> *juce =
@@ -1779,6 +1933,13 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     NSNumber *bufferFrames = [juce[@"bufferFrames"] isKindOfClass:[NSNumber class]]
         ? juce[@"bufferFrames"]
         : nil;
+    const unsigned long long callbackCount =
+        [JuceBridge getMacOutputCallbackProofCountV2ObjC]
+            .unsignedLongLongValue;
+    const NSInteger callbackFrames =
+        [JuceBridge getMacOutputCallbackProofFramesV2ObjC].integerValue;
+    const double callbackRate =
+        [JuceBridge getMacOutputCallbackProofSampleRateV2ObjC].doubleValue;
 
     NSString *diagnosticCode = @"ok";
     if (MixroomDefaultCoreAudioOutputDevice() != expectedDefault ||
@@ -1799,15 +1960,29 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         diagnosticCode = @"actual_state_unavailable";
     } else if (![actualOutput[@"uid"] isEqualToString:target[@"uid"]]) {
         diagnosticCode = @"actual_state_unavailable";
+    } else if (!callbackReady ||
+               !MixroomMacPlaybackSnapshotMatchesPlan(
+                   snapshot, target, callbackRate, callbackFrames, callbackCount)) {
+        diagnosticCode = @"actual_state_unavailable";
     }
 
     const BOOL success = [diagnosticCode isEqualToString:@"ok"];
     if (!success) {
         [JuceBridge shutdownEngineObjC];
     }
+    NSDictionary *defaultInput = MixroomInputForDeviceID(
+        MixroomCoreAudioDeviceInventory() ?: @[],
+        MixroomDefaultCoreAudioInputDevice());
+    const BOOL reducedBluetoothQuality = success &&
+        [target[@"transport"] unsignedIntValue] ==
+            kAudioDeviceTransportTypeBluetooth &&
+        [target[@"outputChannels"] integerValue] == 1 &&
+        [defaultInput[@"transport"] unsignedIntValue] ==
+            kAudioDeviceTransportTypeBluetooth;
     return @{
         @"success": @(success),
         @"diagnosticCode": diagnosticCode,
+        @"bluetoothCommunicationQualityReduced": @(reducedBluetoothQuality),
         @"snapshot": snapshot,
     };
 #else
@@ -1975,7 +2150,129 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 #endif
 }
 
-#if !TARGET_OS_OSX
+#if TARGET_OS_OSX
+- (void)signalMacIntentRouteConditionV2 {
+    NSCondition *condition = self.macIntentRouteConditionV2;
+    if (condition == nil) {
+        return;
+    }
+    [condition lock];
+    self.macIntentRouteConditionSignalledV2 = YES;
+    [condition broadcast];
+    [condition unlock];
+}
+
+- (BOOL)claimMacIntentCleanupV2 {
+    @synchronized (self) {
+        if (self.macIntentCleanupClaimedV2) {
+            return NO;
+        }
+        self.macIntentCleanupClaimedV2 = YES;
+        return YES;
+    }
+}
+
+- (BOOL)installMacIntentDeviceListenersV2 {
+    if (self.macIntentListenersInstalledV2) {
+        return YES;
+    }
+    AudioObjectPropertyAddress defaultInputAddress = {
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    BOOL installed = AudioObjectAddPropertyListener(
+        kAudioObjectSystemObject,
+        &defaultInputAddress,
+        MixroomAudioRoutePropertyListenerV2,
+        self) == noErr;
+
+    const AudioDeviceID input = self.macIntentObservedInputDeviceV2;
+    const AudioDeviceID output = self.macIntentObservedOutputDeviceV2;
+    AudioObjectPropertyAddress aliveAddress = {
+        kAudioDevicePropertyDeviceIsAlive,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectPropertyAddress rateAddress = {
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectPropertyAddress inputStreamsAddress = {
+        kAudioDevicePropertyStreamConfiguration,
+        kAudioDevicePropertyScopeInput,
+        kMixroomCoreAudioElement,
+    };
+    if (input != kAudioObjectUnknown) {
+        // The permanent route observer already owns output alive/rate/stream
+        // evidence. When a Bluetooth headset is both input and output,
+        // registering those same listener tuples again makes ownership and
+        // removal ambiguous. The operation owns only facts not covered by the
+        // output observer.
+        if (input != output) {
+            installed = AudioObjectAddPropertyListener(input, &aliveAddress,
+                MixroomAudioRoutePropertyListenerV2, self) == noErr && installed;
+            installed = AudioObjectAddPropertyListener(input, &rateAddress,
+                MixroomAudioRoutePropertyListenerV2, self) == noErr && installed;
+        }
+        installed = AudioObjectAddPropertyListener(input, &inputStreamsAddress,
+            MixroomAudioRoutePropertyListenerV2, self) == noErr && installed;
+    }
+    self.macIntentListenersInstalledV2 = YES;
+    if (!installed) {
+        [self removeMacIntentDeviceListenersV2];
+    }
+    return installed;
+}
+
+- (void)removeMacIntentDeviceListenersV2 {
+    if (!self.macIntentListenersInstalledV2) {
+        return;
+    }
+    AudioObjectPropertyAddress defaultInputAddress = {
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectRemovePropertyListener(
+        kAudioObjectSystemObject,
+        &defaultInputAddress,
+        MixroomAudioRoutePropertyListenerV2,
+        self);
+
+    const AudioDeviceID input = self.macIntentObservedInputDeviceV2;
+    const AudioDeviceID output = self.macIntentObservedOutputDeviceV2;
+    AudioObjectPropertyAddress aliveAddress = {
+        kAudioDevicePropertyDeviceIsAlive,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectPropertyAddress rateAddress = {
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectPropertyAddress inputStreamsAddress = {
+        kAudioDevicePropertyStreamConfiguration,
+        kAudioDevicePropertyScopeInput,
+        kMixroomCoreAudioElement,
+    };
+    if (input != kAudioObjectUnknown) {
+        if (input != output) {
+            AudioObjectRemovePropertyListener(input, &aliveAddress,
+                MixroomAudioRoutePropertyListenerV2, self);
+            AudioObjectRemovePropertyListener(input, &rateAddress,
+                MixroomAudioRoutePropertyListenerV2, self);
+        }
+        AudioObjectRemovePropertyListener(input, &inputStreamsAddress,
+            MixroomAudioRoutePropertyListenerV2, self);
+    }
+    self.macIntentListenersInstalledV2 = NO;
+    self.macIntentObservedInputDeviceV2 = kAudioObjectUnknown;
+    self.macIntentObservedOutputDeviceV2 = kAudioObjectUnknown;
+}
+#else
 - (void)signalIOSIntentRouteConditionV2 {
     NSCondition *condition = self.iosIntentRouteConditionV2;
     if (condition == nil) {
@@ -2005,19 +2302,517 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     NSString *intent = [args[@"intent"] isKindOfClass:[NSString class]]
         ? args[@"intent"]
         : @"";
+    NSString *intentOperation =
+        [args[@"intentOperation"] isKindOfClass:[NSString class]]
+            ? args[@"intentOperation"] : @"standard";
     self.audioRouteTransitionIdV2 += 1;
     const uint64_t transitionID = self.audioRouteTransitionIdV2;
     NSString *diagnosticCode = @"ok";
     BOOL success = NO;
+    BOOL restoredAfterFailure = NO;
+
+    NSInteger (^remainingMilliseconds)(double) = ^NSInteger(double deadlineMs) {
+        return MAX(0, (NSInteger)(deadlineMs -
+            MixroomMonotonicMilliseconds()));
+    };
+    BOOL (^outputSnapshotIsValid)(NSDictionary *, NSDictionary *) =
+        ^BOOL(NSDictionary *snapshot, NSDictionary *expectedOutput) {
+            NSDictionary *juce =
+                [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+                    ? snapshot[@"juce"] : @{};
+            NSArray *outputs =
+                [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
+                    ? snapshot[@"outputs"] : @[];
+            NSDictionary *actualOutput =
+                outputs.count == 1 ? outputs.firstObject : nil;
+            return [snapshot[@"captureConsistency"] isEqualToString:@"stable"] &&
+                [juce[@"deviceOpen"] boolValue] &&
+                [juce[@"audioCallbackAttached"] boolValue] &&
+                [juce[@"activeInputChannels"] integerValue] == 0 &&
+                [juce[@"activeOutputChannels"] integerValue] > 0 &&
+                [juce[@"activeOutputChannels"] integerValue] <=
+                    [expectedOutput[@"outputChannels"] integerValue] &&
+                [juce[@"sampleRateHz"] doubleValue] > 1000.0 &&
+                fabs([juce[@"sampleRateHz"] doubleValue] -
+                     [expectedOutput[@"sampleRateHz"] doubleValue]) < 1.0 &&
+                [expectedOutput[@"bufferFrames"] integerValue] > 0 &&
+                [juce[@"bufferFrames"] integerValue] ==
+                    [expectedOutput[@"bufferFrames"] integerValue] &&
+                fabs([juce[@"projectGraphSampleRateHz"] doubleValue] -
+                     [expectedOutput[@"sampleRateHz"] doubleValue]) < 1.0 &&
+                [juce[@"projectGraphBufferFrames"] integerValue] ==
+                    [expectedOutput[@"bufferFrames"] integerValue] &&
+                actualOutput != nil && expectedOutput != nil &&
+                [actualOutput[@"uid"] isEqualToString:expectedOutput[@"uid"]] &&
+                [actualOutput[@"channelCount"] integerValue] ==
+                    [expectedOutput[@"outputChannels"] integerValue];
+        };
+
+    void (^releaseOperation)(void) = ^{
+        [self removeMacIntentDeviceListenersV2];
+        self.macIntentOperationActiveV2 = NO;
+        self.macIntentOperationCancelledV2 = NO;
+        self.macIntentCleanupClaimedV2 = NO;
+        self.macLifecycleTransitionActiveV2 = NO;
+        self.macIntentLifecyclePhaseV2 = @"complete";
+        self.macIntentRouteConditionV2 = nil;
+        self.macIntentRouteConditionSignalledV2 = NO;
+        self.macIntentOperationGenerationV2 = 0;
+        self.macIntentOperationStartedAtMsV2 = 0.0;
+        self.macIntentSourceOutputV2 = nil;
+        self.macIntentSourceFingerprintV2 = nil;
+        self.macIntentTargetInputV2 = nil;
+        self.macIntentTargetOutputV2 = nil;
+        self.macIntentVerifiedOutputV2 = nil;
+        self.macIntentInputFactsV2 = nil;
+    };
+
+    BOOL (^restoreSourceOutput)(void) = ^BOOL {
+        NSDictionary *source = self.macIntentSourceOutputV2;
+        if (source == nil || self.macIntentOperationCancelledV2) {
+            NSLog(@"[MacV2Route] op=%llu phase=restore preflight=failed source=%@ cancelled=%d",
+                  (unsigned long long)self.macIntentOperationIdV2,
+                  source == nil ? @"missing" : @"present",
+                  self.macIntentOperationCancelledV2);
+            return NO;
+        }
+        const double restoreDeadline =
+            MixroomMonotonicMilliseconds() + 2000.0;
+        NSArray *inventory = MixroomCoreAudioDeviceInventory() ?: @[];
+        NSDictionary *candidate =
+            MixroomOutputForUID(inventory, source[@"uid"]);
+        NSDictionary *defaultOutput = MixroomOutputForDeviceID(
+            inventory, MixroomDefaultCoreAudioOutputDevice());
+        const BOOL sameDefault = candidate != nil && defaultOutput != nil &&
+            [candidate[@"uid"] isEqualToString:defaultOutput[@"uid"]];
+        if (candidate == nil || self.macIntentOperationCancelledV2) {
+            NSLog(@"[MacV2Route] op=%llu phase=restore candidate=%@ cancelled=%d",
+                  (unsigned long long)self.macIntentOperationIdV2,
+                  candidate == nil ? @"missing" : @"present",
+                  self.macIntentOperationCancelledV2);
+            return NO;
+        }
+        const BOOL candidateAlive = MixroomCoreAudioDeviceIsAlive(
+            [candidate[@"deviceID"] unsignedIntValue]);
+        const BOOL candidateNameUnique =
+            MixroomOutputNameIsUnique(inventory, candidate);
+        if (!sameDefault || !candidateAlive || !candidateNameUnique) {
+            NSLog(@"[MacV2Route] op=%llu phase=restore sameDefault=%d alive=%d unique=%d",
+                  (unsigned long long)self.macIntentOperationIdV2,
+                  sameDefault,
+                  candidateAlive,
+                  candidateNameUnique);
+            return NO;
+        }
+        [JuceBridge beginMacOutputCallbackProofV2ObjC];
+        const BOOL opened = [JuceBridge
+            reconfigureMacPlaybackRouteV2ObjC:candidate[@"name"]
+            sampleRate:[candidate[@"sampleRateHz"] doubleValue]
+            bufferFrames:[candidate[@"bufferFrames"] integerValue]];
+        const NSInteger remaining = remainingMilliseconds(restoreDeadline);
+        const BOOL callbackReady = opened && remaining > 0 &&
+            [JuceBridge waitForMacOutputCallbackProofV2ObjC:remaining];
+        NSArray *restoredInventory =
+            MixroomCoreAudioDeviceInventory() ?: @[];
+        NSDictionary *restoredOutput =
+            MixroomOutputForUID(restoredInventory, source[@"uid"]);
+        self.macIntentTargetOutputV2 = restoredOutput ?: candidate;
+        NSDictionary *snapshot = [self buildAudioRouteSnapshotV2];
+        NSDictionary *juce =
+            [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+                ? snapshot[@"juce"] : @{};
+        const BOOL restoredPresent = restoredOutput != nil;
+        const BOOL snapshotValid =
+            outputSnapshotIsValid(snapshot, source);
+        const BOOL fingerprintValid = [MixroomEffectiveOutputFingerprint()
+            isEqualToString:self.macIntentSourceFingerprintV2];
+        const BOOL generationValid = self.macIntentOperationGenerationV2 ==
+            self.audioRouteGenerationV2;
+        const unsigned long long callbackCount =
+            [JuceBridge getMacOutputCallbackProofCountV2ObjC]
+                .unsignedLongLongValue;
+        const NSInteger callbackFrames =
+            [JuceBridge getMacOutputCallbackProofFramesV2ObjC]
+                .integerValue;
+        const double callbackRate =
+            [JuceBridge getMacOutputCallbackProofSampleRateV2ObjC]
+                .doubleValue;
+        const BOOL callbackShapeValid = callbackFrames > 0 &&
+            callbackFrames == [juce[@"bufferFrames"] integerValue] &&
+            fabs(callbackRate - [juce[@"sampleRateHz"] doubleValue]) < 1.0;
+        NSLog(@"[MacV2Route] op=%llu phase=restore opened=%d callbackReady=%d "
+              "restored=%d snapshot=%d fingerprint=%d generation=%d callbacks=%llu "
+              "callbackFrames=%ld callbackShape=%d "
+              "sourceRate=%@ sourceBuffer=%@ candidateRate=%@ candidateBuffer=%@ "
+              "juceRate=%@ juceBuffer=%@",
+              (unsigned long long)self.macIntentOperationIdV2,
+              opened,
+              callbackReady,
+              restoredPresent,
+              snapshotValid,
+              fingerprintValid,
+              generationValid,
+              callbackCount,
+              (long)callbackFrames,
+              callbackShapeValid,
+              source[@"sampleRateHz"] ?: @"missing",
+              source[@"bufferFrames"] ?: @"missing",
+              restoredOutput[@"sampleRateHz"] ?: @"missing",
+              restoredOutput[@"bufferFrames"] ?: @"missing",
+              juce[@"sampleRateHz"] ?: @"missing",
+              juce[@"bufferFrames"] ?: @"missing");
+        const BOOL restorationVerified = callbackReady && restoredPresent &&
+            snapshotValid && fingerprintValid && generationValid &&
+            callbackCount > 0 && callbackShapeValid;
+        if (!restorationVerified) {
+            [JuceBridge cancelMacOutputCallbackProofV2ObjC];
+            [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+        }
+        return restorationVerified;
+    };
 
     if (!self.audioRouteMonitoringV2 ||
         ![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
         diagnosticCode = @"coordinator_disposed";
     } else if (generation != self.audioRouteGenerationV2) {
         diagnosticCode = @"stale_generation";
+    } else if ([intent isEqualToString:@"recording"] ||
+               ([intent isEqualToString:@"preparingRecording"] &&
+                ![intentOperation isEqualToString:@"systemSelectedProbe"])) {
+        diagnosticCode = @"recording_route_unsupported";
+    } else if ([intent isEqualToString:@"preparingRecording"]) {
+        NSArray<NSDictionary<NSString *, id> *> *inventory =
+            MixroomCoreAudioDeviceInventory() ?: @[];
+        const AudioDeviceID defaultInputID =
+            MixroomDefaultCoreAudioInputDevice();
+        const AudioDeviceID defaultOutputID =
+            MixroomDefaultCoreAudioOutputDevice();
+        NSDictionary *input =
+            MixroomInputForDeviceID(inventory, defaultInputID);
+        NSDictionary *output =
+            MixroomOutputForDeviceID(inventory, defaultOutputID);
+        NSDictionary *sourceSnapshot = [self buildAudioRouteSnapshotV2];
+        NSArray *sourceInputs =
+            [sourceSnapshot[@"inputs"] isKindOfClass:[NSArray class]]
+                ? sourceSnapshot[@"inputs"] : @[];
+
+        if (self.macIntentOperationActiveV2) {
+            diagnosticCode = @"route_unstable";
+        } else if (input == nil || output == nil) {
+            diagnosticCode = input == nil
+                ? @"recording_route_unsupported" : @"no_output";
+        } else if ([input[@"uid"] length] == 0 ||
+                   [output[@"uid"] length] == 0 ||
+                   [input[@"inputChannels"] integerValue] <= 0 ||
+                   [input[@"sampleRateHz"] doubleValue] <= 1000.0 ||
+                   [input[@"bufferFrames"] integerValue] <= 0 ||
+                   [output[@"outputChannels"] integerValue] <= 0 ||
+                   [output[@"sampleRateHz"] doubleValue] <= 1000.0 ||
+                   [output[@"bufferFrames"] integerValue] <= 0 ||
+                   !MixroomCoreAudioDeviceIsAlive(defaultInputID) ||
+                   !MixroomCoreAudioDeviceIsAlive(defaultOutputID) ||
+                   !MixroomOutputNameIsUnique(inventory, output)) {
+            diagnosticCode = @"actual_state_unavailable";
+        } else if (sourceInputs.count != 0 ||
+                   !outputSnapshotIsValid(sourceSnapshot, output)) {
+            diagnosticCode = @"actual_state_unavailable";
+        } else {
+            self.macIntentOperationIdV2 += 1;
+            self.macIntentOperationGenerationV2 = generation;
+            self.macIntentOperationActiveV2 = YES;
+            self.macIntentOperationCancelledV2 = NO;
+            self.macIntentCleanupClaimedV2 = NO;
+            self.macLifecycleTransitionActiveV2 = YES;
+            self.macIntentLifecyclePhaseV2 = @"openingInput";
+            self.macIntentTerminalCauseV2 = nil;
+            self.macIntentOperationStartedAtMsV2 = startedAtMs;
+            self.macIntentSourceOutputV2 = output;
+            self.macIntentSourceFingerprintV2 =
+                MixroomEffectiveOutputFingerprint();
+            self.macIntentTargetInputV2 = input;
+            self.macIntentTargetOutputV2 = output;
+            self.macIntentVerifiedOutputV2 = nil;
+            self.macIntentInputFactsV2 = nil;
+            self.macIntentRouteConditionV2 =
+                [[[NSCondition alloc] init] autorelease];
+            self.macIntentRouteConditionSignalledV2 = NO;
+            self.macIntentObservedInputDeviceV2 = defaultInputID;
+            self.macIntentObservedOutputDeviceV2 = defaultOutputID;
+            const BOOL listenersInstalled =
+                [self installMacIntentDeviceListenersV2];
+
+            const double prepareDeadline = startedAtMs + 2000.0;
+            [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+            const BOOL inputStarted = listenersInstalled &&
+                !self.macIntentOperationCancelledV2 &&
+                [JuceBridge startMacInputProbeV2ObjC:defaultInputID];
+            const NSInteger inputRemaining =
+                remainingMilliseconds(prepareDeadline);
+            const BOOL inputCallbackReady = inputStarted &&
+                inputRemaining > 0 &&
+                [JuceBridge waitForMacInputProbeCallbackV2ObjC:inputRemaining];
+            NSDictionary *inputFacts =
+                [JuceBridge getMacInputProbeFactsV2ObjC] ?: @{};
+            self.macIntentInputFactsV2 = inputFacts;
+
+            NSArray *settledInventory =
+                MixroomCoreAudioDeviceInventory() ?: @[];
+            NSDictionary *settledInput = MixroomInputForDeviceID(
+                settledInventory, MixroomDefaultCoreAudioInputDevice());
+            NSDictionary *settledOutput = MixroomOutputForUID(
+                settledInventory, output[@"uid"]);
+            NSDictionary *settledDefaultOutput = MixroomOutputForDeviceID(
+                settledInventory, MixroomDefaultCoreAudioOutputDevice());
+            const BOOL routeStable = settledInput != nil &&
+                settledOutput != nil && settledDefaultOutput != nil &&
+                [settledInput[@"uid"] isEqualToString:input[@"uid"]] &&
+                [settledDefaultOutput[@"uid"]
+                    isEqualToString:output[@"uid"]] &&
+                MixroomCoreAudioDeviceIsAlive(
+                    [settledInput[@"deviceID"] unsignedIntValue]) &&
+                MixroomCoreAudioDeviceIsAlive(
+                    [settledOutput[@"deviceID"] unsignedIntValue]) &&
+                MixroomOutputNameIsUnique(settledInventory, settledOutput);
+
+            self.macIntentLifecyclePhaseV2 = @"openingOutput";
+            [JuceBridge beginMacOutputCallbackProofV2ObjC];
+            const BOOL outputOpened = inputCallbackReady && routeStable &&
+                !self.macIntentOperationCancelledV2 &&
+                [JuceBridge
+                    reconfigureMacPlaybackRouteV2ObjC:settledOutput[@"name"]
+                    sampleRate:[settledOutput[@"sampleRateHz"] doubleValue]
+                    bufferFrames:[settledOutput[@"bufferFrames"] integerValue]];
+            const NSInteger outputRemaining =
+                remainingMilliseconds(prepareDeadline);
+            const BOOL outputCallbackReady = outputOpened &&
+                outputRemaining > 0 &&
+                [JuceBridge
+                    waitForMacOutputCallbackProofV2ObjC:outputRemaining];
+            self.macIntentTargetInputV2 = settledInput ?: input;
+            self.macIntentTargetOutputV2 = settledOutput ?: output;
+            self.macLifecycleTransitionActiveV2 = NO;
+            NSDictionary *duplexSnapshot = [self buildAudioRouteSnapshotV2];
+            const BOOL inputFactsValid =
+                [inputFacts[@"running"] boolValue] &&
+                [inputFacts[@"deviceID"] unsignedIntValue] == defaultInputID &&
+                [inputFacts[@"sampleRateHz"] doubleValue] > 1000.0 &&
+                fabs([inputFacts[@"sampleRateHz"] doubleValue] -
+                     [settledInput[@"sampleRateHz"] doubleValue]) < 1.0 &&
+                [inputFacts[@"bufferFrames"] integerValue] > 0 &&
+                [inputFacts[@"bufferFrames"] integerValue] ==
+                    [settledInput[@"bufferFrames"] integerValue] &&
+                [inputFacts[@"callbackCount"] unsignedLongLongValue] > 0 &&
+                [inputFacts[@"invalidCallbackCount"] unsignedLongLongValue] == 0;
+            NSDictionary *duplexJuce =
+                [duplexSnapshot[@"juce"] isKindOfClass:[NSDictionary class]]
+                    ? duplexSnapshot[@"juce"] : @{};
+            const NSInteger outputCallbackFrames =
+                [JuceBridge getMacOutputCallbackProofFramesV2ObjC]
+                    .integerValue;
+            const double outputCallbackRate =
+                [JuceBridge getMacOutputCallbackProofSampleRateV2ObjC]
+                    .doubleValue;
+            const BOOL outputCallbackShapeValid =
+                outputCallbackFrames > 0 &&
+                outputCallbackFrames ==
+                    [duplexJuce[@"bufferFrames"] integerValue] &&
+                fabs(outputCallbackRate -
+                     [duplexJuce[@"sampleRateHz"] doubleValue]) < 1.0;
+            const BOOL outputFactsValid = outputCallbackReady &&
+                outputSnapshotIsValid(duplexSnapshot, settledOutput) &&
+                [JuceBridge getMacOutputCallbackProofCountV2ObjC]
+                    .unsignedLongLongValue > 0 &&
+                outputCallbackShapeValid;
+            NSLog(@"[MacV2Route] op=%llu phase=duplexValidation "
+                  "listeners=%d inputStarted=%d inputCallback=%d routeStable=%d "
+                  "outputOpened=%d outputCallback=%d inputFacts=%d outputFacts=%d "
+                  "cancelled=%d generation=%llu/%llu inputRate=%@/%@ "
+                  "inputBuffer=%@/%@ inputFrames=%@ outputRate=%@/%@ "
+                  "outputBuffer=%@/%@ outputFrames=%ld outputShape=%d",
+                  (unsigned long long)self.macIntentOperationIdV2,
+                  listenersInstalled,
+                  inputStarted,
+                  inputCallbackReady,
+                  routeStable,
+                  outputOpened,
+                  outputCallbackReady,
+                  inputFactsValid,
+                  outputFactsValid,
+                  self.macIntentOperationCancelledV2,
+                  (unsigned long long)self.macIntentOperationGenerationV2,
+                  (unsigned long long)self.audioRouteGenerationV2,
+                  inputFacts[@"sampleRateHz"] ?: @"missing",
+                  settledInput[@"sampleRateHz"] ?: @"missing",
+                  inputFacts[@"bufferFrames"] ?: @"missing",
+                  settledInput[@"bufferFrames"] ?: @"missing",
+                  inputFacts[@"lastFrames"] ?: @"missing",
+                  duplexJuce[@"sampleRateHz"] ?: @"missing",
+                  settledOutput[@"sampleRateHz"] ?: @"missing",
+                  duplexJuce[@"bufferFrames"] ?: @"missing",
+                  settledOutput[@"bufferFrames"] ?: @"missing",
+                  (long)outputCallbackFrames,
+                  outputCallbackShapeValid);
+            success = inputFactsValid && outputFactsValid && routeStable &&
+                !self.macIntentOperationCancelledV2 &&
+                self.macIntentOperationGenerationV2 ==
+                    self.audioRouteGenerationV2;
+
+            if (success) {
+                self.macIntentVerifiedOutputV2 = settledOutput;
+                self.currentAudioRouteIntentV2 = @"preparingRecording";
+                self.macIntentLifecyclePhaseV2 = @"duplexVerified";
+                self.iosLastDuplexProbeV2 = @{
+                    @"status": @"duplexVerified",
+                    @"diagnosticCode": @"ok",
+                    @"validationStage": @"duplexVerified",
+                    @"categoryOptions": @[],
+                    @"phase": @"duplexVerified",
+                    @"terminalCause": [NSNull null],
+                    @"actualCallbackCount": inputFacts[@"callbackCount"] ?: @0,
+                    @"inputCallbackCount": inputFacts[@"callbackCount"] ?: @0,
+                    @"outputCallbackCount":
+                        [JuceBridge getMacOutputCallbackProofCountV2ObjC],
+                    @"outputCallbackFrames": @(outputCallbackFrames),
+                    @"inputSampleRateHz": inputFacts[@"sampleRateHz"] ?: @0,
+                    @"inputBufferFrames": inputFacts[@"bufferFrames"] ?: @0,
+                    @"cleanupOutcome": @"pending",
+                    @"selectionMode": @"macOSIndependentInput",
+                    @"operationId": @(self.macIntentOperationIdV2),
+                    @"elapsedMs": @((NSInteger)(
+                        MixroomMonotonicMilliseconds() -
+                        self.macIntentOperationStartedAtMsV2 + 0.5)),
+                    @"sourceOutput": MixroomRouteEndpoint(output, NO, NO),
+                    @"duplexInput": MixroomRouteEndpoint(
+                        self.macIntentTargetInputV2, YES,
+                        MixroomTransportIsBluetooth(
+                            [self.macIntentTargetInputV2[@"transport"]
+                                unsignedIntValue])),
+                    @"duplexOutput": MixroomRouteEndpoint(
+                        self.macIntentTargetOutputV2, NO,
+                        MixroomTransportIsBluetooth(
+                            [self.macIntentTargetInputV2[@"transport"]
+                                unsignedIntValue])),
+                    @"restoredOutput": [NSNull null],
+                };
+            } else {
+                diagnosticCode = self.macIntentOperationCancelledV2
+                    ? @"route_unstable" : @"actual_state_unavailable";
+                [JuceBridge cancelMacOutputCallbackProofV2ObjC];
+                [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+                [JuceBridge stopMacInputProbeV2ObjC];
+                if ([self claimMacIntentCleanupV2]) {
+                    if (!self.macIntentOperationCancelledV2) {
+                        self.macLifecycleTransitionActiveV2 = YES;
+                        restoredAfterFailure = restoreSourceOutput();
+                        self.macLifecycleTransitionActiveV2 = NO;
+                    }
+                }
+                self.currentAudioRouteIntentV2 = @"playbackOnly";
+                self.iosLastDuplexProbeV2 = @{
+                    @"status": restoredAfterFailure
+                        ? @"failedRestored" : @"failed",
+                    @"diagnosticCode": diagnosticCode,
+                    @"validationStage": self.macIntentOperationCancelledV2
+                        ? @"physicalRouteInvalidation" : @"duplexValidation",
+                    @"categoryOptions": @[],
+                    @"phase": @"cleanup",
+                    @"terminalCause": self.macIntentTerminalCauseV2
+                        ?: [NSNull null],
+                    @"actualCallbackCount": inputFacts[@"callbackCount"] ?: @0,
+                    @"inputCallbackCount": inputFacts[@"callbackCount"] ?: @0,
+                    @"outputCallbackCount":
+                        [JuceBridge getMacOutputCallbackProofCountV2ObjC],
+                    @"outputCallbackFrames": @(outputCallbackFrames),
+                    @"inputSampleRateHz": inputFacts[@"sampleRateHz"] ?: @0,
+                    @"inputBufferFrames": inputFacts[@"bufferFrames"] ?: @0,
+                    @"inputCallbackFrames": inputFacts[@"lastFrames"] ?: @0,
+                    @"outputSampleRateHz": duplexJuce[@"sampleRateHz"] ?: @0,
+                    @"outputBufferFrames": duplexJuce[@"bufferFrames"] ?: @0,
+                    @"cleanupOutcome": restoredAfterFailure
+                        ? @"restored" : @"closed",
+                    @"selectionMode": @"macOSIndependentInput",
+                    @"operationId": @(self.macIntentOperationIdV2),
+                    @"elapsedMs": @((NSInteger)(
+                        MixroomMonotonicMilliseconds() -
+                        self.macIntentOperationStartedAtMsV2 + 0.5)),
+                    @"sourceOutput": MixroomRouteEndpoint(output, NO, NO),
+                    @"duplexInput": MixroomRouteEndpoint(input, YES, NO),
+                    @"duplexOutput": settledOutput == nil
+                        ? [NSNull null]
+                        : MixroomRouteEndpoint(settledOutput, NO, NO),
+                    @"restoredOutput": restoredAfterFailure
+                        ? MixroomRouteEndpoint(
+                            self.macIntentTargetOutputV2, NO, NO)
+                        : [NSNull null],
+                };
+                releaseOperation();
+            }
+        }
+    } else if ([intent isEqualToString:@"playbackOnly"] &&
+               self.macIntentOperationActiveV2) {
+        self.macLifecycleTransitionActiveV2 = YES;
+        self.macIntentLifecyclePhaseV2 = @"restoringPlayback";
+        if ([self claimMacIntentCleanupV2]) {
+            [JuceBridge cancelMacOutputCallbackProofV2ObjC];
+            [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+            [JuceBridge stopMacInputProbeV2ObjC];
+            success = !self.macIntentOperationCancelledV2 &&
+                restoreSourceOutput();
+        }
+        diagnosticCode = success ? @"ok" :
+            (self.macIntentOperationCancelledV2
+                ? @"route_unstable" : @"actual_state_unavailable");
+        NSDictionary *source = self.macIntentSourceOutputV2;
+        NSDictionary *restored = self.macIntentTargetOutputV2;
+        NSDictionary *inputFacts = self.macIntentInputFactsV2 ?: @{};
+        self.currentAudioRouteIntentV2 = @"playbackOnly";
+        self.iosLastDuplexProbeV2 = @{
+            @"status": success ? @"restored" : @"failed",
+            @"diagnosticCode": diagnosticCode,
+            @"validationStage": success
+                ? @"duplexVerified"
+                : (self.macIntentOperationCancelledV2
+                    ? @"physicalRouteInvalidation" : @"cleanup"),
+            @"categoryOptions": @[],
+            @"phase": @"complete",
+            @"terminalCause": self.macIntentTerminalCauseV2 ?: [NSNull null],
+            @"actualCallbackCount": inputFacts[@"callbackCount"] ?: @0,
+            @"inputCallbackCount": inputFacts[@"callbackCount"] ?: @0,
+            @"outputCallbackCount":
+                [JuceBridge getMacOutputCallbackProofCountV2ObjC],
+            @"inputSampleRateHz": inputFacts[@"sampleRateHz"] ?: @0,
+            @"inputBufferFrames": inputFacts[@"bufferFrames"] ?: @0,
+            @"cleanupOutcome": success ? @"restored" : @"closed",
+            @"selectionMode": @"macOSIndependentInput",
+            @"operationId": @(self.macIntentOperationIdV2),
+            @"elapsedMs": @((NSInteger)(
+                MixroomMonotonicMilliseconds() -
+                self.macIntentOperationStartedAtMsV2 + 0.5)),
+            @"sourceOutput": source == nil
+                ? [NSNull null] : MixroomRouteEndpoint(source, NO, NO),
+            @"duplexInput": self.macIntentTargetInputV2 == nil
+                ? [NSNull null] : MixroomRouteEndpoint(
+                    self.macIntentTargetInputV2, YES,
+                    MixroomTransportIsBluetooth(
+                        [self.macIntentTargetInputV2[@"transport"]
+                            unsignedIntValue])),
+            @"duplexOutput": self.macIntentVerifiedOutputV2 == nil
+                ? [NSNull null] : MixroomRouteEndpoint(
+                    self.macIntentVerifiedOutputV2, NO,
+                    MixroomTransportIsBluetooth(
+                        [self.macIntentVerifiedOutputV2[@"transport"]
+                            unsignedIntValue])),
+            @"restoredOutput": success && restored != nil
+                ? MixroomRouteEndpoint(restored, NO, NO)
+                : [NSNull null],
+        };
+        releaseOperation();
+        if (success) {
+            self.audioRouteFingerprintV2 = MixroomEffectiveOutputFingerprint();
+            [self updateObservedOutputDeviceV2:
+                MixroomDefaultCoreAudioOutputDevice()];
+        }
     } else if (![intent isEqualToString:@"playbackOnly"]) {
-        // macOS V2 is intentionally output-only at this checkpoint. Reject
-        // input intents before any device, capture, or graph mutation.
         diagnosticCode = @"recording_route_unsupported";
     } else {
         NSArray<NSDictionary<NSString *, id> *> *inventory =
@@ -2029,36 +2824,42 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 
         if (output == nil ||
             !MixroomCoreAudioDeviceIsAlive(defaultOutputID) ||
-            !MixroomOutputNameIsUnique(inventory, output)) {
+            !MixroomOutputNameIsUnique(inventory, output) ||
+            !MixroomCoreAudioOutputHasNativeClock(output)) {
             diagnosticCode = output == nil
                 ? @"no_output" : @"actual_state_unavailable";
         } else {
-            success = [JuceBridge reconfigurePlaybackRouteV2ObjC:output[@"name"]];
+            [JuceBridge beginMacOutputCallbackProofV2ObjC];
+            success = [JuceBridge
+                reconfigureMacPlaybackRouteV2ObjC:output[@"name"]
+                sampleRate:[output[@"sampleRateHz"] doubleValue]
+                bufferFrames:[output[@"bufferFrames"] integerValue]];
+            const NSInteger remainingMs = MAX(0, (NSInteger)(
+                startedAtMs + 2000.0 - MixroomMonotonicMilliseconds()));
+            const BOOL callbackReady = success && remainingMs > 0 &&
+                [JuceBridge waitForMacOutputCallbackProofV2ObjC:remainingMs];
             if (!success) {
                 diagnosticCode = @"juce_reopen_failed";
             } else {
                 NSDictionary *snapshot = [self buildAudioRouteSnapshotV2];
-                NSDictionary *juce = [snapshot[@"juce"] isKindOfClass:[NSDictionary class]]
-                    ? snapshot[@"juce"] : @{};
-                NSArray *outputs = [snapshot[@"outputs"] isKindOfClass:[NSArray class]]
-                    ? snapshot[@"outputs"] : @[];
-                NSDictionary *actualOutput = outputs.count == 1 ? outputs.firstObject : nil;
-                success = generation == self.audioRouteGenerationV2 &&
+                success = callbackReady &&
+                    generation == self.audioRouteGenerationV2 &&
                     [MixroomEffectiveOutputFingerprint() isEqualToString:expectedFingerprint] &&
-                    [snapshot[@"captureConsistency"] isEqualToString:@"stable"] &&
-                    [juce[@"deviceOpen"] boolValue] &&
-                    [juce[@"audioCallbackAttached"] boolValue] &&
-                    [juce[@"activeInputChannels"] integerValue] == 0 &&
-                    [juce[@"activeOutputChannels"] integerValue] > 0 &&
-                    [juce[@"sampleRateHz"] doubleValue] > 1000.0 &&
-                    [juce[@"bufferFrames"] integerValue] > 0 &&
-                    [actualOutput[@"uid"] isEqualToString:output[@"uid"]];
+                    MixroomMacPlaybackSnapshotMatchesPlan(
+                        snapshot,
+                        output,
+                        [JuceBridge getMacOutputCallbackProofSampleRateV2ObjC]
+                            .doubleValue,
+                        [JuceBridge getMacOutputCallbackProofFramesV2ObjC]
+                            .integerValue,
+                        [JuceBridge getMacOutputCallbackProofCountV2ObjC]
+                            .unsignedLongLongValue);
                 if (!success) diagnosticCode = @"actual_state_unavailable";
             }
         }
     }
 
-    if (success) {
+    if (success && [intent isEqualToString:@"playbackOnly"]) {
         self.currentAudioRouteIntentV2 = @"playbackOnly";
     }
 
@@ -2834,7 +3635,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 #endif
 }
 
-#if !TARGET_OS_OSX
 - (void)setAudioRouteIntentV2:(NSDictionary *)args
                    completion:(void (^)(NSDictionary<NSString *, id> *))completion {
     if (completion == nil) {
@@ -2842,6 +3642,35 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     }
 
     NSDictionary *immutableArgs = [[args copy] autorelease] ?: @{};
+#if TARGET_OS_OSX
+    self.macLifecycleTransitionActiveV2 = YES;
+    self.macLifecycleReconcilePendingV2 = NO;
+    dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
+        @autoreleasepool {
+            NSDictionary<NSString *, id> *rawResponse =
+                [self setAudioRouteIntentV2:immutableArgs] ?: @{
+                    @"status": @"failure",
+                    @"generation": @0,
+                    @"transitionId": @0,
+                    @"diagnosticCode": @"actual_state_unavailable",
+                    @"elapsedMs": @0,
+                    @"transportWasPlaying": @NO,
+                    @"snapshot": @{},
+                };
+            NSDictionary<NSString *, id> *response = [rawResponse copy];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                const BOOL reconcile = self.macLifecycleReconcilePendingV2;
+                self.macLifecycleReconcilePendingV2 = NO;
+                self.macLifecycleTransitionActiveV2 = NO;
+                completion(response);
+                if (reconcile) {
+                    [self handleAudioRoutePropertyChangeV2:@"transitionReconcile"];
+                }
+                [response release];
+            });
+        }
+    });
+#else
     self.iosIntentCompletionDeliveredV2 = NO;
     self.iosLifecycleTransitionActiveV2 = YES;
     dispatch_async(MixroomIOSLifecycleQueue(), ^{
@@ -2863,8 +3692,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             }
         });
     });
-}
 #endif
+}
 
 - (void)updateObservedOutputDeviceV2:(uint32_t)deviceID {
 #if TARGET_OS_OSX
@@ -2873,12 +3702,33 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         kAudioObjectPropertyScopeGlobal,
         kMixroomCoreAudioElement,
     };
+    AudioObjectPropertyAddress rateAddress = {
+        kAudioDevicePropertyNominalSampleRate,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectPropertyAddress bufferAddress = {
+        kAudioDevicePropertyBufferFrameSize,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    AudioObjectPropertyAddress streamsAddress = {
+        kAudioDevicePropertyStreamConfiguration,
+        kAudioDevicePropertyScopeOutput,
+        kMixroomCoreAudioElement,
+    };
     if (self.observedOutputDeviceV2 != kAudioObjectUnknown) {
         AudioObjectRemovePropertyListener(
             self.observedOutputDeviceV2,
             &aliveAddress,
             MixroomAudioRoutePropertyListenerV2,
             self);
+        AudioObjectRemovePropertyListener(self.observedOutputDeviceV2,
+            &rateAddress, MixroomAudioRoutePropertyListenerV2, self);
+        AudioObjectRemovePropertyListener(self.observedOutputDeviceV2,
+            &bufferAddress, MixroomAudioRoutePropertyListenerV2, self);
+        AudioObjectRemovePropertyListener(self.observedOutputDeviceV2,
+            &streamsAddress, MixroomAudioRoutePropertyListenerV2, self);
     }
     self.observedOutputDeviceV2 = deviceID;
     if (deviceID != kAudioObjectUnknown &&
@@ -2888,6 +3738,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             &aliveAddress,
             MixroomAudioRoutePropertyListenerV2,
             self);
+        AudioObjectAddPropertyListener(deviceID, &rateAddress,
+            MixroomAudioRoutePropertyListenerV2, self);
+        AudioObjectAddPropertyListener(deviceID, &bufferAddress,
+            MixroomAudioRoutePropertyListenerV2, self);
+        AudioObjectAddPropertyListener(deviceID, &streamsAddress,
+            MixroomAudioRoutePropertyListenerV2, self);
     }
 #else
     #pragma unused(deviceID)
@@ -3262,6 +4118,24 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         self.audioRouteGenerationV2 = 0;
         self.audioRouteTransitionIdV2 = 0;
         self.routeTransitionWasPlayingV2 = NO;
+        self.macIntentOperationActiveV2 = NO;
+        self.macIntentOperationCancelledV2 = NO;
+        self.macIntentCleanupClaimedV2 = NO;
+        self.macLifecycleTransitionActiveV2 = NO;
+        self.macLifecycleReconcilePendingV2 = NO;
+        self.macIntentListenersInstalledV2 = NO;
+        self.macIntentLifecyclePhaseV2 = @"idle";
+        self.macIntentTerminalCauseV2 = nil;
+        self.macIntentSourceOutputV2 = nil;
+        self.macIntentSourceFingerprintV2 = nil;
+        self.macIntentTargetInputV2 = nil;
+        self.macIntentTargetOutputV2 = nil;
+        self.macIntentVerifiedOutputV2 = nil;
+        self.macIntentInputFactsV2 = nil;
+        self.macIntentRouteConditionV2 = nil;
+        self.macIntentObservedInputDeviceV2 = kAudioObjectUnknown;
+        self.macIntentObservedOutputDeviceV2 = kAudioObjectUnknown;
+        self.iosLastDuplexProbeV2 = nil;
         self.audioRouteFingerprintV2 = MixroomEffectiveOutputFingerprint();
         self.audioRouteMonitoringV2 = YES;
 
@@ -3346,6 +4220,57 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         ![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
         return;
     }
+    if (self.macIntentOperationActiveV2) {
+        NSArray<NSDictionary<NSString *, id> *> *inventory =
+            MixroomCoreAudioDeviceInventory() ?: @[];
+        NSDictionary *expectedInput = self.macIntentTargetInputV2;
+        NSDictionary *expectedOutput = self.macIntentSourceOutputV2;
+        NSDictionary *currentInput = MixroomInputForDeviceID(
+            inventory, MixroomDefaultCoreAudioInputDevice());
+        NSDictionary *currentOutput = MixroomOutputForDeviceID(
+            inventory, MixroomDefaultCoreAudioOutputDevice());
+        NSDictionary *ownedInput = expectedInput == nil
+            ? nil
+            : MixroomInputForDeviceID(
+                inventory,
+                [expectedInput[@"deviceID"] unsignedIntValue]);
+        NSDictionary *ownedOutput = expectedOutput == nil
+            ? nil : MixroomOutputForUID(inventory, expectedOutput[@"uid"]);
+        const BOOL invalidated = expectedInput == nil || expectedOutput == nil ||
+            ownedInput == nil || ownedOutput == nil ||
+            !MixroomCoreAudioDeviceIsAlive(
+                [ownedInput[@"deviceID"] unsignedIntValue]) ||
+            !MixroomCoreAudioDeviceIsAlive(
+                [ownedOutput[@"deviceID"] unsignedIntValue]) ||
+            currentInput == nil || currentOutput == nil ||
+            ![currentInput[@"uid"] isEqualToString:expectedInput[@"uid"]] ||
+            ![currentOutput[@"uid"] isEqualToString:expectedOutput[@"uid"]];
+        if (invalidated) {
+            self.macIntentOperationCancelledV2 = YES;
+            self.macIntentTerminalCauseV2 = cause ?: @"routeChanged";
+            self.macIntentLifecyclePhaseV2 = @"physicalRouteInvalidation";
+            [JuceBridge cancelMacInputProbeWaitV2ObjC];
+            [JuceBridge cancelMacOutputCallbackProofV2ObjC];
+            if (!self.macLifecycleTransitionActiveV2) {
+                self.macLifecycleTransitionActiveV2 = YES;
+                dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
+                    if ([self claimMacIntentCleanupV2]) {
+                        [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+                        [JuceBridge stopMacInputProbeV2ObjC];
+                    }
+                    [self removeMacIntentDeviceListenersV2];
+                    self.macLifecycleTransitionActiveV2 = NO;
+                    [self signalMacIntentRouteConditionV2];
+                });
+            }
+        }
+        [self signalMacIntentRouteConditionV2];
+        return;
+    }
+    if (self.macLifecycleTransitionActiveV2) {
+        self.macLifecycleReconcilePendingV2 = YES;
+        return;
+    }
     NSString *fingerprint = MixroomEffectiveOutputFingerprint();
     if ([fingerprint isEqualToString:self.audioRouteFingerprintV2]) {
         return;
@@ -3418,24 +4343,26 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         MixroomOutputForDeviceID(inventory, expectedDefault);
     const BOOL targetUsable = target != nil &&
         MixroomCoreAudioDeviceIsAlive(expectedDefault) &&
-        MixroomOutputNameIsUnique(inventory, target);
-    BOOL opened = targetUsable &&
-        [JuceBridge reconfigurePlaybackRouteV2ObjC:target[@"name"]];
-    BOOL usedFallback = NO;
-
-    if (!opened && [args[@"allowBuiltInFallback"] boolValue]) {
-        NSDictionary<NSString *, id> *fallback =
-            MixroomUniqueBuiltInOutput(inventory);
-        const BOOL fallbackDistinct = fallback != nil &&
-            ![fallback[@"uid"] isEqualToString:target[@"uid"]];
-        if (fallbackDistinct && MixroomOutputNameIsUnique(inventory, fallback)) {
-            opened = [JuceBridge reconfigurePlaybackRouteV2ObjC:fallback[@"name"]];
-            if (opened) {
-                target = fallback;
-                usedFallback = YES;
-            }
-        }
-    }
+        MixroomOutputNameIsUnique(inventory, target) &&
+        MixroomCoreAudioOutputHasNativeClock(target);
+    const double deadlineMs = startedAtMs + 2000.0;
+    [JuceBridge beginMacOutputCallbackProofV2ObjC];
+    const BOOL opened = targetUsable &&
+        [JuceBridge
+            reconfigureMacPlaybackRouteV2ObjC:target[@"name"]
+            sampleRate:[target[@"sampleRateHz"] doubleValue]
+            bufferFrames:[target[@"bufferFrames"] integerValue]];
+    const NSInteger callbackRemainingMs = MAX(
+        0, (NSInteger)(deadlineMs - MixroomMonotonicMilliseconds()));
+    const BOOL callbackReady = opened && callbackRemainingMs > 0 &&
+        [JuceBridge waitForMacOutputCallbackProofV2ObjC:callbackRemainingMs];
+    const unsigned long long callbackCount =
+        [JuceBridge getMacOutputCallbackProofCountV2ObjC]
+            .unsignedLongLongValue;
+    const NSInteger callbackFrames =
+        [JuceBridge getMacOutputCallbackProofFramesV2ObjC].integerValue;
+    const double callbackRate =
+        [JuceBridge getMacOutputCallbackProofSampleRateV2ObjC].doubleValue;
 
     NSDictionary<NSString *, id> *snapshot = [self buildAudioRouteSnapshotV2];
     NSDictionary<NSString *, id> *juce =
@@ -3454,24 +4381,21 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     } else if (![actualFingerprint isEqualToString:expectedFingerprint]) {
         diagnosticCode = @"route_unstable";
     } else if (!opened) {
-        diagnosticCode = @"fallback_failed";
+        diagnosticCode = @"juce_open_failed";
     } else if ([juce[@"activeInputChannels"] integerValue] != 0) {
         diagnosticCode = @"input_open";
     } else if (![juce[@"deviceOpen"] boolValue] ||
                [juce[@"activeOutputChannels"] integerValue] <= 0 ||
                outputs.count != 1) {
         diagnosticCode = @"no_output";
-    } else if ([juce[@"sampleRateHz"] doubleValue] <= 1000.0 ||
-               [juce[@"bufferFrames"] integerValue] <= 0 ||
-               target == nil ||
+    } else if (!callbackReady ||
+               !MixroomMacPlaybackSnapshotMatchesPlan(
+                   snapshot, target, callbackRate, callbackFrames, callbackCount) ||
                ![actualOutput[@"uid"] isEqualToString:target[@"uid"]]) {
         diagnosticCode = @"actual_state_unavailable";
-    } else if (usedFallback) {
-        diagnosticCode = @"fallback_succeeded";
     }
 
-    const BOOL success = [diagnosticCode isEqualToString:@"ok"] ||
-        [diagnosticCode isEqualToString:@"fallback_succeeded"];
+    const BOOL success = [diagnosticCode isEqualToString:@"ok"];
     if (!success && ![diagnosticCode isEqualToString:@"stale_generation"]) {
         [JuceBridge quiescePlaybackRouteV2ObjC:YES];
         snapshot = [self buildAudioRouteSnapshotV2];
@@ -3481,15 +4405,25 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     if (success) {
         self.routeTransitionWasPlayingV2 = NO;
     }
+    NSDictionary *defaultInput = MixroomInputForDeviceID(
+        MixroomCoreAudioDeviceInventory() ?: @[],
+        MixroomDefaultCoreAudioInputDevice());
+    const BOOL reducedBluetoothQuality = success &&
+        [target[@"transport"] unsignedIntValue] ==
+            kAudioDeviceTransportTypeBluetooth &&
+        [target[@"outputChannels"] integerValue] == 1 &&
+        [defaultInput[@"transport"] unsignedIntValue] ==
+            kAudioDeviceTransportTypeBluetooth;
     const NSInteger elapsedMs = (NSInteger)(
         MixroomMonotonicMilliseconds() - startedAtMs + 0.5);
     return @{
-        @"status": success ? (usedFallback ? @"fallback" : @"success") : @"failure",
+        @"status": success ? @"success" : @"failure",
         @"generation": @(generation),
         @"transitionId": @(transitionID),
         @"diagnosticCode": diagnosticCode,
         @"elapsedMs": @(elapsedMs),
         @"transportWasPlaying": @(transportWasPlaying),
+        @"bluetoothCommunicationQualityReduced": @(reducedBluetoothQuality),
         @"snapshot": snapshot,
     };
 #else
@@ -3633,6 +4567,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     if (!self.audioRouteMonitoringV2) {
         return;
     }
+    const BOOL operationWasActive = self.macIntentOperationActiveV2;
+    if (operationWasActive) {
+        self.macIntentOperationCancelledV2 = YES;
+        self.macIntentTerminalCauseV2 = @"shutdown";
+        [JuceBridge cancelMacInputProbeWaitV2ObjC];
+        [JuceBridge cancelMacOutputCallbackProofV2ObjC];
+        [self signalMacIntentRouteConditionV2];
+    }
     self.audioRouteMonitoringV2 = NO;
     self.audioRouteGenerationV2 += 1;
     AudioObjectPropertyAddress defaultOutputAddress = {
@@ -3658,6 +4600,20 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     [self updateObservedOutputDeviceV2:kAudioObjectUnknown];
     self.audioRouteFingerprintV2 = nil;
     self.routeTransitionWasPlayingV2 = NO;
+    self.macLifecycleReconcilePendingV2 = NO;
+    if (operationWasActive) {
+        dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
+            if ([self claimMacIntentCleanupV2]) {
+                [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+                [JuceBridge stopMacInputProbeV2ObjC];
+            }
+            [self removeMacIntentDeviceListenersV2];
+            self.macIntentOperationActiveV2 = NO;
+            self.macLifecycleTransitionActiveV2 = NO;
+            self.macIntentRouteConditionV2 = nil;
+            self.currentAudioRouteIntentV2 = @"playbackOnly";
+        });
+    }
 #else
     [self stopIOSAudioRouteMonitoringV2];
 #endif
@@ -4060,9 +5016,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"shutdown"]) {
         [self stopAudioRouteMonitoringV2];
 #if TARGET_OS_OSX
-        [JuceBridge shutdownEngineObjC];
-        [self restoreBluetoothPlaybackAfterRecordingStop];
-        result(nil);
+        FlutterResult shutdownResult = [result copy];
+        dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
+            [JuceBridge stopMacInputProbeV2ObjC];
+            [JuceBridge shutdownEngineObjC];
+            [self restoreBluetoothPlaybackAfterRecordingStop];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                shutdownResult(nil);
+                [shutdownResult release];
+            });
+        });
 #else
         self.iosLifecycleTransitionActiveV2 = YES;
         dispatch_async(MixroomIOSLifecycleQueue(), ^{
@@ -5045,14 +6008,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"initialisePlaybackV2"]) {
 #if TARGET_OS_OSX
         dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
-            NSDictionary<NSString *, id> *response =
+            NSDictionary<NSString *, id> *rawResponse =
                 [self initialisePlaybackV2] ?: @{
                     @"success": @NO,
                     @"diagnosticCode": @"actual_state_unavailable",
                     @"snapshot": @{},
                 };
+            NSDictionary<NSString *, id> *response = [rawResponse copy];
             dispatch_async(dispatch_get_main_queue(), ^{
                 result(response);
+                [response release];
             });
         });
 #else
@@ -5063,20 +6028,46 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result([self startAudioRouteMonitoringV2]);
     }
     else if ([call.method isEqualToString:@"applyAudioRouteConfigurationV2"]) {
+#if TARGET_OS_OSX
+        NSDictionary *transitionArgs = [args ?: @{} copy];
+        dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
+            self.macLifecycleTransitionActiveV2 = YES;
+            self.macLifecycleReconcilePendingV2 = NO;
+            NSDictionary<NSString *, id> *rawResponse =
+                [self applyAudioRouteConfigurationV2:transitionArgs] ?: @{
+                    @"status": @"failure",
+                    @"diagnosticCode": @"actual_state_unavailable",
+                    @"snapshot": @{},
+                };
+            NSDictionary<NSString *, id> *response = [rawResponse copy];
+            const BOOL reconcile = self.macLifecycleReconcilePendingV2;
+            self.macLifecycleReconcilePendingV2 = NO;
+            self.macLifecycleTransitionActiveV2 = NO;
+            [transitionArgs release];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                result(response);
+                if (reconcile) {
+                    [self handleAudioRoutePropertyChangeV2:@"transitionReconcile"];
+                }
+                [response release];
+            });
+        });
+#else
         result([self applyAudioRouteConfigurationV2:args ?: @{}]);
+#endif
     }
     else if ([call.method isEqualToString:@"setAudioRouteIntentV2"]) {
-#if TARGET_OS_OSX
-        result([self setAudioRouteIntentV2:args ?: @{}]);
-#else
         [self setAudioRouteIntentV2:args ?: @{} completion:result];
-#endif
     }
     else if ([call.method isEqualToString:@"abortRecordingV2"]) {
 #if TARGET_OS_OSX
-        // macOS V2 owns no recording/input lifecycle in the output-only
-        // checkpoint. An abort must therefore not close a working output.
-        self.currentAudioRouteIntentV2 = @"playbackOnly";
+        if (self.macIntentOperationActiveV2) {
+            self.macIntentOperationCancelledV2 = YES;
+            self.macIntentTerminalCauseV2 = @"cancelled";
+            [JuceBridge cancelMacInputProbeWaitV2ObjC];
+            [JuceBridge cancelMacOutputCallbackProofV2ObjC];
+            [self signalMacIntentRouteConditionV2];
+        }
 #else
         if ([[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
             const BOOL restoreRequested =

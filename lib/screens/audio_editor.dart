@@ -5683,9 +5683,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _iosSystemSelectedRouteProbeRunning = false;
+  bool _macOSSystemSelectedRouteProbeRunning = false;
   bool _androidBluetoothDuplexProbeRunning = false;
   bool _androidSystemSelectedMediaProbeRunning = false;
   bool _bluetoothRecordingQualityNoticeShown = false;
+  bool _macBluetoothCommunicationQualityNoticeShown = false;
   bool _v2AudioSessionInvalidated = false;
   bool _v2AudioSessionRecoveryInProgress = false;
   bool _androidV2ForegroundRecoveryPending = false;
@@ -5807,8 +5809,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool get _isBluetoothV2Session =>
       _bluetoothImplementationSessionV2?.active == BluetoothImplementationV2.v2;
 
-  bool get _supportsV2AudioRecording =>
-      Platform.isAndroid || Platform.isIOS;
+  bool get _supportsV2AudioRecording => Platform.isAndroid || Platform.isIOS;
 
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
@@ -9275,6 +9276,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _showSmallNotice('Bluetooth 2.0 playback is not available yet.');
         setState(() => _isLoadingNextScreen = false);
         return;
+      }
+      if (Platform.isMacOS &&
+          JuceAudioEngine.v2BluetoothCommunicationQualityReduced) {
+        _macBluetoothCommunicationQualityNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone selected. Playback quality is reduced. Select another microphone for stereo audio.',
+        );
       }
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
@@ -13002,6 +13010,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    if (Platform.isMacOS) {
+      if (result.bluetoothCommunicationQualityReduced &&
+          !_macBluetoothCommunicationQualityNoticeShown) {
+        _macBluetoothCommunicationQualityNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone selected. Playback quality is reduced. Select another microphone for stereo audio.',
+        );
+        return;
+      }
+      if (!result.bluetoothCommunicationQualityReduced) {
+        _macBluetoothCommunicationQualityNoticeShown = false;
+      }
+    }
     if (result.status == AudioRouteTransitionStatusV2.fallback) {
       _showSmallNotice(
         'Bluetooth disconnected. Audio output changed. Press Play to continue.',
@@ -41386,6 +41407,109 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _runMacOSSystemSelectedRouteProbeV2() async {
+    if (!kDebugMode || !Platform.isMacOS || !_isBluetoothV2Session) return;
+    if (_macOSSystemSelectedRouteProbeRunning) return;
+
+    final coordinator = _audioRouteCoordinatorV2;
+    if (_isPlaying || _transportDesiredPlaying) {
+      _showSmallNotice('Stop playback before checking the recording route.');
+      return;
+    }
+    if (coordinator == null ||
+        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
+      return;
+    }
+
+    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    if (!mounted) return;
+    final sourceReady =
+        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
+        source.outputs.length == 1 &&
+        source.inputs.isEmpty &&
+        source.juce.deviceOpen == true &&
+        source.juce.audioCallbackAttached == true &&
+        source.juce.activeInputChannels == 0 &&
+        (source.juce.activeOutputChannels ?? 0) > 0;
+    if (!sourceReady) {
+      _showSmallNotice('The current macOS audio output is not ready yet.');
+      return;
+    }
+    if (!await _ensureMicrophonePermissionForRecording()) return;
+    if (!mounted) return;
+
+    setState(() => _macOSSystemSelectedRouteProbeRunning = true);
+    await _letRecordingVisualStatePaint();
+
+    try {
+      final duplexResult = await coordinator.transitionIntent(
+        AudioRouteIntentV2.preparingRecording,
+        operation: AudioRouteIntentOperationV2.systemSelectedProbe,
+      );
+      if (!mounted) return;
+      if (!duplexResult.succeeded) {
+        final removed =
+            duplexResult.snapshot.duplexProbe?.validationStage ==
+            'physicalRouteInvalidation';
+        _showSmallNotice(
+          removed
+              ? 'The audio device disconnected during the check. Reopen the audio editor.'
+              : 'The system-selected recording route is unavailable.',
+        );
+        return;
+      }
+
+      final duplex = duplexResult.snapshot;
+      final duplexVerified =
+          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
+          duplex.duplexProbe?.selectionMode == 'macOSIndependentInput' &&
+          (duplex.duplexProbe?.inputCallbackCount ?? 0) > 0 &&
+          (duplex.duplexProbe?.outputCallbackCount ?? 0) > 0 &&
+          duplex.inputs.length == 1 &&
+          duplex.outputs.length == 1 &&
+          (duplex.inputs.single.channelCount ?? 0) > 0 &&
+          (duplex.outputs.single.channelCount ?? 0) > 0 &&
+          duplex.juce.deviceOpen == true &&
+          duplex.juce.audioCallbackAttached == true &&
+          duplex.juce.activeInputChannels == 0 &&
+          (duplex.juce.activeOutputChannels ?? 0) > 0 &&
+          (duplex.juce.sampleRateHz ?? 0) > 1000 &&
+          (duplex.juce.bufferFrames ?? 0) > 0;
+      if (!duplexVerified) {
+        final restoreResult = await coordinator.transitionIntent(
+          AudioRouteIntentV2.playbackOnly,
+        );
+        if (restoreResult.succeeded) {
+          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
+        }
+        _showSmallNotice('The system-selected recording route is unavailable.');
+        return;
+      }
+
+      final restoreResult = await coordinator.transitionIntent(
+        AudioRouteIntentV2.playbackOnly,
+      );
+      if (!mounted) return;
+      if (!restoreResult.succeeded) {
+        _showSmallNotice(
+          restoreResult.snapshot.duplexProbe?.validationStage ==
+                  'physicalRouteInvalidation'
+              ? 'The audio device disconnected during the check. Reopen the audio editor.'
+              : 'Audio output could not be restored. Reopen the audio editor.',
+        );
+        return;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
+      _showSmallNotice('System recording route verified. Playback restored.');
+    } finally {
+      if (mounted) {
+        setState(() => _macOSSystemSelectedRouteProbeRunning = false);
+      }
+    }
+  }
+
   Future<void> _runIOSSystemSelectedRouteProbeV2() async {
     if (!kDebugMode || !Platform.isIOS || !_isBluetoothV2Session) return;
     if (_iosSystemSelectedRouteProbeRunning) return;
@@ -42003,6 +42127,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           },
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed:
+                            _bluetoothImplementationSessionV2!.active ==
+                                    BluetoothImplementationV2.v2 &&
+                                !_macOSSystemSelectedRouteProbeRunning
+                            ? () => unawaited(
+                                _runMacOSSystemSelectedRouteProbeV2(),
+                              )
+                            : null,
+                        child: Text(
+                          _macOSSystemSelectedRouteProbeRunning
+                              ? 'Checking System Recording Route…'
+                              : 'Run System Recording Route Check',
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 10),
                   ],

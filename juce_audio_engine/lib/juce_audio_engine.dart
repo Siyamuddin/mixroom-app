@@ -339,6 +339,10 @@ class JuceAudioEngine {
   static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
       MethodChannelAudioRouteSnapshotProviderV2();
   static AudioRouteSnapshotV2? _v2StartupSnapshot;
+  static bool _v2BluetoothCommunicationQualityReduced = false;
+
+  static bool get v2BluetoothCommunicationQualityReduced =>
+      _v2BluetoothCommunicationQualityReduced;
   static Future<void>? _shutdownInFlight;
 
   static final Stream<Map<String, dynamic>> _events = _eventCh
@@ -396,6 +400,8 @@ class JuceAudioEngine {
     if (implementation == BluetoothImplementationV2.v2) {
       final result = await initialisePlaybackV2();
       _v2StartupSnapshot = result.success ? result.snapshot : null;
+      _v2BluetoothCommunicationQualityReduced =
+          result.success && result.bluetoothCommunicationQualityReduced;
       return result.success;
     }
     return initialise();
@@ -406,6 +412,7 @@ class JuceAudioEngine {
   }) async {
     final shutdown = _shutdownInFlight;
     if (shutdown != null) await shutdown;
+    _v2BluetoothCommunicationQualityReduced = false;
     final platform = platformOverride ?? defaultTargetPlatform;
     if (kIsWeb ||
         (platform != TargetPlatform.macOS &&
@@ -426,9 +433,12 @@ class JuceAudioEngine {
         Map<String, dynamic>.from(raw),
       );
       _v2StartupSnapshot = result.success ? result.snapshot : null;
+      _v2BluetoothCommunicationQualityReduced =
+          result.success && result.bluetoothCommunicationQualityReduced;
       return result;
     } on MissingPluginException {
       _v2StartupSnapshot = null;
+      _v2BluetoothCommunicationQualityReduced = false;
       return _unavailablePlaybackStartupV2();
     } on PlatformException catch (error) {
       _v2StartupSnapshot = null;
@@ -628,7 +638,11 @@ class JuceAudioEngine {
   static void acceptVerifiedAudioRouteTransitionV2(
     AudioRouteTransitionResultV2 result,
   ) {
-    if (result.succeeded) _v2StartupSnapshot = result.snapshot;
+    if (result.succeeded) {
+      _v2StartupSnapshot = result.snapshot;
+      _v2BluetoothCommunicationQualityReduced =
+          result.bluetoothCommunicationQualityReduced;
+    }
   }
 
   static Future<bool> validatePlaybackV2(
@@ -736,6 +750,7 @@ class JuceAudioEngine {
       _logError('shutdown', e);
     } finally {
       _v2StartupSnapshot = null;
+      _v2BluetoothCommunicationQualityReduced = false;
     }
   }
 

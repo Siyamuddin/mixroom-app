@@ -185,6 +185,10 @@ class JuceRouteFactsV2 {
     this.audioCallbackAttached,
     this.sampleRateHz,
     this.bufferFrames,
+    this.projectGraphSampleRateHz,
+    this.projectGraphBufferFrames,
+    this.outputCallbackProofSampleRateHz,
+    this.outputCallbackProofFrames,
     this.activeInputChannels,
     this.activeOutputChannels,
     this.inputDeviceName,
@@ -214,6 +218,10 @@ class JuceRouteFactsV2 {
   final bool? audioCallbackAttached;
   final double? sampleRateHz;
   final int? bufferFrames;
+  final double? projectGraphSampleRateHz;
+  final int? projectGraphBufferFrames;
+  final double? outputCallbackProofSampleRateHz;
+  final int? outputCallbackProofFrames;
   final int? activeInputChannels;
   final int? activeOutputChannels;
   final String? inputDeviceName;
@@ -247,6 +255,12 @@ class JuceRouteFactsV2 {
       audioCallbackAttached: _nullableBool(map['audioCallbackAttached']),
       sampleRateHz: _nullableDouble(map['sampleRateHz']),
       bufferFrames: _nullableInt(map['bufferFrames']),
+      projectGraphSampleRateHz:
+          _nullableDouble(map['projectGraphSampleRateHz']),
+      projectGraphBufferFrames: _nullableInt(map['projectGraphBufferFrames']),
+      outputCallbackProofSampleRateHz:
+          _nullableDouble(map['outputCallbackProofSampleRateHz']),
+      outputCallbackProofFrames: _nullableInt(map['outputCallbackProofFrames']),
       activeInputChannels: _nullableInt(map['activeInputChannels']),
       activeOutputChannels: _nullableInt(map['activeOutputChannels']),
       inputDeviceName: map['inputDeviceName']?.toString(),
@@ -282,6 +296,10 @@ class JuceRouteFactsV2 {
       'audioCallbackAttached': audioCallbackAttached,
       'sampleRateHz': sampleRateHz,
       'bufferFrames': bufferFrames,
+      'projectGraphSampleRateHz': projectGraphSampleRateHz,
+      'projectGraphBufferFrames': projectGraphBufferFrames,
+      'outputCallbackProofSampleRateHz': outputCallbackProofSampleRateHz,
+      'outputCallbackProofFrames': outputCallbackProofFrames,
       'activeInputChannels': activeInputChannels,
       'activeOutputChannels': activeOutputChannels,
       if (includeDeviceNames) 'inputDeviceName': inputDeviceName,
@@ -490,6 +508,10 @@ class AudioRouteDuplexProbeFactsV2 {
     this.phase,
     this.terminalCause,
     this.actualCallbackCount,
+    this.inputCallbackCount,
+    this.outputCallbackCount,
+    this.inputSampleRateHz,
+    this.inputBufferFrames,
     this.cleanupOutcome,
     this.selectionMode,
     this.physicalValidationPending,
@@ -508,6 +530,10 @@ class AudioRouteDuplexProbeFactsV2 {
   final String? phase;
   final String? terminalCause;
   final int? actualCallbackCount;
+  final int? inputCallbackCount;
+  final int? outputCallbackCount;
+  final double? inputSampleRateHz;
+  final int? inputBufferFrames;
   final String? cleanupOutcome;
   final String? selectionMode;
   final bool? physicalValidationPending;
@@ -538,6 +564,10 @@ class AudioRouteDuplexProbeFactsV2 {
       phase: map['phase']?.toString(),
       terminalCause: map['terminalCause']?.toString(),
       actualCallbackCount: _nullableInt(map['actualCallbackCount']),
+      inputCallbackCount: _nullableInt(map['inputCallbackCount']),
+      outputCallbackCount: _nullableInt(map['outputCallbackCount']),
+      inputSampleRateHz: _nullableDouble(map['inputSampleRateHz']),
+      inputBufferFrames: _nullableInt(map['inputBufferFrames']),
       cleanupOutcome: map['cleanupOutcome']?.toString(),
       selectionMode: map['selectionMode']?.toString(),
       physicalValidationPending: map['physicalValidationPending'] as bool?,
@@ -558,6 +588,10 @@ class AudioRouteDuplexProbeFactsV2 {
         'phase': phase,
         'terminalCause': terminalCause,
         'actualCallbackCount': actualCallbackCount,
+        'inputCallbackCount': inputCallbackCount,
+        'outputCallbackCount': outputCallbackCount,
+        'inputSampleRateHz': inputSampleRateHz,
+        'inputBufferFrames': inputBufferFrames,
         'cleanupOutcome': cleanupOutcome,
         'selectionMode': selectionMode,
         'physicalValidationPending': physicalValidationPending,
@@ -602,11 +636,13 @@ class AudioPlaybackStartupResultV2 {
     required this.success,
     required this.diagnosticCode,
     required this.snapshot,
+    this.bluetoothCommunicationQualityReduced = false,
   });
 
   final bool success;
   final String diagnosticCode;
   final AudioRouteSnapshotV2 snapshot;
+  final bool bluetoothCommunicationQualityReduced;
 
   factory AudioPlaybackStartupResultV2.fromMap(Map<String, dynamic> map) {
     final rawSnapshot = map['snapshot'];
@@ -614,6 +650,8 @@ class AudioPlaybackStartupResultV2 {
       success: map['success'] == true,
       diagnosticCode:
           map['diagnosticCode']?.toString() ?? 'actual_state_unavailable',
+      bluetoothCommunicationQualityReduced:
+          map['bluetoothCommunicationQualityReduced'] == true,
       snapshot: AudioRouteSnapshotV2.fromMap(
         rawSnapshot is Map
             ? Map<String, dynamic>.from(rawSnapshot)
@@ -676,6 +714,7 @@ class AudioRouteTransitionResultV2 {
     required this.elapsedMs,
     required this.transportWasPlaying,
     required this.snapshot,
+    this.bluetoothCommunicationQualityReduced = false,
   });
 
   final AudioRouteTransitionStatusV2 status;
@@ -685,6 +724,7 @@ class AudioRouteTransitionResultV2 {
   final int elapsedMs;
   final bool transportWasPlaying;
   final AudioRouteSnapshotV2 snapshot;
+  final bool bluetoothCommunicationQualityReduced;
 
   bool get succeeded => status != AudioRouteTransitionStatusV2.failure;
 
@@ -702,6 +742,8 @@ class AudioRouteTransitionResultV2 {
           map['diagnosticCode']?.toString() ?? 'actual_state_unavailable',
       elapsedMs: _nullableInt(map['elapsedMs']) ?? 0,
       transportWasPlaying: map['transportWasPlaying'] == true,
+      bluetoothCommunicationQualityReduced:
+          map['bluetoothCommunicationQualityReduced'] == true,
       snapshot: AudioRouteSnapshotV2.fromMap(
         rawSnapshot is Map
             ? Map<String, dynamic>.from(rawSnapshot)

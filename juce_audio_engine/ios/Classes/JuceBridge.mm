@@ -6,6 +6,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
 #import "JuceBridge.h"
 #import "JuceEngine.h"
@@ -22,6 +23,7 @@
 #import <FlutterMacOS/FlutterMacOS.h>
 #endif
 #if TARGET_OS_OSX
+#import <AudioUnit/AudioUnit.h>
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
@@ -2342,6 +2344,349 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 @end
 
+#if TARGET_OS_OSX
+namespace
+{
+class MixroomMacInputProbe final
+{
+public:
+    ~MixroomMacInputProbe()
+    {
+        stop();
+    }
+
+    bool start(AudioDeviceID requestedDevice)
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        stopLocked();
+
+        const auto failStart = [this](const char *stage, OSStatus status)
+        {
+            juce::Logger::writeToLog(
+                "[MacV2Input] start failed stage=" + juce::String(stage) +
+                " status=" + juce::String(static_cast<int>(status)));
+            stopLocked();
+            return false;
+        };
+
+        if (requestedDevice == kAudioObjectUnknown)
+            return failStart("missingDevice", kAudio_ParamError);
+
+        Float64 requestedSampleRate = 0.0;
+        UInt32 propertySize = sizeof(requestedSampleRate);
+        AudioObjectPropertyAddress sampleRateAddress{
+            kAudioDevicePropertyNominalSampleRate,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        };
+        OSStatus status = AudioObjectGetPropertyData(requestedDevice,
+                                                     &sampleRateAddress,
+                                                     0,
+                                                     nullptr,
+                                                     &propertySize,
+                                                     &requestedSampleRate);
+        if (status != noErr || requestedSampleRate <= 1000.0)
+            return failStart("readSampleRate",
+                             status != noErr ? status : kAudio_ParamError);
+
+        UInt32 requestedBufferFrames = 0;
+        propertySize = sizeof(requestedBufferFrames);
+        AudioObjectPropertyAddress bufferAddress{
+            kAudioDevicePropertyBufferFrameSize,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        };
+        status = AudioObjectGetPropertyData(requestedDevice,
+                                            &bufferAddress,
+                                            0,
+                                            nullptr,
+                                            &propertySize,
+                                            &requestedBufferFrames);
+        if (status != noErr || requestedBufferFrames == 0)
+            return failStart("readBuffer",
+                             status != noErr ? status : kAudio_ParamError);
+
+        AudioComponentDescription description{};
+        description.componentType = kAudioUnitType_Output;
+        description.componentSubType = kAudioUnitSubType_HALOutput;
+        description.componentManufacturer = kAudioUnitManufacturer_Apple;
+        AudioComponent component = AudioComponentFindNext(nullptr, &description);
+        if (component == nullptr)
+            return failStart("findComponent", kAudio_ParamError);
+        status = AudioComponentInstanceNew(component, &unit);
+        if (status != noErr || unit == nullptr)
+            return failStart("createInstance",
+                             status != noErr ? status : kAudio_ParamError);
+
+        UInt32 enabled = 1;
+        UInt32 disabled = 0;
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_EnableIO,
+                                      kAudioUnitScope_Input,
+                                      1,
+                                      &enabled,
+                                      sizeof(enabled));
+        if (status != noErr)
+            return failStart("enableInput", status);
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_EnableIO,
+                                      kAudioUnitScope_Output,
+                                      0,
+                                      &disabled,
+                                      sizeof(disabled));
+        if (status != noErr)
+            return failStart("disableOutput", status);
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_CurrentDevice,
+                                      kAudioUnitScope_Global,
+                                      0,
+                                      &requestedDevice,
+                                      sizeof(requestedDevice));
+        if (status != noErr)
+            return failStart("selectDevice", status);
+
+        AudioStreamBasicDescription clientFormat{};
+        clientFormat.mSampleRate = requestedSampleRate;
+        clientFormat.mFormatID = kAudioFormatLinearPCM;
+        clientFormat.mFormatFlags = kAudioFormatFlagIsFloat |
+            kAudioFormatFlagIsPacked |
+            kAudioFormatFlagsNativeEndian;
+        clientFormat.mBytesPerPacket = sizeof(float);
+        clientFormat.mFramesPerPacket = 1;
+        clientFormat.mBytesPerFrame = sizeof(float);
+        clientFormat.mChannelsPerFrame = 1;
+        clientFormat.mBitsPerChannel = 8 * sizeof(float);
+        status = AudioUnitSetProperty(unit,
+                                      kAudioUnitProperty_StreamFormat,
+                                      kAudioUnitScope_Output,
+                                      1,
+                                      &clientFormat,
+                                      sizeof(clientFormat));
+        if (status != noErr)
+            return failStart("setClientFormat", status);
+
+        UInt32 unitMaximumFrames = 0;
+        propertySize = sizeof(unitMaximumFrames);
+        if (AudioUnitGetProperty(unit,
+                                 kAudioUnitProperty_MaximumFramesPerSlice,
+                                 kAudioUnitScope_Global,
+                                 0,
+                                 &unitMaximumFrames,
+                                 &propertySize) != noErr)
+            unitMaximumFrames = 0;
+        capacityFrames = std::max(requestedBufferFrames, unitMaximumFrames);
+        if (capacityFrames == 0)
+            return failStart("resolveCapacity", kAudio_ParamError);
+        scratch.assign(capacityFrames, 0.0f);
+
+        AURenderCallbackStruct callback{};
+        callback.inputProc = renderCallback;
+        callback.inputProcRefCon = this;
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_SetInputCallback,
+                                      kAudioUnitScope_Global,
+                                      0,
+                                      &callback,
+                                      sizeof(callback));
+        if (status != noErr)
+            return failStart("setInputCallback", status);
+        status = AudioUnitInitialize(unit);
+        if (status != noErr)
+            return failStart("initialize", status);
+
+        deviceID.store(requestedDevice, std::memory_order_release);
+        sampleRate.store(requestedSampleRate, std::memory_order_release);
+        bufferFrames.store(requestedBufferFrames, std::memory_order_release);
+        callbackCount.store(0, std::memory_order_release);
+        invalidCallbackCount.store(0, std::memory_order_release);
+        lastFrames.store(0, std::memory_order_release);
+        lastStatus.store(noErr, std::memory_order_release);
+        callbackReady.store(false, std::memory_order_release);
+        cancelled.store(false, std::memory_order_release);
+        callbackEvent.reset();
+        active.store(true, std::memory_order_release);
+
+        status = AudioOutputUnitStart(unit);
+        if (status != noErr)
+        {
+            active.store(false, std::memory_order_release);
+            return failStart("start", status);
+        }
+        running.store(true, std::memory_order_release);
+        return true;
+    }
+
+    bool waitForValidCallback(int timeoutMilliseconds) noexcept
+    {
+        if (callbackReady.load(std::memory_order_acquire))
+            return true;
+        if (!active.load(std::memory_order_acquire) ||
+            cancelled.load(std::memory_order_acquire))
+            return false;
+        callbackEvent.wait(juce::jmax(0, timeoutMilliseconds));
+        return callbackReady.load(std::memory_order_acquire) &&
+            !cancelled.load(std::memory_order_acquire);
+    }
+
+    void cancelWait() noexcept
+    {
+        cancelled.store(true, std::memory_order_release);
+        callbackEvent.signal();
+    }
+
+    void stop()
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        stopLocked();
+    }
+
+    AudioDeviceID getDeviceID() const noexcept
+    {
+        return deviceID.load(std::memory_order_acquire);
+    }
+
+    double getSampleRate() const noexcept
+    {
+        return sampleRate.load(std::memory_order_acquire);
+    }
+
+    UInt32 getBufferFrames() const noexcept
+    {
+        return bufferFrames.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t getCallbackCount() const noexcept
+    {
+        return callbackCount.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t getInvalidCallbackCount() const noexcept
+    {
+        return invalidCallbackCount.load(std::memory_order_acquire);
+    }
+
+    UInt32 getLastFrames() const noexcept
+    {
+        return lastFrames.load(std::memory_order_acquire);
+    }
+
+    OSStatus getLastStatus() const noexcept
+    {
+        return lastStatus.load(std::memory_order_acquire);
+    }
+
+    bool isRunning() const noexcept
+    {
+        return running.load(std::memory_order_acquire);
+    }
+
+private:
+    static OSStatus renderCallback(void *context,
+                                   AudioUnitRenderActionFlags *flags,
+                                   const AudioTimeStamp *timestamp,
+                                   UInt32 busNumber,
+                                   UInt32 numberFrames,
+                                   AudioBufferList *data) noexcept
+    {
+        juce::ignoreUnused(busNumber, data);
+        return static_cast<MixroomMacInputProbe *>(context)->render(
+            flags, timestamp, numberFrames);
+    }
+
+    OSStatus render(AudioUnitRenderActionFlags *flags,
+                    const AudioTimeStamp *timestamp,
+                    UInt32 numberFrames) noexcept
+    {
+        if (!active.load(std::memory_order_acquire) ||
+            cancelled.load(std::memory_order_acquire))
+            return noErr;
+
+        if (numberFrames == 0 || numberFrames > capacityFrames || unit == nullptr)
+        {
+            invalidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+            lastFrames.store(numberFrames, std::memory_order_relaxed);
+            lastStatus.store(kAudio_ParamError, std::memory_order_relaxed);
+            callbackEvent.signal();
+            return kAudio_ParamError;
+        }
+
+        AudioBufferList bufferList{};
+        bufferList.mNumberBuffers = 1;
+        bufferList.mBuffers[0].mNumberChannels = 1;
+        bufferList.mBuffers[0].mDataByteSize = numberFrames * sizeof(float);
+        bufferList.mBuffers[0].mData = scratch.data();
+        const OSStatus status = AudioUnitRender(unit,
+                                                flags,
+                                                timestamp,
+                                                1,
+                                                numberFrames,
+                                                &bufferList);
+        lastFrames.store(numberFrames, std::memory_order_relaxed);
+        lastStatus.store(status, std::memory_order_relaxed);
+        if (status == noErr)
+        {
+            callbackCount.fetch_add(1, std::memory_order_relaxed);
+            callbackReady.store(true, std::memory_order_release);
+        }
+        else
+        {
+            invalidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+        }
+        callbackEvent.signal();
+        return status;
+    }
+
+    void stopLocked()
+    {
+        cancelled.store(true, std::memory_order_release);
+        active.store(false, std::memory_order_release);
+        callbackEvent.signal();
+        if (unit != nullptr)
+        {
+            if (running.exchange(false, std::memory_order_acq_rel))
+                AudioOutputUnitStop(unit);
+            AudioUnitUninitialize(unit);
+            AudioComponentInstanceDispose(unit);
+            unit = nullptr;
+        }
+        scratch.clear();
+        capacityFrames = 0;
+        deviceID.store(kAudioObjectUnknown, std::memory_order_release);
+        sampleRate.store(0.0, std::memory_order_release);
+        bufferFrames.store(0, std::memory_order_release);
+        callbackCount.store(0, std::memory_order_release);
+        invalidCallbackCount.store(0, std::memory_order_release);
+        lastFrames.store(0, std::memory_order_release);
+        lastStatus.store(noErr, std::memory_order_release);
+        callbackReady.store(false, std::memory_order_release);
+    }
+
+    std::mutex controlMutex;
+    AudioUnit unit = nullptr;
+    std::vector<float> scratch;
+    UInt32 capacityFrames = 0;
+    juce::WaitableEvent callbackEvent;
+    std::atomic<AudioDeviceID> deviceID{kAudioObjectUnknown};
+    std::atomic<double> sampleRate{0.0};
+    std::atomic<UInt32> bufferFrames{0};
+    std::atomic<std::uint64_t> callbackCount{0};
+    std::atomic<std::uint64_t> invalidCallbackCount{0};
+    std::atomic<UInt32> lastFrames{0};
+    std::atomic<OSStatus> lastStatus{noErr};
+    std::atomic<bool> callbackReady{false};
+    std::atomic<bool> cancelled{false};
+    std::atomic<bool> active{false};
+    std::atomic<bool> running{false};
+};
+
+MixroomMacInputProbe &mixroomMacInputProbeV2()
+{
+    static MixroomMacInputProbe probe;
+    return probe;
+}
+}
+#endif
+
 @implementation JuceBridge
 
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath
@@ -2375,6 +2720,18 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         juceStringFromNSString(outputDeviceName));
 }
 
+#if TARGET_OS_OSX
++ (BOOL)initialiseMacPlaybackV2ObjC:(NSString *)outputDeviceName
+                         sampleRate:(double)sampleRate
+                       bufferFrames:(NSInteger)bufferFrames
+{
+    return JuceEngine::get().initialisePlaybackV2(
+        juceStringFromNSString(outputDeviceName),
+        sampleRate,
+        static_cast<int>(bufferFrames));
+}
+#endif
+
 + (BOOL)pausePlaybackForRouteChangeV2ObjC
 {
     return JuceEngine::get().pausePlaybackForRouteChangeV2();
@@ -2382,14 +2739,141 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice
 {
+#if TARGET_OS_OSX
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+#else
     return JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+#endif
 }
 
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString *)outputDeviceName
 {
+#if TARGET_OS_OSX
+    const auto name = juceStringFromNSString(outputDeviceName);
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().reconfigurePlaybackRouteV2(name);
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+#else
     return JuceEngine::get().reconfigurePlaybackRouteV2(
         juceStringFromNSString(outputDeviceName));
+#endif
 }
+
+#if TARGET_OS_OSX
++ (BOOL)reconfigureMacPlaybackRouteV2ObjC:(NSString *)outputDeviceName
+                              sampleRate:(double)sampleRate
+                            bufferFrames:(NSInteger)bufferFrames
+{
+    const auto name = juceStringFromNSString(outputDeviceName);
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().reconfigureMacPlaybackRouteV2(
+            name,
+            sampleRate,
+            static_cast<int>(bufferFrames));
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+}
+
++ (void)beginMacOutputCallbackProofV2ObjC
+{
+    JuceEngine::get().beginMacOutputCallbackProofV2();
+}
+
++ (BOOL)waitForMacOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return JuceEngine::get().waitForMacOutputCallbackProofV2(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (void)cancelMacOutputCallbackProofV2ObjC
+{
+    JuceEngine::get().cancelMacOutputCallbackProofV2();
+}
+
++ (NSNumber *)getMacOutputCallbackProofCountV2ObjC
+{
+    return @((unsigned long long)
+        JuceEngine::get().getMacOutputCallbackProofCountV2());
+}
+
++ (NSNumber *)getMacOutputCallbackProofFramesV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofFramesV2());
+}
+
++ (NSNumber *)getMacOutputCallbackProofSampleRateV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofSampleRateV2());
+}
+
++ (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID
+{
+    return mixroomMacInputProbeV2().start((AudioDeviceID)deviceID);
+}
+
++ (BOOL)waitForMacInputProbeCallbackV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return mixroomMacInputProbeV2().waitForValidCallback(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (void)cancelMacInputProbeWaitV2ObjC
+{
+    mixroomMacInputProbeV2().cancelWait();
+}
+
++ (NSDictionary<NSString *, id> *)getMacInputProbeFactsV2ObjC
+{
+    const auto &probe = mixroomMacInputProbeV2();
+    return @{
+        @"deviceID": @((uint32_t)probe.getDeviceID()),
+        @"sampleRateHz": @(probe.getSampleRate()),
+        @"bufferFrames": @(probe.getBufferFrames()),
+        @"callbackCount": @((unsigned long long)probe.getCallbackCount()),
+        @"invalidCallbackCount": @((unsigned long long)
+            probe.getInvalidCallbackCount()),
+        @"lastFrames": @(probe.getLastFrames()),
+        @"lastStatus": @(probe.getLastStatus()),
+        @"running": @(probe.isRunning()),
+    };
+}
+
++ (void)stopMacInputProbeV2ObjC
+{
+    mixroomMacInputProbeV2().stop();
+}
+#endif
 
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString *)outputDeviceName
                               inputName:(NSString *)inputDeviceName

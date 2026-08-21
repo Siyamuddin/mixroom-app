@@ -208,6 +208,7 @@ void main() {
     final result = AudioPlaybackStartupResultV2.fromMap(<String, dynamic>{
       'success': true,
       'diagnosticCode': 'ok',
+      'bluetoothCommunicationQualityReduced': true,
       'futureResultField': true,
       'snapshot': snapshot().toRawMap()
         ..['implementation'] = 'v2'
@@ -216,6 +217,7 @@ void main() {
 
     expect(result.success, isTrue);
     expect(result.diagnosticCode, 'ok');
+    expect(result.bluetoothCommunicationQualityReduced, isTrue);
     expect(result.snapshot.implementation, BluetoothImplementationV2.v2);
   });
 
@@ -227,6 +229,23 @@ void main() {
 
     expect(present.audioCallbackAttached, isTrue);
     expect(missing.audioCallbackAttached, isNull);
+  });
+
+  test('macOS clock facts preserve native graph and callback agreement', () {
+    final facts = JuceRouteFactsV2.fromMap(<String, dynamic>{
+      'sampleRateHz': 16000,
+      'bufferFrames': 320,
+      'projectGraphSampleRateHz': 16000,
+      'projectGraphBufferFrames': 320,
+      'outputCallbackProofSampleRateHz': 16000,
+      'outputCallbackProofFrames': 320,
+    });
+
+    expect(facts.projectGraphSampleRateHz, 16000);
+    expect(facts.projectGraphBufferFrames, 320);
+    expect(facts.outputCallbackProofSampleRateHz, 16000);
+    expect(facts.outputCallbackProofFrames, 320);
+    expect(facts.toMap()['outputCallbackProofFrames'], 320);
   });
 
   test('missing playback startup snapshot fails closed', () {
@@ -332,6 +351,34 @@ void main() {
     );
   });
 
+  test('independent-input probe preserves separate callback facts', () {
+    final snapshot = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'implementation': 'v2',
+      'captureConsistency': 'stable',
+      'duplexProbe': <String, dynamic>{
+        'status': 'restored',
+        'diagnosticCode': 'ok',
+        'validationStage': 'duplexVerified',
+        'categoryOptions': <String>[],
+        'selectionMode': 'macOSIndependentInput',
+        'actualCallbackCount': 2,
+        'inputCallbackCount': 2,
+        'outputCallbackCount': 1,
+        'inputSampleRateHz': 16000.0,
+        'inputBufferFrames': 512,
+        'operationId': 7,
+        'elapsedMs': 850,
+      },
+    });
+
+    final probe = snapshot.duplexProbe;
+    expect(probe?.inputCallbackCount, 2);
+    expect(probe?.outputCallbackCount, 1);
+    expect(probe?.inputSampleRateHz, 16000.0);
+    expect(probe?.inputBufferFrames, 512);
+    expect(probe?.toRawMap()['selectionMode'], 'macOSIndependentInput');
+  });
+
   test('transition result parses fallback and fails closed without snapshot',
       () {
     final fallback = AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
@@ -340,6 +387,7 @@ void main() {
       'transitionId': 3,
       'diagnosticCode': 'fallback_succeeded',
       'elapsedMs': 24,
+      'bluetoothCommunicationQualityReduced': true,
       'snapshot': <String, dynamic>{
         'implementation': 'v2',
         'captureConsistency': 'stable',
@@ -349,7 +397,9 @@ void main() {
 
     expect(fallback.succeeded, isTrue);
     expect(fallback.status, AudioRouteTransitionStatusV2.fallback);
+    expect(fallback.bluetoothCommunicationQualityReduced, isTrue);
     expect(malformed.succeeded, isFalse);
+    expect(malformed.bluetoothCommunicationQualityReduced, isFalse);
     expect(
       malformed.snapshot.captureConsistency,
       AudioRouteCaptureConsistencyV2.unavailable,

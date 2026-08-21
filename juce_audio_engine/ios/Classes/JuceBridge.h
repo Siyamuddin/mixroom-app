@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <TargetConditionals.h>
 
 @interface JuceBridge : NSObject
 
@@ -7,6 +8,25 @@
 + (BOOL)pausePlaybackForRouteChangeV2ObjC;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
+#if TARGET_OS_OSX
++ (BOOL)initialiseMacPlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName
+                         sampleRate:(double)sampleRate
+                       bufferFrames:(NSInteger)bufferFrames;
++ (BOOL)reconfigureMacPlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
+                              sampleRate:(double)sampleRate
+                            bufferFrames:(NSInteger)bufferFrames;
++ (void)beginMacOutputCallbackProofV2ObjC;
++ (BOOL)waitForMacOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds;
++ (void)cancelMacOutputCallbackProofV2ObjC;
++ (NSNumber * _Nonnull)getMacOutputCallbackProofCountV2ObjC;
++ (NSNumber * _Nonnull)getMacOutputCallbackProofFramesV2ObjC;
++ (NSNumber * _Nonnull)getMacOutputCallbackProofSampleRateV2ObjC;
++ (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID;
++ (BOOL)waitForMacInputProbeCallbackV2ObjC:(NSInteger)timeoutMilliseconds;
++ (void)cancelMacInputProbeWaitV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)getMacInputProbeFactsV2ObjC;
++ (void)stopMacInputProbeV2ObjC;
+#endif
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;
 + (BOOL)prepareBluetoothDuplexSessionV2ObjC;
