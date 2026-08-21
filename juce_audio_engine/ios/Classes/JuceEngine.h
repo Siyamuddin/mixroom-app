@@ -5883,18 +5883,8 @@ public:
     bool pausePlaybackForRouteChangeV2();
     bool quiescePlaybackRouteV2(bool closeRemovedDevice);
     bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
-    bool beginMacPlaybackRoutePhaseV2(const juce::String &outputDeviceName,
-                                      double preferredSampleRateHz);
     bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                      const juce::String &inputDeviceName);
-    bool beginMacSystemSelectedDuplexPhaseV2(
-        const juce::String &outputDeviceName,
-        const juce::String &inputDeviceName,
-        int outputChannels);
-    bool waitForMacRoutePhaseCallbackV2(int timeoutMilliseconds) noexcept;
-    void cancelMacRoutePhaseCallbackWaitV2() noexcept;
-    juce::NamedValueSet getMacRoutePhaseFactsV2();
-    void closeMacRoutePhaseV2();
     bool prepareBluetoothDuplexSessionV2();
     bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
     bool prepareSystemSelectedDuplexSessionV2();
@@ -6349,8 +6339,7 @@ private:
         iosBluetoothDuplexProbeCallback;
     bool iosBluetoothDuplexProbeCallbackAttached = false;
     void detachIOSBluetoothDuplexProbeCallback() noexcept;
-    bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
-                                  double preferredSampleRateHz = 0.0);
+    bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName);
     bool openRecordingInputV2(const juce::String &outputDeviceName,
                               const juce::String &inputDeviceName,
                               bool bluetoothHfp = false);

@@ -2,138 +2,172 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+String _between(String source, String start, String end) {
+  final startIndex = source.indexOf(start);
+  final endIndex = source.indexOf(end, startIndex + start.length);
+  expect(startIndex, greaterThanOrEqualTo(0), reason: 'Missing: $start');
+  expect(endIndex, greaterThan(startIndex), reason: 'Missing: $end');
+  return source.substring(startIndex, endIndex);
+}
+
 void main() {
-  test(
-    'macOS V2 recording accepts only built-in or classic Bluetooth output',
-    () {
-      final source = File(
-        'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
-      ).readAsStringSync();
-      final policyStart = source.indexOf(
-        'static BOOL MixroomOutputSupportsV2Recording(',
-      );
-      final fingerprintStart = source.indexOf(
-        'static NSString *MixroomEffectiveOutputFingerprint',
-        policyStart,
-      );
-      final policy = source.substring(policyStart, fingerprintStart);
-      final intentStart = source.indexOf(
-        '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
-      );
-      final observerStart = source.indexOf(
-        '- (void)updateObservedOutputDeviceV2:',
-        intentStart,
-      );
-      final intent = source.substring(intentStart, observerStart);
+  final pluginPath =
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m';
+  final enginePath = 'juce_audio_engine/ios/Classes/JuceEngine.cpp';
+  final editorPath = 'lib/screens/audio_editor.dart';
 
-      expect(policy, contains('kAudioDeviceTransportTypeBuiltIn'));
-      expect(policy, contains('kAudioDeviceTransportTypeBluetooth'));
-      expect(policy, contains('channels.integerValue >= 2'));
-      expect(policy, isNot(contains('kAudioDeviceTransportTypeBluetoothLE')));
-      expect(policy, contains('MixroomCoreAudioDeviceIsAlive'));
-      expect(intent, contains('MixroomOutputSupportsV2Recording'));
-      expect(intent, contains('MixroomUniqueBuiltInInput'));
-      expect(intent, contains('MixroomSnapshotMatchesRecordingRoute'));
-      expect(intent, contains('MixroomEffectiveOutputFingerprint'));
-    },
-  );
-
-  test(
-    'macOS V2 verifies both recording endpoints without profile guessing',
-    () {
-      final source = File(
-        'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
-      ).readAsStringSync();
-      final matchStart = source.indexOf(
-        'static BOOL MixroomEndpointMatchesCoreAudioDevice(',
-      );
-      final snapshotStart = source.indexOf(
-        'static BOOL MixroomSnapshotMatchesRecordingRoute(',
-        matchStart,
-      );
-      final snapshotEnd = source.indexOf(
-        'static NSString *MixroomFlutterAssetRootPath',
-        snapshotStart,
-      );
-      final endpointMatch = source.substring(matchStart, snapshotStart);
-      final snapshotMatch = source.substring(snapshotStart, snapshotEnd);
-
-      expect(endpointMatch, contains('endpoint[@"uid"]'));
-      expect(endpointMatch, contains('endpoint[@"nativePortType"]'));
-      expect(endpointMatch, contains('endpoint[@"normalizedKind"]'));
-      expect(snapshotMatch, contains('actualInput[@"normalizedKind"]'));
-      expect(snapshotMatch, contains('@"builtIn"'));
-      expect(snapshotMatch, contains('@"bluetoothDuplex"'));
-      expect(snapshotMatch, contains('activeInputChannels'));
-      expect(snapshotMatch, contains('activeOutputChannels'));
-    },
-  );
-
-  test('macOS V2 Play accepts only its active mono recording input', () {
-    final source = File(
-      'juce_audio_engine/ios/Classes/JuceEngine.cpp',
-    ).readAsStringSync();
-    final playStart = source.indexOf('void JuceEngine::play()');
-    final playEnd = source.indexOf('\nvoid JuceEngine::pause()', playStart);
-    final play = source.substring(playStart, playEnd);
-    final v2End = play.indexOf('else if (missingOutputRoute)');
-    final v2Guard = play.substring(0, v2End);
-
-    expect(play, contains('verifiedRecordingInputActive'));
-    expect(play, contains('wavCapture.isActive()'));
-    expect(
-      play,
-      contains('desiredInputOpenChannels.load(std::memory_order_relaxed) == 1'),
+  test('macOS V2 is explicitly output-only in the editor', () {
+    final editor = File(editorPath).readAsStringSync();
+    final support = _between(
+      editor,
+      'bool get _supportsV2AudioRecording =>',
+      'List<String> _inputDevices',
     );
-    expect(play, contains('activeInputChannels == 1'));
-    expect(
-      play,
-      contains('(activeInputChannels != 0 && !verifiedRecordingInputActive)'),
+    final recordStart = _between(
+      editor,
+      'Future<void> _startRecordingJuce()',
+      'Future<void> _letRecordingVisualStatePaint()',
     );
-    expect(v2Guard, isNot(contains('applyPreferredAudioDeviceSetup(')));
+
+    expect(support, contains('Platform.isAndroid || Platform.isIOS'));
+    expect(support, isNot(contains('Platform.isMacOS')));
+    expect(
+      recordStart,
+      contains(
+        'Recording is temporarily unavailable in Bluetooth 2.0 on macOS.',
+      ),
+    );
+    expect(editor, isNot(contains('_runMacOSSystemSelectedRouteProbeV2')));
+    expect(editor, isNot(contains('macOSSystemSelected')));
   });
 
-  test('macOS V2 recording serializes playback and failure cleanup', () {
-    final source = File('lib/screens/audio_editor.dart').readAsStringSync();
-    final preflightStart = source.indexOf(
-      'Future<bool> _prepareAudioRecordingStartPreflight()',
+  test('macOS V2 input controls cannot open or prewarm a microphone', () {
+    final editor = File(editorPath).readAsStringSync();
+    final selector = _between(
+      editor,
+      'Widget _buildInputSelector()',
+      'Widget _buildInputChannelRouteSelector()',
     );
-    final recordingStart = source.indexOf(
-      'Future<void> _startAudioRecordingJuce()',
-      preflightStart,
-    );
-    final restoreStart = source.indexOf(
-      'Future<bool> _restoreV2PlaybackOnlyAfterRecording()',
-      recordingStart,
-    );
-    final permissionStart = source.indexOf(
-      'Future<bool> _ensureMicrophonePermissionForRecording()',
-      restoreStart,
-    );
-    final preflight = source.substring(preflightStart, recordingStart);
-    final start = source.substring(recordingStart, restoreStart);
-    final restore = source.substring(restoreStart, permissionStart);
 
-    expect(preflight, contains('if (_isPlaying)'));
-    expect(preflight, contains('await _pausePlayback()'));
     expect(
-      preflight.indexOf('await _pausePlayback()'),
-      lessThan(preflight.indexOf('AudioRouteIntentV2.preparingRecording')),
+      selector,
+      contains('if (_isBluetoothV2Session && Platform.isMacOS)'),
     );
-    expect(start, contains('if (startPlaybackAfterRecorder && !_isPlaying)'));
     expect(
-      start,
-      contains('Recording stopped because playback could not start.'),
+      selector,
+      contains(
+        'Unavailable in the macOS Bluetooth 2.0 output-only checkpoint',
+      ),
     );
-    expect(restore, contains('await JuceAudioEngine.abortRecordingV2()'));
+    expect(
+      selector.indexOf('if (_isBluetoothV2Session && Platform.isMacOS)'),
+      lessThan(selector.indexOf('JuceAudioEngine.selectInputDevice(name)')),
+    );
+  });
+
+  test('macOS input intents fail before any native device mutation', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final intentMethod = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+
+    final rejection = intentMethod.indexOf(
+      'else if (![intent isEqualToString:@"playbackOnly"])',
+    );
+    final inventoryRead = intentMethod.indexOf(
+      'MixroomCoreAudioDeviceInventory()',
+    );
+    expect(rejection, greaterThanOrEqualTo(0));
+    expect(rejection, lessThan(inventoryRead));
+    expect(intentMethod, contains('@"recording_route_unsupported"'));
+    expect(intentMethod, isNot(contains('reconfigureRecordingRouteV2ObjC')));
+    expect(intentMethod, isNot(contains('MixroomUniqueBuiltInInput')));
+    expect(intentMethod, isNot(contains('startRecordingObjC')));
+    expect(intentMethod, isNot(contains('AudioHardwareCreateAggregateDevice')));
+    expect(intentMethod, isNot(contains('AudioHardwareDestroyAggregateDevice')));
+  });
+
+  test('macOS playback intent verifies a zero-input live output', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final intentMethod = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+
+    expect(intentMethod, contains('reconfigurePlaybackRouteV2ObjC'));
+    expect(intentMethod, contains('audioCallbackAttached'));
+    expect(intentMethod, contains('activeInputChannels'));
+    expect(intentMethod, contains('activeOutputChannels'));
+    expect(intentMethod, contains('sampleRateHz'));
+    expect(intentMethod, contains('bufferFrames'));
+    expect(intentMethod, contains('actualOutput[@"uid"]'));
+  });
+
+  test('macOS abort cannot close a working output-only device', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final abort = _between(
+      plugin,
+      'else if ([call.method isEqualToString:@"abortRecordingV2"]) {',
+      '#else\n        if ([[JuceBridge getAudioRouteImplementationObjC]',
+    );
+
+    expect(abort, contains('self.currentAudioRouteIntentV2 = @"playbackOnly"'));
+    expect(abort, isNot(contains('discardRecordingCaptureObjC')));
+    expect(abort, isNot(contains('quiescePlaybackRouteV2ObjC')));
+    expect(abort, isNot(contains('closeAudioDevice')));
+  });
+
+  test('macOS startup stays off Flutter UI and avoids the callback-lock deadlock', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final engine = File(enginePath).readAsStringSync();
+    final handler = _between(
+      plugin,
+      'else if ([call.method isEqualToString:@"initialisePlaybackV2"]) {',
+      'else if ([call.method isEqualToString:@"startAudioRouteMonitoringV2"])',
+    );
+    final initialise = _between(
+      engine,
+      'void JuceEngine::initialiseEngine(',
+      'bool JuceEngine::initialisePlaybackV2(',
+    );
+
+    expect(handler, contains('MixroomMacPlaybackStartupQueue()'));
+    expect(handler, contains('dispatch_async(dispatch_get_main_queue()'));
+    final openStart = initialise.indexOf(
+      'if (deviceManager.getCurrentAudioDevice() == nullptr)',
+    );
+    final renderLock = initialise.indexOf('GraphMutationScope renderLock(');
+    expect(openStart, greaterThanOrEqualTo(0));
+    expect(renderLock, greaterThan(openStart));
+    expect(
+      initialise,
+      contains('No Mixroom audio\n    // callback is attached until after'),
+    );
+  });
+
+  test('application Mac code contains no duplex aggregate lifecycle', () {
+    final sources = <String>[
+      pluginPath,
+      'juce_audio_engine/ios/Classes/JuceBridge.h',
+      'juce_audio_engine/ios/Classes/JuceBridge.mm',
+      enginePath,
+      'juce_audio_engine/ios/Classes/JuceEngine.h',
+    ].map((path) => File(path).readAsStringSync()).join('\n');
+
+    expect(sources, isNot(contains('AudioHardwareCreateAggregateDevice')));
+    expect(sources, isNot(contains('AudioHardwareDestroyAggregateDevice')));
+    expect(sources, isNot(contains('beginMacSystemSelectedDuplex')));
+    expect(sources, isNot(contains('waitForMacRoutePhaseCallback')));
+    expect(sources, isNot(contains('macIntentAggregateDevice')));
   });
 
   test('macOS editor startup follows the latest process teardown', () {
-    final source = File('lib/screens/audio_editor.dart').readAsStringSync();
+    final source = File(editorPath).readAsStringSync();
     final startup = source.substring(
-      source.indexOf(
-        'WidgetsBinding.instance.addPostFrameCallback((_) async {',
-      ),
+      source.indexOf('WidgetsBinding.instance.addPostFrameCallback((_) async {'),
       source.indexOf('_juceEngineEventSubscription ??='),
     );
     final sessionLoaded = startup.indexOf('.loadSession()');

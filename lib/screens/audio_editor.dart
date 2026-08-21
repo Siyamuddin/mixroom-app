@@ -5683,7 +5683,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
   bool _iosSystemSelectedRouteProbeRunning = false;
-  bool _macOSSystemSelectedRouteProbeRunning = false;
   bool _androidBluetoothDuplexProbeRunning = false;
   bool _androidSystemSelectedMediaProbeRunning = false;
   bool _bluetoothRecordingQualityNoticeShown = false;
@@ -5809,7 +5808,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _bluetoothImplementationSessionV2?.active == BluetoothImplementationV2.v2;
 
   bool get _supportsV2AudioRecording =>
-      Platform.isMacOS || Platform.isAndroid || Platform.isIOS;
+      Platform.isAndroid || Platform.isIOS;
 
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
@@ -12832,8 +12831,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         event.cause == 'audioInterruptionEnded' ||
         event.cause == 'audioInterrupted';
     final shouldAttemptSystemOutputRecovery =
-        (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) &&
-        event.cause != 'shutdown';
+        (Platform.isIOS || Platform.isAndroid) && event.cause != 'shutdown';
     final recordingWasActive =
         _isRecording ||
         _recordStartVisualPending ||
@@ -20896,7 +20894,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_isBluetoothV2Session) {
       if (!_supportsV2AudioRecording) {
         _showSmallNotice(
-          'Only audio recording with the built-in device microphone is available in this Bluetooth 2.0 checkpoint.',
+          Platform.isMacOS
+              ? 'Recording is temporarily unavailable in Bluetooth 2.0 on macOS.'
+              : 'Recording is unavailable for the current Bluetooth 2.0 route.',
         );
         return;
       }
@@ -41386,108 +41386,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _runMacOSSystemSelectedRouteProbeV2() async {
-    if (!kDebugMode || !Platform.isMacOS || !_isBluetoothV2Session) return;
-    if (_macOSSystemSelectedRouteProbeRunning) return;
-
-    final coordinator = _audioRouteCoordinatorV2;
-    if (_isPlaying || _transportDesiredPlaying) {
-      _showSmallNotice('Stop playback before checking the recording route.');
-      return;
-    }
-    if (coordinator == null ||
-        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
-        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
-      return;
-    }
-
-    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    if (!mounted) return;
-    final sourceReady =
-        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-        source.outputs.length == 1 &&
-        source.inputs.isEmpty &&
-        source.juce.deviceOpen == true &&
-        source.juce.audioCallbackAttached == true &&
-        source.juce.activeInputChannels == 0 &&
-        (source.juce.activeOutputChannels ?? 0) > 0;
-    if (!sourceReady) {
-      _showSmallNotice('The current macOS audio output is not ready yet.');
-      return;
-    }
-    if (!await _ensureMicrophonePermissionForRecording()) return;
-    if (!mounted) return;
-
-    setState(() => _macOSSystemSelectedRouteProbeRunning = true);
-    await _letRecordingVisualStatePaint();
-
-    try {
-      final duplexResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.preparingRecording,
-        operation: AudioRouteIntentOperationV2.systemSelectedProbe,
-      );
-      if (!mounted) return;
-      if (!duplexResult.succeeded) {
-        final removed =
-            duplexResult.snapshot.duplexProbe?.validationStage ==
-            'physicalRouteInvalidation';
-        _showSmallNotice(
-          removed
-              ? 'An audio device disconnected during the check.'
-              : 'The system-selected recording route is unavailable.',
-        );
-        return;
-      }
-
-      final duplex = duplexResult.snapshot;
-      final duplexVerified =
-          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-          duplex.duplexProbe?.selectionMode == 'macOSSystemSelected' &&
-          (duplex.duplexProbe?.actualCallbackCount ?? 0) > 0 &&
-          duplex.inputs.length == 1 &&
-          duplex.outputs.length == 1 &&
-          (duplex.inputs.single.channelCount ?? 0) > 0 &&
-          (duplex.outputs.single.channelCount ?? 0) > 0 &&
-          duplex.juce.deviceOpen == true &&
-          duplex.juce.audioCallbackAttached == true &&
-          duplex.juce.activeInputChannels == 1 &&
-          (duplex.juce.activeOutputChannels ?? 0) > 0 &&
-          (duplex.juce.sampleRateHz ?? 0) > 1000 &&
-          (duplex.juce.bufferFrames ?? 0) > 0;
-      if (!duplexVerified) {
-        final restoreResult = await coordinator.transitionIntent(
-          AudioRouteIntentV2.playbackOnly,
-        );
-        if (restoreResult.succeeded) {
-          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-        } else {
-          await JuceAudioEngine.abortRecordingV2();
-        }
-        _showSmallNotice('System recording-route verification failed.');
-        return;
-      }
-
-      final restoreResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.playbackOnly,
-      );
-      if (!mounted) return;
-      if (!restoreResult.succeeded) {
-        await JuceAudioEngine.abortRecordingV2();
-        _showSmallNotice(
-          'Audio playback could not be restored. Reopen the audio editor.',
-        );
-        return;
-      }
-      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-      _showSmallNotice('System recording route verified. Playback restored.');
-    } finally {
-      if (mounted) {
-        setState(() => _macOSSystemSelectedRouteProbeRunning = false);
-      }
-    }
-  }
-
   Future<void> _runIOSSystemSelectedRouteProbeV2() async {
     if (!kDebugMode || !Platform.isIOS || !_isBluetoothV2Session) return;
     if (_iosSystemSelectedRouteProbeRunning) return;
@@ -41973,7 +41871,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     JuceEngineDiagnostics diagnostics =
         await JuceAudioEngine.getEngineDiagnostics();
     if (!mounted) return;
-    var macProbeRunning = false;
     await showDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -42106,31 +42003,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           },
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                  if (kDebugMode &&
-                      Platform.isMacOS &&
-                      _isBluetoothV2Session) ...[
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.tonalIcon(
-                        onPressed: macProbeRunning
-                            ? null
-                            : () async {
-                                setModalState(() => macProbeRunning = true);
-                                await _runMacOSSystemSelectedRouteProbeV2();
-                                if (context.mounted) {
-                                  setModalState(() => macProbeRunning = false);
-                                }
-                              },
-                        icon: const Icon(Icons.mic_none_rounded),
-                        label: Text(
-                          macProbeRunning
-                              ? 'Checking System Recording Route…'
-                              : 'Run System Recording Route Check',
-                        ),
-                      ),
                     ),
                     const SizedBox(height: 10),
                   ],
@@ -43696,6 +43568,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildInputSelector() {
+    if (_isBluetoothV2Session && Platform.isMacOS) {
+      return InputDecorator(
+        decoration: _projectSettingsFieldDecoration(
+          labelText: L10n.translate(context, 'Input Device'),
+        ),
+        child: Text(
+          L10n.translate(
+            context,
+            'Unavailable in the macOS Bluetooth 2.0 output-only checkpoint',
+          ),
+          style: const TextStyle(color: Colors.white54),
+        ),
+      );
+    }
     if (_loadingDevices) {
       return const Padding(
         padding: EdgeInsets.all(8),

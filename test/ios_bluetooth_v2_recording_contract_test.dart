@@ -306,8 +306,13 @@ void main() {
         lessThan(abort.indexOf('dispatch_async(MixroomIOSLifecycleQueue()')),
       );
       expect(
-        plugin,
-        contains('self.iosIntentOperationActiveV2)) {'),
+        abort,
+        allOf(
+          contains(
+            'const BOOL activeProbe = self.iosIntentOperationActiveV2;',
+          ),
+          contains('if (activeProbe && ![self claimIOSIntentCleanupV2])'),
+        ),
         reason:
             'an active cancelled preparation must retain the single native cleanup owner',
       );
