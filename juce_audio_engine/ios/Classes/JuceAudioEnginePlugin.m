@@ -4617,16 +4617,19 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             self.macIntentRecoveryPendingV2 = YES;
             [JuceBridge cancelMacInputProbeWaitV2ObjC];
             [JuceBridge cancelMacOutputCallbackProofV2ObjC];
-            if (!self.macLifecycleTransitionActiveV2) {
+            // CoreAudio may deliver concurrent property callbacks for one
+            // physical change. Claim the terminal cleanup before enqueueing
+            // it so only one callback can finish the operation and emit the
+            // coordinator invalidation event.
+            if (!self.macLifecycleTransitionActiveV2 &&
+                [self claimMacIntentCleanupV2]) {
                 self.macLifecycleTransitionActiveV2 = YES;
                 dispatch_async(MixroomMacPlaybackStartupQueue(), ^{
                     NSDictionary *captureFacts =
                         [JuceBridge getMacInputCaptureFactsV2ObjC] ?: @{};
-                    if ([self claimMacIntentCleanupV2]) {
-                        [JuceBridge quiescePlaybackRouteV2ObjC:YES];
-                        [JuceBridge discardMacInputRecordingV2ObjC];
-                        [JuceBridge stopMacInputProbeV2ObjC];
-                    }
+                    [JuceBridge quiescePlaybackRouteV2ObjC:YES];
+                    [JuceBridge discardMacInputRecordingV2ObjC];
+                    [JuceBridge stopMacInputProbeV2ObjC];
                     self.iosLastDuplexProbeV2 = @{
                         @"status": @"failed",
                         @"diagnosticCode": @"route_unstable",

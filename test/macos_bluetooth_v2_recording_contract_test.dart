@@ -385,6 +385,18 @@ void main() {
     expect(ownedOperation, contains('quiescePlaybackRouteV2ObjC:YES'));
     expect(ownedOperation, contains('discardMacInputRecordingV2ObjC'));
     expect(ownedOperation, contains('stopMacInputProbeV2ObjC'));
+    expect(
+      'claimMacIntentCleanupV2'.allMatches(ownedOperation),
+      hasLength(1),
+    );
+    expect(
+      ownedOperation.indexOf('[self claimMacIntentCleanupV2]'),
+      lessThan(
+        ownedOperation.indexOf(
+          'dispatch_async(MixroomMacPlaybackStartupQueue()',
+        ),
+      ),
+    );
     expect(ownedOperation, isNot(contains('reconfigurePlaybackRouteV2ObjC')));
     expect(ownedOperation, contains('emitMacIntentRouteInvalidationEventV2:'));
     expect(intent, contains('const BOOL physicalRouteInvalidation'));
