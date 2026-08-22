@@ -14063,6 +14063,7 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     const double acceptedSampleRate = getKnownDeviceSampleRate(
         deviceManager,
         hostSampleRateAtomic.load(std::memory_order_relaxed));
+    independentInputCaptureMode.store(false, std::memory_order_release);
     if (!wavCapture.start(file,
                           acceptedSampleRate,
                           channelCount,
@@ -14074,9 +14075,64 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     return true;
 }
 
+#if JUCE_MAC && !JUCE_IOS
+bool JuceEngine::startIndependentInputRecordingToWav(
+    const juce::File &file,
+    double inputSampleRate)
+{
+    if (wavCapture.isActive() || !engineInitialized ||
+        !isV2PlaybackSession() || inputSampleRate <= 1000.0)
+        return false;
+
+    auto *device = deviceManager.getCurrentAudioDevice();
+    if (device == nullptr || v2PlaybackCallbackDetached ||
+        metronomeCallback == nullptr ||
+        device->getActiveInputChannels().countNumberOfSetBits() != 0 ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        device->getCurrentSampleRate() <= 1000.0 ||
+        device->getCurrentBufferSizeSamples() <= 0)
+        return false;
+
+    independentInputCaptureMode.store(true, std::memory_order_release);
+    if (!wavCapture.start(file, inputSampleRate, 1, 0))
+    {
+        independentInputCaptureMode.store(false, std::memory_order_release);
+        return false;
+    }
+
+    logCurrentAudioDeviceState("independent-input-recording-started");
+    return true;
+}
+
+void JuceEngine::captureIndependentInput(const float *input,
+                                         int numSamples) noexcept
+{
+    if (!independentInputCaptureMode.load(std::memory_order_acquire))
+        return;
+    const float *channels[] = {input};
+    wavCapture.capture(channels, input != nullptr ? 1 : 0, numSamples, 0);
+}
+
+juce::NamedValueSet JuceEngine::getIndependentInputCaptureFacts() const
+{
+    juce::NamedValueSet facts;
+    facts.set("active", wavCapture.isActive());
+    facts.set("attemptedSamples", (juce::int64)wavCapture.getAttemptedSamples());
+    facts.set("acceptedSamples", (juce::int64)wavCapture.getAcceptedSamples());
+    facts.set("droppedSamples", (juce::int64)wavCapture.getDroppedSamples());
+    facts.set("invalidBlockCount", (juce::int64)wavCapture.getInvalidBlockCount());
+    facts.set("actualSampleRate", wavCapture.getActualSampleRate());
+    facts.set("channelCount", wavCapture.getCaptureChannelCount());
+    facts.set("source", independentInputCaptureMode.load(
+        std::memory_order_acquire) ? "independentInput" : "deviceInput");
+    return facts;
+}
+#endif
+
 RealtimeWavCapture::StopResult JuceEngine::stopRecording()
 {
     auto captureResult = wavCapture.stop();
+    independentInputCaptureMode.store(false, std::memory_order_release);
 
     routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 #if JUCE_IOS
@@ -14094,6 +14150,7 @@ RealtimeWavCapture::StopResult JuceEngine::stopRecording()
 void JuceEngine::discardRecordingCapture()
 {
     wavCapture.stop(true);
+    independentInputCaptureMode.store(false, std::memory_order_release);
     routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 }
 
@@ -14104,6 +14161,8 @@ bool JuceEngine::isRecording() const
 
 void JuceEngine::captureInput(const float *const *input, int numInputChannels, int numSamples)
 {
+    if (independentInputCaptureMode.load(std::memory_order_acquire))
+        return;
     wavCapture.capture(input, numInputChannels, numSamples);
 }
 

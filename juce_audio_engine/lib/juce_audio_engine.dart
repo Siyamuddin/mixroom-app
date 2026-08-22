@@ -207,6 +207,7 @@ class RecordingCaptureResult {
     required this.attemptedSamples,
     required this.acceptedSamples,
     required this.droppedSamples,
+    required this.invalidBlockCount,
     required this.actualSampleRate,
     required this.channelCount,
   });
@@ -216,6 +217,7 @@ class RecordingCaptureResult {
   final int attemptedSamples;
   final int acceptedSamples;
   final int droppedSamples;
+  final int invalidBlockCount;
   final double actualSampleRate;
   final int channelCount;
 
@@ -227,6 +229,7 @@ class RecordingCaptureResult {
       attemptedSamples: (map['attemptedSamples'] as num?)?.toInt() ?? 0,
       acceptedSamples: (map['acceptedSamples'] as num?)?.toInt() ?? 0,
       droppedSamples: (map['droppedSamples'] as num?)?.toInt() ?? 0,
+      invalidBlockCount: (map['invalidBlockCount'] as num?)?.toInt() ?? 0,
       actualSampleRate: (map['actualSampleRate'] as num?)?.toDouble() ?? 0.0,
       channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
     );
@@ -238,6 +241,7 @@ class RecordingCaptureResult {
     attemptedSamples: 0,
     acceptedSamples: 0,
     droppedSamples: 0,
+    invalidBlockCount: 0,
     actualSampleRate: 0.0,
     channelCount: 0,
   );

@@ -9,6 +9,7 @@ void main() {
       'attemptedSamples': 48000,
       'acceptedSamples': 48000,
       'droppedSamples': 0,
+      'invalidBlockCount': 0,
       'actualSampleRate': 48000,
       'channelCount': 1,
       'futureField': 'ignored',
@@ -19,6 +20,7 @@ void main() {
     expect(result.attemptedSamples, 48000);
     expect(result.acceptedSamples, 48000);
     expect(result.droppedSamples, 0);
+    expect(result.invalidBlockCount, 0);
     expect(result.actualSampleRate, 48000.0);
     expect(result.channelCount, 1);
   });

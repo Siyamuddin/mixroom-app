@@ -19,7 +19,7 @@ void main() {
       'juce_audio_engine/android/src/main/cpp/juce/modules/'
       'juce_audio_devices/native/juce_CoreAudio_mac.cpp';
 
-  test('macOS exposes only the writer-free system-route proof', () {
+  test('macOS recording and probe share the system-selected intent route', () {
     final editor = File(editorPath).readAsStringSync();
     final support = _between(
       editor,
@@ -32,8 +32,11 @@ void main() {
       'Future<void> _runIOSSystemSelectedRouteProbeV2()',
     );
 
-    expect(support, contains('Platform.isAndroid || Platform.isIOS'));
-    expect(support, isNot(contains('Platform.isMacOS')));
+    expect(support, contains('Platform.isMacOS'));
+    expect(
+      editor,
+      contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
+    );
     expect(probe, contains('AudioRouteIntentOperationV2.systemSelectedProbe'));
     expect(probe, contains("'macOSIndependentInput'"));
     expect(probe, contains('inputCallbackCount'));
@@ -55,7 +58,7 @@ void main() {
     );
     expect(
       selector,
-      contains('Unavailable in the macOS Bluetooth 2.0 output-only checkpoint'),
+      contains('System Default (change in macOS Sound settings)'),
     );
     expect(
       selector.indexOf('if (_isBluetoothV2Session && Platform.isMacOS)'),
@@ -102,9 +105,135 @@ void main() {
     expect(adapter, contains('AudioUnitRender(unit'));
     expect(adapter, contains('numberFrames > capacityFrames'));
     expect(adapter, contains('callbackReady.store(true'));
+    expect(adapter, contains('startIndependentInputRecordingToWav'));
+    expect(adapter, contains('captureIndependentInput'));
+    expect(
+      adapter,
+      contains('captureIndependentInput(\n                    nullptr'),
+    );
+    expect(adapter, contains('captureEnabled.load'));
     expect(adapter, isNot(contains('push_back')));
     expect(adapter, isNot(contains('resize(')));
   });
+
+  test('production capture uses AUHAL native rate without reopening JUCE', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final bridge = File(bridgePath).readAsStringSync();
+    final engine = File(enginePath).readAsStringSync();
+    final start = _between(
+      plugin,
+      '- (BOOL)startMacIndependentInputRecordingV2:',
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:',
+    );
+    final externalCapture = _between(
+      engine,
+      'bool JuceEngine::startIndependentInputRecordingToWav(',
+      'RealtimeWavCapture::StopResult JuceEngine::stopRecording()',
+    );
+
+    expect(start, contains('systemSelectedRecording'));
+    expect(start, contains('getMacInputProbeFactsV2ObjC'));
+    expect(start, contains('startMacInputRecordingV2ObjC:path'));
+    expect(start, isNot(contains('reconfigureMacPlaybackRouteV2ObjC')));
+    expect(start, isNot(contains('reconfigureRecordingRouteV2ObjC')));
+    expect(
+      externalCapture,
+      contains('wavCapture.start(file, inputSampleRate, 1, 0)'),
+    );
+    expect(
+      externalCapture,
+      contains('independentInputCaptureMode.store(true'),
+    );
+    expect(
+      engine,
+      contains(
+        'if (independentInputCaptureMode.load(std::memory_order_acquire))\n'
+        '        return;\n'
+        '    wavCapture.capture(input, numInputChannels, numSamples);',
+      ),
+    );
+    expect(
+      externalCapture,
+      contains('getActiveInputChannels().countNumberOfSetBits() != 0'),
+    );
+    expect(bridge, contains('scratch.data(), static_cast<int>(numberFrames)'));
+    expect(bridge, isNot(contains('AudioHardwareCreateAggregateDevice')));
+  });
+
+  test('recording stop finalizes capture before output-only restoration', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final handler = _between(
+      plugin,
+      'else if ([call.method isEqualToString:@"stopRecording"])',
+      'else if ([call.method isEqualToString:@"restoreBluetoothPlaybackAfterRecordingStop"])',
+    );
+    final intent = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+    final restore = _between(
+      intent,
+      'else if ([intent isEqualToString:@"playbackOnly"] &&',
+      'else if (![intent isEqualToString:@"playbackOnly"])',
+    );
+
+    expect(handler, contains('stopMacInputRecordingV2ObjC'));
+    expect(handler, contains('MixroomMacPlaybackStartupQueue()'));
+    expect(restore, contains('discardMacInputRecordingV2ObjC'));
+    expect(restore, contains('stopMacInputProbeV2ObjC'));
+    expect(restore, contains('restoreSourceOutput()'));
+    expect(
+      restore.indexOf('stopMacInputProbeV2ObjC'),
+      lessThan(restore.indexOf('restoreSourceOutput()')),
+    );
+  });
+
+  test('independent input and output clocks remain intentionally separate', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final engine = File(enginePath).readAsStringSync();
+    final start = _between(
+      plugin,
+      '- (BOOL)startMacIndependentInputRecordingV2:',
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:',
+    );
+    final capture = _between(
+      engine,
+      'bool JuceEngine::startIndependentInputRecordingToWav(',
+      'RealtimeWavCapture::StopResult JuceEngine::stopRecording()',
+    );
+
+    expect(start, contains('inputFacts[@"sampleRateHz"]'));
+    expect(start, contains('expectedOutput[@"sampleRateHz"]'));
+    expect(capture, contains('inputSampleRate'));
+    expect(capture, isNot(contains('hostSampleRateAtomic')));
+    expect(capture, isNot(contains('resampl')));
+  });
+
+  test(
+    'verified independent-input recording does not revalidate JUCE input',
+    () {
+      final editor = File(editorPath).readAsStringSync();
+      final readiness = _between(
+        editor,
+        'Future<bool> _ensurePlaybackRouteReady(',
+        'void _handleAudioRouteIntentInvalidatedV2(',
+      );
+
+      expect(readiness, contains('macIndependentInputRecording'));
+      expect(
+        readiness,
+        contains('coordinator?.intent == AudioRouteIntentV2.recording'),
+      );
+      expect(
+        readiness,
+        contains(
+          'macIndependentInputRecording ||\n'
+          '          await JuceAudioEngine.validatePlaybackV2()',
+        ),
+      );
+    },
+  );
 
   test('probe never duplicates the permanent output observer listeners', () {
     final plugin = File(pluginPath).readAsStringSync();
@@ -248,10 +377,29 @@ void main() {
 
       expect(ownedOperation, contains('macIntentOperationCancelledV2 = YES'));
       expect(ownedOperation, contains('quiescePlaybackRouteV2ObjC:YES'));
+      expect(ownedOperation, contains('discardMacInputRecordingV2ObjC'));
       expect(ownedOperation, contains('stopMacInputProbeV2ObjC'));
       expect(ownedOperation, isNot(contains('reconfigurePlaybackRouteV2ObjC')));
     },
   );
+
+  test('recording preparation removal uses the explicit reopen boundary', () {
+    final editor = File(editorPath).readAsStringSync();
+    final preflight = _between(
+      editor,
+      'Future<bool> _prepareAudioRecordingStartPreflight()',
+      'Future<void> _startAudioRecordingJuce()',
+    );
+
+    expect(preflight, contains("'physicalRouteInvalidation'"));
+    expect(
+      preflight,
+      contains(
+        'The audio device disconnected during recording preparation. '
+        'Reopen the audio editor.',
+      ),
+    );
+  });
 
   test(
     'macOS startup remains off Flutter UI and avoids callback-lock deadlock',

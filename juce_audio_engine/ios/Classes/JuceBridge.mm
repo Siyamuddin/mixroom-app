@@ -2575,9 +2575,62 @@ public:
         return lastStatus.load(std::memory_order_acquire);
     }
 
+    OSStatus getFirstRenderErrorStatus() const noexcept
+    {
+        return firstRenderErrorStatus.load(std::memory_order_acquire);
+    }
+
+    OSStatus getLastRenderErrorStatus() const noexcept
+    {
+        return lastRenderErrorStatus.load(std::memory_order_acquire);
+    }
+
     bool isRunning() const noexcept
     {
         return running.load(std::memory_order_acquire);
+    }
+
+    bool startCapture(const juce::File &file)
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        if (!running.load(std::memory_order_acquire) ||
+            !callbackReady.load(std::memory_order_acquire) ||
+            cancelled.load(std::memory_order_acquire) ||
+            captureEnabled.load(std::memory_order_acquire))
+            return false;
+
+        if (!JuceEngine::get().startIndependentInputRecordingToWav(
+                file, sampleRate.load(std::memory_order_acquire)))
+            return false;
+
+        captureEnabled.store(true, std::memory_order_release);
+        return true;
+    }
+
+    RealtimeWavCapture::StopResult stopCapture()
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        if (!captureEnabled.exchange(false, std::memory_order_acq_rel))
+            return {};
+        return JuceEngine::get().stopRecording();
+    }
+
+    void discardCapture()
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        captureEnabled.store(false, std::memory_order_release);
+        JuceEngine::get().discardRecordingCapture();
+    }
+
+    bool isCaptureActive() const noexcept
+    {
+        return captureEnabled.load(std::memory_order_acquire) &&
+            JuceEngine::get().isRecording();
+    }
+
+    juce::NamedValueSet getCaptureFacts() const
+    {
+        return JuceEngine::get().getIndependentInputCaptureFacts();
     }
 
 private:
@@ -2604,6 +2657,10 @@ private:
         if (numberFrames == 0 || numberFrames > capacityFrames || unit == nullptr)
         {
             invalidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+            recordRenderError(kAudio_ParamError);
+            if (captureEnabled.load(std::memory_order_acquire))
+                JuceEngine::get().captureIndependentInput(
+                    nullptr, static_cast<int>(numberFrames));
             lastFrames.store(numberFrames, std::memory_order_relaxed);
             lastStatus.store(kAudio_ParamError, std::memory_order_relaxed);
             callbackEvent.signal();
@@ -2627,17 +2684,37 @@ private:
         {
             callbackCount.fetch_add(1, std::memory_order_relaxed);
             callbackReady.store(true, std::memory_order_release);
+            if (captureEnabled.load(std::memory_order_acquire))
+                JuceEngine::get().captureIndependentInput(
+                    scratch.data(), static_cast<int>(numberFrames));
         }
         else
         {
             invalidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+            recordRenderError(status);
+            if (captureEnabled.load(std::memory_order_acquire))
+                JuceEngine::get().captureIndependentInput(
+                    nullptr, static_cast<int>(numberFrames));
         }
         callbackEvent.signal();
         return status;
     }
 
+    void recordRenderError(OSStatus status) noexcept
+    {
+        OSStatus expected = noErr;
+        firstRenderErrorStatus.compare_exchange_strong(
+            expected,
+            status,
+            std::memory_order_release,
+            std::memory_order_relaxed);
+        lastRenderErrorStatus.store(status, std::memory_order_release);
+    }
+
     void stopLocked()
     {
+        if (captureEnabled.exchange(false, std::memory_order_acq_rel))
+            JuceEngine::get().discardRecordingCapture();
         cancelled.store(true, std::memory_order_release);
         active.store(false, std::memory_order_release);
         callbackEvent.signal();
@@ -2658,6 +2735,8 @@ private:
         invalidCallbackCount.store(0, std::memory_order_release);
         lastFrames.store(0, std::memory_order_release);
         lastStatus.store(noErr, std::memory_order_release);
+        firstRenderErrorStatus.store(noErr, std::memory_order_release);
+        lastRenderErrorStatus.store(noErr, std::memory_order_release);
         callbackReady.store(false, std::memory_order_release);
     }
 
@@ -2673,10 +2752,13 @@ private:
     std::atomic<std::uint64_t> invalidCallbackCount{0};
     std::atomic<UInt32> lastFrames{0};
     std::atomic<OSStatus> lastStatus{noErr};
+    std::atomic<OSStatus> firstRenderErrorStatus{noErr};
+    std::atomic<OSStatus> lastRenderErrorStatus{noErr};
     std::atomic<bool> callbackReady{false};
     std::atomic<bool> cancelled{false};
     std::atomic<bool> active{false};
     std::atomic<bool> running{false};
+    std::atomic<bool> captureEnabled{false};
 };
 
 MixroomMacInputProbe &mixroomMacInputProbeV2()
@@ -2865,6 +2947,8 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
             probe.getInvalidCallbackCount()),
         @"lastFrames": @(probe.getLastFrames()),
         @"lastStatus": @(probe.getLastStatus()),
+        @"firstRenderErrorStatus": @(probe.getFirstRenderErrorStatus()),
+        @"lastRenderErrorStatus": @(probe.getLastRenderErrorStatus()),
         @"running": @(probe.isRunning()),
     };
 }
@@ -2872,6 +2956,54 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 + (void)stopMacInputProbeV2ObjC
 {
     mixroomMacInputProbeV2().stop();
+}
+
++ (BOOL)startMacInputRecordingV2ObjC:(NSString *)path
+{
+    return mixroomMacInputProbeV2().startCapture(juceFileFromNSString(path));
+}
+
++ (NSDictionary<NSString *, id> *)stopMacInputRecordingV2ObjC
+{
+    const auto &probe = mixroomMacInputProbeV2();
+    const auto inputCallbackCount = probe.getCallbackCount();
+    const auto inputInvalidCallbackCount = probe.getInvalidCallbackCount();
+    const auto firstRenderErrorStatus = probe.getFirstRenderErrorStatus();
+    const auto lastRenderErrorStatus = probe.getLastRenderErrorStatus();
+    const auto result = mixroomMacInputProbeV2().stopCapture();
+    return @{
+        @"success": @(result.success),
+        @"diagnosticCode":
+            [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()]
+                ?: @"writer_finalize_failed",
+        @"attemptedSamples": @(result.attemptedSamples),
+        @"acceptedSamples": @(result.acceptedSamples),
+        @"droppedSamples": @(result.droppedSamples),
+        @"invalidBlockCount": @(result.invalidBlockCount),
+        @"actualSampleRate": @(result.actualSampleRate),
+        @"channelCount": @(result.channelCount),
+        @"inputCallbackCount": @((unsigned long long)inputCallbackCount),
+        @"inputInvalidCallbackCount":
+            @((unsigned long long)inputInvalidCallbackCount),
+        @"firstRenderErrorStatus": @(firstRenderErrorStatus),
+        @"lastRenderErrorStatus": @(lastRenderErrorStatus),
+    };
+}
+
++ (void)discardMacInputRecordingV2ObjC
+{
+    mixroomMacInputProbeV2().discardCapture();
+}
+
++ (BOOL)isMacInputRecordingV2ObjC
+{
+    return mixroomMacInputProbeV2().isCaptureActive();
+}
+
++ (NSDictionary<NSString *, id> *)getMacInputCaptureFactsV2ObjC
+{
+    return namedValueStatsToNSDictionary(
+        mixroomMacInputProbeV2().getCaptureFacts());
 }
 #endif
 
@@ -5466,6 +5598,7 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
         @"attemptedSamples" : @(result.attemptedSamples),
         @"acceptedSamples" : @(result.acceptedSamples),
         @"droppedSamples" : @(result.droppedSamples),
+        @"invalidBlockCount" : @(result.invalidBlockCount),
         @"actualSampleRate" : @(result.actualSampleRate),
         @"channelCount" : @(result.channelCount),
     };

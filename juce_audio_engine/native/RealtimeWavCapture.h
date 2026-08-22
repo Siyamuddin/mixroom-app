@@ -19,6 +19,7 @@ public:
         std::int64_t attemptedSamples = 0;
         std::int64_t acceptedSamples = 0;
         std::int64_t droppedSamples = 0;
+        std::int64_t invalidBlockCount = 0;
         double actualSampleRate = 0.0;
         int channelCount = 0;
 
@@ -30,6 +31,7 @@ public:
             values.set("attemptedSamples", (juce::int64)attemptedSamples);
             values.set("acceptedSamples", (juce::int64)acceptedSamples);
             values.set("droppedSamples", (juce::int64)droppedSamples);
+            values.set("invalidBlockCount", (juce::int64)invalidBlockCount);
             values.set("actualSampleRate", actualSampleRate);
             values.set("channelCount", channelCount);
             return values;
@@ -132,10 +134,12 @@ public:
         result.attemptedSamples = attemptedSamples.load(std::memory_order_relaxed);
         result.acceptedSamples = acceptedSamples.load(std::memory_order_relaxed);
         result.droppedSamples = droppedSamples.load(std::memory_order_relaxed);
+        result.invalidBlockCount =
+            invalidBlockCount.load(std::memory_order_relaxed);
         result.actualSampleRate = actualSampleRate;
         result.channelCount = captureChannelCount;
 
-        const bool invalidShape = invalidBlockCount.load(std::memory_order_relaxed) > 0;
+        const bool invalidShape = result.invalidBlockCount > 0;
         const bool overrun = result.droppedSamples > 0 && !invalidShape;
         const bool fileValid = validateFinalizedFile(result.acceptedSamples);
 
@@ -173,6 +177,36 @@ public:
     bool isActive() const noexcept
     {
         return admissionOpen.load(std::memory_order_acquire);
+    }
+
+    std::int64_t getAttemptedSamples() const noexcept
+    {
+        return attemptedSamples.load(std::memory_order_relaxed);
+    }
+
+    std::int64_t getAcceptedSamples() const noexcept
+    {
+        return acceptedSamples.load(std::memory_order_relaxed);
+    }
+
+    std::int64_t getDroppedSamples() const noexcept
+    {
+        return droppedSamples.load(std::memory_order_relaxed);
+    }
+
+    std::int64_t getInvalidBlockCount() const noexcept
+    {
+        return invalidBlockCount.load(std::memory_order_relaxed);
+    }
+
+    double getActualSampleRate() const noexcept
+    {
+        return actualSampleRate;
+    }
+
+    int getCaptureChannelCount() const noexcept
+    {
+        return captureChannelCount;
     }
 
     double consumePeak() const noexcept

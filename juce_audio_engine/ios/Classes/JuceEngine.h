@@ -6253,6 +6253,12 @@ public:
     bool startRecordingToWav(const juce::File &file,
                              int channelStart,
                              int channelCount);
+#if JUCE_MAC && !JUCE_IOS
+    bool startIndependentInputRecordingToWav(const juce::File &file,
+                                             double inputSampleRate);
+    void captureIndependentInput(const float *input, int numSamples) noexcept;
+    juce::NamedValueSet getIndependentInputCaptureFacts() const;
+#endif
     RealtimeWavCapture::StopResult stopRecording();
     void discardRecordingCapture();
     bool isRecording() const;
@@ -6892,6 +6898,7 @@ private:
 
     // Recording state
     RealtimeWavCapture wavCapture;
+    std::atomic<bool> independentInputCaptureMode{false};
     std::atomic<int> recordingRestoreDesiredInputs{0};
     std::atomic<int> desiredInputOpenChannels{0};
     juce::String preferredInputDeviceName;

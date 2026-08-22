@@ -5809,7 +5809,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool get _isBluetoothV2Session =>
       _bluetoothImplementationSessionV2?.active == BluetoothImplementationV2.v2;
 
-  bool get _supportsV2AudioRecording => Platform.isAndroid || Platform.isIOS;
+  bool get _supportsV2AudioRecording =>
+      Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
@@ -12779,7 +12780,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         return false;
       }
-      final ready = await JuceAudioEngine.validatePlaybackV2();
+      final macIndependentInputRecording =
+          Platform.isMacOS &&
+          coordinator?.intent == AudioRouteIntentV2.recording;
+      final ready =
+          macIndependentInputRecording ||
+          await JuceAudioEngine.validatePlaybackV2();
       if (!ready && mounted) {
         _showSmallNotice(
           Platform.isAndroid
@@ -20953,6 +20959,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
     var v2IntentOperation = AudioRouteIntentOperationV2.standard;
+    if (_isBluetoothV2Session && Platform.isMacOS) {
+      v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
+    }
     if (_isBluetoothV2Session && Platform.isAndroid) {
       final coordinator = _audioRouteCoordinatorV2;
       if (_v2AudioSessionInvalidated ||
@@ -21021,16 +21030,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       final result = await coordinator.transitionIntent(
         AudioRouteIntentV2.preparingRecording,
-        operation: Platform.isIOS
+        operation: Platform.isIOS || Platform.isMacOS
             ? AudioRouteIntentOperationV2.systemSelectedRecording
             : v2IntentOperation,
       );
       if (_recordStartCancelRequested) return false;
       if (!result.succeeded) {
         if (mounted) {
+          final macRouteRemoved =
+              Platform.isMacOS &&
+              result.snapshot.duplexProbe?.validationStage ==
+                  'physicalRouteInvalidation';
           _showSmallNotice(
-            Platform.isIOS
+            macRouteRemoved
+                ? 'The audio device disconnected during recording preparation. Reopen the audio editor.'
+                : Platform.isIOS
                 ? 'Recording is unavailable for the current iOS audio route.'
+                : Platform.isMacOS
+                ? 'Recording is unavailable for the current macOS audio route.'
                 : v2IntentOperation ==
                       AudioRouteIntentOperationV2.systemSelectedRecording
                 ? 'Recording is unavailable for the current Android audio route.'
@@ -43719,7 +43736,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         child: Text(
           L10n.translate(
             context,
-            'Unavailable in the macOS Bluetooth 2.0 output-only checkpoint',
+            'System Default (change in macOS Sound settings)',
           ),
           style: const TextStyle(color: Colors.white54),
         ),
@@ -45546,7 +45563,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         });
       }
       if (_isBluetoothV2Session &&
-          (Platform.isIOS || Platform.isAndroid) &&
+          (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) &&
           _audioRouteCoordinatorV2?.state ==
               AudioRouteCoordinatorStateV2.preparingInput) {
         await JuceAudioEngine.abortRecordingV2(cancelOnly: true);

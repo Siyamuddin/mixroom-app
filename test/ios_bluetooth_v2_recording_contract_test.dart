@@ -122,6 +122,11 @@ void main() {
       'AudioRouteIntentV2.preparingRecording',
       preflightStart,
     );
+    final preflightEnd = editor.indexOf(
+      'Future<void> _startAudioRecordingJuce()',
+      preflightStart,
+    );
+    final preflight = editor.substring(preflightStart, preflightEnd);
 
     expect(
       editor.substring(preflightStart, permissionIndex),
@@ -133,17 +138,17 @@ void main() {
     );
     expect(permissionIndex, lessThan(intentIndex));
     expect(
-      editor.substring(preflightStart, intentIndex + 500),
+      preflight,
       contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
     );
     expect(
-      editor.substring(preflightStart, intentIndex + 2000),
+      preflight,
       contains(
         'Bluetooth microphone in use. Playback quality is reduced while recording.',
       ),
     );
     expect(
-      editor.substring(preflightStart, intentIndex + 2500),
+      preflight,
       contains('Recording is unavailable for the current iOS audio route.'),
     );
     final androidSourceGuard = editor.substring(
@@ -153,13 +158,13 @@ void main() {
     expect(androidSourceGuard, contains('Platform.isAndroid'));
     expect(androidSourceGuard, contains('getAudioRouteSnapshotV2'));
     expect(
-      editor.substring(intentIndex, intentIndex + 2500),
+      preflight,
       contains(
         'verifiedInput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex',
       ),
     );
     expect(
-      editor.substring(intentIndex, intentIndex + 2500),
+      preflight,
       contains(
         'verifiedOutput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex',
       ),
@@ -308,9 +313,7 @@ void main() {
       expect(
         abort,
         allOf(
-          contains(
-            'const BOOL activeProbe = self.iosIntentOperationActiveV2;',
-          ),
+          contains('const BOOL activeProbe = self.iosIntentOperationActiveV2;'),
           contains('if (activeProbe && ![self claimIOSIntentCleanupV2])'),
         ),
         reason:

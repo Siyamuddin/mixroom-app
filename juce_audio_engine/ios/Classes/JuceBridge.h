@@ -26,6 +26,11 @@
 + (void)cancelMacInputProbeWaitV2ObjC;
 + (NSDictionary<NSString *, id> * _Nonnull)getMacInputProbeFactsV2ObjC;
 + (void)stopMacInputProbeV2ObjC;
++ (BOOL)startMacInputRecordingV2ObjC:(NSString * _Nonnull)path;
++ (NSDictionary<NSString *, id> * _Nonnull)stopMacInputRecordingV2ObjC;
++ (void)discardMacInputRecordingV2ObjC;
++ (BOOL)isMacInputRecordingV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)getMacInputCaptureFactsV2ObjC;
 #endif
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;

@@ -214,7 +214,7 @@ void main() {
     expect(engine, contains('duplexProbeCallbackCount'));
     expect(engine, contains('isBluetoothDuplexProjectCallbackReadyV2'));
     expect(engineHeader, contains('beginFirstValidCallbackProof()'));
-    expect(engineHeader, contains('completeFirstValidCallbackProof()'));
+    expect(engineHeader, contains('completeFirstValidCallbackProof('));
     expect(plugin, contains('@"projectCallback"'));
     expect(engine, isNot(contains('while (iosBluetoothDuplexProbe')));
   });
