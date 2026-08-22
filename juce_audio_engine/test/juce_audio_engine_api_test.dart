@@ -578,6 +578,21 @@ void main() {
     });
   }
 
+  test('macOS V2 explicit output reuses the playback route contract', () async {
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      15,
+      outputDeviceName: 'Studio Display',
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(calls.single.method, 'applyAudioRouteConfigurationV2');
+    final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
+    expect(arguments['outputDeviceName'], 'Studio Display');
+    expect(arguments['followSystemOutput'], isFalse);
+    expect(arguments['desiredInputChannels'], 0);
+  });
+
   for (final platform in <TargetPlatform>[
     TargetPlatform.macOS,
     TargetPlatform.android,

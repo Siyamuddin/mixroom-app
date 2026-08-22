@@ -7,7 +7,10 @@ abstract interface class AudioRouteAdapterV2 {
 
   Future<AudioRouteSnapshotV2> startMonitoring();
 
-  Future<AudioRouteTransitionResultV2> applyPlaybackRoute(int generation);
+  Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
+    int generation, {
+    String? outputDeviceName,
+  });
 
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
@@ -306,6 +309,65 @@ class AudioRouteCoordinatorV2 {
       finishTransition();
       _schedulePendingDrain();
     }
+  }
+
+  /// Performs one explicit output-only transition through the same serialized
+  /// owner used by system route changes. The optional output is meaningful on
+  /// macOS only; mobile platforms remain system-selected.
+  Future<AudioRouteTransitionResultV2> selectPlaybackOutput(
+    String outputDeviceName,
+  ) async {
+    final selection = outputDeviceName.trim();
+    if (_disposed || !_started || _shutdownCancellation) {
+      return _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'coordinator_disposed',
+      );
+    }
+    if (selection.isEmpty ||
+        _interruptionActive ||
+        _intent != AudioRouteIntentV2.playbackOnly ||
+        _applyInFlight ||
+        _intentTransitionInFlight ||
+        _pending != null) {
+      return _localFailure(AudioRouteIntentV2.playbackOnly, 'route_unstable');
+    }
+
+    _applyInFlight = true;
+    final generation = _latestGeneration;
+    _setState(AudioRouteCoordinatorStateV2.reconfiguring);
+    AudioRouteTransitionResultV2 result;
+    try {
+      result = await _adapter.applyPlaybackRoute(
+        generation,
+        outputDeviceName: selection,
+      );
+    } catch (_) {
+      result = _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'actual_state_unavailable',
+      );
+    } finally {
+      _applyInFlight = false;
+    }
+
+    if (_disposed) return result;
+    final stale = result.generation != generation ||
+        result.diagnosticCode == 'stale_generation' ||
+        (_latestGeneration > result.generation && _pending != null);
+    if (!stale) {
+      final restoredPlayback =
+          result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
+              result.snapshot.juce.deviceOpen == true &&
+              result.snapshot.juce.activeInputChannels == 0 &&
+              (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
+      _setState(result.succeeded || restoredPlayback
+          ? AudioRouteCoordinatorStateV2.stable
+          : AudioRouteCoordinatorStateV2.failed);
+      onTransition?.call(result);
+    }
+    _schedulePendingDrain();
+    return result;
   }
 
   /// Serializes a playback-only recovery behind an intent transition that was

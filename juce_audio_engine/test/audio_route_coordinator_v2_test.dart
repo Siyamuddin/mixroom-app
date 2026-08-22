@@ -85,6 +85,7 @@ AudioRouteTransitionResultV2 _result(
 class _FakeAdapter implements AudioRouteAdapterV2 {
   final controller = StreamController<AudioRouteChangeEventV2>.broadcast();
   final appliedGenerations = <int>[];
+  final appliedOutputNames = <String?>[];
   final appliedIntents = <AudioRouteIntentV2>[];
   final appliedOperations = <AudioRouteIntentOperationV2>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
@@ -104,9 +105,11 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
 
   @override
   Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
-    int generation,
-  ) async {
+    int generation, {
+    String? outputDeviceName,
+  }) async {
     appliedGenerations.add(generation);
+    appliedOutputNames.add(outputDeviceName);
     return results[generation] ?? _result(generation);
   }
 
@@ -143,6 +146,93 @@ void main() {
     await coordinator.dispose();
     await coordinator.dispose();
     expect(adapter.stopCount, 1);
+  });
+
+  test('serializes an explicit playback output through the route owner',
+      () async {
+    final adapter = _FakeAdapter();
+    final transitions = <AudioRouteTransitionResultV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onTransition: transitions.add,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.selectPlaybackOutput('Mac Speakers');
+
+    expect(result.succeeded, isTrue);
+    expect(adapter.appliedGenerations, <int>[0]);
+    expect(adapter.appliedOutputNames, <String?>['Mac Speakers']);
+    expect(transitions, hasLength(1));
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('explicit output selection cannot overlap input lifecycle ownership',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+
+    final result = await coordinator.selectPlaybackOutput('Mac Speakers');
+
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'route_unstable');
+    expect(adapter.appliedOutputNames, isEmpty);
+    await coordinator.dispose();
+  });
+
+  test('rapid explicit output selections never overlap', () async {
+    final adapter = _FakeAdapter();
+    final firstResult = Completer<AudioRouteTransitionResultV2>();
+    adapter.results[0] = firstResult.future;
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final first = coordinator.selectPlaybackOutput('Bluetooth Output');
+    await Future<void>.delayed(Duration.zero);
+    final second = await coordinator.selectPlaybackOutput('Mac Speakers');
+    firstResult.complete(_result(0));
+    final completedFirst = await first;
+
+    expect(completedFirst.succeeded, isTrue);
+    expect(second.succeeded, isFalse);
+    expect(second.diagnosticCode, 'route_unstable');
+    expect(adapter.appliedOutputNames, <String?>['Bluetooth Output']);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('failed output selection with verified playback remains stable',
+      () async {
+    final adapter = _FakeAdapter();
+    adapter.results[0] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'output_selection_unavailable',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.selectPlaybackOutput('Missing Output');
+
+    expect(result.succeeded, isFalse);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
   });
 
   test('ignores duplicate fingerprints and applies once', () async {

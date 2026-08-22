@@ -2554,9 +2554,39 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
         MixroomIOSAudioSessionPolicy::v2PlaybackOnly);
 #endif
 #if JUCE_MAC && !JUCE_IOS
+    // A removed CoreAudio endpoint can remain in JUCE's cached device list
+    // until the device type is scanned again. Resolve the already-verified
+    // CoreAudio name to exactly one fresh JUCE mechanical open key before the
+    // single open attempt; this is discovery, not a retry or route choice.
+    juce::String resolvedOutputDeviceName;
+    int outputNameMatchCount = 0;
+    const auto normalizedOutputDeviceName = outputDeviceName.trim();
+    for (auto *type : deviceManager.getAvailableDeviceTypes())
+    {
+        if (type == nullptr)
+            continue;
+        type->scanForDevices();
+        for (const auto &candidate : type->getDeviceNames(false))
+        {
+            if (candidate.trim() == normalizedOutputDeviceName)
+            {
+                resolvedOutputDeviceName = candidate;
+                ++outputNameMatchCount;
+            }
+        }
+    }
+    if (outputNameMatchCount != 1)
+    {
+        juceLogToFlutter(
+            ("V2 output-only JUCE mapping unavailable: matches=" +
+             juce::String(outputNameMatchCount))
+                .toRawUTF8());
+        return false;
+    }
+
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     setup.inputDeviceName = {};
-    setup.outputDeviceName = outputDeviceName;
+    setup.outputDeviceName = resolvedOutputDeviceName;
     setup.sampleRate = preferredSampleRate;
     setup.bufferSize = preferredBufferFrames;
     setup.useDefaultInputChannels = false;

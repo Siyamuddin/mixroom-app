@@ -66,9 +66,13 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   }
 
   @override
-  Future<AudioRouteTransitionResultV2> applyPlaybackRoute(int generation) {
+  Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
+    int generation, {
+    String? outputDeviceName,
+  }) {
     return JuceAudioEngine.applyAudioRouteConfigurationV2(
       generation,
+      outputDeviceName: outputDeviceName,
       platformOverride: platformOverride,
     );
   }
@@ -499,6 +503,7 @@ class JuceAudioEngine {
 
   static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
     int generation, {
+    String? outputDeviceName,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -509,15 +514,18 @@ class JuceAudioEngine {
       return _unavailableRouteTransitionV2(generation);
     }
     try {
+      final arguments = <String, Object>{
+        'generation': generation,
+        'intent': 'playbackOnly',
+        'desiredInputChannels': 0,
+        'followSystemOutput': outputDeviceName?.trim().isNotEmpty != true,
+        'allowBuiltInFallback': true,
+        if (outputDeviceName?.trim().isNotEmpty == true)
+          'outputDeviceName': outputDeviceName!.trim(),
+      };
       final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
         'applyAudioRouteConfigurationV2',
-        <String, Object>{
-          'generation': generation,
-          'intent': 'playbackOnly',
-          'desiredInputChannels': 0,
-          'followSystemOutput': true,
-          'allowBuiltInFallback': true,
-        },
+        arguments,
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);
       return AudioRouteTransitionResultV2.fromMap(
