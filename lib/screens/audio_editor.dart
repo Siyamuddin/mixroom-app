@@ -12845,7 +12845,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         event.cause == 'audioInterruptionEnded' ||
         event.cause == 'audioInterrupted';
     final shouldAttemptSystemOutputRecovery =
-        (Platform.isIOS || Platform.isAndroid) && event.cause != 'shutdown';
+        (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) &&
+        event.cause != 'shutdown';
     final recordingWasActive =
         _isRecording ||
         _recordStartVisualPending ||
@@ -12861,13 +12862,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       notice: pendingNotice,
     );
     if (interruption) _showSmallNotice(pendingNotice);
+    final recoverySuccessNotice = interruption
+        ? 'Audio is ready. Press Play to continue.'
+        : recordingWasActive
+        ? 'Recording stopped because the audio device changed. Press Play to continue.'
+        : 'Audio output changed. Press Play to continue.';
     final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
       shouldAttemptSystemOutputRecovery: shouldAttemptSystemOutputRecovery,
       unpublishedRecordingPath: unpublishedRecordingPath,
       cleanupBeforeRecovery: interruption || Platform.isAndroid,
-      successNotice: interruption
-          ? 'Audio is ready. Press Play to continue.'
-          : 'Audio output changed. Press Play to continue.',
+      successNotice: recoverySuccessNotice,
     );
     _trackV2AudioSessionRecovery(recovery);
   }
@@ -21041,20 +21045,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               Platform.isMacOS &&
               result.snapshot.duplexProbe?.validationStage ==
                   'physicalRouteInvalidation';
-          _showSmallNotice(
-            macRouteRemoved
-                ? 'The audio device disconnected during recording preparation. Reopen the audio editor.'
-                : Platform.isIOS
-                ? 'Recording is unavailable for the current iOS audio route.'
-                : Platform.isMacOS
-                ? 'Recording is unavailable for the current macOS audio route.'
-                : v2IntentOperation ==
-                      AudioRouteIntentOperationV2.systemSelectedRecording
-                ? 'Recording is unavailable for the current Android audio route.'
-                : result.diagnosticCode == 'bluetooth_input_forbidden'
-                ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
-                : 'Recording with the built-in device microphone is unavailable for the current output.',
-          );
+          if (!macRouteRemoved) {
+            _showSmallNotice(
+              Platform.isIOS
+                  ? 'Recording is unavailable for the current iOS audio route.'
+                  : Platform.isMacOS
+                  ? 'Recording is unavailable for the current macOS audio route.'
+                  : v2IntentOperation ==
+                        AudioRouteIntentOperationV2.systemSelectedRecording
+                  ? 'Recording is unavailable for the current Android audio route.'
+                  : result.diagnosticCode == 'bluetooth_input_forbidden'
+                  ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
+                  : 'Recording with the built-in device microphone is unavailable for the current output.',
+            );
+          }
         }
         return false;
       }

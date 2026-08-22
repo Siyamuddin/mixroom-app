@@ -361,9 +361,10 @@ void main() {
   });
 
   test(
-    'device removal closes the owned streams without replacement recovery',
+    'device removal closes owned streams before one coordinator recovery',
     () {
       final plugin = File(pluginPath).readAsStringSync();
+      final editor = File(editorPath).readAsStringSync();
       final routeHandler = _between(
         plugin,
         '- (void)handleAudioRoutePropertyChangeV2:(NSString *)cause {',
@@ -374,16 +375,58 @@ void main() {
         'if (self.macIntentOperationActiveV2) {',
         'NSString *fingerprint = MixroomEffectiveOutputFingerprint();',
       );
+      final intent = _between(
+        plugin,
+        '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+        '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+      );
+      final eventEmitter = _between(
+        plugin,
+        '- (void)emitMacIntentRouteInvalidationEventV2:(BOOL)recordingWasActive {',
+        '- (BOOL)startMacIndependentInputRecordingV2:',
+      );
 
       expect(ownedOperation, contains('macIntentOperationCancelledV2 = YES'));
       expect(ownedOperation, contains('quiescePlaybackRouteV2ObjC:YES'));
       expect(ownedOperation, contains('discardMacInputRecordingV2ObjC'));
       expect(ownedOperation, contains('stopMacInputProbeV2ObjC'));
       expect(ownedOperation, isNot(contains('reconfigurePlaybackRouteV2ObjC')));
+      expect(
+        ownedOperation,
+        contains('emitMacIntentRouteInvalidationEventV2:'),
+      );
+      expect(intent, contains('const BOOL physicalRouteInvalidation'));
+      expect(intent, contains('releaseOperation();'));
+      expect(intent, contains('emitMacIntentRouteInvalidationEventV2:NO'));
+      expect(eventEmitter, contains('dispatch_get_main_queue()'));
+      expect(eventEmitter, contains('audioRouteGenerationV2 += 1'));
+      expect(eventEmitter, contains('MixroomDefaultCoreAudioOutputDevice()'));
+      expect(eventEmitter, isNot(contains('reconfigureMacPlaybackRouteV2ObjC')));
+      expect(ownedOperation, contains('macIntentRecoveryPendingV2 = YES'));
+      expect(
+        routeHandler,
+        contains('if (self.macIntentRecoveryPendingV2)'),
+      );
+      expect(
+        routeHandler,
+        contains('self.macLifecycleReconcilePendingV2 = YES'),
+      );
+      expect(
+        editor,
+        contains('Platform.isIOS || Platform.isAndroid || Platform.isMacOS'),
+      );
+      expect(
+        editor,
+        contains('recoverPlaybackAfterIntentInvalidation()'),
+      );
+      expect(
+        editor,
+        contains('cleanupBeforeRecovery: interruption || Platform.isAndroid'),
+      );
     },
   );
 
-  test('recording preparation removal uses the explicit reopen boundary', () {
+  test('recording preparation removal defers its notice to recovery', () {
     final editor = File(editorPath).readAsStringSync();
     final preflight = _between(
       editor,
@@ -392,12 +435,91 @@ void main() {
     );
 
     expect(preflight, contains("'physicalRouteInvalidation'"));
+    expect(preflight, contains('if (!macRouteRemoved)'));
     expect(
       preflight,
-      contains(
-        'The audio device disconnected during recording preparation. '
-        'Reopen the audio editor.',
+      isNot(
+        contains(
+          'The audio device disconnected during recording preparation. '
+          'Reopen the audio editor.',
+        ),
       ),
+    );
+  });
+
+  test('macOS invalidation reports one route-specific recovery outcome', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final editor = File(editorPath).readAsStringSync();
+    final intent = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+
+    expect(intent, contains('@"status"] = @"failedRestored"'));
+    expect(intent, contains('@"cleanupOutcome"] = @"restored"'));
+    expect(intent, contains('@"restoredOutput"] ='));
+    expect(
+      editor,
+      contains(
+        'Recording stopped because the audio device changed. Press Play to continue.',
+      ),
+    );
+    expect(
+      editor,
+      contains('Audio output changed. Press Play to continue.'),
+    );
+  });
+
+  test('current-output recovery waits once for authoritative route evidence', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final recovery = _between(
+      plugin,
+      'const double recoveryDeadlineMs = startedAtMs + 2000.0;',
+      'if (success && [intent isEqualToString:@"playbackOnly"])',
+    );
+    final routeObserver = _between(
+      plugin,
+      '- (void)handleAudioRoutePropertyChangeV2:(NSString *)cause {',
+      '- (NSDictionary<NSString *, id> *)applyAudioRouteConfigurationV2:',
+    );
+
+    expect(recovery, contains('MixroomCurrentUsableDefaultOutput()'));
+    expect(recovery, contains('[condition waitUntilDate:'));
+    expect(recovery, contains('recoveryDeadlineMs -'));
+    expect(recovery, contains('waitForMacOutputCallbackProofV2ObjC:remainingMs'));
+    expect(
+      'reconfigureMacPlaybackRouteV2ObjC'.allMatches(recovery),
+      hasLength(1),
+    );
+    expect(recovery, isNot(contains('while (')));
+    expect(recovery, isNot(contains('sleep')));
+    expect(recovery, isNot(contains('dispatch_after')));
+    expect(
+      routeObserver,
+      contains('if (MixroomCurrentUsableDefaultOutput() != nil)'),
+    );
+  });
+
+  test('invalidation owns delayed route notifications until recovery starts', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final asyncIntent = _between(
+      plugin,
+      '- (void)setAudioRouteIntentV2:(NSDictionary *)args\n'
+          '                   completion:(void (^)(NSDictionary<NSString *, id> *))completion {',
+      '#else\n    self.iosIntentCompletionDeliveredV2 = NO;',
+    );
+
+    expect(asyncIntent, contains('beginsInvalidationRecovery'));
+    expect(asyncIntent, contains('macIntentRecoveryPendingV2'));
+    expect(
+      asyncIntent,
+      contains('[immutableArgs[@"intent"] isEqualToString:@"playbackOnly"]'),
+    );
+    expect(asyncIntent, contains('macLifecycleTransitionActiveV2 = YES'));
+    expect(
+      asyncIntent.indexOf('macLifecycleTransitionActiveV2 = YES'),
+      lessThan(asyncIntent.indexOf('macIntentRecoveryPendingV2 = NO')),
     );
   });
 
