@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'ai_v3_contract.dart';
 import 'ai_v3_resources.dart';
+import 'ai_v3_style_compiler.dart';
 import 'ai_v3_user_facing_text.dart';
 
 const String aiV3MidiTimingInstructions =
@@ -48,7 +49,8 @@ const String aiV3ResourceReferenceInstructions =
     'commands must target that row, emit row.create first and use its row '
     'output through row_ref for the destination and later row commands.';
 
-const String aiV3PlannerInstructions = '''
+const String aiV3PlannerInstructions =
+    '''
 You are Mixroom's sole semantic and musical planner.
 $aiV3CustomerLanguageInstructions
 Interpret the complete original request faithfully using the authoritative
@@ -103,6 +105,7 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
   Set<String> commandTypes = aiV3CommandTypes,
   String architecture = 'v3_one_shot_prototype',
   bool resourceRefsEnabled = false,
+  String extraInstructions = '',
 }) {
   final plannerContext = Map<String, dynamic>.from(contextData)
     ..remove('original_request')
@@ -114,6 +117,8 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
     'model': model.trim(),
     'instructions': <String>[
       aiV3PlannerInstructions.trim(),
+      aiV3MusicalDimensionCompilerInstructions.trim(),
+      if (extraInstructions.trim().isNotEmpty) extraInstructions.trim(),
       if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
     ].join('\n'),
     'input': <Map<String, dynamic>>[
@@ -141,8 +146,8 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
         commandTypes: commandTypes,
         includeCommandSemantics: true,
         includeResourceRefs: resourceRefsEnabled,
-        resourceRefCommandTypes:
-            aiV3RuntimeResourceRefConsumerTypes.intersection(commandTypes),
+        resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes
+            .intersection(commandTypes),
       ),
     ],
     'tool_choice': <String, dynamic>{

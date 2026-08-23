@@ -201,6 +201,22 @@
       ]
     },
     {
+      "doc": "docs/engineering/ai_v3_compound_requests.md",
+      "owner": "AI Engineering",
+      "update_trigger": "The musical-dimension compiler, align-tempo collapse retry, mix automation targets, mix pan-strip, skip-note policy, or verified chat receipt / Play / Undo behavior changes.",
+      "watch_paths": [
+        "lib/ai/v3/ai_v3_style_compiler.dart",
+        "lib/ai/v3/ai_v3_automation_targets.dart",
+        "lib/ai/v3/ai_v3_planner_service.dart",
+        "lib/ai/v3/ai_v3_planner_request.dart",
+        "lib/ai/chat_pipeline.dart",
+        "lib/screens/audio_editor.dart",
+        "test/ai_v3_style_compiler_test.dart",
+        "test/ai_v3_automation_targets_test.dart",
+        "test/assistant_action_flow_test.dart"
+      ]
+    },
+    {
       "doc": "docs/engineering/ai_v3_capability_matrix.md",
       "owner": "AI Engineering",
       "update_trigger": "A V3 command, non-mutating outcome, retrieval type, staged job, editor expansion, capability status, limit, or evidence claim changes.",

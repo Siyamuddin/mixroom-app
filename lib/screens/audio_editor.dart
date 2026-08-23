@@ -8319,6 +8319,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _playAiV3VerifiedResult() async {
+    if (_v3ExecutionInProgress) return;
+    try {
+      if (_isPlaying) {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
+      await _seekAiV3TransportPaused(0);
+      if (!mounted) return;
+      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+    } catch (error) {
+      debugPrint('V3 play-after-apply failed: $error');
+    }
+  }
+
   Future<void> _performEditorUndo() async {
     if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
@@ -9175,8 +9189,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
     });
     if (PlatformCapabilities.current.isDesktop) {
-      _desktopFinderDropSub =
-          DesktopFileIngressService.dragSession.listen((event) {
+      _desktopFinderDropSub = DesktopFileIngressService.dragSession.listen((
+        event,
+      ) {
         if (_isProjectLoading || !_loadedOnce) {
           if (event.phase == DesktopFileDragPhase.dropped) {
             _pendingDesktopFinderDragEvents.add(event);
@@ -28791,7 +28806,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (event.location != null && event.hasAudio) {
       placement = _timelineController.placementForExternalSampleDrop(
         event.location!,
-        data: dragData ??
+        data:
+            dragData ??
             SampleDragData(
               filePath: event.audioItems.first.path,
               label: p.basename(event.audioItems.first.path),
@@ -28800,10 +28816,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (placement != null && !placement.allowed) {
-      await _handleDesktopFinderDropBatch(
-        event.items,
-        skipAudio: true,
-      );
+      await _handleDesktopFinderDropBatch(event.items, skipAudio: true);
       return;
     }
 
@@ -30612,10 +30625,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ),
                                       itemBuilder: (_, index) {
                                         final spec = filtered[index];
-                                        final id =
-                                            (spec['id'] as String? ?? '').trim();
+                                        final id = (spec['id'] as String? ?? '')
+                                            .trim();
                                         final isLocked =
-                                            !_canUseInstrumentForCurrentPlan(id);
+                                            !_canUseInstrumentForCurrentPlan(
+                                              id,
+                                            );
                                         return _buildInstrumentPickerRow(
                                           spec: spec,
                                           isLocked: isLocked,
@@ -30633,7 +30648,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   <String, String>{
                                                     'name': L10n.translate(
                                                       context,
-                                                      (spec['name'] as String? ??
+                                                      (spec['name']
+                                                                  as String? ??
                                                               '')
                                                           .trim(),
                                                     ),
@@ -36174,20 +36190,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                         ],
                                                                       ),
                                                                     )
-                                                                  : Text(
-                                                                      visibleMessageText,
-                                                                      style: const TextStyle(
-                                                                        fontFamily:
-                                                                            'Pretendard',
-                                                                        fontSize:
-                                                                            15,
-                                                                        fontWeight:
-                                                                            FontWeight.w500,
-                                                                        height:
-                                                                            1.2,
-                                                                        color: Colors
-                                                                            .white,
-                                                                      ),
+                                                                  : _buildAssistantChatBody(
+                                                                      text:
+                                                                          visibleMessageText,
+                                                                      metadata:
+                                                                          metadata,
                                                                     ),
                                                             ),
                                                           ),
@@ -64174,6 +64181,101 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Widget _buildAssistantChatBody({
+    required String text,
+    required Map<String, dynamic>? metadata,
+  }) {
+    final textWidget = Text(
+      text,
+      style: const TextStyle(
+        fontFamily: 'Pretendard',
+        fontSize: 15,
+        fontWeight: FontWeight.w500,
+        height: 1.2,
+        color: Colors.white,
+      ),
+    );
+    if (metadata?['source'] != 'ai_v3_verified_completion') {
+      return textWidget;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        textWidget,
+        const SizedBox(height: 10),
+        _buildAiV3VerifiedActionChips(),
+      ],
+    );
+  }
+
+  Widget _buildAiV3VerifiedActionChips() {
+    final canUndoAi = _undoManager.lastAction?.description == 'AI changes';
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _buildAiV3ActionChip(
+          label: L10n.translate(context, 'Play'),
+          icon: Icons.play_arrow_rounded,
+          onPressed: () {
+            unawaited(_playAiV3VerifiedResult());
+          },
+        ),
+        _buildAiV3ActionChip(
+          label: L10n.translate(context, 'Undo'),
+          icon: Icons.undo_rounded,
+          onPressed: canUndoAi
+              ? () {
+                  unawaited(_performEditorUndo());
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAiV3ActionChip({
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    final isEnabled = onPressed != null;
+    return Material(
+      color: Colors.white.withValues(alpha: isEnabled ? 0.12 : 0.05),
+      borderRadius: BorderRadius.circular(999),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onPressed,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: Colors.white.withValues(alpha: isEnabled ? 0.92 : 0.35),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white.withValues(
+                    alpha: isEnabled ? 0.92 : 0.35,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSystemChatMessage(TextMessage message) {
     final metadata = message.metadata;
     final detailLines = _chatExecutionDetailLines(metadata);
@@ -64984,13 +65086,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         bundle,
         runtimeAlreadySatisfiedCommandIds,
       );
-      final executionDetails = aiV3VerifiedExecutionDetails(
-        verifiedBundle,
-        executionSummariesByCommandId: localizedExecutionSummaries,
-        actionNotices: verifiedActionNotices,
-        receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
-        alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
-      );
       final conversationMessage = aiV3VerifiedConversationMessage(
         verifiedBundle,
         executionSummariesByCommandId: localizedExecutionSummaries,
@@ -65021,23 +65116,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         count == 1 ? 'Applied 1 change.' : 'Applied {count} changes.',
         <String, String>{'count': '$count'},
       );
-      _insertExecutionDetailSystemText(
-        source: 'ai_v3_verified_execution',
-        collapsedTitle: L10n.translateWithParams(
-          context,
-          executionDetails.length == 1
-              ? 'Applied 1 verified change'
-              : 'Applied {count} verified changes',
-          <String, String>{'count': '${executionDetails.length}'},
-        ),
-        detailLines: executionDetails,
-      );
       _insertAssistantChatText(
         completionMessage,
         modelAuthored: true,
         metadata: const <String, dynamic>{
           'source': 'ai_v3_verified_completion',
         },
+      );
+      debugPrint(
+        aiV3ObserveLine(
+          stage: 'apply',
+          commandTypes:
+              (verifiedBundle['receipts'] as List?)
+                  ?.whereType<Map>()
+                  .map((receipt) => receipt['type']?.toString() ?? '')
+                  .where((type) => type.isNotEmpty) ??
+              const <String>[],
+          bpm: _tempo,
+          clipPitches: _audioTracks.map((clip) => clip.pitchSemitones),
+        ),
       );
       _showSmallNotice(applied);
       if (LlmConfig.aiLiveEvaluationEnabled) {
