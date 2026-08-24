@@ -88,6 +88,9 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final appliedOutputNames = <String?>[];
   final appliedInputNames = <String?>[];
   final inputPreferenceUpdates = <bool>[];
+  final preferredSampleRates = <int?>[];
+  final preferredBufferFrames = <int?>[];
+  final hardwarePreferenceUpdates = <bool>[];
   final appliedIntents = <AudioRouteIntentV2>[];
   final appliedOperations = <AudioRouteIntentOperationV2>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
@@ -111,11 +114,17 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
     String? outputDeviceName,
     String? inputDeviceName,
     bool updateInputPreference = false,
+    int? preferredSampleRateHz,
+    int? preferredBufferFrames,
+    bool updateHardwarePreferences = false,
   }) async {
     appliedGenerations.add(generation);
     appliedOutputNames.add(outputDeviceName);
     appliedInputNames.add(inputDeviceName);
     inputPreferenceUpdates.add(updateInputPreference);
+    preferredSampleRates.add(preferredSampleRateHz);
+    this.preferredBufferFrames.add(preferredBufferFrames);
+    hardwarePreferenceUpdates.add(updateHardwarePreferences);
     return results[generation] ?? _result(generation);
   }
 
@@ -298,6 +307,100 @@ void main() {
     expect(result.succeeded, isFalse);
     expect(result.diagnosticCode, 'route_unstable');
     expect(adapter.inputPreferenceUpdates, isEmpty);
+    await coordinator.dispose();
+  });
+
+  test('hardware settings use the stable serialized playback owner', () async {
+    final adapter = _FakeAdapter();
+    final states = <AudioRouteCoordinatorStateV2>[];
+    final transitions = <AudioRouteTransitionResultV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onStateChanged: states.add,
+      onTransition: transitions.add,
+    );
+    await coordinator.start();
+    states.clear();
+
+    final result = await coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: 96000,
+      preferredBufferFrames: 128,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(adapter.preferredSampleRates, <int?>[96000]);
+    expect(adapter.preferredBufferFrames, <int?>[128]);
+    expect(adapter.hardwarePreferenceUpdates, <bool>[true]);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    expect(states, isEmpty);
+    expect(transitions, isEmpty);
+    await coordinator.dispose();
+  });
+
+  test('hardware settings cannot overlap an intent transition', () async {
+    final adapter = _FakeAdapter();
+    final preparing = Completer<AudioRouteTransitionResultV2>();
+    adapter.intentResults[AudioRouteIntentV2.preparingRecording] =
+        preparing.future;
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final transition = coordinator.transitionIntent(
+      AudioRouteIntentV2.preparingRecording,
+    );
+    await _flush();
+    final settings = await coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: 48000,
+      preferredBufferFrames: 512,
+    );
+
+    expect(settings.succeeded, isFalse);
+    expect(settings.diagnosticCode, 'route_unstable');
+    expect(adapter.hardwarePreferenceUpdates, isEmpty);
+    preparing.complete(_result(0));
+    await transition;
+    await coordinator.dispose();
+  });
+
+  test('hardware settings always drain a route event that makes them stale',
+      () async {
+    final adapter = _FakeAdapter();
+    final settingsResult = Completer<AudioRouteTransitionResultV2>();
+    adapter.results[0] = settingsResult.future;
+    final transitions = <AudioRouteTransitionResultV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onTransition: transitions.add,
+    );
+    await coordinator.start();
+
+    final settings = coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: 96000,
+      preferredBufferFrames: 128,
+    );
+    await _flush();
+    adapter.controller.add(
+      _event(1, 'new-output', requiresReconfiguration: true),
+    );
+    await _flush();
+    await _flush();
+
+    settingsResult.complete(_result(0));
+    final staleSettings = await settings;
+    await _flush();
+    await _flush();
+
+    expect(staleSettings.succeeded, isFalse);
+    expect(staleSettings.diagnosticCode, 'stale_generation');
+    expect(adapter.appliedGenerations, <int>[0, 1]);
+    expect(adapter.hardwarePreferenceUpdates, <bool>[true, false]);
+    expect(transitions.map((result) => result.generation), <int>[1]);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
     await coordinator.dispose();
   });
 

@@ -5829,6 +5829,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _preferredDawBufferSize = 512;
   int _midiInputChannelFilter = 0;
   bool _audioEngineSettingsApplying = false;
+  bool _v2HardwareSettingsApplicationPending = false;
   String? _lastPreparedRecordingDevice;
   int? _lastPreparedRecordingInputOpenChannels;
   bool _recordingInputPrewarmInFlight = false;
@@ -9364,6 +9365,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _showSmallNotice('Bluetooth 2.0 route monitoring is unavailable.');
           setState(() => _isLoadingNextScreen = false);
           return;
+        }
+        if (_v2HardwareSettingsApplicationPending) {
+          _v2HardwareSettingsApplicationPending = false;
+          await _applyAudioEngineSettingsToNative(
+            reason: 'projectLoadDeferred',
+            notifyOnFailure: false,
+          );
         }
       }
       if (!_isBluetoothV2Session) {
@@ -43394,20 +43402,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool get _supportsDawAudioEngineDeviceSettings =>
-      !_isBluetoothV2Session && (Platform.isMacOS || Platform.isIOS);
+      Platform.isMacOS || Platform.isIOS;
 
   Future<bool> _applyAudioEngineSettingsToNative({
     required String reason,
     bool notifyOnFailure = true,
   }) async {
-    if (_isBluetoothV2Session) {
-      if (notifyOnFailure && mounted) {
-        _showSmallNotice(
-          'Hardware settings are managed by Bluetooth 2.0 in this checkpoint.',
-        );
-      }
-      return false;
-    }
     if (_audioEngineSettingsApplying) return false;
 
     _setStateAndRefreshProjectSettings(() {
@@ -43416,6 +43416,61 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     try {
       await JuceAudioEngine.setMidiInputChannelFilter(_midiInputChannelFilter);
+
+      if (_isBluetoothV2Session) {
+        if (!Platform.isMacOS && !Platform.isIOS) {
+          return true;
+        }
+        final coordinator = _audioRouteCoordinatorV2;
+        if (coordinator == null) {
+          // iOS deliberately starts its route coordinator after project load.
+          // Retain the loaded project preference and apply it once that
+          // existing startup boundary is ready.
+          _v2HardwareSettingsApplicationPending = true;
+          return true;
+        }
+        final result = await coordinator.configurePlaybackHardware(
+          preferredSampleRateHz: _preferredDawSampleRate,
+          preferredBufferFrames: _preferredDawBufferSize,
+        );
+        if (!result.succeeded) {
+          if (notifyOnFailure && mounted) {
+            _showSmallNotice(
+              L10n.translate(context, 'Could not apply audio device settings'),
+            );
+          }
+          return false;
+        }
+
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+        final outputKind = result.snapshot.outputs.length == 1
+            ? result.snapshot.outputs.first.normalizedKind
+            : AudioRouteKindV2.unknown;
+        final bluetoothRoute =
+            outputKind == AudioRouteKindV2.bluetooth ||
+            outputKind == AudioRouteKindV2.bluetoothMedia ||
+            outputKind == AudioRouteKindV2.bluetoothDuplex ||
+            outputKind == AudioRouteKindV2.bluetoothLe;
+        if (!bluetoothRoute) {
+          final actualSampleRate =
+              result.snapshot.juce.sampleRateHz?.round() ?? 0;
+          final actualBufferSize = result.snapshot.juce.bufferFrames ?? 0;
+          if ((_dawSampleRateOptions.contains(actualSampleRate) &&
+                  actualSampleRate != _preferredDawSampleRate) ||
+              (_dawBufferSizeOptions.contains(actualBufferSize) &&
+                  actualBufferSize != _preferredDawBufferSize)) {
+            _setStateAndRefreshProjectSettings(() {
+              if (_dawSampleRateOptions.contains(actualSampleRate)) {
+                _preferredDawSampleRate = actualSampleRate;
+              }
+              if (_dawBufferSizeOptions.contains(actualBufferSize)) {
+                _preferredDawBufferSize = actualBufferSize;
+              }
+            });
+          }
+        }
+        return true;
+      }
 
       if (_isRecording) {
         if (notifyOnFailure && mounted) {

@@ -2600,14 +2600,22 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
         {},
         &setup);
 #else
-    juce::ignoreUnused(outputDeviceName,
-                       preferredSampleRate,
-                       preferredBufferFrames);
+    juce::ignoreUnused(outputDeviceName);
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    setup.inputDeviceName = {};
+    setup.outputDeviceName = {};
+    setup.sampleRate = preferredSampleRate;
+    setup.bufferSize = preferredBufferFrames;
+    setup.useDefaultInputChannels = false;
+    setup.inputChannels.clear();
+    setup.useDefaultOutputChannels = true;
     const auto error = deviceManager.initialise(
         0,
         2,
         nullptr,
-        true);
+        false,
+        {},
+        &setup);
 #endif
     if (error.isNotEmpty())
     {
@@ -2624,10 +2632,6 @@ bool JuceEngine::openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
         device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
         device->getCurrentSampleRate() > 1000.0 &&
         device->getCurrentBufferSizeSamples() > 0
-#if JUCE_MAC && !JUCE_IOS
-        && std::abs(device->getCurrentSampleRate() - preferredSampleRate) < 1.0
-        && device->getCurrentBufferSizeSamples() == preferredBufferFrames
-#endif
         ;
     if (!valid)
         deviceManager.closeAudioDevice();
@@ -2751,7 +2755,10 @@ bool JuceEngine::pausePlaybackForRouteChangeV2()
 #endif
 }
 
-bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName)
+bool JuceEngine::reconfigurePlaybackRouteV2(
+    const juce::String &outputDeviceName,
+    double sampleRate,
+    int bufferFrames)
 {
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession())
@@ -2762,12 +2769,12 @@ bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName
 #endif
 
     quiescePlaybackRouteV2(false);
-    if (!openPlaybackOutputOnlyV2(outputDeviceName))
+    if (!openPlaybackOutputOnlyV2(outputDeviceName, sampleRate, bufferFrames))
         return false;
 
     auto *device = deviceManager.getCurrentAudioDevice();
-    const double sampleRate = device->getCurrentSampleRate();
-    hostSampleRateAtomic.store(sampleRate, std::memory_order_relaxed);
+    const double actualSampleRate = device->getCurrentSampleRate();
+    hostSampleRateAtomic.store(actualSampleRate, std::memory_order_relaxed);
     armOutputSafetyForCurrentRoute();
     if (v2PlaybackCallbackDetached && metronomeCallback != nullptr)
     {
@@ -2782,7 +2789,6 @@ bool JuceEngine::reconfigurePlaybackRouteV2(const juce::String &outputDeviceName
 #endif
 }
 
-#if JUCE_MAC && !JUCE_IOS
 void JuceEngine::beginMacOutputCallbackProofV2() noexcept
 {
     if (metronomeCallback != nullptr)
@@ -2821,7 +2827,6 @@ double JuceEngine::getMacOutputCallbackProofSampleRateV2() const noexcept
         ? metronomeCallback->getFirstValidCallbackSampleRate()
         : 0.0;
 }
-#endif
 
 bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                               const juce::String &inputDeviceName)

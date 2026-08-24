@@ -125,13 +125,18 @@ void main() {
 
     expect(helper, contains('JUCE_IOS'));
     expect(helper, contains('quiescePlaybackRouteV2(false)'));
-    expect(helper, contains('openPlaybackOutputOnlyV2(outputDeviceName)'));
+    expect(
+      helper,
+      contains(
+        'openPlaybackOutputOnlyV2(outputDeviceName, sampleRate, bufferFrames)',
+      ),
+    );
     expect(helper, contains('prepareLiveClipProcessorsForCurrentDevice()'));
     expect(helper, contains('addAudioCallback'));
     expect(helper, isNot(contains('applyPreferredAudioDeviceSetup')));
   });
 
-  test('iOS coordinator apply only verifies the settled JUCE route', () {
+  test('iOS coordinator applies and verifies the route-aware JUCE clock', () {
     final source = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
     ).readAsStringSync();
@@ -152,9 +157,12 @@ void main() {
     expect(iosApply, contains('eventFingerprint'));
     expect(iosApply, contains('bluetooth_duplex_forbidden'));
     expect(iosApply, contains('fallback_succeeded'));
+    expect(iosApply, contains('MixroomIOSPlaybackOpenRate'));
+    expect(iosApply, contains('MixroomIOSPlaybackOpenBuffer'));
+    expect(iosApply, contains('beginOutputCallbackProofV2ObjC'));
+    expect(iosApply, contains('waitForOutputCallbackProofV2ObjC'));
+    expect(iosApply, contains('reconfigurePlaybackRouteV2ObjC'));
     for (final forbidden in <String>[
-      'reconfigurePlaybackRouteV2ObjC',
-      'quiescePlaybackRouteV2ObjC',
       'preparePlaybackRouteObjC',
       'refreshAudioRouteObjC',
       'setPreferredInput:',

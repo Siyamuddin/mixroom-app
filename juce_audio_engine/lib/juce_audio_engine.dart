@@ -71,12 +71,18 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
     String? outputDeviceName,
     String? inputDeviceName,
     bool updateInputPreference = false,
+    int? preferredSampleRateHz,
+    int? preferredBufferFrames,
+    bool updateHardwarePreferences = false,
   }) {
     return JuceAudioEngine.applyAudioRouteConfigurationV2(
       generation,
       outputDeviceName: outputDeviceName,
       inputDeviceName: inputDeviceName,
       updateInputPreference: updateInputPreference,
+      preferredSampleRateHz: preferredSampleRateHz,
+      preferredBufferFrames: preferredBufferFrames,
+      updateHardwarePreferences: updateHardwarePreferences,
       platformOverride: platformOverride,
     );
   }
@@ -510,6 +516,9 @@ class JuceAudioEngine {
     String? outputDeviceName,
     String? inputDeviceName,
     bool updateInputPreference = false,
+    int? preferredSampleRateHz,
+    int? preferredBufferFrames,
+    bool updateHardwarePreferences = false,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -533,6 +542,11 @@ class JuceAudioEngine {
           'followSystemInput': inputDeviceName?.trim().isNotEmpty != true,
         if (updateInputPreference && inputDeviceName?.trim().isNotEmpty == true)
           'inputDeviceName': inputDeviceName!.trim(),
+        if (updateHardwarePreferences) 'updateHardwarePreferences': true,
+        if (updateHardwarePreferences && preferredSampleRateHz != null)
+          'preferredSampleRateHz': preferredSampleRateHz,
+        if (updateHardwarePreferences && preferredBufferFrames != null)
+          'preferredBufferFrames': preferredBufferFrames,
       };
       final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
         'applyAudioRouteConfigurationV2',

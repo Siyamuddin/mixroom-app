@@ -12,6 +12,9 @@ abstract interface class AudioRouteAdapterV2 {
     String? outputDeviceName,
     String? inputDeviceName,
     bool updateInputPreference = false,
+    int? preferredSampleRateHz,
+    int? preferredBufferFrames,
+    bool updateHardwarePreferences = false,
   });
 
   Future<AudioRouteTransitionResultV2> applyIntent(
@@ -351,6 +354,10 @@ class AudioRouteCoordinatorV2 {
       );
     } finally {
       _applyInFlight = false;
+      // A route event can arrive while an explicit apply is settling. Its
+      // first timer may fire while this call still owns the adapter, so
+      // re-arm the pending drain before inspecting the result.
+      _schedulePendingDrain();
     }
 
     if (_disposed) return result;
@@ -368,7 +375,6 @@ class AudioRouteCoordinatorV2 {
           : AudioRouteCoordinatorStateV2.failed);
       onTransition?.call(result);
     }
-    _schedulePendingDrain();
     return result;
   }
 
@@ -408,6 +414,7 @@ class AudioRouteCoordinatorV2 {
       );
     } finally {
       _applyInFlight = false;
+      _schedulePendingDrain();
     }
 
     if (_disposed) return result;
@@ -422,7 +429,67 @@ class AudioRouteCoordinatorV2 {
               'stale_generation',
             );
     }
-    _schedulePendingDrain();
+    return result;
+  }
+
+  /// Applies the existing project hardware preferences through the same
+  /// serialized playback owner. This command intentionally leaves the
+  /// coordinator in [AudioRouteCoordinatorStateV2.stable]: an explicit
+  /// settings edit is not an external route change and must preserve the
+  /// product's existing playing/paused state and notices.
+  Future<AudioRouteTransitionResultV2> configurePlaybackHardware({
+    required int preferredSampleRateHz,
+    required int preferredBufferFrames,
+  }) async {
+    if (_disposed || !_started || _shutdownCancellation) {
+      return _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'coordinator_disposed',
+      );
+    }
+    if (preferredSampleRateHz <= 0 ||
+        preferredBufferFrames <= 0 ||
+        _state != AudioRouteCoordinatorStateV2.stable ||
+        _interruptionActive ||
+        _intent != AudioRouteIntentV2.playbackOnly ||
+        _applyInFlight ||
+        _intentTransitionInFlight ||
+        _pending != null) {
+      return _localFailure(AudioRouteIntentV2.playbackOnly, 'route_unstable');
+    }
+
+    _applyInFlight = true;
+    final generation = _latestGeneration;
+    AudioRouteTransitionResultV2 result;
+    try {
+      result = await _adapter.applyPlaybackRoute(
+        generation,
+        preferredSampleRateHz: preferredSampleRateHz,
+        preferredBufferFrames: preferredBufferFrames,
+        updateHardwarePreferences: true,
+      );
+    } catch (_) {
+      result = _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'actual_state_unavailable',
+      );
+    } finally {
+      _applyInFlight = false;
+      _schedulePendingDrain();
+    }
+
+    if (_disposed) return result;
+    final stale = result.generation != generation ||
+        result.diagnosticCode == 'stale_generation' ||
+        _latestGeneration != generation;
+    if (stale) {
+      return result.diagnosticCode == 'stale_generation'
+          ? result
+          : _localFailure(
+              AudioRouteIntentV2.playbackOnly,
+              'stale_generation',
+            );
+    }
     return result;
   }
 

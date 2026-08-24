@@ -626,6 +626,26 @@ void main() {
     expect(arguments['followSystemInput'], isTrue);
   });
 
+  test('V2 hardware preferences extend the existing playback route payload',
+      () async {
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      18,
+      preferredSampleRateHz: 96000,
+      preferredBufferFrames: 128,
+      updateHardwarePreferences: true,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(calls.single.method, 'applyAudioRouteConfigurationV2');
+    final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
+    expect(arguments['preferredSampleRateHz'], 96000);
+    expect(arguments['preferredBufferFrames'], 128);
+    expect(arguments['updateHardwarePreferences'], isTrue);
+    expect(arguments['desiredInputChannels'], 0);
+    expect(arguments, isNot(contains('outputDeviceName')));
+  });
+
   for (final platform in <TargetPlatform>[
     TargetPlatform.macOS,
     TargetPlatform.android,

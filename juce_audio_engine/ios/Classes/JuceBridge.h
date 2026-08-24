@@ -8,6 +8,9 @@
 + (BOOL)pausePlaybackForRouteChangeV2ObjC;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
 + (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
+                            sampleRate:(double)sampleRate
+                          bufferFrames:(NSInteger)bufferFrames;
 #if TARGET_OS_OSX
 + (BOOL)initialiseMacPlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName
                          sampleRate:(double)sampleRate
@@ -32,6 +35,11 @@
 + (BOOL)isMacInputRecordingV2ObjC;
 + (NSDictionary<NSString *, id> * _Nonnull)getMacInputCaptureFactsV2ObjC;
 #endif
++ (void)beginOutputCallbackProofV2ObjC;
++ (BOOL)waitForOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds;
++ (NSNumber * _Nonnull)getOutputCallbackProofCountV2ObjC;
++ (NSNumber * _Nonnull)getOutputCallbackProofFramesV2ObjC;
++ (NSNumber * _Nonnull)getOutputCallbackProofSampleRateV2ObjC;
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
                               inputName:(NSString * _Nonnull)inputDeviceName;
 + (BOOL)prepareBluetoothDuplexSessionV2ObjC;
@@ -57,6 +65,7 @@
 
 + (BOOL)playObjC;
 + (void)pauseObjC;
++ (BOOL)isTransportPlayingObjC;
 + (void)removeTrackObjC:(NSInteger)trackIndex;
 + (NSArray<NSString *> *)getTrackEffectsObjC:(NSInteger)trackIndex;
 + (void)removeEffectObjC:(NSInteger)trackIndex effectIndex:(NSInteger)effectIndex;

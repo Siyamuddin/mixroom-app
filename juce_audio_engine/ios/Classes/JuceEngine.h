@@ -5886,18 +5886,20 @@ public:
                               int bufferFrames = 0);
     bool pausePlaybackForRouteChangeV2();
     bool quiescePlaybackRouteV2(bool closeRemovedDevice);
-    bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName);
+    bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName,
+                                    double sampleRate = 0.0,
+                                    int bufferFrames = 0);
 #if JUCE_MAC && !JUCE_IOS
     bool reconfigureMacPlaybackRouteV2(const juce::String &outputDeviceName,
                                        double sampleRate,
                                        int bufferFrames);
+#endif
     void beginMacOutputCallbackProofV2() noexcept;
     bool waitForMacOutputCallbackProofV2(int timeoutMilliseconds) noexcept;
     void cancelMacOutputCallbackProofV2() noexcept;
     std::uint64_t getMacOutputCallbackProofCountV2() const noexcept;
     int getMacOutputCallbackProofFramesV2() const noexcept;
     double getMacOutputCallbackProofSampleRateV2() const noexcept;
-#endif
     bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
                                      const juce::String &inputDeviceName);
     bool prepareBluetoothDuplexSessionV2();

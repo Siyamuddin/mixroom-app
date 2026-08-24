@@ -2863,6 +2863,21 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 #endif
 }
 
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString *)outputDeviceName
+                            sampleRate:(double)sampleRate
+                          bufferFrames:(NSInteger)bufferFrames
+{
+#if TARGET_OS_OSX
+    juce::ignoreUnused(outputDeviceName, sampleRate, bufferFrames);
+    return NO;
+#else
+    return JuceEngine::get().reconfigurePlaybackRouteV2(
+        juceStringFromNSString(outputDeviceName),
+        sampleRate,
+        static_cast<int>(bufferFrames));
+#endif
+}
+
 #if TARGET_OS_OSX
 + (BOOL)reconfigureMacPlaybackRouteV2ObjC:(NSString *)outputDeviceName
                               sampleRate:(double)sampleRate
@@ -3005,7 +3020,34 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return namedValueStatsToNSDictionary(
         mixroomMacInputProbeV2().getCaptureFacts());
 }
+
 #endif
+
++ (void)beginOutputCallbackProofV2ObjC
+{
+    JuceEngine::get().beginMacOutputCallbackProofV2();
+}
+
++ (BOOL)waitForOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return JuceEngine::get().waitForMacOutputCallbackProofV2(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (NSNumber *)getOutputCallbackProofCountV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofCountV2());
+}
+
++ (NSNumber *)getOutputCallbackProofFramesV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofFramesV2());
+}
+
++ (NSNumber *)getOutputCallbackProofSampleRateV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofSampleRateV2());
+}
 
 + (BOOL)reconfigureRecordingRouteV2ObjC:(NSString *)outputDeviceName
                               inputName:(NSString *)inputDeviceName
@@ -3186,6 +3228,11 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
             messageManager->callSync(play);
     }
     return started;
+}
+
++ (BOOL)isTransportPlayingObjC
+{
+    return JuceEngine::get().isTransportPlaying();
 }
 
 + (void)pauseObjC

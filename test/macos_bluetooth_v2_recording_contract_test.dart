@@ -88,8 +88,12 @@ void main() {
     expect(intent, contains('beginMacOutputCallbackProofV2ObjC'));
     expect(intent, contains('waitForMacOutputCallbackProofV2ObjC'));
     expect(intent, contains('reconfigureMacPlaybackRouteV2ObjC'));
-    expect(intent, contains('sampleRate:[settledOutput[@"sampleRateHz"]'));
-    expect(intent, contains('bufferFrames:[settledOutput[@"bufferFrames"]'));
+    expect(intent, contains('MixroomMacPlaybackOpenPlan'));
+    expect(intent, contains('sampleRate:[settledOutputPlan[@"sampleRateHz"]'));
+    expect(
+      intent,
+      contains('bufferFrames:[settledOutputPlan[@"bufferFrames"]'),
+    );
     expect(intent, contains('@"selectionMode": @"macOSIndependentInput"'));
     expect(intent, isNot(contains('reconfigureRecordingRouteV2ObjC')));
     expect(intent, isNot(contains('startRecordingObjC')));
@@ -348,11 +352,11 @@ void main() {
     expect(restore, contains('reconfigureMacPlaybackRouteV2ObjC'));
     expect(
       restore,
-      contains('sampleRate:[candidate[@"sampleRateHz"] doubleValue]'),
+      contains('sampleRate:[candidatePlan[@"sampleRateHz"] doubleValue]'),
     );
     expect(
       restore,
-      contains('bufferFrames:[candidate[@"bufferFrames"] integerValue]'),
+      contains('bufferFrames:[candidatePlan[@"bufferFrames"] integerValue]'),
     );
     expect(restore, contains('getMacOutputCallbackProofFramesV2ObjC'));
     expect(restore, contains('callbackShapeValid'));
@@ -654,12 +658,12 @@ void main() {
     final genericReopen = _between(
       engine,
       'bool JuceEngine::reconfigurePlaybackRouteV2(',
-      '#if JUCE_MAC && !JUCE_IOS\nvoid JuceEngine::beginMacOutputCallbackProofV2()',
+      'void JuceEngine::beginMacOutputCallbackProofV2()',
     );
     final exactOutputOpen = _between(
       engine,
       'bool JuceEngine::openPlaybackOutputOnlyV2(',
-      '#if JUCE_MAC && !JUCE_IOS\nbool JuceEngine::reconfigureMacPlaybackRouteV2(',
+      'bool JuceEngine::reconfigureMacPlaybackRouteV2(',
     );
 
     expect(startup, contains('initialiseMacPlaybackV2ObjC'));

@@ -336,7 +336,8 @@ void main() {
       intent,
       contains(
         'BOOL outputRestored = physicalRouteInvalidation\n'
-        '            ? NO : [JuceBridge reconfigurePlaybackRouteV2ObjC:@""]',
+        '            ? NO : [JuceBridge\n'
+        '                reconfigurePlaybackRouteV2ObjC:@""',
       ),
     );
     expect('dispatch_after'.allMatches(intent), hasLength(1));
