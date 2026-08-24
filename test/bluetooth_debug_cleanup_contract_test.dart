@@ -68,6 +68,36 @@ void main() {
     );
   });
 
+  test('V2 clip insertion cannot invoke Legacy engine initialisation', () {
+    final insertionStart = editor.indexOf(
+      'Future<void> _addAudioTrackFromFile(',
+    );
+    final insertionPreflightEnd = editor.indexOf(
+      'await _ensureRowIndexExists(row);',
+      insertionStart,
+    );
+    expect(insertionStart, greaterThanOrEqualTo(0));
+    expect(insertionPreflightEnd, greaterThan(insertionStart));
+
+    final insertionPreflight = editor.substring(
+      insertionStart,
+      insertionPreflightEnd,
+    );
+    expect(
+      insertionPreflight,
+      matches(
+        RegExp(
+          r'if \(!_isBluetoothV2Session\) \{\s*'
+          r'await JuceAudioEngine\.initialise\(\);\s*\}',
+        ),
+      ),
+    );
+    expect(
+      'JuceAudioEngine.initialise()'.allMatches(insertionPreflight),
+      hasLength(1),
+    );
+  });
+
   test('product controls and internal diagnostics remain available', () {
     expect(editor, contains('_buildDesktopDiagnosticsLauncher'));
     expect(editor, contains("'Desktop Diagnostics'"));

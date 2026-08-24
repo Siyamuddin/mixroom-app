@@ -22712,7 +22712,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // the audio device has reattached. Prime the same route used by first
     // playback before asking JUCE to install the clip, so importing audio does
     // not depend on the user pressing Play once.
-    await JuceAudioEngine.initialise();
+    if (!_isBluetoothV2Session) {
+      await JuceAudioEngine.initialise();
+    }
     if (PlatformCapabilities.current.isDesktop || Platform.isIOS) {
       await _ensurePlaybackRouteReady(reason: 'audioImport');
     }
