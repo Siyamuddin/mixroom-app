@@ -40716,7 +40716,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted || !_isProjectSettingsOpen) return;
       if (_isBluetoothV2Session) {
-        if (Platform.isMacOS) await _loadMacV2AudioDevices();
+        if (Platform.isMacOS) {
+          await _loadMacV2AudioDevices();
+        } else if (showAudioRouting && (Platform.isAndroid || Platform.isIOS)) {
+          await _refreshSystemSelectedRouteInfoV2();
+        }
         return;
       }
       if (!showAudioRouting) return;
@@ -40752,12 +40756,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final showInlineAudioRouting =
         PlatformCapabilities.current.isDesktop ||
         mixroomUsesTabletLandscapeShell(context);
-    final showAudioRoutingLauncher =
-        !_isBluetoothV2Session &&
-        showProjectSettingsAudioRoutingLauncher(
-          showInlineAudioRouting: showInlineAudioRouting,
-          isMobilePlatform: Platform.isIOS || Platform.isAndroid,
-        );
+    final showAudioRoutingLauncher = showProjectSettingsAudioRoutingLauncher(
+      showInlineAudioRouting: showInlineAudioRouting,
+      isMobilePlatform: Platform.isIOS || Platform.isAndroid,
+    );
     final usesTabletDawLayout = _usesTabletDesktopDawShell(context);
     final usesTabletDesktopLayout = usesTabletDawLayout;
     final _TopPopupLayout popupLayout = _resolveTopPopupLayout(
@@ -40867,7 +40869,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               const SizedBox(height: 10),
                               if (showInlineAudioRouting) ...[
                                 _buildInputSelector(),
-                                if (_shouldShowInputChannelRouteSelector()) ...[
+                                if (!_isBluetoothV2Session &&
+                                    _shouldShowInputChannelRouteSelector()) ...[
                                   const SizedBox(height: 9),
                                   _buildInputChannelRouteSelector(),
                                 ],
@@ -43662,9 +43665,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _refreshSystemSelectedRouteInfoV2() async {
+    if (!_isBluetoothV2Session || (!Platform.isAndroid && !Platform.isIOS)) {
+      return;
+    }
+    final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    if (!mounted) return;
+
+    final output = snapshot.outputs.length == 1
+        ? snapshot.outputs.single
+        : null;
+    final input = snapshot.inputs.length == 1 ? snapshot.inputs.single : null;
+    final outputName = (output?.name ?? '').trim();
+    final inputName = (input?.name ?? '').trim();
+    final outputKind = switch (output?.normalizedKind) {
+      AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
+      AudioRouteKindV2.wired => AudioRouteKind.wired,
+      AudioRouteKindV2.external => AudioRouteKind.usb,
+      AudioRouteKindV2.bluetooth ||
+      AudioRouteKindV2.bluetoothMedia ||
+      AudioRouteKindV2.bluetoothDuplex ||
+      AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
+      _ => AudioRouteKind.unknown,
+    };
+    final inputIsBluetooth = switch (input?.normalizedKind) {
+      AudioRouteKindV2.bluetooth ||
+      AudioRouteKindV2.bluetoothDuplex ||
+      AudioRouteKindV2.bluetoothLe => true,
+      _ => false,
+    };
+    final info = AudioRouteInfo(
+      outputRouteKind: outputKind,
+      outputRouteName: outputName,
+      inputDeviceName: inputName,
+      inputIsBluetoothHeadset: inputIsBluetooth,
+    );
+    _setStateAndRefreshProjectSettings(() {
+      _audioRouteInfo = info;
+      if (Platform.isAndroid) {
+        _androidOutputRouteName = outputName.isEmpty ? null : outputName;
+      }
+    });
+  }
+
   Future<void> _refreshAndroidOutputRouteLabel({
     bool refreshNativeRoute = false,
   }) async {
+    if (_isBluetoothV2Session) {
+      await _refreshSystemSelectedRouteInfoV2();
+      return;
+    }
     await _refreshAudioRouteInfo(refreshNativeRoute: refreshNativeRoute);
   }
 
@@ -44400,6 +44450,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildInputSelector() {
+    if (_isBluetoothV2Session && (Platform.isAndroid || Platform.isIOS)) {
+      final routeLabel = _audioRouteInfo.inputDeviceName.trim();
+      final effectiveLabel = routeLabel.isEmpty
+          ? L10n.translate(context, 'System Default')
+          : routeLabel;
+      return Semantics(
+        identifier: 'daw.input_device',
+        label: L10n.translate(context, 'Input Device'),
+        child: InputDecorator(
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Device'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh audio devices'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: () {
+                unawaited(_refreshSystemSelectedRouteInfoV2());
+              },
+            ),
+          ),
+          child: Text(
+            effectiveLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+    }
     if (_isBluetoothV2Session && Platform.isMacOS) {
       const systemDefaultValue = '';
       final selectionEnabled = _macV2InputSelectionEnabled;
@@ -44867,7 +44945,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               tooltip: L10n.translate(context, 'Refresh output route'),
               icon: const Icon(Icons.refresh, color: Colors.white70),
               onPressed: () {
-                unawaited(_refreshAudioRouteInfo());
+                unawaited(
+                  _isBluetoothV2Session
+                      ? _refreshSystemSelectedRouteInfoV2()
+                      : _refreshAudioRouteInfo(),
+                );
               },
             ),
           ),
@@ -45246,16 +45328,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _showAudioRoutingSheet() async {
     if (_isBluetoothV2Session) {
-      _showSmallNotice(
-        'Recording and routing controls are unavailable for the current audio route.',
-      );
-      return;
-    }
-    await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: false);
-    if (Platform.isAndroid) {
-      unawaited(_refreshAndroidOutputRouteLabel());
+      await _refreshSystemSelectedRouteInfoV2();
     } else {
-      unawaited(_refreshAudioRouteInfo());
+      await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: false);
+      if (Platform.isAndroid) {
+        unawaited(_refreshAndroidOutputRouteLabel());
+      } else {
+        unawaited(_refreshAudioRouteInfo());
+      }
     }
     if (!mounted) return;
 
@@ -45322,7 +45402,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         _buildInputMeterStrip(),
                         const SizedBox(height: 10),
                         _buildInputSelector(),
-                        if (_shouldShowInputChannelRouteSelector()) ...[
+                        if (!_isBluetoothV2Session &&
+                            _shouldShowInputChannelRouteSelector()) ...[
                           const SizedBox(height: 9),
                           _buildInputChannelRouteSelector(),
                         ],
