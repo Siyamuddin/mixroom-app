@@ -90,9 +90,27 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             if method == "GET":
                 payload = {
                     "settings": repo.get_prompt_limits(),
+                    "defaults": repo.get_default_prompt_limits(),
                     "can_edit": can_edit_ai_settings(admin_email),
                     "requested_by": admin_user_id,
                     "requested_email": admin_email,
+                }
+                return _finalize(json_response(200, payload))
+
+            if method == "DELETE":
+                if not can_edit_ai_settings(admin_email):
+                    return _finalize(
+                        json_response(
+                            403,
+                            {"error": "Only andrew@mixroom.ai can edit AI settings or grant AI prompts."},
+                        ),
+                        error="ai_editor_required",
+                    )
+                payload = {
+                    "settings": repo.clear_prompt_limits(),
+                    "defaults": repo.get_default_prompt_limits(),
+                    "updated_by": admin_user_id,
+                    "updated_email": admin_email,
                 }
                 return _finalize(json_response(200, payload))
 

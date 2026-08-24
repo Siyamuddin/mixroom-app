@@ -158,18 +158,6 @@ bool looksLikeHostedPluginIdentifier(const juce::String &identifier)
            lower.contains("\\");
 }
 
-bool canInstantiateHostedPluginWithoutFullScan(const juce::String &identifier)
-{
-    const auto lower = identifier.trim().toLowerCase();
-    if (lower.isEmpty())
-        return false;
-    return lower.startsWith("audiounit") ||
-           lower.endsWith(".vst3") ||
-           lower.endsWith(".component") ||
-           lower.contains("/audio/plug-ins/") ||
-           lower.contains("\\");
-}
-
 juce::File hostedPluginGuardDirectory()
 {
     return juce::File::getSpecialLocation(
@@ -3113,8 +3101,10 @@ bool JuceEngine::loadMidiClip(int clipId,
                                          ? juce::jmax(0.0, lengthSec)
                                          : estimateMidiMaterialLengthSec(notes, params, safeSourceTempo, safeOffsetSec);
 
-    if (!canInstantiateHostedPluginWithoutFullScan(instrumentId))
-        scanPluginsIfNeeded();
+    // Project restore must not turn a saved plug-in identifier into a global
+    // scan. Direct VST/AU identifiers resolve in
+    // createMidiClipProcessorFromState; an unknown legacy identifier fails
+    // safely and lets the caller use its preserved audio fallback instead.
 
     juce::String createError;
     auto player = createMidiClipProcessorFromState(
@@ -3431,8 +3421,8 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
                                       const juce::NamedValueSet &params,
                                       double sourceTempoBpm)
 {
-    if (!canInstantiateHostedPluginWithoutFullScan(instrumentId))
-        scanPluginsIfNeeded();
+    // See loadMidiClip: MIDI updates must not introduce a hidden global scan
+    // while a project is opening or recovering a plug-in.
 
     const double safeSourceTempo = clampSourceTempo(sourceTempoBpm);
     juce::PluginDescription hostedDescription;
@@ -4727,6 +4717,7 @@ JuceEngine::ExportOptions sanitiseExportOptions(const JuceEngine::ExportOptions 
         out.format = "wav";
 
     out.sampleRate = juce::jlimit(8000.0, 192000.0, out.sampleRate);
+    out.timelineStartSeconds = juce::jmax(0.0, out.timelineStartSeconds);
     if (!(out.wavBitDepth == 16 || out.wavBitDepth == 24 || out.wavBitDepth == 32))
         out.wavBitDepth = 16;
     out.mp3BitrateKbps = juce::jlimit(32, 320, out.mp3BitrateKbps);
@@ -4982,6 +4973,17 @@ void applyDryClipRenderOptions(ExportProjectSnapshot &snapshot)
         row.panUi = 0.5f;
         row.muted = false;
     }
+}
+
+void applyBypassMasterProcessingOptions(ExportProjectSnapshot &snapshot)
+{
+    snapshot.masterEffects.clear();
+    snapshot.masterEffectAutomationLanes.clear();
+    snapshot.masterGainAutomationPoints.clear();
+    snapshot.masterPanAutomationPoints.clear();
+    snapshot.masterGainUi = SimpleGainProcessor::kUiUnity;
+    snapshot.masterPanUi = 0.5f;
+    snapshot.masterMuted = false;
 }
 
 struct OfflineClipRenderState
@@ -5559,12 +5561,22 @@ bool mergeExportClipSnapshotsIntoProject(std::vector<ExportClipSnapshot> &projec
         const auto projectIt = projectIndexByClipId.find(overrideClip.clipId);
         if (projectIt != projectIndexByClipId.end())
         {
+            // The live engine snapshot owns routing identity. Dart supplies
+            // timing/source overrides for a clip that already exists in this
+            // graph, but its UI row cache can briefly lag a row insertion or
+            // reorder. Letting that stale rowId replace the snapshot row makes
+            // the offline graph impossible to construct.
+            overrideClip.rowId = projectClips[projectIt->second].rowId;
             projectClips[projectIt->second] = std::move(overrideClip);
             continue;
         }
 
-        projectIndexByClipId[overrideClip.clipId] = projectClips.size();
-        projectClips.push_back(std::move(overrideClip));
+        // clipSnapshotJson is an override layer for the captured live graph,
+        // not an instruction to create new offline clips. A Dart clip can be
+        // stale for one frame after removal/reload, in which case adding it
+        // creates a clip that has no corresponding destination row.
+        juceLogToFlutter(
+            "Ignoring stale offline export clip override that is absent from the native graph.");
     }
 
     return true;
@@ -6375,29 +6387,53 @@ juce::String renderOfflineSnapshotToFile(
 
     stream.release();
 
-    OfflineExportContext context;
+    auto context = std::make_unique<OfflineExportContext>();
     juce::String error;
-    if (!buildOfflineExportContext(snapshot,
-                                   sampleRate,
-                                   clampedBlockSize,
-                                   formatManager,
-                                   pluginFormatManager,
-                                   pluginList,
-                                   context,
-                                   error))
+    bool contextBuilt = false;
+    const auto buildContext = [&]
+    {
+        contextBuilt = buildOfflineExportContext(snapshot,
+                                                 sampleRate,
+                                                 clampedBlockSize,
+                                                 formatManager,
+                                                 pluginFormatManager,
+                                                 pluginList,
+                                                 *context,
+                                                 error);
+    };
+    auto *messageManager = juce::MessageManager::getInstance();
+    if (messageManager != nullptr && !messageManager->isThisTheMessageThread())
+        messageManager->callSync(buildContext);
+    else
+        buildContext();
+
+    const auto releaseContext = [&]
+    {
+        if (context == nullptr)
+            return;
+        const auto reset = [&] { context.reset(); };
+        if (messageManager != nullptr && !messageManager->isThisTheMessageThread())
+            messageManager->callSync(reset);
+        else
+            reset();
+    };
+
+    if (!contextBuilt)
     {
         if (error.isNotEmpty())
             juceLogToFlutter(error.toRawUTF8());
+        releaseContext();
         return {};
     }
 
-    const double tailSeconds = getGraphTailLengthSeconds(context.graph);
+    const double tailSeconds = getGraphTailLengthSeconds(context->graph);
     const int64 totalSamples =
         (int64)std::ceil((contentDurationSeconds + tailSeconds) * sampleRate);
     if (totalSamples <= 0)
     {
         if (progressCallback)
             progressCallback(1.0);
+        releaseContext();
         return outFile.getFullPathName();
     }
 
@@ -6413,9 +6449,9 @@ juce::String renderOfflineSnapshotToFile(
     const int64 totalRenderSamples = prerollSamples + totalSamples;
     double transportSeconds = -((double)prerollSamples / sampleRate);
 
-    context.blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
-    context.blockIsPlaying.store(false, std::memory_order_relaxed);
-    context.playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
+    context->blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
+    context->blockIsPlaying.store(false, std::memory_order_relaxed);
+    context->playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
     mixroom::fx::setGlobalTransportSeconds(0.0);
     mixroom::fx::setGlobalTransportPlaying(false);
 
@@ -6432,14 +6468,20 @@ juce::String renderOfflineSnapshotToFile(
 
         const bool hostIsPlaying = transportSeconds >= 0.0;
         const double hostTransportSeconds = hostIsPlaying ? transportSeconds : 0.0;
-        context.blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
-        context.blockIsPlaying.store(hostIsPlaying, std::memory_order_relaxed);
-        context.playHead.setTransport(hostTransportSeconds, sampleRate, snapshot.tempoBpm, hostIsPlaying);
-        mixroom::fx::setGlobalTransportSeconds(hostTransportSeconds);
+        context->blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
+        context->blockIsPlaying.store(hostIsPlaying, std::memory_order_relaxed);
+        context->playHead.setTransport(hostTransportSeconds, sampleRate, snapshot.tempoBpm, hostIsPlaying);
+        // Clip scheduling runs in the compact artifact's local timeline, but
+        // automation belongs to the source project timeline. Keep those
+        // concepts separate so a stem printed from bar 17 starts with the
+        // same automated parameter values it had at bar 17.
+        const double sourceProjectSeconds =
+            hostTransportSeconds + options.timelineStartSeconds;
+        mixroom::fx::setGlobalTransportSeconds(sourceProjectSeconds);
         mixroom::fx::setGlobalTransportPlaying(hostIsPlaying);
-        const double automationSeconds = hostTransportSeconds;
-        applyOfflineAutomationAtTimeSeconds(context, automationSeconds);
-        context.graph.processBlock(buffer, midi);
+        const double automationSeconds = sourceProjectSeconds;
+        applyOfflineAutomationAtTimeSeconds(*context, automationSeconds);
+        context->graph.processBlock(buffer, midi);
         sanitiseExportBuffer(buffer);
 
         const int64 validStartSample = std::max<int64>(
@@ -6474,6 +6516,7 @@ juce::String renderOfflineSnapshotToFile(
 
     if (progressCallback)
         progressCallback(1.0);
+    releaseContext();
     return outFile.getFullPathName();
 }
 } // namespace
@@ -6670,7 +6713,8 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         std::atomic<bool> &active;
     } exportProgressGuard(exportInProgressAtomic);
 
-    const bool hadLiveCallback = (metronomeCallback != nullptr);
+    const bool hadLiveCallback =
+        !options.preserveRealtimePlayback && metronomeCallback != nullptr;
     if (hadLiveCallback)
         deviceManager.removeAudioCallback(metronomeCallback.get());
 
@@ -6870,8 +6914,27 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         clip.midiPluginAutomationLanes =
             midiAutomationByClipId[clip.clipId];
 
+    if (options.restrictToAudibleClipIds)
+    {
+        for (auto &clip : snapshot.clips)
+            clip.muted = clip.muted || !options.audibleClipIds.contains(clip.clipId);
+    }
+
+    if (options.timelineStartSeconds > 0.0)
+    {
+        for (auto &clip : snapshot.clips)
+            clip.startSec -= options.timelineStartSeconds;
+    }
+
     if (options.dryClipRender)
         applyDryClipRenderOptions(snapshot);
+    else
+    {
+        if (options.bypassGroupProcessing)
+            snapshot.groups.clear();
+        if (options.bypassMasterProcessing)
+            applyBypassMasterProcessingOptions(snapshot);
+    }
 
     mixroom::fx::setGlobalTempoBpm(snapshot.tempoBpm);
     const auto result = renderOfflineSnapshotToFile(
@@ -8387,7 +8450,10 @@ bool JuceEngine::insertTrackEffect(int trackRow, const juce::String &pluginPath,
                                  .toRawUTF8());
             return false;
         }
-        scanPluginsIfNeeded();
+        // Project restore already has the exact VST/AU identifier. Avoid a
+        // global scan here: an unrelated unhealthy plug-in must not prevent
+        // this project from opening. Direct identifiers resolve below;
+        // unknown legacy IDs fail safely instead of scanning the machine.
 
         juce::PluginDescription desc;
         const bool resolved = resolveKnownPluginDescription(pluginList, requestedId, desc);
@@ -11056,7 +11122,9 @@ bool JuceEngine::insertMasterEffect(const juce::String &pluginPath)
                                  .toRawUTF8());
             return false;
         }
-        scanPluginsIfNeeded();
+        // Same project-open rule as row effects. Direct identifiers resolve
+        // below; unknown legacy IDs fail safely instead of scanning the
+        // machine during a project open.
 
         juce::PluginDescription desc;
         const bool resolved = resolveKnownPluginDescription(pluginList, requestedId, desc);
