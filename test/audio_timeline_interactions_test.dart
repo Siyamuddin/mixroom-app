@@ -182,6 +182,73 @@ Future<void> _openRowHeaderMenu(WidgetTester tester, int row) async {
   await tester.pumpAndSettle();
 }
 
+CustomPainter _timelineClipPainter(WidgetTester tester) {
+  for (final customPaint in tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byType(AudioCanvasTimeline),
+      matching: find.byType(CustomPaint),
+    ),
+  )) {
+    final painter = customPaint.painter;
+    if (painter == null) continue;
+    try {
+      final indices = (painter as dynamic).visibleClipIndices;
+      if (indices is List<int>) return painter;
+    } on NoSuchMethodError {
+      // Other timeline painters do not expose clip visibility.
+    }
+  }
+  fail('Timeline painter with visible clip indices was not found.');
+}
+
+List<int> _paintedTimelineClipIndices(WidgetTester tester) {
+  final indices = (_timelineClipPainter(tester) as dynamic).visibleClipIndices;
+  return List<int>.of(indices as List<int>);
+}
+
+double _paintedTimelineVerticalScrollOffset(WidgetTester tester) {
+  for (final customPaint in tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byType(AudioCanvasTimeline),
+      matching: find.byType(CustomPaint),
+    ),
+  )) {
+    final painter = customPaint.painter;
+    if (painter == null) continue;
+    try {
+      final offset = (painter as dynamic).verticalScrollOffset;
+      if (offset is double) return offset;
+    } on NoSuchMethodError {
+      // Other timeline painters do not expose vertical scroll state.
+    }
+  }
+  fail('Timeline painter with vertical scroll state was not found.');
+}
+
+ScrollController _timelineVerticalScrollController(WidgetTester tester) {
+  final candidates = tester
+      .widgetList<SingleChildScrollView>(
+        find.descendant(
+          of: find.byType(AudioCanvasTimeline),
+          matching: find.byType(SingleChildScrollView),
+        ),
+      )
+      .where(
+        (scrollView) =>
+            scrollView.scrollDirection == Axis.vertical &&
+            scrollView.controller?.hasClients == true,
+      )
+      .map((scrollView) => scrollView.controller!)
+      .toList(growable: false);
+  if (candidates.isEmpty) {
+    fail('Timeline vertical scroll controller was not found.');
+  }
+  candidates.sort(
+    (a, b) => b.position.maxScrollExtent.compareTo(a.position.maxScrollExtent),
+  );
+  return candidates.first;
+}
+
 Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
   final rect = tester.getRect(
     find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
@@ -3311,6 +3378,75 @@ void main() {
 
     expect(find.byType(RowEffectsPanel), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets(
+      'effect parameter geometry admits an off-screen clip on the next scroll',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final rows = List<TimelineRow>.generate(
+        8,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final upperClip = await _buildClip(row: 0, rowId: 1, engineClipId: 1);
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[upperClip],
+          controller: controller,
+          rowsOverride: rows,
+          rowEffects: const <String>['EQ'],
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller.ensureRowExpanded(7, tab: 1);
+      await tester.pumpAndSettle();
+
+      final effectsPanel = tester.widget<RowEffectsPanel>(
+        find.byType(RowEffectsPanel),
+      );
+      effectsPanel.onHeightChanged(800.0);
+      await tester.pumpAndSettle();
+
+      final verticalController = _timelineVerticalScrollController(tester);
+      verticalController.jumpTo(verticalController.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(_paintedTimelineClipIndices(tester), isNot(contains(0)));
+      final painterWithoutClipZero = _timelineClipPainter(tester);
+
+      effectsPanel.onHeightChanged(240.0);
+      await tester.pumpAndSettle();
+
+      expect(
+        _paintedTimelineVerticalScrollOffset(tester),
+        closeTo(verticalController.offset, 0.01),
+      );
+
+      final stableOffset = verticalController.offset;
+      effectsPanel.onHeightChanged(240.0);
+      await tester.pumpAndSettle();
+      expect(verticalController.offset, stableOffset);
+
+      verticalController.jumpTo(0.0);
+      await tester.pumpAndSettle();
+      expect(_paintedTimelineClipIndices(tester), contains(0));
+      final painterWithClipZero = _timelineClipPainter(tester);
+      expect(
+        painterWithClipZero.shouldRepaint(painterWithoutClipZero),
+        isTrue,
+        reason: 'clip index 0 entering the viewport must invalidate paint',
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
   });
 
   testWidgets('tablet effects tab shows horizontal device chain controls',

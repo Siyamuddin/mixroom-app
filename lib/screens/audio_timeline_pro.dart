@@ -12525,11 +12525,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         onUpgradeRequested: widget.onUpgradeRequested,
         minHeight: _effectsPanelMinHeight,
         onHeightChanged: (h) {
-          if (mounted) {
-            setState(() {
-              _effectsPanelHeights[row] = math.max(h, _effectsPanelMinHeight);
-            });
+          if (!mounted || row < 0 || row >= _effectsPanelHeights.length) {
+            return;
           }
+          final nextHeight = math.max(h, _effectsPanelMinHeight);
+          if ((_effectsPanelHeights[row] - nextHeight).abs() <= 0.5) return;
+          setState(() {
+            _effectsPanelHeights[row] = nextHeight;
+          });
+          _syncVerticalScrollOffsetAfterGeometryChange();
         },
         // callbacks
         getEffectsForRow: widget.getRowEffects,
@@ -18281,7 +18285,6 @@ class _TimelinePainter extends CustomPainter {
   final Set<int> rowsHiddenByCollapsedGroups;
   final double? leftVisibleExtensionPx;
   final int _clipDataHash;
-  final int _visibleClipIndicesHash;
   final int _automationClipHash;
   final int _rowsHiddenByCollapsedGroupsHash;
   final int _selectedClipIndicesHash;
@@ -18359,7 +18362,6 @@ class _TimelinePainter extends CustomPainter {
     required this.rowsHiddenByCollapsedGroups,
     this.leftVisibleExtensionPx,
   }) : _clipDataHash = clipVisualRevision,
-       _visibleClipIndicesHash = _hashList(visibleClipIndices),
        _automationClipHash = _computeAutomationClipHash(automationClipVisuals),
        _rowsHiddenByCollapsedGroupsHash = _hashList(
          (rowsHiddenByCollapsedGroups.toList()..sort()),
@@ -20424,7 +20426,7 @@ class _TimelinePainter extends CustomPainter {
         _clipDataHash < 0 ||
         old._clipDataHash < 0 ||
         _clipDataHash != old._clipDataHash ||
-        _visibleClipIndicesHash != old._visibleClipIndicesHash ||
+        !listEquals(visibleClipIndices, old.visibleClipIndices) ||
         _automationClipHash != old._automationClipHash ||
         quantizeDivisions != old.quantizeDivisions ||
         foregroundGridEnabled != old.foregroundGridEnabled ||
