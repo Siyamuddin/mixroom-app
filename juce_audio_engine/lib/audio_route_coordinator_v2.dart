@@ -29,6 +29,7 @@ class AudioRouteCoordinatorV2 {
   AudioRouteCoordinatorV2({
     required AudioRouteAdapterV2 adapter,
     this.settlingDelay = const Duration(milliseconds: 100),
+    this.allowRecoveryGenerationSupersession = false,
     this.onStateChanged,
     this.onTransition,
     this.onIntentInvalidated,
@@ -36,6 +37,7 @@ class AudioRouteCoordinatorV2 {
 
   final AudioRouteAdapterV2 _adapter;
   final Duration settlingDelay;
+  final bool allowRecoveryGenerationSupersession;
   final void Function(AudioRouteCoordinatorStateV2 state)? onStateChanged;
   final void Function(AudioRouteTransitionResultV2 result)? onTransition;
   final void Function(AudioRouteChangeEventV2 event)? onIntentInvalidated;
@@ -494,8 +496,9 @@ class AudioRouteCoordinatorV2 {
   }
 
   /// Serializes a playback-only recovery behind an intent transition that was
-  /// invalidated by a native route event. This does not retry: it performs one
-  /// transition using the latest observed generation.
+  /// invalidated by a native route event. A native stale-generation preflight
+  /// may be superseded once when its immutable snapshot proves that the route
+  /// generation advanced before any device mutation began.
   Future<AudioRouteTransitionResultV2>
       recoverPlaybackAfterIntentInvalidation() async {
     final existing = _invalidationRecovery;
@@ -531,8 +534,32 @@ class AudioRouteCoordinatorV2 {
         'coordinator_disposed',
       );
     }
-    final result = await transitionIntent(AudioRouteIntentV2.playbackOnly);
-    if (recoveryEpisode == _invalidationEpisode) return result;
+    final attemptedGeneration = _latestGeneration;
+    var result = await transitionIntent(AudioRouteIntentV2.playbackOnly);
+    if (recoveryEpisode == _invalidationEpisode) {
+      final snapshotGeneration = result.snapshot.generation ?? 0;
+      final authoritativeGeneration = snapshotGeneration > _latestGeneration
+          ? snapshotGeneration
+          : _latestGeneration;
+      final canSupersedeNativeStalePreflight =
+          allowRecoveryGenerationSupersession &&
+              result.diagnosticCode == 'stale_generation' &&
+              result.transitionId > 0 &&
+              authoritativeGeneration > attemptedGeneration &&
+              !_disposed &&
+              _started &&
+              !_shutdownCancellation &&
+              !_interruptionActive &&
+              _pending == null;
+      if (!canSupersedeNativeStalePreflight) return result;
+
+      // The rejected native preflight did not mutate the route. Promote only
+      // the authoritative generation exposed by native/event facts, then
+      // replace that stale request once within the same invalidation episode.
+      _latestGeneration = authoritativeGeneration;
+      result = await transitionIntent(AudioRouteIntentV2.playbackOnly);
+      return result;
+    }
 
     // An interruption can begin while an older route restoration is already
     // in flight. That stale transition belongs to the older episode. Wait for

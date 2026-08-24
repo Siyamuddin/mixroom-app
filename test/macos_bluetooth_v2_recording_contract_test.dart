@@ -511,27 +511,40 @@ void main() {
     },
   );
 
-  test('invalidation owns delayed route notifications until recovery starts', () {
-    final plugin = File(pluginPath).readAsStringSync();
-    final asyncIntent = _between(
-      plugin,
-      '- (void)setAudioRouteIntentV2:(NSDictionary *)args\n'
-          '                   completion:(void (^)(NSDictionary<NSString *, id> *))completion {',
-      '#else\n    self.iosIntentCompletionDeliveredV2 = NO;',
-    );
+  test(
+    'invalidation owns notifications until a non-stale recovery completes',
+    () {
+      final plugin = File(pluginPath).readAsStringSync();
+      final asyncIntent = _between(
+        plugin,
+        '- (void)setAudioRouteIntentV2:(NSDictionary *)args\n'
+            '                   completion:(void (^)(NSDictionary<NSString *, id> *))completion {',
+        '#else\n    self.iosIntentCompletionDeliveredV2 = NO;',
+      );
 
-    expect(asyncIntent, contains('beginsInvalidationRecovery'));
-    expect(asyncIntent, contains('macIntentRecoveryPendingV2'));
-    expect(
-      asyncIntent,
-      contains('[immutableArgs[@"intent"] isEqualToString:@"playbackOnly"]'),
-    );
-    expect(asyncIntent, contains('macLifecycleTransitionActiveV2 = YES'));
-    expect(
-      asyncIntent.indexOf('macLifecycleTransitionActiveV2 = YES'),
-      lessThan(asyncIntent.indexOf('macIntentRecoveryPendingV2 = NO')),
-    );
-  });
+      expect(asyncIntent, contains('beginsInvalidationRecovery'));
+      expect(asyncIntent, contains('macIntentRecoveryPendingV2'));
+      expect(
+        asyncIntent,
+        contains('[immutableArgs[@"intent"] isEqualToString:@"playbackOnly"]'),
+      );
+      expect(asyncIntent, contains('macLifecycleTransitionActiveV2 = YES'));
+      expect(asyncIntent, contains('stalePreflight'));
+      expect(
+        asyncIntent,
+        contains('[diagnosticCode isEqualToString:@"stale_generation"]'),
+      );
+      expect(asyncIntent, contains('if (!stalePreflight)'));
+      expect(
+        asyncIntent,
+        contains('[MacV2Recovery] result attempted=%llu snapshot=%llu'),
+      );
+      expect(
+        asyncIntent.indexOf('NSDictionary<NSString *, id> *response ='),
+        lessThan(asyncIntent.indexOf('macIntentRecoveryPendingV2 = NO')),
+      );
+    },
+  );
 
   test(
     'macOS startup remains off Flutter UI and avoids callback-lock deadlock',

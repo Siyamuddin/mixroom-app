@@ -92,10 +92,13 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final preferredBufferFrames = <int?>[];
   final hardwarePreferenceUpdates = <bool>[];
   final appliedIntents = <AudioRouteIntentV2>[];
+  final appliedIntentGenerations = <int>[];
   final appliedOperations = <AudioRouteIntentOperationV2>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
   final intentResults =
       <AudioRouteIntentV2, Future<AudioRouteTransitionResultV2>>{};
+  final intentResultsByGeneration =
+      <int, Future<AudioRouteTransitionResultV2>>{};
   var startCount = 0;
   var stopCount = 0;
 
@@ -134,8 +137,11 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
       {AudioRouteIntentOperationV2 operation =
           AudioRouteIntentOperationV2.standard}) async {
     appliedIntents.add(intent);
+    appliedIntentGenerations.add(generation);
     appliedOperations.add(operation);
-    return intentResults[intent] ?? _result(generation);
+    return intentResultsByGeneration[generation] ??
+        intentResults[intent] ??
+        _result(generation);
   }
 
   @override
@@ -1137,6 +1143,159 @@ void main() {
       AudioRouteIntentV2.playbackOnly,
     ]);
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test(
+      'native stale recovery preflight is superseded once at newest generation',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      allowRecoveryGenerationSupersession: true,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+
+    adapter.controller.add(
+      _event(1, 'speaker', cause: 'oldDeviceUnavailable'),
+    );
+    await _flush();
+    adapter.intentResultsByGeneration[1] = Future.value(
+      AudioRouteTransitionResultV2(
+        status: AudioRouteTransitionStatusV2.failure,
+        generation: 1,
+        transitionId: 201,
+        diagnosticCode: 'stale_generation',
+        elapsedMs: 1,
+        transportWasPlaying: false,
+        snapshot: _snapshot(generation: 2, transitionId: 201),
+      ),
+    );
+    adapter.intentResultsByGeneration[2] = Future.value(_result(2));
+
+    final first = coordinator.recoverPlaybackAfterIntentInvalidation();
+    final duplicate = coordinator.recoverPlaybackAfterIntentInvalidation();
+    final firstResult = await first;
+    final duplicateResult = await duplicate;
+
+    expect(firstResult.succeeded, isTrue);
+    expect(duplicateResult.succeeded, isTrue);
+    expect(identical(firstResult, duplicateResult), isTrue);
+    expect(
+      adapter.appliedIntents,
+      <AudioRouteIntentV2>[
+        AudioRouteIntentV2.preparingRecording,
+        AudioRouteIntentV2.recording,
+        AudioRouteIntentV2.playbackOnly,
+        AudioRouteIntentV2.playbackOnly,
+      ],
+    );
+    expect(adapter.appliedIntentGenerations.sublist(2), <int>[1, 2]);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('shared coordinator does not supersede native stale without opt-in',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+
+    adapter.controller.add(
+      _event(1, 'speaker', cause: 'oldDeviceUnavailable'),
+    );
+    await _flush();
+    adapter.intentResultsByGeneration[1] = Future.value(
+      AudioRouteTransitionResultV2(
+        status: AudioRouteTransitionStatusV2.failure,
+        generation: 1,
+        transitionId: 203,
+        diagnosticCode: 'stale_generation',
+        elapsedMs: 1,
+        transportWasPlaying: false,
+        snapshot: _snapshot(generation: 2, transitionId: 203),
+      ),
+    );
+
+    final result = await coordinator.recoverPlaybackAfterIntentInvalidation();
+
+    expect(result.succeeded, isFalse);
+    expect(adapter.appliedIntentGenerations.sublist(1), <int>[1]);
+    await coordinator.dispose();
+  });
+
+  test('non-stale recovery failure is never superseded', () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+    await coordinator.transitionIntent(AudioRouteIntentV2.recording);
+
+    adapter.controller.add(
+      _event(1, 'missing', cause: 'oldDeviceUnavailable'),
+    );
+    await _flush();
+    adapter.intentResultsByGeneration[1] = Future.value(
+      AudioRouteTransitionResultV2(
+        status: AudioRouteTransitionStatusV2.failure,
+        generation: 1,
+        transitionId: 202,
+        diagnosticCode: 'no_output',
+        elapsedMs: 1,
+        transportWasPlaying: false,
+        snapshot: _snapshot(generation: 2, transitionId: 202),
+      ),
+    );
+
+    final result = await coordinator.recoverPlaybackAfterIntentInvalidation();
+
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'no_output');
+    expect(adapter.appliedIntentGenerations.sublist(2), <int>[1]);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
+    await coordinator.dispose();
+  });
+
+  test('local stale recovery result is never superseded', () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+
+    adapter.controller.add(
+      _event(1, 'speaker', cause: 'oldDeviceUnavailable'),
+    );
+    await _flush();
+    adapter.intentResultsByGeneration[1] = Future.value(
+      AudioRouteTransitionResultV2(
+        status: AudioRouteTransitionStatusV2.failure,
+        generation: 1,
+        transitionId: 0,
+        diagnosticCode: 'stale_generation',
+        elapsedMs: 0,
+        transportWasPlaying: false,
+        snapshot: _snapshot(generation: 2),
+      ),
+    );
+
+    final result = await coordinator.recoverPlaybackAfterIntentInvalidation();
+
+    expect(result.succeeded, isFalse);
+    expect(adapter.appliedIntentGenerations.sublist(1), <int>[1]);
     await coordinator.dispose();
   });
 

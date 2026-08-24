@@ -9287,6 +9287,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           !Platform.isIOS) {
         final coordinator = AudioRouteCoordinatorV2(
           adapter: const MethodChannelAudioRouteAdapterV2(),
+          allowRecoveryGenerationSupersession: Platform.isMacOS,
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
           onTransition: _handleAudioRouteTransitionV2,
           onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,

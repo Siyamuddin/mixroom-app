@@ -4527,7 +4527,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         self.macIntentRecoveryPendingV2 &&
         [immutableArgs[@"intent"] isEqualToString:@"playbackOnly"];
     if (beginsInvalidationRecovery) {
-        self.macIntentRecoveryPendingV2 = NO;
         NSLog(@"[MacV2Recovery] admitted generation=%llu",
               (unsigned long long)[immutableArgs[@"generation"]
                   unsignedLongLongValue]);
@@ -4546,6 +4545,33 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 };
             NSDictionary<NSString *, id> *response = [rawResponse copy];
             dispatch_async(dispatch_get_main_queue(), ^{
+                NSString *diagnosticCode =
+                    [response[@"diagnosticCode"] isKindOfClass:[NSString class]]
+                        ? response[@"diagnosticCode"]
+                        : @"actual_state_unavailable";
+                NSDictionary *snapshot =
+                    [response[@"snapshot"] isKindOfClass:[NSDictionary class]]
+                        ? response[@"snapshot"]
+                        : @{};
+                const uint64_t attemptedGeneration =
+                    [immutableArgs[@"generation"] unsignedLongLongValue];
+                const uint64_t snapshotGeneration =
+                    [snapshot[@"generation"] unsignedLongLongValue];
+                const uint64_t finalGeneration = self.audioRouteGenerationV2;
+                if (beginsInvalidationRecovery) {
+                    const BOOL stalePreflight =
+                        [diagnosticCode isEqualToString:@"stale_generation"];
+                    if (!stalePreflight) {
+                        self.macIntentRecoveryPendingV2 = NO;
+                    }
+                    NSLog(@"[MacV2Recovery] result attempted=%llu snapshot=%llu "
+                          "final=%llu status=%@ code=%@",
+                          (unsigned long long)attemptedGeneration,
+                          (unsigned long long)snapshotGeneration,
+                          (unsigned long long)finalGeneration,
+                          response[@"status"] ?: @"failure",
+                          diagnosticCode);
+                }
                 const BOOL reconcile = self.macLifecycleReconcilePendingV2;
                 self.macLifecycleReconcilePendingV2 = NO;
                 self.macLifecycleTransitionActiveV2 = NO;
