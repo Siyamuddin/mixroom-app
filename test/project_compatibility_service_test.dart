@@ -79,6 +79,158 @@ void main() {
     expect(frozenTrack['clipType'], 'audio');
   });
 
+  test(
+    'promotes compatibility audio when its portable view is edited',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'mixroom_compat_edit_',
+      );
+      try {
+        final sourceProject = Directory(p.join(root.path, 'source'));
+        final editedProject = Directory(p.join(root.path, 'edited'));
+        final compatibilityAudio =
+            ProjectCompatibilityService.audioDirectoryFor(sourceProject);
+        await compatibilityAudio.create(recursive: true);
+        await Directory(
+          p.join(editedProject.path, 'audio'),
+        ).create(recursive: true);
+        final referenceMix = File(
+          p.join(compatibilityAudio.path, 'original_mix_reference.wav'),
+        );
+        await referenceMix.writeAsBytes(<int>[1, 2, 3], flush: true);
+
+        final promoted =
+            await ProjectCompatibilityService.promoteAudioForEditedCopy(
+              sourceProjectDir: sourceProject,
+              editedProjectDir: editedProject,
+              audioFiles: <File>[referenceMix, referenceMix],
+            );
+
+        final promotedFile = promoted[p.normalize(referenceMix.path)];
+        expect(promotedFile, isNotNull);
+        expect(
+          p.isWithin(p.join(editedProject.path, 'audio'), promotedFile!.path),
+          isTrue,
+        );
+        expect(
+          ProjectCompatibilityService.persistedAudioFileName(
+            projectDir: editedProject,
+            audioFile: promotedFile,
+          ),
+          'original_mix_reference.wav',
+        );
+        expect(await promotedFile.readAsBytes(), <int>[1, 2, 3]);
+        expect(promoted, hasLength(1));
+      } finally {
+        await root.delete(recursive: true);
+      }
+    },
+  );
+
+  test('uses the rendered mix when the master has an unavailable plugin', () {
+    final source = _sourceProject()
+      ..['rows'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'rowId': 10,
+          'name': 'Synth',
+          'kind': 'instrument',
+          'groupId': 'band',
+        },
+        <String, dynamic>{
+          'rowId': 11,
+          'name': 'Bass',
+          'kind': 'audio',
+          'groupId': 'band',
+        },
+      ]
+      ..['tracks'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'fileName': 'synth.wav',
+          'clipType': 'audio',
+          'rowIndex': 0,
+          'clipId': 'synth',
+        },
+        <String, dynamic>{
+          'fileName': 'bass.wav',
+          'clipType': 'audio',
+          'rowIndex': 1,
+          'clipId': 'bass',
+        },
+      ]
+      ..['rowStates'] = <Map<String, dynamic>>[
+        <String, dynamic>{'row': 0, 'gain': 1.3, 'pan': 0.2},
+        <String, dynamic>{'row': 1, 'gain': 2.4, 'pan': 0.8},
+      ]
+      ..['trackGroups'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'id': 'band',
+          'rowIds': <int>[10, 11],
+          'gain': 1.5,
+          'pan': 0.25,
+          'effects': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'effectId': 'mixroom:compressor',
+              'pluginOrigin': 'mixroom',
+            },
+          ],
+        },
+      ];
+    final inspected = ProjectCompatibilityService.inspect(source);
+    final masterDependencies = inspected.dependencies
+        .where(
+          (dependency) => dependency.scope == ProjectCompatibilityScope.master,
+        )
+        .toList(growable: false);
+    const referenceMix = 'compatibility/audio/original_mix_reference.wav';
+
+    final projection = ProjectCompatibilityService.buildCompatibleProjection(
+      sourceProject: source,
+      manifest: ProjectCompatibilityManifest(
+        sourceFingerprint: inspected.sourceFingerprint,
+        dependencies: masterDependencies,
+        artifacts: <ProjectCompatibilityArtifact>[
+          for (final dependency in masterDependencies)
+            ProjectCompatibilityArtifact(
+              dependencyKey: dependency.key,
+              fileName: referenceMix,
+              fingerprint: ProjectCompatibilityService.artifactFingerprint(
+                source,
+                dependency,
+              ),
+            ),
+        ],
+        referenceMixFileName: referenceMix,
+      ),
+    );
+
+    final tracks = (projection['tracks'] as List).cast<Map>();
+    expect(tracks, hasLength(1));
+    expect(tracks.single['fileName'], referenceMix);
+    expect(tracks.single['clipId'], 'compatibility-original-mix');
+    final rows = (projection['rows'] as List).cast<Map>();
+    expect(rows.map((row) => row['name']), <Object?>[
+      'Master',
+      'Synth',
+      'Bass',
+    ]);
+    expect(rows.first['kind'], 'audio');
+    expect(tracks.single['rowIndex'], 0);
+    expect(tracks.single['rowId'], rows.first['rowId']);
+    final rowStates = (projection['rowStates'] as List).cast<Map>();
+    expect(rowStates.map((state) => state['row']), <Object?>[0, 1, 2]);
+    expect(rowStates.first['rowId'], rows.first['rowId']);
+    expect(rowStates.map((state) => state['gain']), everyElement(2.0));
+    expect(rowStates.map((state) => state['pan']), everyElement(0.5));
+    final group = (projection['trackGroups'] as List).single as Map;
+    expect(group['gain'], 2.0);
+    expect(group['pan'], 0.5);
+    expect(group['effects'], isEmpty);
+    final master = projection['master'] as Map;
+    expect(master['gain'], 2.0);
+    expect(master['pan'], 0.5);
+    expect((master['effects'] as Map)['effects'], isEmpty);
+  });
+
   test('invalidates plugin audio when the project sample rate changes', () {
     final source = _sourceProject()
       ..['ui'] = <String, dynamic>{
@@ -169,9 +321,13 @@ void main() {
         );
         await audioDir.create(recursive: true);
         final artifacts = <ProjectCompatibilityArtifact>[];
+        var referenceMixFileName = '';
         for (var index = 0; index < dependencies.length; index++) {
           final fileName = 'compatibility/audio/frozen_$index.wav';
           await File(p.join(projectDir.path, fileName)).writeAsBytes(<int>[1]);
+          if (dependencies[index].scope == ProjectCompatibilityScope.master) {
+            referenceMixFileName = fileName;
+          }
           artifacts.add(
             ProjectCompatibilityArtifact(
               dependencyKey: dependencies[index].key,
@@ -204,6 +360,7 @@ void main() {
           projectDir: projectDir,
           sourceProject: source,
           artifacts: artifacts,
+          referenceMixFileName: referenceMixFileName,
         );
 
         expect(await ProjectCompatibilityService.isCurrent(projectDir), isTrue);
@@ -223,7 +380,12 @@ void main() {
         expect(opened.usingCompatibleAudio, isTrue);
         final tracks = (opened.projectState['tracks'] as List).cast<Map>();
         expect(tracks.single['clipType'], 'audio');
+        expect(tracks.single['fileName'], referenceMixFileName);
         expect(tracks.single['instrumentId'], isEmpty);
+        final rows = (opened.projectState['rows'] as List).cast<Map>();
+        expect(rows, hasLength(1));
+        expect(rows.single['name'], 'Master');
+        expect(tracks.single['rowId'], rows.single['rowId']);
         final rowEffects = (opened.projectState['rowEffects'] as List)
             .cast<Map>();
         expect((rowEffects.single['effects'] as List), isEmpty);

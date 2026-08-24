@@ -35,6 +35,8 @@ class ProjectMeta {
   final String? cloudWorkspaceId;
   final String? cloudOrganizationId;
   final int? cloudDocumentRevision;
+  final String? cloudSourceFingerprint;
+  final String sourceFingerprint;
   final DateTime createdAt;
   final DateTime lastOpenedAt;
   final String? bundledDemoAssetPath;
@@ -47,10 +49,41 @@ class ProjectMeta {
     this.cloudWorkspaceId,
     this.cloudOrganizationId,
     this.cloudDocumentRevision,
+    this.cloudSourceFingerprint,
+    this.sourceFingerprint = '',
     required this.createdAt,
     required this.lastOpenedAt,
     this.bundledDemoAssetPath,
   });
+}
+
+enum ProjectCloudFreshness {
+  synced,
+  localChanges,
+  cloudAhead,
+  diverged,
+  linkedUnknown,
+}
+
+ProjectCloudFreshness resolveProjectCloudFreshness({
+  required ProjectMeta project,
+  required bool cloudStatusAvailable,
+  int? latestCloudRevision,
+}) {
+  final syncedFingerprint = (project.cloudSourceFingerprint ?? '').trim();
+  final hasLocalChanges =
+      syncedFingerprint.isNotEmpty &&
+      project.sourceFingerprint.isNotEmpty &&
+      syncedFingerprint != project.sourceFingerprint;
+  if (!cloudStatusAvailable) return ProjectCloudFreshness.linkedUnknown;
+  final cloudAhead =
+      latestCloudRevision != null &&
+      (project.cloudDocumentRevision == null ||
+          latestCloudRevision != project.cloudDocumentRevision);
+  if (cloudAhead && hasLocalChanges) return ProjectCloudFreshness.diverged;
+  if (cloudAhead) return ProjectCloudFreshness.cloudAhead;
+  if (hasLocalChanges) return ProjectCloudFreshness.localChanges;
+  return ProjectCloudFreshness.synced;
 }
 
 class BundledDemoProjectAsset {
@@ -150,6 +183,9 @@ class ProjectManager {
             (json["cloudOrganizationId"] ?? json["cloud_organization_id"])
                 ?.toString()
                 .trim();
+        final cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+            .toString()
+            .trim();
         metas.add(
           ProjectMeta(
             dir: d,
@@ -169,6 +205,12 @@ class ProjectManager {
                 : cloudOrganizationId,
             cloudDocumentRevision: (json["cloudDocumentRevision"] as num?)
                 ?.toInt(),
+            cloudSourceFingerprint: cloudSourceFingerprint.isEmpty
+                ? null
+                : cloudSourceFingerprint,
+            sourceFingerprint: ProjectCompatibilityService.sourceFingerprint(
+              json,
+            ),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
               (json["createdAt"] ?? 0) as int,
             ),
@@ -626,6 +668,7 @@ class ProjectBundle {
   static Future<String> exportMixroomBundle({
     required Directory projectDir,
     required BundleAudioMode audioMode,
+    bool requireCurrentCompatibility = true,
   }) async {
     final projectJson = File(p.join(projectDir.path, "project.json"));
     if (!projectJson.existsSync()) {
@@ -636,10 +679,14 @@ class ProjectBundle {
         jsonDecode(projectJson.readAsStringSync()) as Map<String, dynamic>;
     final projectName = (jsonMap["name"] as String?) ?? "Mixroom Project";
     final compatibility = ProjectCompatibilityService.inspect(jsonMap);
-    if (compatibility.needsPluginAudio &&
-        !await ProjectCompatibilityService.isCurrent(projectDir)) {
+    final hasCurrentCompatibility =
+        compatibility.needsPluginAudio &&
+        await ProjectCompatibilityService.isCurrent(projectDir);
+    if (requireCurrentCompatibility &&
+        compatibility.needsPluginAudio &&
+        !hasCurrentCompatibility) {
       throw StateError(
-        'This project needs an up-to-date compatible version. Open it on the desktop that has its plugins, then choose Prepare under Project Settings before sharing or syncing.',
+        'This project needs an up-to-date compatible version. Open it on the desktop that has its plugins, then choose Prepare under Project Settings before sharing it with devices that do not have those plugins.',
       );
     }
     ProjectManager.stripCloudSyncMetadata(jsonMap);
@@ -708,7 +755,10 @@ class ProjectBundle {
     final stagedCompatibilityDir = Directory(
       p.join(staging.path, ProjectCompatibilityService.directoryName),
     );
-    if (await sourceCompatibilityDir.exists()) {
+    // Cloud autosave may publish the canonical editable source before the
+    // producer explicitly prepares portable audio. Never package a stale
+    // projection beside a newer source revision.
+    if (hasCurrentCompatibility && await sourceCompatibilityDir.exists()) {
       await _copyDirectory(sourceCompatibilityDir, stagedCompatibilityDir);
     }
 

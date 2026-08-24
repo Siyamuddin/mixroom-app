@@ -5868,6 +5868,7 @@ public:
         bool restrictToAudibleClipIds{false};
         bool dryClipRender{false};
         bool bypassMasterProcessing{false};
+        bool bypassGroupProcessing{false};
         // Compatibility renders use an isolated offline graph. Keep the
         // realtime callback attached while that graph renders so background
         // sharing preparation cannot pause live playback.

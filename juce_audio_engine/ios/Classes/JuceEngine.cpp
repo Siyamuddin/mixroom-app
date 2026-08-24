@@ -6387,29 +6387,53 @@ juce::String renderOfflineSnapshotToFile(
 
     stream.release();
 
-    OfflineExportContext context;
+    auto context = std::make_unique<OfflineExportContext>();
     juce::String error;
-    if (!buildOfflineExportContext(snapshot,
-                                   sampleRate,
-                                   clampedBlockSize,
-                                   formatManager,
-                                   pluginFormatManager,
-                                   pluginList,
-                                   context,
-                                   error))
+    bool contextBuilt = false;
+    const auto buildContext = [&]
+    {
+        contextBuilt = buildOfflineExportContext(snapshot,
+                                                 sampleRate,
+                                                 clampedBlockSize,
+                                                 formatManager,
+                                                 pluginFormatManager,
+                                                 pluginList,
+                                                 *context,
+                                                 error);
+    };
+    auto *messageManager = juce::MessageManager::getInstance();
+    if (messageManager != nullptr && !messageManager->isThisTheMessageThread())
+        messageManager->callSync(buildContext);
+    else
+        buildContext();
+
+    const auto releaseContext = [&]
+    {
+        if (context == nullptr)
+            return;
+        const auto reset = [&] { context.reset(); };
+        if (messageManager != nullptr && !messageManager->isThisTheMessageThread())
+            messageManager->callSync(reset);
+        else
+            reset();
+    };
+
+    if (!contextBuilt)
     {
         if (error.isNotEmpty())
             juceLogToFlutter(error.toRawUTF8());
+        releaseContext();
         return {};
     }
 
-    const double tailSeconds = getGraphTailLengthSeconds(context.graph);
+    const double tailSeconds = getGraphTailLengthSeconds(context->graph);
     const int64 totalSamples =
         (int64)std::ceil((contentDurationSeconds + tailSeconds) * sampleRate);
     if (totalSamples <= 0)
     {
         if (progressCallback)
             progressCallback(1.0);
+        releaseContext();
         return outFile.getFullPathName();
     }
 
@@ -6425,9 +6449,9 @@ juce::String renderOfflineSnapshotToFile(
     const int64 totalRenderSamples = prerollSamples + totalSamples;
     double transportSeconds = -((double)prerollSamples / sampleRate);
 
-    context.blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
-    context.blockIsPlaying.store(false, std::memory_order_relaxed);
-    context.playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
+    context->blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
+    context->blockIsPlaying.store(false, std::memory_order_relaxed);
+    context->playHead.setTransport(0.0, sampleRate, snapshot.tempoBpm, false);
     mixroom::fx::setGlobalTransportSeconds(0.0);
     mixroom::fx::setGlobalTransportPlaying(false);
 
@@ -6444,9 +6468,9 @@ juce::String renderOfflineSnapshotToFile(
 
         const bool hostIsPlaying = transportSeconds >= 0.0;
         const double hostTransportSeconds = hostIsPlaying ? transportSeconds : 0.0;
-        context.blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
-        context.blockIsPlaying.store(hostIsPlaying, std::memory_order_relaxed);
-        context.playHead.setTransport(hostTransportSeconds, sampleRate, snapshot.tempoBpm, hostIsPlaying);
+        context->blockTransportStartSec.store(transportSeconds, std::memory_order_relaxed);
+        context->blockIsPlaying.store(hostIsPlaying, std::memory_order_relaxed);
+        context->playHead.setTransport(hostTransportSeconds, sampleRate, snapshot.tempoBpm, hostIsPlaying);
         // Clip scheduling runs in the compact artifact's local timeline, but
         // automation belongs to the source project timeline. Keep those
         // concepts separate so a stem printed from bar 17 starts with the
@@ -6456,8 +6480,8 @@ juce::String renderOfflineSnapshotToFile(
         mixroom::fx::setGlobalTransportSeconds(sourceProjectSeconds);
         mixroom::fx::setGlobalTransportPlaying(hostIsPlaying);
         const double automationSeconds = sourceProjectSeconds;
-        applyOfflineAutomationAtTimeSeconds(context, automationSeconds);
-        context.graph.processBlock(buffer, midi);
+        applyOfflineAutomationAtTimeSeconds(*context, automationSeconds);
+        context->graph.processBlock(buffer, midi);
         sanitiseExportBuffer(buffer);
 
         const int64 validStartSample = std::max<int64>(
@@ -6492,6 +6516,7 @@ juce::String renderOfflineSnapshotToFile(
 
     if (progressCallback)
         progressCallback(1.0);
+    releaseContext();
     return outFile.getFullPathName();
 }
 } // namespace
@@ -6903,8 +6928,13 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
 
     if (options.dryClipRender)
         applyDryClipRenderOptions(snapshot);
-    else if (options.bypassMasterProcessing)
-        applyBypassMasterProcessingOptions(snapshot);
+    else
+    {
+        if (options.bypassGroupProcessing)
+            snapshot.groups.clear();
+        if (options.bypassMasterProcessing)
+            applyBypassMasterProcessingOptions(snapshot);
+    }
 
     mixroom::fx::setGlobalTempoBpm(snapshot.tempoBpm);
     const auto result = renderOfflineSnapshotToFile(

@@ -2787,6 +2787,9 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     NSNumber *bypassMasterProcessing = settings[@"bypassMasterProcessing"];
     if ([bypassMasterProcessing isKindOfClass:[NSNumber class]])
         options.bypassMasterProcessing = [bypassMasterProcessing boolValue];
+    NSNumber *bypassGroupProcessing = settings[@"bypassGroupProcessing"];
+    if ([bypassGroupProcessing isKindOfClass:[NSNumber class]])
+        options.bypassGroupProcessing = [bypassGroupProcessing boolValue];
     NSNumber *preserveRealtimePlayback = settings[@"preserveRealtimePlayback"];
     if ([preserveRealtimePlayback isKindOfClass:[NSNumber class]])
         options.preserveRealtimePlayback = [preserveRealtimePlayback boolValue];
@@ -2804,20 +2807,18 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
             if ([rawClipId isKindOfClass:[NSNumber class]])
                 options.audibleClipIds.add([(NSNumber *)rawClipId intValue]);
     }
-    juce::String result;
-
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
+    // The Flutter plug-in already invokes exports on a user-initiated worker
+    // queue. JuceEngine marshals only plug-in graph construction back to the
+    // message thread, leaving the long offline render loop on this worker.
+    const juce::String result =
+        JuceEngine::get().exportMix(juce::File(jucePath), options);
 
     return [NSString stringWithUTF8String:result.toRawUTF8()];
 }
 
 + (double)getExportProgressObjC
 {
-    double progress = 0.0;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { progress = JuceEngine::get().getExportProgress(); });
-    return progress;
+    return JuceEngine::get().getExportProgress();
 }
 
 + (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings

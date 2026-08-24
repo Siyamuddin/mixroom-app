@@ -360,6 +360,58 @@ void main() {
     },
   );
 
+  test('cloud source bundle can omit a stale compatible version', () async {
+    final projectDir = await ProjectManager.createNewProjectDir(
+      name: 'Source Only Cloud Bundle',
+    );
+    final json = await ProjectManager.readProjectJson(projectDir);
+    json['rowEffects'] = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'row': 0,
+        'effects': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'effectId': 'vst3:com.acme.delay',
+            'pluginOrigin': 'third_party',
+          },
+        ],
+      },
+    ];
+    await ProjectManager.writeProjectJson(projectDir, json);
+    final staleCompatibilityDir = ProjectCompatibilityService.directoryFor(
+      projectDir,
+    );
+    await staleCompatibilityDir.create(recursive: true);
+    await File(
+      p.join(staleCompatibilityDir.path, 'stale.txt'),
+    ).writeAsString('stale');
+
+    expect(
+      ProjectBundle.exportMixroomBundle(
+        projectDir: projectDir,
+        audioMode: BundleAudioMode.preserveAsIs,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final bundlePath = await ProjectBundle.exportMixroomBundle(
+      projectDir: projectDir,
+      audioMode: BundleAudioMode.preserveAsIs,
+      requireCurrentCompatibility: false,
+    );
+    final importedDir = await ProjectBundleImport.importMixroomBundle(
+      bundleFile: File(bundlePath),
+      audioStrategy: ImportAudioStrategy.keepAsBundled,
+    );
+    final importedJson = await ProjectManager.readProjectJson(importedDir);
+    final importedEffects =
+        ((importedJson['rowEffects'] as List).single as Map)['effects'] as List;
+    expect((importedEffects.single as Map)['effectId'], contains('acme'));
+    expect(
+      await ProjectCompatibilityService.directoryFor(importedDir).exists(),
+      isFalse,
+    );
+  });
+
   test('project bundle preserves a current compatible audio copy', () async {
     final projectDir = await ProjectManager.createNewProjectDir(
       name: 'Compatible Bundle',

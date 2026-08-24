@@ -1155,6 +1155,23 @@ class L10n {
           'Folder already loaded for this project.',
       'Failed to preview sample': 'Failed to preview sample',
       'Project Settings': 'Project Settings',
+      'Prepare compatible version': 'Prepare compatible version',
+      'Preparing…': 'Preparing…',
+      'Compatible version': 'Compatible version',
+      'About compatible versions': 'About compatible versions',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.',
+      'Your original stays editable': 'Your original stays editable',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          'The editable project and its plug-in settings stay bundled and unchanged.',
+      'Rendered audio keeps the sound': 'Rendered audio keeps the sound',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.',
+      'Edits stay separate': 'Edits stay separate',
+      'Editing the compatible version creates a separate normal project.':
+          'Editing the compatible version creates a separate normal project.',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.',
       'Project Name': 'Project Name',
       'Metronome': 'Metronome',
       'Metronome Volume': 'Metronome Volume',
@@ -1925,6 +1942,8 @@ class L10n {
       'Cloud projects are not available.': 'Cloud projects are not available.',
       'Cloud sync failed': 'Cloud sync failed',
       'Cloud synced': 'Cloud synced',
+      'Not synced': 'Not synced',
+      'Cloud update available': 'Cloud update available',
       'Compliance controls': 'Compliance controls',
       'Create sampler': 'Create sampler',
       'Custom AI models': 'Custom AI models',
@@ -1981,6 +2000,9 @@ class L10n {
       'Project bundle format': 'Project bundle format',
       'Project is currently': 'Project is currently',
       'Project synced to cloud': 'Project synced to cloud',
+      'Replace cloud version?': 'Replace cloud version?',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          'The cloud copy changed on another device or account. Replace it with this device\'s version?',
       'Replace sampler source': 'Replace sampler source',
       'Replace source': 'Replace source',
       'Sample pack storage': 'Sample pack storage',
@@ -3197,6 +3219,23 @@ class L10n {
       'Folder already loaded for this project.': '이 프로젝트에 이미 불러온 폴더입니다.',
       'Failed to preview sample': '샘플 미리듣기 실패',
       'Project Settings': '프로젝트 설정',
+      'Prepare compatible version': '호환 버전 준비',
+      'Preparing…': '준비 중…',
+      'Compatible version': '호환 버전',
+      'About compatible versions': '호환 버전 정보',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          '이 프로젝트는 타사 플러그인을 사용합니다. 해당 플러그인이 없는 모바일이나 다른 기기에서도 열 수 있도록 호환 버전을 준비하세요.',
+      'Your original stays editable': '원본은 계속 편집 가능',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          '편집 가능한 프로젝트와 플러그인 설정은 변경 없이 번들에 함께 유지됩니다.',
+      'Rendered audio keeps the sound': '렌더링 오디오로 사운드 유지',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          '타사 플러그인과 프리즈된 트랙을 렌더링합니다. 필요하면 렌더링된 Master 트랙도 추가합니다.',
+      'Edits stay separate': '편집 내용은 별도로 저장',
+      'Editing the compatible version creates a separate normal project.':
+          '호환 버전을 편집하면 별도의 일반 프로젝트가 생성됩니다.',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          '해당 트랙이나 마스터를 변경한 후 다시 준비하세요. 저장과 클라우드 동기화는 계속 정상 작동합니다.',
       'Project Name': '프로젝트 이름',
       'Metronome': '메트로놈',
       'Metronome Volume': '메트로놈 볼륨',
@@ -3925,6 +3964,8 @@ class L10n {
       'Cloud projects are not available.': '클라우드 프로젝트를 사용할 수 없습니다.',
       'Cloud sync failed': '클라우드 동기화 실패',
       'Cloud synced': '클라우드 동기화 완료',
+      'Not synced': '동기화되지 않음',
+      'Cloud update available': '클라우드 업데이트 있음',
       'Compliance controls': '규정 준수 제어',
       'Create sampler': '샘플러 만들기',
       'Custom AI models': '사용자 지정 AI 모델',
@@ -3980,6 +4021,9 @@ class L10n {
       'Project bundle format': '프로젝트 번들 형식',
       'Project is currently': '현재 프로젝트:',
       'Project synced to cloud': '프로젝트가 클라우드에 동기화되었습니다',
+      'Replace cloud version?': '클라우드 버전을 교체할까요?',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          '다른 기기 또는 계정에서 클라우드 복사본이 변경되었습니다. 이 기기의 버전으로 교체할까요?',
       'Replace sampler source': '샘플러 소스 교체',
       'Replace source': '소스 교체',
       'SYNC': '동기화',
@@ -4145,6 +4189,9 @@ class L10n {
       'Finish': '완료',
     },
     'zh': {
+      'Replace cloud version?': '替换云端版本？',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          '云端副本已在其他设备或账户上更改。要用此设备上的版本替换它吗？',
       'Casual enthusiasts': '轻度音乐爱好者',
       'Start on mobile, tablet, or desktop.': '从手机、平板或桌面端开始。',
       'Aspiring producers': '进阶制作人',
@@ -4632,6 +4679,23 @@ class L10n {
       'Folder already loaded for this project.': '该项目已加载此文件夹。',
       'Failed to preview sample': '样本预听失败',
       'Project Settings': '项目设置',
+      'Prepare compatible version': '准备兼容版本',
+      'Preparing…': '准备中…',
+      'Compatible version': '兼容版本',
+      'About compatible versions': '关于兼容版本',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          '此项目使用了第三方插件。请准备兼容版本，让没有这些插件的手机或其他设备也能打开项目。',
+      'Your original stays editable': '原项目仍可编辑',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          '可编辑项目及其插件设置会保持不变，并一起保存在项目包中。',
+      'Rendered audio keeps the sound': '渲染音频保留声音效果',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          '它会处理第三方插件和冻结轨道，并在需要时添加渲染后的 Master 轨道。',
+      'Edits stay separate': '编辑内容单独保存',
+      'Editing the compatible version creates a separate normal project.':
+          '编辑兼容版本会创建一个单独的普通项目。',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          '更改相关轨道或主控后请重新准备。保存和云同步仍会正常进行。',
       'Project Name': '项目名称',
       'Metronome': '节拍器',
       'Metronome Volume': '节拍器音量',
@@ -6034,6 +6098,23 @@ class L10n {
       'Folder already loaded for this project.': 'このプロジェクトでは既に読み込まれているフォルダーです。',
       'Failed to preview sample': 'サンプルの試聴に失敗しました',
       'Project Settings': 'プロジェクト設定',
+      'Prepare compatible version': '互換バージョンを準備',
+      'Preparing…': '準備中…',
+      'Compatible version': '互換バージョン',
+      'About compatible versions': '互換バージョンについて',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          'このプロジェクトはサードパーティ製プラグインを使用しています。それらがないモバイルや別のデバイスでも開けるように、互換バージョンを準備してください。',
+      'Your original stays editable': 'オリジナルは引き続き編集可能',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          '編集可能なプロジェクトとプラグイン設定は変更されず、バンドル内に一緒に保持されます。',
+      'Rendered audio keeps the sound': 'レンダリング音声でサウンドを維持',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          'サードパーティ製プラグインとフリーズ済みトラックをレンダリングし、必要に応じてMasterトラックを追加します。',
+      'Edits stay separate': '編集内容は別に保存',
+      'Editing the compatible version creates a separate normal project.':
+          '互換バージョンを編集すると、別の通常プロジェクトが作成されます。',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          '対象トラックまたはマスターを変更したら再度準備してください。保存とクラウド同期は引き続き通常どおり動作します。',
       'Project Name': 'プロジェクト名',
       'Metronome': 'メトロノーム',
       'Metronome Volume': 'メトロノーム音量',
@@ -6756,6 +6837,8 @@ class L10n {
       'Cloud projects are not available.': 'クラウドプロジェクトは利用できません。',
       'Cloud sync failed': 'クラウド同期に失敗しました',
       'Cloud synced': 'クラウド同期済み',
+      'Not synced': '未同期',
+      'Cloud update available': 'クラウド更新あり',
       'Compliance controls': 'コンプライアンス管理',
       'Copy': 'コピー',
       'Copy range': '範囲をコピー',
@@ -6819,6 +6902,9 @@ class L10n {
       'Project is currently': '現在のプロジェクトは',
       'Project synced to cloud': 'プロジェクトをクラウドに同期しました',
       'Replace sampler source': 'サンプラーソースを置換',
+      'Replace cloud version?': 'クラウド版を置き換えますか？',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          '別のデバイスまたはアカウントでクラウドコピーが変更されました。このデバイスのバージョンに置き換えますか？',
       'Replace source': 'ソースを置換',
       'Row': '行',
       'SYNC': '同期',

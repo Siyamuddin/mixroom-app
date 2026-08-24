@@ -4532,6 +4532,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _compatibilityAudioRequired = false;
   bool _compatibilityAudioCurrent = false;
   bool _compatibilityPreparationActive = false;
+  double _compatibilityPreparationProgress = 0.0;
   String _compatibilityAudioError = '';
   CloudSyncMode _cloudSyncMode = CloudSyncMode.auto;
   Timer? _cloudAutoSyncTimer;
@@ -13638,20 +13639,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  void _remapCompatibilityForkAudioPaths({
+  Future<void> _remapCompatibilityForkAudioPaths({
     required Directory oldProjectDir,
     required Directory newProjectDir,
-  }) {
+  }) async {
     final oldPath = p.normalize(oldProjectDir.path);
+    final promoted =
+        await ProjectCompatibilityService.promoteAudioForEditedCopy(
+          sourceProjectDir: oldProjectDir,
+          editedProjectDir: newProjectDir,
+          audioFiles: <File>[
+            for (final track in _audioTracks) ...<File>[
+              track.file,
+              track.originalFile,
+            ],
+          ],
+        );
     for (final track in _audioTracks) {
       final paths = <File>[track.file, track.originalFile];
       for (var index = 0; index < paths.length; index++) {
         final file = paths[index];
         final normalized = p.normalize(file.path);
-        if (!p.isWithin(oldPath, normalized)) continue;
-        final remapped = File(
-          p.join(newProjectDir.path, p.relative(normalized, from: oldPath)),
-        );
+        final remapped =
+            promoted[normalized] ??
+            (p.isWithin(oldPath, normalized)
+                ? File(
+                    p.join(
+                      newProjectDir.path,
+                      p.relative(normalized, from: oldPath),
+                    ),
+                  )
+                : file);
         if (index == 0) {
           track.file = remapped;
         } else {
@@ -13659,6 +13677,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       }
     }
+  }
+
+  Future<bool> _promoteCompatibilityAudioIntoCurrentProject() async {
+    final promoted =
+        await ProjectCompatibilityService.promoteAudioForEditedCopy(
+          sourceProjectDir: _projectDir,
+          editedProjectDir: _projectDir,
+          audioFiles: <File>[
+            for (final track in _audioTracks) ...<File>[
+              track.file,
+              track.originalFile,
+            ],
+          ],
+        );
+    if (promoted.isEmpty) return false;
+    for (final track in _audioTracks) {
+      track.file = promoted[p.normalize(track.file.path)] ?? track.file;
+      track.originalFile =
+          promoted[p.normalize(track.originalFile.path)] ?? track.originalFile;
+    }
+    return true;
   }
 
   Future<void> _forkCompatibilityProjectForEdits() async {
@@ -13672,7 +13711,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _projectName,
       );
       final forkJson = await ProjectManager.readProjectJson(forkDir);
-      _remapCompatibilityForkAudioPaths(
+      await _remapCompatibilityForkAudioPaths(
         oldProjectDir: oldProjectDir,
         newProjectDir: forkDir,
       );
@@ -14282,23 +14321,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       final sourceFingerprintBeforePreparation =
           ProjectCompatibilityService.sourceFingerprint(sourceBeforePublish);
-      final sourceUsesThirdPartyPlugins = ProjectCompatibilityService.inspect(
-        sourceBeforePublish,
-      ).needsPluginAudio;
-      final compatibleVersionIsCurrent =
-          !sourceUsesThirdPartyPlugins ||
-          await ProjectCompatibilityService.isCurrent(_projectDir);
-      if (_cloudSourceFingerprint == sourceFingerprintBeforePreparation &&
-          compatibleVersionIsCurrent) {
-        return;
-      }
-      // A cloud autosave must never turn into an offline plug-in export. The
-      // producer prepares that version explicitly from Project Settings.
-      if (sourceUsesThirdPartyPlugins && !compatibleVersionIsCurrent) {
-        debugPrint(
-          'Cloud auto sync is waiting for a manually prepared compatible '
-          'version.',
-        );
+      if (_cloudSourceFingerprint == sourceFingerprintBeforePreparation) {
         return;
       }
       if (!await _hasCurrentCloudRevisionForAutoSync(auth)) return;
@@ -14316,16 +14339,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final sourceFingerprint = ProjectCompatibilityService.sourceFingerprint(
         sourceForPublish,
       );
-      final sourceForPublishUsesThirdPartyPlugins =
-          ProjectCompatibilityService.inspect(
-            sourceForPublish,
-          ).needsPluginAudio;
-      if (sourceForPublishUsesThirdPartyPlugins &&
-          !await ProjectCompatibilityService.isCurrent(_projectDir)) {
-        _cloudAutoSyncDirty = true;
-        return;
-      }
-
       final projectId = _projectId.trim().isNotEmpty
           ? _projectId.trim()
           : await ProjectManager.ensureProjectId(_projectDir);
@@ -14334,6 +14347,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final bundlePath = await ProjectBundle.exportMixroomBundle(
         projectDir: _projectDir,
         audioMode: BundleAudioMode.flacLossless,
+        requireCurrentCompatibility: false,
       );
       final bundleFile = File(bundlePath);
       if (!await bundleFile.exists() || await bundleFile.length() <= 0) {
@@ -14447,7 +14461,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _ensureCompatibilityAudioForPublish() async {
+  Future<void> _ensureCompatibilityAudioForPublish({
+    ValueChanged<double>? onProgress,
+  }) async {
     if (!_platformCapabilities.externalPluginHosting) return;
     final inFlight = _compatibilityRenderInFlight;
     if (inFlight != null) {
@@ -14455,10 +14471,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final task = () async {
+      onProgress?.call(0.03);
       final source = await ProjectManager.readProjectJson(_projectDir);
       final inspected = ProjectCompatibilityService.inspect(source);
       if (!inspected.needsPluginAudio ||
           await ProjectCompatibilityService.isCurrent(_projectDir)) {
+        onProgress?.call(1.0);
         return;
       }
       final prefs = await SharedPreferences.getInstance();
@@ -14477,6 +14495,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       await _prepareNativeEngineStateForExport((_) {});
+      onProgress?.call(0.08);
       final clipSnapshotJson = _buildNativeExportClipSnapshotJson();
       await ProjectCompatibilityService.audioDirectoryFor(
         _projectDir,
@@ -14527,6 +14546,59 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .add(dependency);
         }
       }
+      final pendingGroupDependencies = inspected.dependencies
+          .where(
+            (item) =>
+                item.scope == ProjectCompatibilityScope.group &&
+                !reusableArtifacts.containsKey(item.key),
+          )
+          .toList(growable: false);
+      final pendingMasterDependencies = inspected.dependencies
+          .where(
+            (item) =>
+                item.scope == ProjectCompatibilityScope.master &&
+                !reusableArtifacts.containsKey(item.key),
+          )
+          .toList(growable: false);
+      final renderCount = math.max(
+        1,
+        dependenciesByRow.length +
+            pendingGroupDependencies.length +
+            (pendingMasterDependencies.isEmpty ? 0 : 1),
+      );
+      var completedRenders = 0;
+
+      Future<String> renderWithProgress(
+        Future<String> Function() startRender,
+      ) async {
+        final base = completedRenders / renderCount;
+        var pollingDone = false;
+        final renderFuture = startRender();
+
+        Future<void> poll() async {
+          while (!pollingDone) {
+            try {
+              final nativeProgress = await JuceAudioEngine.getExportProgress();
+              final overall =
+                  (base + nativeProgress.clamp(0.0, 1.0) / renderCount)
+                      .clamp(0.0, 1.0)
+                      .toDouble();
+              onProgress?.call(0.1 + overall * 0.82);
+            } catch (_) {}
+            await Future<void>.delayed(const Duration(milliseconds: 120));
+          }
+        }
+
+        final poller = poll();
+        try {
+          return await renderFuture;
+        } finally {
+          pollingDone = true;
+          await poller;
+          completedRenders++;
+          onProgress?.call(0.1 + (completedRenders / renderCount) * 0.82);
+        }
+      }
 
       Future<void> renderBoundary({
         required List<ProjectCompatibilityDependency> dependencies,
@@ -14564,21 +14636,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (await output.exists()) {
           await output.delete();
         }
-        final rendered = await JuceAudioEngine.exportMix(
-          output.path,
-          format: 'wav',
-          sampleRate: _preferredDawSampleRate,
-          wavBitDepth: 32,
-          wavDithering: false,
-          // The Dart snapshot is the export authority for MIDI timing,
-          // resolved source tempo, and the latest hosted-instrument state.
-          // Omitting it can leave a newly-created offline plug-in instance
-          // with stale MIDI metadata and produce a silent frozen instrument.
-          clipSnapshotJson: clipSnapshotJson,
-          audibleClipIds: clipIds.toList(growable: false),
-          timelineStartSeconds: boundaryStartSeconds,
-          bypassMasterProcessing: true,
-          preserveRealtimePlayback: true,
+        final rendered = await renderWithProgress(
+          () => JuceAudioEngine.exportMix(
+            output.path,
+            format: 'wav',
+            sampleRate: _preferredDawSampleRate,
+            wavBitDepth: 32,
+            wavDithering: false,
+            // The Dart snapshot is the export authority for MIDI timing,
+            // resolved source tempo, and the latest hosted-instrument state.
+            // Omitting it can leave a newly-created offline plug-in instance
+            // with stale MIDI metadata and produce a silent frozen instrument.
+            clipSnapshotJson: clipSnapshotJson,
+            audibleClipIds: clipIds.toList(growable: false),
+            timelineStartSeconds: boundaryStartSeconds,
+            bypassMasterProcessing: true,
+            // Row and instrument artifacts remain routed through their source
+            // group in the compatible project. Leave group gain, pan, and FX
+            // out of this render so that retained group processing applies once.
+            bypassGroupProcessing: dependencies.every(
+              (dependency) =>
+                  dependency.scope != ProjectCompatibilityScope.group,
+            ),
+            preserveRealtimePlayback: true,
+          ),
         );
         if (rendered.isEmpty || !await output.exists()) {
           throw StateError('Could not render third-party plugin audio.');
@@ -14626,11 +14707,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       }
       final groups = (source['trackGroups'] as List?) ?? const <Object?>[];
-      for (final dependency in inspected.dependencies.where(
-        (item) =>
-            item.scope == ProjectCompatibilityScope.group &&
-            !reusableArtifacts.containsKey(item.key),
-      )) {
+      for (final dependency in pendingGroupDependencies) {
         final group = groups.whereType<Map>().cast<Map>().firstWhere(
           (item) => (item['id'] ?? '').toString() == dependency.groupId,
           orElse: () => const <String, dynamic>{},
@@ -14655,13 +14732,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final allMasterDependencies = inspected.dependencies
           .where((item) => item.scope == ProjectCompatibilityScope.master)
           .toList(growable: false);
-      final masterDependencies = inspected.dependencies
-          .where(
-            (item) =>
-                item.scope == ProjectCompatibilityScope.master &&
-                !reusableArtifacts.containsKey(item.key),
-          )
-          .toList(growable: false);
+      final masterDependencies = pendingMasterDependencies;
       if (masterDependencies.isEmpty && allMasterDependencies.isNotEmpty) {
         referenceMix =
             reusableArtifacts[allMasterDependencies.first.key]?.fileName ?? '';
@@ -14672,14 +14743,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (await reference.exists()) {
           await reference.delete();
         }
-        final rendered = await JuceAudioEngine.exportMix(
-          reference.path,
-          format: 'wav',
-          sampleRate: _preferredDawSampleRate,
-          wavBitDepth: 32,
-          wavDithering: false,
-          clipSnapshotJson: clipSnapshotJson,
-          preserveRealtimePlayback: true,
+        final rendered = await renderWithProgress(
+          () => JuceAudioEngine.exportMix(
+            reference.path,
+            format: 'wav',
+            sampleRate: _preferredDawSampleRate,
+            wavBitDepth: 32,
+            wavDithering: false,
+            clipSnapshotJson: clipSnapshotJson,
+            preserveRealtimePlayback: true,
+          ),
         );
         if (rendered.isEmpty || !await reference.exists()) {
           throw StateError('Could not render the original mix reference.');
@@ -14706,6 +14779,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         artifacts: artifacts,
         referenceMixFileName: referenceMix,
       );
+      onProgress?.call(1.0);
     }();
     _compatibilityRenderInFlight = task;
     try {
@@ -14765,9 +14839,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     _setStateAndRefreshProjectSettings(() {
       _compatibilityPreparationActive = true;
+      _compatibilityPreparationProgress = 0.01;
       _compatibilityAudioError = '';
     });
     try {
+      // Let the settings card paint its progress state before any native
+      // snapshot or plug-in work begins.
+      await WidgetsBinding.instance.endOfFrame;
       await _projectAutosaveCoordinator.flush();
       // Persist every hosted instrument's current state before reading the
       // canonical source and constructing the offline export snapshot. The
@@ -14775,13 +14853,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshHostedInstrumentStatesForPersistence();
       _projectAutosaveCoordinator.markDirty();
       await _projectAutosaveCoordinator.flush();
-      await _ensureCompatibilityAudioForPublish();
+      await _ensureCompatibilityAudioForPublish(
+        onProgress: (progress) {
+          if (!mounted) return;
+          final next = progress.clamp(0.0, 1.0).toDouble();
+          if (next <= _compatibilityPreparationProgress) return;
+          _setStateAndRefreshProjectSettings(() {
+            _compatibilityPreparationProgress = next;
+          });
+        },
+      );
       await _refreshCompatibilityAudioStatus();
       if (!_compatibilityAudioCurrent) {
         throw StateError(
           'The project changed while its compatible version was being prepared. Try again when the edit is stable.',
         );
       }
+      // A source-only cloud autosave may already have published this exact
+      // project revision. Force one follow-up upload to add the newly prepared
+      // portable audio without requiring another edit.
+      _cloudSourceFingerprint = '';
       _requestCloudAutoSyncNow('compatible-version-ready');
       if (mounted) {
         showAppSnackBar(
@@ -14806,9 +14897,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (mounted) {
         _setStateAndRefreshProjectSettings(() {
           _compatibilityPreparationActive = false;
+          _compatibilityPreparationProgress = 0.0;
         });
       } else {
         _compatibilityPreparationActive = false;
+        _compatibilityPreparationProgress = 0.0;
       }
     }
   }
@@ -15475,6 +15568,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _performAutosaveWrite() async {
     if (_usingCompatibilityAudio) {
       await _forkCompatibilityProjectForEdits();
+    }
+    if (!_usingCompatibilityAudio) {
+      await _promoteCompatibilityAudioIntoCurrentProject();
     }
     _syncEffectSnapshotCacheToCurrentRows();
     await _refreshHostedInstrumentStatesForPersistence(captureAll: false);
@@ -17360,6 +17456,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       await _projectAutosaveCoordinator.flush();
       if (!_usingCompatibilityAudio) {
+        await _promoteCompatibilityAudioIntoCurrentProject();
         await _normalizeProjectAudioAssetsForCheckpoint();
       }
       await _refreshAllPersistedEffectSnapshots();
@@ -39678,6 +39775,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
+                              if (PlatformCapabilities.current.isDesktop &&
+                                  _compatibilityAudioRequired &&
+                                  !_compatibilityAudioCurrent) ...[
+                                _buildCompatibilityVersionLauncher(),
+                                const SizedBox(height: 10),
+                              ],
                               if (showAudioRoutingLauncher) ...[
                                 _buildAudioRoutingLauncher(),
                                 const SizedBox(height: 10),
@@ -39757,10 +39860,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 _buildDesktopKeyboardShortcutsLauncher(),
                                 const SizedBox(height: 9),
                                 _buildDesktopPluginManagerLauncher(),
-                                if (_compatibilityAudioRequired) ...[
-                                  const SizedBox(height: 9),
-                                  _buildCompatibilityVersionLauncher(),
-                                ],
                                 const SizedBox(height: 9),
                                 _buildDesktopDiagnosticsLauncher(),
                               ],
@@ -41682,90 +41781,256 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<void> _showCompatibilityVersionInfo() async {
+    if (!mounted) return;
+
+    Widget detailRow(IconData icon, String title, String text) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 13),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icon, size: 17, color: const Color(0xFF9BC9F4)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(context, title),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF0F5FA),
+                      fontSize: 13.2,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    L10n.translate(context, text),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.70),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.38,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: MixroomShellSurface(
+              radius: 24,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFF78B5EE,
+                          ).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.offline_pin_outlined,
+                          color: Color(0xFF9BC9F4),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          L10n.translate(context, 'Compatible version'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: L10n.translate(context, 'Close'),
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Color(0xFFD8E0E8),
+                          size: 20,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 13.2,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  detailRow(
+                    Icons.tune_rounded,
+                    'Your original stays editable',
+                    'The editable project and its plug-in settings stay bundled and unchanged.',
+                  ),
+                  detailRow(
+                    Icons.graphic_eq_rounded,
+                    'Rendered audio keeps the sound',
+                    'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.',
+                  ),
+                  detailRow(
+                    Icons.call_split_rounded,
+                    'Edits stay separate',
+                    'Editing the compatible version creates a separate normal project.',
+                  ),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.62),
+                      fontSize: 12.2,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildCompatibilityVersionLauncher() {
     final active = _compatibilityPreparationActive;
-    final current = _compatibilityAudioCurrent;
-    final subtitle = active
-        ? 'Rendering tracks that use third-party plugins. You can keep the editable source unchanged.'
-        : current
-        ? 'Ready to open on devices that do not have the same plugins. Update it manually after future edits.'
-        : _compatibilityAudioError.isNotEmpty
-        ? _compatibilityAudioError
-        : 'Create frozen audio for third-party plugin paths before sharing or cloud sync.';
-    final accent = current ? const Color(0xFF63D69A) : const Color(0xFF7DB7FF);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: active
-            ? null
-            : () => unawaited(_prepareCompatibilityAudioManually()),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: current ? 0.09 : 0.07),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: accent.withValues(alpha: 0.22)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      L10n.translate(context, 'Compatible Project Version'),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      L10n.translate(context, subtitle),
-                      style: const TextStyle(
-                        color: Color(0xB8F4F4F4),
-                        fontSize: 12.4,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                constraints: const BoxConstraints(minWidth: 68),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                alignment: Alignment.center,
-                child: active
-                    ? SizedBox(
-                        width: 15,
-                        height: 15,
+    final progress = (_compatibilityPreparationProgress * 100).round();
+    return Material(
+      color: const Color(0xFF2D6C9B).withValues(alpha: 0.88),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: const Color(0xFF9BC9F4).withValues(alpha: 0.38),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              identifier: 'daw.prepare_compatible_version',
+              label: active
+                  ? 'Preparing compatible version, $progress percent'
+                  : 'Prepare compatible version',
+              button: true,
+              child: TextButton.icon(
+                onPressed: active
+                    ? null
+                    : () => unawaited(_prepareCompatibilityAudioManually()),
+                icon: active
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: accent,
+                          color: Color(0xFFE6F2FC),
                         ),
                       )
-                    : Text(
-                        L10n.translate(context, current ? 'Ready' : 'Prepare'),
-                        style: TextStyle(
-                          color: accent,
-                          fontSize: 11.8,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                    : const Icon(Icons.offline_pin_outlined, size: 18),
+                label: Text(
+                  active
+                      ? '${L10n.translate(context, 'Preparing…')} $progress%'
+                      : L10n.translate(context, 'Prepare compatible version'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFF0F7FD),
+                  disabledForegroundColor: const Color(0xFFDCECF9),
+                  backgroundColor: Colors.transparent,
+                  minimumSize: const Size(0, 42),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  textStyle: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 13.2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  shape: const RoundedRectangleBorder(),
+                ),
               ),
-            ],
+            ),
           ),
-        ),
+          Container(
+            width: 1,
+            height: 22,
+            color: Colors.white.withValues(alpha: 0.18),
+          ),
+          Semantics(
+            label: L10n.translate(context, 'About compatible versions'),
+            button: true,
+            child: Tooltip(
+              message: L10n.translate(context, 'About compatible versions'),
+              child: InkWell(
+                onTap: () => unawaited(_showCompatibilityVersionInfo()),
+                child: const SizedBox(
+                  width: 42,
+                  height: 42,
+                  child: Icon(
+                    Icons.info_outline_rounded,
+                    color: Color(0xFFDCECF9),
+                    size: 19,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

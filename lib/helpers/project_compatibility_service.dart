@@ -85,10 +85,11 @@ class ProjectCompatibilityManifest {
     this.referenceMixFileName = '',
   });
 
-  // v6 stores frozen row audio relative to its original timeline position,
-  // rather than packaging leading silence from project zero. Older sidecars
-  // are deliberately regenerated on a capable desktop.
-  static const int version = 6;
+  // v8 gives a rendered master reference its own neutral Master row instead
+  // of attaching it to whichever source row happened to be first. It retains
+  // the v7 render semantics for master and group processing.
+  // Older sidecars are deliberately regenerated on a capable desktop.
+  static const int version = 8;
 
   final String sourceFingerprint;
   final List<ProjectCompatibilityDependency> dependencies;
@@ -227,6 +228,50 @@ class ProjectCompatibilityService {
       );
     }
     return p.basename(filePath);
+  }
+
+  /// Promotes audio from a portable compatibility view into the ordinary
+  /// `audio/` folder of a newly edited project. The returned map is keyed by
+  /// normalized source path so live clips can be repointed before the first
+  /// normal autosave.
+  static Future<Map<String, File>> promoteAudioForEditedCopy({
+    required Directory sourceProjectDir,
+    required Directory editedProjectDir,
+    required Iterable<File> audioFiles,
+  }) async {
+    final sourceCompatibilityAudio = p.normalize(
+      audioDirectoryFor(sourceProjectDir).path,
+    );
+    final destinationAudio = Directory(p.join(editedProjectDir.path, 'audio'));
+    await destinationAudio.create(recursive: true);
+    final usedNamesLower = <String>{
+      for (final file in destinationAudio.listSync().whereType<File>())
+        p.basename(file.path).toLowerCase(),
+    };
+    final promoted = <String, File>{};
+
+    for (final audioFile in audioFiles) {
+      final sourcePath = p.normalize(audioFile.path);
+      if (!p.isWithin(sourceCompatibilityAudio, sourcePath) ||
+          promoted.containsKey(sourcePath)) {
+        continue;
+      }
+      if (!await audioFile.exists()) continue;
+
+      final originalName = p.basename(sourcePath);
+      final extension = p.extension(originalName);
+      final stem = p.basenameWithoutExtension(originalName);
+      var destinationName = originalName;
+      var suffix = 1;
+      while (!usedNamesLower.add(destinationName.toLowerCase())) {
+        destinationName = '$stem #$suffix$extension';
+        suffix++;
+      }
+      final destination = File(p.join(destinationAudio.path, destinationName));
+      await audioFile.copy(destination.path);
+      promoted[sourcePath] = destination;
+    }
+    return promoted;
   }
 
   static String sourceFingerprint(Map<String, dynamic> project) {
@@ -684,7 +729,24 @@ class ProjectCompatibilityService {
       selectedReplacements.add(artifact);
       replacedRows.addAll(artifact.replacementRows);
     }
-    final rows = (projection['rows'] as List?) ?? const <Object?>[];
+    final rows = List<Object?>.from(
+      (projection['rows'] as List?) ?? const <Object?>[],
+    );
+    projection['rows'] = rows;
+    final usesReferenceMix =
+        manifest.referenceMixFileName.trim().isNotEmpty &&
+        manifest.dependencies.any(
+          (dependency) => dependency.scope == ProjectCompatibilityScope.master,
+        );
+    if (usesReferenceMix) {
+      // A master plug-in affects the entire mix. Its compatibility artifact is
+      // therefore the authoritative playback source, not merely a reference
+      // file alongside tracks that no longer have the master plug-in.
+      selectedReplacements.clear();
+      replacedRows
+        ..clear()
+        ..addAll(List<int>.generate(rows.length, (index) => index));
+    }
     final rowIndexById = <int, int>{
       for (var index = 0; index < rows.length; index++)
         if (rows[index] is Map && (rows[index] as Map)['rowId'] is num)
@@ -775,13 +837,83 @@ class ProjectCompatibilityService {
       if (effectsContainer is Map) {
         final effectsMap = Map<String, dynamic>.from(effectsContainer);
         final effects = (effectsMap['effects'] as List?) ?? <Object?>[];
-        effectsMap['effects'] = <Object?>[
-          for (var index = 0; index < effects.length; index++)
-            if (!_isDependency(dependencies, 'master:$index:')) effects[index],
-        ];
+        effectsMap['effects'] = usesReferenceMix
+            ? <Object?>[]
+            : <Object?>[
+                for (var index = 0; index < effects.length; index++)
+                  if (!_isDependency(dependencies, 'master:$index:'))
+                    effects[index],
+              ];
         masterMap['effects'] = effectsMap;
-        projection['master'] = masterMap;
       }
+      if (usesReferenceMix) {
+        // The reference mix already contains all master gain, pan, automation,
+        // and effects, including native processors around the unavailable one.
+        masterMap['gain'] = 2.0;
+        masterMap['pan'] = 0.5;
+        masterMap['muted'] = false;
+      }
+      projection['master'] = masterMap;
+    }
+
+    var referenceMixRowId = -1;
+    if (usesReferenceMix) {
+      final existingRowIds = rows
+          .whereType<Map>()
+          .map((row) => (row['rowId'] as num?)?.toInt() ?? -1)
+          .where((rowId) => rowId >= 0);
+      referenceMixRowId =
+          existingRowIds.fold<int>(0, (a, b) => a > b ? a : b) + 1;
+
+      rows.insert(0, <String, dynamic>{
+        'rowId': referenceMixRowId,
+        'name': 'Master',
+        'iconId': 0,
+        'kind': 'audio',
+        'inputChannelStart': 0,
+        'inputChannelCount': 1,
+      });
+
+      projection['rowStates'] = <Object?>[
+        <String, dynamic>{
+          'row': 0,
+          'rowId': referenceMixRowId,
+          'gain': 2.0,
+          'pan': 0.5,
+          'volumeAutomation': <Object?>[
+            <String, double>{'x': 0.0, 'volume': 1.0},
+            <String, double>{'x': 1.0, 'volume': 1.0},
+          ],
+          'automationLanes': <Object?>[],
+          'automationClips': <Object?>[],
+          'selectedAutomationTargetId': 'volume',
+          'muted': false,
+          'soloed': false,
+          'inputChannelStart': 0,
+          'inputChannelCount': 1,
+        },
+        for (final rawState in rowStates.whereType<Map>())
+          if (((rawState['row'] as num?)?.toInt() ?? -1) >= 0 &&
+              ((rawState['row'] as num?)?.toInt() ?? -1) < rows.length - 1)
+            <String, dynamic>{
+              ...Map<String, dynamic>.from(rawState),
+              'row': ((rawState['row'] as num?)?.toInt() ?? -1) + 1,
+            },
+      ];
+      projection['rowEffects'] = <Object?>[
+        <String, dynamic>{
+          'row': 0,
+          'rowId': referenceMixRowId,
+          'effects': <Object?>[],
+        },
+        for (final rawEffects in rowEffects.whereType<Map>())
+          if (((rawEffects['row'] as num?)?.toInt() ?? -1) >= 0 &&
+              ((rawEffects['row'] as num?)?.toInt() ?? -1) < rows.length - 1)
+            <String, dynamic>{
+              ...Map<String, dynamic>.from(rawEffects),
+              'row': ((rawEffects['row'] as num?)?.toInt() ?? -1) + 1,
+            },
+      ];
     }
 
     final tracks = (projection['tracks'] as List?) ?? <Object?>[];
@@ -827,6 +959,28 @@ class ProjectCompatibilityService {
       track['midiNotes'] = <Object?>[];
       track.remove('hostedInstrumentStateB64');
       compatibleTracks.add(track);
+    }
+    if (usesReferenceMix) {
+      compatibleTracks
+        ..clear()
+        ..add(<String, dynamic>{
+          'fileName': manifest.referenceMixFileName.trim(),
+          'label': 'Original mix',
+          'clipType': 'audio',
+          'clipId': 'compatibility-original-mix',
+          'instrumentId': '',
+          'instrumentName': '',
+          'instrumentParams': <String, dynamic>{},
+          'midiNotes': <Object?>[],
+          'rowIndex': 0,
+          'rowId': referenceMixRowId,
+          'offset': 0.0,
+          'gain': 2.0,
+          'normalizeVolume': false,
+          'normalizeGain': 1.0,
+          'preNormalizeGain': 2.0,
+          'trimStartMs': 0,
+        });
     }
     projection['tracks'] = compatibleTracks;
     projection['compatibility'] = <String, dynamic>{
@@ -925,6 +1079,14 @@ class ProjectCompatibilityService {
         .whereType<Map>()
         .map((track) => (track['fileName'] ?? '').toString().trim())
         .toSet();
+    final usesReferenceMix =
+        manifest.referenceMixFileName.trim().isNotEmpty &&
+        manifest.dependencies.any(
+          (dependency) => dependency.scope == ProjectCompatibilityScope.master,
+        );
+    if (usesReferenceMix) {
+      return frozenFileNames.contains(manifest.referenceMixFileName.trim());
+    }
     return manifest.artifacts
         .where((artifact) => artifact.trackJson != null)
         .every((artifact) => frozenFileNames.contains(artifact.fileName));
