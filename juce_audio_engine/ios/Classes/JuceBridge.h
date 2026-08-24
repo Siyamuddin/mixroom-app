@@ -51,6 +51,7 @@
                              segments:(NSArray<NSDictionary *> *)segments;
 + (NSArray<NSDictionary *> *)scanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
 + (NSArray<NSDictionary *> *)rescanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
++ (void)cancelPluginScanObjC;
 + (NSArray<NSDictionary *> *)getQuarantinedPluginsObjC;
 + (BOOL)isPluginQuarantinedObjC:(NSString *)pluginId;
 + (void)clearPluginQuarantineObjC:(NSString *)pluginId;

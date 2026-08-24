@@ -5895,6 +5895,7 @@ public:
     void setAdditionalPluginSearchPaths(const juce::StringArray &paths);
     juce::Array<juce::PluginDescription> getKnownPlugins();
     juce::Array<juce::PluginDescription> rescanPlugins(const juce::StringArray &paths = {});
+    void cancelPluginScan();
     juce::Array<juce::NamedValueSet> getQuarantinedHostedPlugins() const;
     bool isHostedPluginQuarantined(const juce::String &pluginId) const;
     void clearHostedPluginQuarantine(const juce::String &pluginId);
@@ -6317,7 +6318,11 @@ private:
     juce::StringArray pluginScanFailures;
     juce::StringArray additionalPluginSearchPaths;
     void scanPluginsIfNeeded();
+    void performPluginScan(bool reuseUnchangedPlugins = false);
+    bool restoreCachedPluginList();
+    void persistPluginListCache() const;
     bool pluginsScanned = false;
+    std::atomic<bool> pluginScanCancellationRequested{false};
     std::vector<juce::String> getExposedParametersForPlugin(const juce::String &pluginId);
 
     juce::AudioDeviceManager deviceManager;
