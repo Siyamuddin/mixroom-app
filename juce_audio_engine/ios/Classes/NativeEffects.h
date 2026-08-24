@@ -698,6 +698,8 @@ public:
         delayBufferSize = static_cast<int>(2.0 * (bufferSize + sampleRate));
         delayBuffer.setSize(numOutputs, delayBufferSize);
         delayBuffer.clear();
+        currentBlockSize = 0;
+        writePosition = 0;
         juce::dsp::ProcessSpec spec;
         spec.sampleRate = sampleRate;
         spec.maximumBlockSize = bufferSize;
