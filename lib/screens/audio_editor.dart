@@ -5583,6 +5583,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String? _recordingFilePath; // temp recorded file (m4a/wav/etc)
   String? _pendingUnpublishedRecordingPath;
   Timer? _recordingPeakTimer;
+  int _recordingPeakGeneration = 0;
+  bool _recordingPeakPollBusy = false;
   Timer? _midiInputPollTimer;
   Timer? _midiHeldNoteRefreshTimer;
   int? _midiRecordingClipEngineId;
@@ -5600,6 +5602,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   // for live preview waveform
   List<double> _recordingPeaks = []; // 0..1 peaks while recording
+  final List<double> _recordingPeakTimesMs = <double>[];
   StreamSubscription<Amplitude>? _amplitudeSub;
 
   // so keeping this local state might be unnecessary (and cause a factor of drift from source of truth which is JUCE) (maybe consider removing?)
@@ -12437,6 +12440,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.removeObserver(this);
     _undoManager.removeListener(_handleUndoHistoryChanged);
     _amplitudeSub?.cancel();
+    _stopRecordingPeakPolling(clearSamples: true);
     _micRecorder.dispose();
     unawaited(_spleeterStemSeparator.dispose());
     unawaited(_classifier.dispose());
@@ -12889,15 +12893,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _transportDesiredPlaying = false;
     ++_transportCommandSerial;
     _transportTicker?.stop();
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer = null;
+    _stopRecordingPeakPolling(clearSamples: true);
     _stopMeterPolling();
     setState(() {
       _isPlaying = false;
       _isRecording = false;
       _recordStartVisualPending = false;
       _recordingFilePath = null;
-      _recordingPeaks.clear();
       _syncTransportClock(pausedPosition, playing: false);
     });
     return unpublishedRecordingPath;
@@ -20847,12 +20849,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
 
+    _stopRecordingPeakPolling(clearSamples: true);
     setState(() {
       _activeMidiClipEngineId = clip.engineClipId;
       _activeMidiClipIndex = clipIndex;
       _selectedRow = clip.rowIndex.clamp(0, math.max(0, _rowCount - 1)).toInt();
       _recordingFilePath = null;
-      _recordingPeaks.clear();
       _isRecording = true;
       _isMidiClipRecording = true;
       _midiRecordingClipEngineId = clip.engineClipId;
@@ -20880,9 +20882,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _lastMidiRecordTransportSec =
         _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
     _midiRecordHasChanges = false;
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer = null;
-
     _midiInputPollTimer?.cancel();
     _midiInputPollTimer = liveTargetOk
         ? Timer.periodic(const Duration(milliseconds: 40), (_) {
@@ -20905,8 +20904,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _stopMidiClipRecording({bool keepPlaying = true}) async {
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer = null;
+    _stopRecordingPeakPolling(clearSamples: true);
     _midiInputPollTimer?.cancel();
     _midiInputPollTimer = null;
     _midiHeldNoteRefreshTimer?.cancel();
@@ -20953,7 +20951,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     setState(() {
       _isRecording = false;
-      _recordingPeaks.clear();
       _recordingFilePath = null;
     });
 
@@ -20999,6 +20996,57 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     } catch (_) {
       await Future<void>.delayed(Duration.zero);
     }
+  }
+
+  void _stopRecordingPeakPolling({required bool clearSamples}) {
+    _recordingPeakTimer?.cancel();
+    _recordingPeakTimer = null;
+    ++_recordingPeakGeneration;
+    _recordingPeakPollBusy = false;
+    if (clearSamples) {
+      _recordingPeaks.clear();
+      _recordingPeakTimesMs.clear();
+    }
+  }
+
+  void _startRecordingPeakPolling() {
+    _stopRecordingPeakPolling(clearSamples: true);
+    final peakGeneration = _recordingPeakGeneration;
+    _recordingPeakTimer = Timer.periodic(const Duration(milliseconds: 50), (
+      _,
+    ) async {
+      if (!_isRecording ||
+          peakGeneration != _recordingPeakGeneration ||
+          _recordingPeakPollBusy) {
+        return;
+      }
+
+      _recordingPeakPollBusy = true;
+      try {
+        final peak = await JuceAudioEngine.getRecordingPeak();
+        if (!mounted ||
+            !_isRecording ||
+            peakGeneration != _recordingPeakGeneration) {
+          return;
+        }
+        final acceptedElapsedMs = math.max(
+          0.0,
+          _globalAudioClock.inMicroseconds.toDouble() / 1000.0 -
+              _recordingStartMs,
+        );
+        final elapsedMs = _recordingPeakTimesMs.isEmpty
+            ? acceptedElapsedMs
+            : math.max(_recordingPeakTimesMs.last, acceptedElapsedMs);
+        setState(() {
+          _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
+          _recordingPeakTimesMs.add(elapsedMs);
+        });
+      } finally {
+        if (peakGeneration == _recordingPeakGeneration) {
+          _recordingPeakPollBusy = false;
+        }
+      }
+    });
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
@@ -21385,20 +21433,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _midiRecordingLiveInputArmed = false;
       });
 
-      _recordingPeaks.clear();
-
-      _recordingPeakTimer?.cancel();
-      _recordingPeakTimer = Timer.periodic(const Duration(milliseconds: 50), (
-        _,
-      ) async {
-        if (!_isRecording) return;
-
-        final peak = await JuceAudioEngine.getRecordingPeak();
-        if (!mounted || !_isRecording) return;
-        setState(() {
-          _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
-        });
-      });
+      _startRecordingPeakPolling();
       _startRecordingRoutePolicyPolling();
     } finally {
       if (mounted && !_isRecording && _recordStartVisualPending) {
@@ -21568,8 +21603,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           hadBluetoothInputRoute;
       Future<void>? deferredBluetoothRestore;
 
-      _recordingPeakTimer?.cancel();
-      _recordingPeakTimer = null;
+      _stopRecordingPeakPolling(clearSamples: true);
       _stopRecordingRoutePolicyPolling();
       _liveInputMonitoringEffective = null;
 
@@ -82277,6 +82311,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           recordingStartMs: _recordingStartMs,
                                           recordingPeaks:
                                               _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                          recordingPeakTimesMs:
+                                              _recordingPeakTimesMs,
                                           selectedClipIndex:
                                               _timelinePrimarySelectedClipIndex,
                                           selectedClipIndices:
