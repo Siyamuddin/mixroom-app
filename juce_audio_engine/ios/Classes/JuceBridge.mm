@@ -3171,10 +3171,21 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     JuceEngine::get().loadTrack((int)idx, juce::File(jucePath)); // CALL DIRECTLY!
 }
 
-+ (void)playObjC
++ (BOOL)playObjC
 {
-    juce::MessageManager::callAsync([]
-                                    { JuceEngine::get().play(); });
+    BOOL started = NO;
+    auto play = [&]
+    {
+        started = JuceEngine::get().play();
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            play();
+        else
+            messageManager->callSync(play);
+    }
+    return started;
 }
 
 + (void)pauseObjC

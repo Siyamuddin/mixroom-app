@@ -5796,8 +5796,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   MediaDeviceInfo? _selectedOutput;
   final List<TrackGroup> _trackGroups = <TrackGroup>[];
   String? _androidOutputRouteName;
+  List<String> _macInputDevices = const <String>[];
+  String? _macInputDeviceName;
   List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
+  bool _macV2InputSelectionInFlight = false;
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
   static final BluetoothRouteReportSerializerV2 _bluetoothReportSerializerV2 =
       BluetoothRouteReportSerializerV2();
@@ -9311,7 +9314,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return;
         }
         if (Platform.isMacOS) {
-          await _loadMacV2OutputDevices();
+          await _loadMacV2AudioDevices();
         }
       }
       await _refreshPlatformCapabilities();
@@ -12966,7 +12969,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _macOutputDeviceName = recoveredOutputName;
         }
       });
-      if (Platform.isMacOS) unawaited(_loadMacV2OutputDevices());
+      if (Platform.isMacOS) unawaited(_loadMacV2AudioDevices());
       _showSmallNotice(_v2AudioSessionInvalidationNotice);
       return;
     }
@@ -13051,7 +13054,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _macOutputDeviceName = outputName;
         });
       }
-      unawaited(_loadMacV2OutputDevices());
+      unawaited(_loadMacV2AudioDevices());
       if (result.bluetoothCommunicationQualityReduced &&
           !_macBluetoothCommunicationQualityNoticeShown) {
         _macBluetoothCommunicationQualityNoticeShown = true;
@@ -17759,7 +17762,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (!commandIsCurrent()) return;
-    final playStarted = await JuceAudioEngine.play();
+    var playStarted = await JuceAudioEngine.play();
+    if (!playStarted &&
+        Platform.isMacOS &&
+        _isBluetoothV2Session &&
+        commandIsCurrent() &&
+        !_v2AudioSessionInvalidated &&
+        !_v2AudioSessionRecoveryInProgress) {
+      final recoveryResult = await _audioRouteCoordinatorV2?.transitionIntent(
+        AudioRouteIntentV2.playbackOnly,
+      );
+      if (recoveryResult != null && recoveryResult.succeeded) {
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+        if (commandIsCurrent()) {
+          playStarted = await JuceAudioEngine.play();
+        }
+      }
+    }
     if (!playStarted) {
       _transportDesiredPlaying = false;
       _transportTicker?.stop();
@@ -17768,6 +17787,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _syncTransportClock(resumeStartPoint, playing: false);
       });
       _stopMeterPolling();
+      if (mounted && commandIsCurrent()) {
+        _showSmallNotice('Audio output is unavailable. Please try again.');
+      }
       return;
     }
     if (!commandIsCurrent()) return;
@@ -39803,7 +39825,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(() async {
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted || !_isProjectSettingsOpen) return;
-      if (_isBluetoothV2Session) return;
+      if (_isBluetoothV2Session) {
+        if (Platform.isMacOS) await _loadMacV2AudioDevices();
+        return;
+      }
       if (!showAudioRouting) return;
       await _refreshMicrophonePermissionState();
       if (_inputDevices.isEmpty && !_loadingDevices) {
@@ -42767,7 +42792,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final result = await coordinator.selectPlaybackOutput(trimmed);
       if (!mounted) return;
       if (!result.succeeded) {
-        await _loadMacV2OutputDevices();
+        await _loadMacV2AudioDevices();
         return;
       }
       final verifiedName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
@@ -42794,6 +42819,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
     await _refreshAudioRouteInfo();
     await _ensurePlaybackRouteReady(reason: 'selectMacOutputDevice');
+  }
+
+  Future<void> _selectMacV2InputDevice(String? name) async {
+    final coordinator = _audioRouteCoordinatorV2;
+    if (!_macV2InputSelectionEnabled || coordinator == null) {
+      _showSmallNotice('Audio input selection is not ready yet.');
+      return;
+    }
+    final selection = name?.trim();
+    _setStateAndRefreshProjectSettings(
+      () => _macV2InputSelectionInFlight = true,
+    );
+    try {
+      final result = await coordinator.selectRecordingInput(
+        selection == null || selection.isEmpty ? null : selection,
+      );
+      if (!mounted) return;
+      if (!result.succeeded) {
+        _showSmallNotice(
+          L10n.translate(context, 'Selected input device is not available.'),
+        );
+        await _loadMacV2AudioDevices();
+        return;
+      }
+      _setStateAndRefreshProjectSettings(() {
+        _macInputDeviceName = selection == null || selection.isEmpty
+            ? null
+            : selection;
+      });
+    } finally {
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(
+          () => _macV2InputSelectionInFlight = false,
+        );
+      }
+    }
   }
 
   List<_InputChannelRouteOption> _buildInputChannelRouteOptions(
@@ -43546,7 +43607,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool scheduleRecordingPrewarm = false,
   }) async {
     if (_isBluetoothV2Session) {
-      if (Platform.isMacOS) await _loadMacV2OutputDevices();
+      if (Platform.isMacOS) await _loadMacV2AudioDevices();
       return;
     }
     if (_loadingDevices) return;
@@ -43673,6 +43734,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!Platform.isMacOS || !_isBluetoothV2Session) return true;
     final coordinator = _audioRouteCoordinatorV2;
     return !_loadingDevices &&
+        !_macV2InputSelectionInFlight &&
         !_v2AudioSessionInvalidated &&
         !_isRecording &&
         !_recordStartVisualPending &&
@@ -43681,10 +43743,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         coordinator.state == AudioRouteCoordinatorStateV2.stable;
   }
 
-  Future<void> _loadMacV2OutputDevices() async {
+  bool get _macV2InputSelectionEnabled {
+    if (!Platform.isMacOS || !_isBluetoothV2Session) return false;
+    final coordinator = _audioRouteCoordinatorV2;
+    return !_loadingDevices &&
+        !_macV2InputSelectionInFlight &&
+        !_v2AudioSessionInvalidated &&
+        !_isRecording &&
+        !_recordStartVisualPending &&
+        coordinator != null &&
+        coordinator.intent == AudioRouteIntentV2.playbackOnly &&
+        coordinator.state == AudioRouteCoordinatorStateV2.stable;
+  }
+
+  Future<void> _loadMacV2AudioDevices() async {
     if (!Platform.isMacOS || !_isBluetoothV2Session || _loadingDevices) return;
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
     try {
+      final inputDevices = <String>[];
+      for (final info in await JuceAudioEngine.getInputDeviceInfos()) {
+        final name = info.name.trim();
+        if (name.isNotEmpty && !inputDevices.contains(name)) {
+          inputDevices.add(name);
+        }
+      }
       final outputDevices = <String>[];
       for (final rawName in await JuceAudioEngine.getOutputDevices()) {
         final name = rawName.trim();
@@ -43696,6 +43778,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           .trim();
       if (!mounted) return;
       _setStateAndRefreshProjectSettings(() {
+        _macInputDevices = inputDevices;
+        if (_macInputDeviceName != null &&
+            !inputDevices.contains(_macInputDeviceName)) {
+          _macInputDeviceName = null;
+        }
         _macOutputDevices = outputDevices;
         _macOutputDeviceName = currentOutput.isEmpty
             ? _macOutputDeviceName
@@ -43816,16 +43903,72 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Widget _buildInputSelector() {
     if (_isBluetoothV2Session && Platform.isMacOS) {
-      return InputDecorator(
-        decoration: _projectSettingsFieldDecoration(
-          labelText: L10n.translate(context, 'Input Device'),
-        ),
-        child: Text(
-          L10n.translate(
-            context,
-            'System Default (change in macOS Sound settings)',
+      const systemDefaultValue = '';
+      final selectionEnabled = _macV2InputSelectionEnabled;
+      final selectedName = _macInputDeviceName?.trim();
+      final selectedValue =
+          selectedName != null &&
+              selectedName.isNotEmpty &&
+              _macInputDevices.contains(selectedName)
+          ? selectedName
+          : systemDefaultValue;
+      final values = <String>[systemDefaultValue, ..._macInputDevices];
+      return Semantics(
+        identifier: 'daw.input_device',
+        label: L10n.translate(context, 'Input Device'),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey<String>('mac-v2-input-$selectedValue'),
+          initialValue: selectedValue,
+          isExpanded: true,
+          dropdownColor: kMixroomGlassDropdownMenuColor,
+          style: const TextStyle(color: Colors.white),
+          selectedItemBuilder: (context) => values
+              .map(
+                (value) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value.isEmpty
+                        ? L10n.translate(context, 'System Default')
+                        : value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Device'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh audio devices'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: selectionEnabled
+                  ? () => unawaited(_loadMacV2AudioDevices())
+                  : null,
+            ),
           ),
-          style: const TextStyle(color: Colors.white54),
+          items: values
+              .map(
+                (value) => DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(
+                    value.isEmpty
+                        ? L10n.translate(context, 'System Default')
+                        : value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: selectionEnabled
+              ? (value) => unawaited(
+                  _selectMacV2InputDevice(
+                    value == null || value.isEmpty ? null : value,
+                  ),
+                )
+              : null,
         ),
       );
     }
@@ -58806,6 +58949,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _handleJuceEngineEvent(Map<String, dynamic> event) {
     final eventType = (event['event'] ?? '').toString().trim();
     switch (eventType) {
+      case 'macV2InputPreferenceChanged':
+        if (Platform.isMacOS && _isBluetoothV2Session && mounted) {
+          _setStateAndRefreshProjectSettings(() {
+            _macInputDeviceName = null;
+          });
+          unawaited(_loadMacV2AudioDevices());
+        }
+        return;
       case 'pluginEditorSpacebar':
         if (_isEditorTextEntryActive()) return;
         unawaited(_handleMacSpacebarPlayPauseShortcut());

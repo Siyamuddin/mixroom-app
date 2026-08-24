@@ -10,6 +10,8 @@ abstract interface class AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
     int generation, {
     String? outputDeviceName,
+    String? inputDeviceName,
+    bool updateInputPreference = false,
   });
 
   Future<AudioRouteTransitionResultV2> applyIntent(
@@ -365,6 +367,60 @@ class AudioRouteCoordinatorV2 {
           ? AudioRouteCoordinatorStateV2.stable
           : AudioRouteCoordinatorStateV2.failed);
       onTransition?.call(result);
+    }
+    _schedulePendingDrain();
+    return result;
+  }
+
+  /// Validates and stores a macOS recording-input preference without
+  /// mutating the active output-only route. A null/empty selection means
+  /// follow the system default input.
+  Future<AudioRouteTransitionResultV2> selectRecordingInput(
+    String? inputDeviceName,
+  ) async {
+    if (_disposed || !_started || _shutdownCancellation) {
+      return _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'coordinator_disposed',
+      );
+    }
+    if (_interruptionActive ||
+        _intent != AudioRouteIntentV2.playbackOnly ||
+        _applyInFlight ||
+        _intentTransitionInFlight ||
+        _pending != null) {
+      return _localFailure(AudioRouteIntentV2.playbackOnly, 'route_unstable');
+    }
+
+    _applyInFlight = true;
+    final generation = _latestGeneration;
+    AudioRouteTransitionResultV2 result;
+    try {
+      result = await _adapter.applyPlaybackRoute(
+        generation,
+        inputDeviceName: inputDeviceName?.trim(),
+        updateInputPreference: true,
+      );
+    } catch (_) {
+      result = _localFailure(
+        AudioRouteIntentV2.playbackOnly,
+        'actual_state_unavailable',
+      );
+    } finally {
+      _applyInFlight = false;
+    }
+
+    if (_disposed) return result;
+    final stale = result.generation != generation ||
+        result.diagnosticCode == 'stale_generation' ||
+        _latestGeneration != generation;
+    if (stale) {
+      return result.diagnosticCode == 'stale_generation'
+          ? result
+          : _localFailure(
+              AudioRouteIntentV2.playbackOnly,
+              'stale_generation',
+            );
     }
     _schedulePendingDrain();
     return result;

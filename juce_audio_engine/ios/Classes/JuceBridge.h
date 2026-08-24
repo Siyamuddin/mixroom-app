@@ -55,7 +55,7 @@
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
 + (void)loadTrackObjC:(NSInteger)idx path:(NSString *)path;
 
-+ (void)playObjC;
++ (BOOL)playObjC;
 + (void)pauseObjC;
 + (void)removeTrackObjC:(NSInteger)trackIndex;
 + (NSArray<NSString *> *)getTrackEffectsObjC:(NSInteger)trackIndex;

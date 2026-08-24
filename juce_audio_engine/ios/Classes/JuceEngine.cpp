@@ -7826,7 +7826,7 @@ juce::String JuceEngine::exportTrack(int trackIndex,
 // ============================================================
 // Transport
 // ============================================================
-void JuceEngine::play()
+bool JuceEngine::play()
 {
     {
         GraphMutationScope renderLock(deviceManager.getAudioCallbackLock(), graphRenderMutex);
@@ -7851,7 +7851,7 @@ void JuceEngine::play()
         {
             pause();
             juceLogToFlutter("V2 play blocked while output route is unavailable");
-            return;
+            return false;
         }
     }
     else if (missingOutputRoute)
@@ -7862,6 +7862,7 @@ void JuceEngine::play()
         {
             juceLogToFlutter("play: output route still invalid after recover attempt");
             requestAudioDeviceRefreshAsync("play-recover-output");
+            return false;
         }
     }
 
@@ -7870,6 +7871,7 @@ void JuceEngine::play()
 
     if (metronomeCallback)
         metronomeCallback->setIsPlaying(true);
+    return true;
 }
 
 void JuceEngine::pause()

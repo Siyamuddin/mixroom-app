@@ -69,10 +69,14 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
     int generation, {
     String? outputDeviceName,
+    String? inputDeviceName,
+    bool updateInputPreference = false,
   }) {
     return JuceAudioEngine.applyAudioRouteConfigurationV2(
       generation,
       outputDeviceName: outputDeviceName,
+      inputDeviceName: inputDeviceName,
+      updateInputPreference: updateInputPreference,
       platformOverride: platformOverride,
     );
   }
@@ -504,6 +508,8 @@ class JuceAudioEngine {
   static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
     int generation, {
     String? outputDeviceName,
+    String? inputDeviceName,
+    bool updateInputPreference = false,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -522,6 +528,11 @@ class JuceAudioEngine {
         'allowBuiltInFallback': true,
         if (outputDeviceName?.trim().isNotEmpty == true)
           'outputDeviceName': outputDeviceName!.trim(),
+        if (updateInputPreference) 'updateInputPreference': true,
+        if (updateInputPreference)
+          'followSystemInput': inputDeviceName?.trim().isNotEmpty != true,
+        if (updateInputPreference && inputDeviceName?.trim().isNotEmpty == true)
+          'inputDeviceName': inputDeviceName!.trim(),
       };
       final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
         'applyAudioRouteConfigurationV2',
@@ -808,7 +819,7 @@ class JuceAudioEngine {
   static Future<bool> play() async {
     try {
       final res = await _ch.invokeMethod<bool>('play');
-      return res ?? true;
+      return res ?? false;
     } on PlatformException catch (e) {
       _logError('play', e);
       return false;

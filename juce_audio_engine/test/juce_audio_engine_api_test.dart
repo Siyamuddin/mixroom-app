@@ -593,6 +593,39 @@ void main() {
     expect(arguments['desiredInputChannels'], 0);
   });
 
+  test('macOS V2 input preference reuses the playback route contract',
+      () async {
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      16,
+      inputDeviceName: 'Mac Microphone',
+      updateInputPreference: true,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    expect(calls.single.method, 'applyAudioRouteConfigurationV2');
+    final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
+    expect(arguments['inputDeviceName'], 'Mac Microphone');
+    expect(arguments['updateInputPreference'], isTrue);
+    expect(arguments['followSystemInput'], isFalse);
+    expect(arguments['desiredInputChannels'], 0);
+  });
+
+  test('macOS V2 system-default input clears the explicit preference',
+      () async {
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      17,
+      updateInputPreference: true,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
+    expect(arguments, isNot(contains('inputDeviceName')));
+    expect(arguments['updateInputPreference'], isTrue);
+    expect(arguments['followSystemInput'], isTrue);
+  });
+
   for (final platform in <TargetPlatform>[
     TargetPlatform.macOS,
     TargetPlatform.android,

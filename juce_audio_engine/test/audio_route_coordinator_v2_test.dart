@@ -86,6 +86,8 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final controller = StreamController<AudioRouteChangeEventV2>.broadcast();
   final appliedGenerations = <int>[];
   final appliedOutputNames = <String?>[];
+  final appliedInputNames = <String?>[];
+  final inputPreferenceUpdates = <bool>[];
   final appliedIntents = <AudioRouteIntentV2>[];
   final appliedOperations = <AudioRouteIntentOperationV2>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
@@ -107,9 +109,13 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
     int generation, {
     String? outputDeviceName,
+    String? inputDeviceName,
+    bool updateInputPreference = false,
   }) async {
     appliedGenerations.add(generation);
     appliedOutputNames.add(outputDeviceName);
+    appliedInputNames.add(inputDeviceName);
+    inputPreferenceUpdates.add(updateInputPreference);
     return results[generation] ?? _result(generation);
   }
 
@@ -232,6 +238,66 @@ void main() {
 
     expect(result.succeeded, isFalse);
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('serializes input preference without reconfiguring playback', () async {
+    final adapter = _FakeAdapter();
+    final states = <AudioRouteCoordinatorStateV2>[];
+    final transitions = <AudioRouteTransitionResultV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onStateChanged: states.add,
+      onTransition: transitions.add,
+    );
+    await coordinator.start();
+    states.clear();
+
+    final result = await coordinator.selectRecordingInput('Mac Microphone');
+
+    expect(result.succeeded, isTrue);
+    expect(adapter.appliedInputNames, <String?>['Mac Microphone']);
+    expect(adapter.inputPreferenceUpdates, <bool>[true]);
+    expect(adapter.appliedOutputNames, <String?>[null]);
+    expect(states, isEmpty);
+    expect(transitions, isEmpty);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('system-default input clears preference through the same owner',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.selectRecordingInput(null);
+
+    expect(result.succeeded, isTrue);
+    expect(adapter.appliedInputNames, <String?>[null]);
+    expect(adapter.inputPreferenceUpdates, <bool>[true]);
+    await coordinator.dispose();
+  });
+
+  test('input preference cannot overlap recording lifecycle ownership',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.preparingRecording);
+
+    final result = await coordinator.selectRecordingInput('Mac Microphone');
+
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'route_unstable');
+    expect(adapter.inputPreferenceUpdates, isEmpty);
     await coordinator.dispose();
   });
 

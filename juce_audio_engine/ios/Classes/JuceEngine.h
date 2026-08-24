@@ -6047,7 +6047,7 @@ public:
     int updateClipFadesBatch(const juce::Array<juce::NamedValueSet> &updates);
 
     // Transport
-    void play();
+    bool play();
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;

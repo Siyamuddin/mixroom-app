@@ -44,7 +44,7 @@ void main() {
     expect(editor, contains('Run System Recording Route Check'));
   });
 
-  test('macOS V2 input controls cannot open or prewarm a microphone', () {
+  test('macOS V2 input selector stores preference without opening input', () {
     final editor = File(editorPath).readAsStringSync();
     final selector = _between(
       editor,
@@ -56,14 +56,22 @@ void main() {
       selector,
       contains('if (_isBluetoothV2Session && Platform.isMacOS)'),
     );
-    expect(
-      selector,
-      contains('System Default (change in macOS Sound settings)'),
-    );
+    expect(selector, contains("L10n.translate(context, 'System Default')"));
+    expect(selector, contains('_selectMacV2InputDevice'));
+    expect(selector, contains('DropdownButtonFormField<String>'));
     expect(
       selector.indexOf('if (_isBluetoothV2Session && Platform.isMacOS)'),
       lessThan(selector.indexOf('JuceAudioEngine.selectInputDevice(name)')),
     );
+    final v2Selection = _between(
+      editor,
+      'Future<void> _selectMacV2InputDevice(String? name) async {',
+      'List<_InputChannelRouteOption> _buildInputChannelRouteOptions',
+    );
+    expect(v2Selection, contains('coordinator.selectRecordingInput'));
+    expect(v2Selection, isNot(contains('selectInputDevice')));
+    expect(v2Selection, isNot(contains('prepareRecordingInputs')));
+    expect(v2Selection, isNot(contains('requestMicrophone')));
   });
 
   test('macOS probe owns an independent input and output-only JUCE route', () {
@@ -320,7 +328,7 @@ void main() {
     );
   });
 
-  test('restoration proves the exact original output before release', () {
+  test('restoration proves source identity and the current OS profile', () {
     final plugin = File(pluginPath).readAsStringSync();
     final intent = _between(
       plugin,
@@ -352,9 +360,18 @@ void main() {
     expect(restore, contains('if (!restorationVerified)'));
     expect(restore, contains('quiescePlaybackRouteV2ObjC:YES'));
     expect(restore, isNot(contains('exactBufferRestored')));
-    expect(restore, contains('outputSnapshotIsValid(snapshot, source)'));
-    expect(restore, isNot(contains('while (')));
+    expect(
+      restore,
+      contains('outputSnapshotIsValid(snapshot, restoredOutput ?: candidate)'),
+    );
+    expect(restore, contains('MixroomMonotonicMilliseconds() + 2000.0'));
+    expect(restore, contains('MixroomOutputFingerprint(candidate)'));
+    expect(restore, contains('currentProfileValid'));
+    expect(restore, contains('sourceProfileRestored'));
+    expect(restore, contains('macIntentSourceFingerprintV2'));
     expect(restore, isNot(contains('waitUntilDate')));
+    expect(restore, isNot(contains('sleep')));
+    expect(restore, isNot(contains('dispatch_after')));
   });
 
   test('device removal closes owned streams before one coordinator recovery', () {
@@ -385,10 +402,7 @@ void main() {
     expect(ownedOperation, contains('quiescePlaybackRouteV2ObjC:YES'));
     expect(ownedOperation, contains('discardMacInputRecordingV2ObjC'));
     expect(ownedOperation, contains('stopMacInputProbeV2ObjC'));
-    expect(
-      'claimMacIntentCleanupV2'.allMatches(ownedOperation),
-      hasLength(1),
-    );
+    expect('claimMacIntentCleanupV2'.allMatches(ownedOperation), hasLength(1));
     expect(
       ownedOperation.indexOf('[self claimMacIntentCleanupV2]'),
       lessThan(
@@ -419,7 +433,7 @@ void main() {
       contains('recoveryResult.snapshot.juce.outputDeviceName?.trim()'),
     );
     expect(editor, contains('_macOutputDeviceName = recoveredOutputName'));
-    expect(editor, contains('unawaited(_loadMacV2OutputDevices())'));
+    expect(editor, contains('unawaited(_loadMacV2AudioDevices())'));
     expect(
       editor,
       contains('cleanupBeforeRecovery: interruption || Platform.isAndroid'),
@@ -769,7 +783,7 @@ void main() {
       );
       final v2Refresh = _between(
         editor,
-        'Future<void> _loadMacV2OutputDevices() async {',
+        'Future<void> _loadMacV2AudioDevices() async {',
         'Widget _buildMicrophonePermissionNotice()',
       );
 
@@ -780,6 +794,7 @@ void main() {
         lessThan(selector.lastIndexOf('JuceAudioEngine.selectOutputDevice')),
       );
       expect(v2Refresh, contains('JuceAudioEngine.getOutputDevices()'));
+      expect(v2Refresh, contains('JuceAudioEngine.getInputDeviceInfos()'));
       expect(v2Refresh, contains('getCurrentOutputDeviceName()'));
       expect(v2Refresh, contains('final name = rawName.trim()'));
       expect(v2Refresh, contains('!outputDevices.contains(name)'));
@@ -788,6 +803,86 @@ void main() {
       expect(v2Refresh, isNot(contains('requestMicrophone')));
     },
   );
+
+  test('explicit input selection validates identity without audio mutation', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final apply = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)applyAudioRouteConfigurationV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+    final selection = _between(
+      apply,
+      'if (updateInputPreference) {',
+      'const BOOL explicitSelection = requestedName.length > 0;',
+    );
+
+    expect(
+      selection,
+      contains('MixroomExactDeviceMatches(inventory, requestedInputName, YES)'),
+    );
+    expect(selection, contains('inputMatches.count != 1'));
+    expect(selection, contains('MixroomMacInputIsUsable'));
+    expect(selection, contains('self.macSelectedInputUIDV2'));
+    expect(selection, contains('followSystemInput'));
+    expect(selection, isNot(contains('startMacInputProbeV2ObjC')));
+    expect(selection, isNot(contains('reconfigureMacPlaybackRouteV2ObjC')));
+    expect(selection, isNot(contains('waitForMacOutputCallbackProofV2ObjC')));
+    expect(selection, isNot(contains('selectInputDeviceObjC')));
+    expect(selection, isNot(contains('requestMicrophone')));
+  });
+
+  test(
+    'input enumeration rejects unavailable CoreAudio facts without messaging NSNull',
+    () {
+      final plugin = File(pluginPath).readAsStringSync();
+      final validator = _between(
+        plugin,
+        'static BOOL MixroomMacInputIsUsable(',
+        'static NSArray<NSDictionary<NSString *, id> *> *\n'
+            'MixroomMacV2InputDeviceInfos(void)',
+      );
+
+      expect(
+        validator,
+        contains('[input[@"inputChannels"] isKindOfClass:[NSNumber class]]'),
+      );
+      expect(
+        validator,
+        contains('[input[@"sampleRateHz"] isKindOfClass:[NSNumber class]]'),
+      );
+      expect(
+        validator,
+        contains('[input[@"bufferFrames"] isKindOfClass:[NSNumber class]]'),
+      );
+      expect(
+        validator,
+        contains('[input[@"deviceID"] isKindOfClass:[NSNumber class]]'),
+      );
+    },
+  );
+
+  test('recording resolves the committed input UID through AUHAL', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final resolver = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)currentMacRecordingInputV2:\n'
+          '    (NSArray<NSDictionary<NSString *, id> *> *)inventory {',
+      '- (NSString *)currentMacPlaybackOutputFingerprintV2',
+    );
+    final intent = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+
+    expect(resolver, contains('self.macSelectedInputUIDV2'));
+    expect(resolver, contains('MixroomInputForUID'));
+    expect(resolver, contains('MixroomDefaultCoreAudioInputDevice'));
+    expect(intent, contains('[self currentMacRecordingInputV2:inventory]'));
+    expect(intent, contains('startMacInputProbeV2ObjC:inputDeviceID'));
+    expect(intent, isNot(contains('selectInputDeviceObjC')));
+  });
 
   test('explicit output selection commits one verified CoreAudio UID', () {
     final plugin = File(pluginPath).readAsStringSync();
@@ -895,6 +990,51 @@ void main() {
     expect(
       observer,
       contains('else if (!MixroomMacOutputIsUsable(inventory, selected))'),
+    );
+  });
+
+  test('native play reports admission and Mac performs one owned recovery', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final bridge = File(bridgePath).readAsStringSync();
+    final bridgeHeader = File(
+      'juce_audio_engine/ios/Classes/JuceBridge.h',
+    ).readAsStringSync();
+    final engine = File(enginePath).readAsStringSync();
+    final engineHeader = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.h',
+    ).readAsStringSync();
+    final api = File(
+      'juce_audio_engine/lib/juce_audio_engine.dart',
+    ).readAsStringSync();
+    final editor = File(editorPath).readAsStringSync();
+    final resume = _between(
+      editor,
+      'Future<void> _resumeAudio(',
+      'Future<void> _pauseAudio(',
+    );
+
+    expect(engineHeader, contains('bool play();'));
+    expect(engine, contains('bool JuceEngine::play()'));
+    expect(
+      engine,
+      contains('V2 play blocked while output route is unavailable'),
+    );
+    expect(engine, contains('return false;'));
+    expect(engine, contains('return true;'));
+    expect(bridgeHeader, contains('+ (BOOL)playObjC;'));
+    expect(bridge, contains('started = JuceEngine::get().play()'));
+    expect(bridge, contains('messageManager->callSync(play)'));
+    expect(plugin, contains('result(@([JuceBridge playObjC]))'));
+    expect(api, contains('return res ?? false;'));
+    expect(resume, contains('var playStarted = await JuceAudioEngine.play()'));
+    expect(resume, contains('Platform.isMacOS'));
+    expect(resume, contains('AudioRouteIntentV2.playbackOnly'));
+    expect(resume, contains('acceptVerifiedAudioRouteTransitionV2'));
+    expect(
+      RegExp(
+        r'playStarted = await JuceAudioEngine\.play\(\)',
+      ).allMatches(resume).length,
+      2,
     );
   });
 }
