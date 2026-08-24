@@ -543,14 +543,29 @@ void main() {
     );
     expect(
       start,
-      contains(
-        'final peak = await JuceAudioEngine.getRecordingPeak();\n'
-        '        if (!mounted || !_isRecording) return;',
-      ),
+      contains('_startRecordingPeakPolling();'),
     );
     expect(
       start,
       contains('if (mounted &&\n          _isBluetoothV2Session &&'),
+    );
+
+    final peakBegin = editor.indexOf('void _startRecordingPeakPolling()');
+    final peakEnd = editor.indexOf(
+      'Future<bool> _prepareAudioRecordingStartPreflight()',
+      peakBegin,
+    );
+    final peakPolling = editor.substring(peakBegin, peakEnd);
+    expect(
+      peakPolling,
+      contains(
+        'final peak = await JuceAudioEngine.getRecordingPeak();\n'
+        '        if (!mounted ||\n'
+        '            !_isRecording ||\n'
+        '            peakGeneration != _recordingPeakGeneration) {\n'
+        '          return;\n'
+        '        }',
+      ),
     );
 
     final stopBegin = editor.indexOf(

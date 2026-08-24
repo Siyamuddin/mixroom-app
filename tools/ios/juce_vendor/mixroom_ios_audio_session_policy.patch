@@ -3,7 +3,7 @@
 @@ -32,7 +32,107 @@
    ==============================================================================
  */
- 
+
 -namespace juce
 +#include "MixroomIOSAudioSessionPolicy.h"
 +
@@ -107,7 +107,7 @@
 +
 +namespace juce
  {
- 
+
      class iOSAudioIODevice;
 @@ -345,5 +428,99 @@
          AudioUnit audioUnit{};
@@ -212,7 +212,7 @@
 @@ -355,15 +532,23 @@
          {
              JUCE_IOS_AUDIO_LOG("Creating iOS audio device");
- 
+
 -            // We need to activate the audio session here to obtain the available sample rates and buffer sizes,
 -            // but if we don't set a category first then background audio will always be stopped. This category
 -            // may be changed later.
@@ -239,13 +239,13 @@
 +                    updateHardwareInfo();
 +                channelData.reconfigure({}, {});
 +            }
- 
+
              sessionHolder->activeDevices.add(this);
          }
 @@ -393,7 +578,7 @@
                                                                        error:&error]);
          }
- 
+
 -        static void setAudioSessionActive(bool enabled)
 +        static void setAudioSessionActive(bool enabled)
          {
@@ -253,7 +253,7 @@
                                                                      error:&error]);
 @@ -636,7 +821,112 @@
              JUCE_IOS_AUDIO_LOG ("Sample rate after detecting available sample rates: " << sampleRate);
- 
+
              availableSampleRates = sampleRates;
 +        }
 +
@@ -361,13 +361,13 @@
 +            mixroomIOSClearPreparedSession();
 +            v2SessionActive = false;
 +        }
- 
+
          void updateHardwareInfo(bool forceUpdate = false)
          {
 @@ -663,11 +944,15 @@
              JUCE_IOS_AUDIO_LOG("Actual buffer size: " << bufferSize);
          }
- 
+
 -        String open(const BigInteger &inputChannelsWanted,
 +        String open(const BigInteger &inputChannelsWanted,
                      const BigInteger &outputChannelsWanted,
@@ -379,13 +379,13 @@
 +            const bool preservePreparedV2Session = isV2 && !isRunning && v2SessionActive;
 +            if (!preservePreparedV2Session)
 +                close();
- 
+
              firstHostTime = true;
              lastNumFrames = 0;
 @@ -685,13 +979,39 @@
                                 << ", targetSampleRate: " << targetSampleRate
                                 << ", targetBufferSize: " << targetBufferSize);
- 
+
 -            setAudioSessionActive(true);
 -            setAudioSessionCategory(requestedInputChannels > 0 ? AVAudioSessionCategoryPlayAndRecord
 -                                                               : AVAudioSessionCategoryPlayback);
@@ -426,9 +426,9 @@
 +            updateHardwareInfo(true);
 +            if (!isV2)
 +                fixAudioRouteIfSetToReceiver();
- 
+
              isRunning = true;
- 
+
 @@ -722,12 +1032,22 @@
                  if (audioUnit != nullptr)
                  {
@@ -443,7 +443,7 @@
                      AudioComponentInstanceDispose(audioUnit);
                      audioUnit = nullptr;
                  }
- 
+
 -                setAudioSessionActive(false);
 -            }
 +                if (mixroomIOSCurrentPolicy() == MixroomIOSAudioSessionPolicy::legacyManaged)
@@ -453,11 +453,11 @@
 +            if (mixroomIOSCurrentPolicy() != MixroomIOSAudioSessionPolicy::legacyManaged)
 +                deactivateV2Session();
          }
- 
+
          void start(AudioIODeviceCallback *newCallback)
 @@ -962,17 +1276,30 @@
              const ScopedLock myScopedLock(callbackLock);
- 
+
              JUCE_IOS_AUDIO_LOG("handleStatusChange: enabled: " << (int)enabled << ", reason: " << reason);
 -
 -            isRunning = enabled;
@@ -467,7 +467,7 @@
 -                AudioOutputUnitStart(audioUnit);
 -            else
 -                AudioOutputUnitStop(audioUnit);
- 
+
 -            if (!enabled)
 -                invokeAudioDeviceErrorCallback(reason);
 +            isRunning = enabled;
@@ -494,7 +494,7 @@
 +            if (!isRunning)
 +                invokeAudioDeviceErrorCallback(reason);
          }
- 
+
          void handleRouteChange(AVAudioSessionRouteChangeReason reason)
 @@ -1176,5 +1536,12 @@
              if (audioUnit != nullptr)
@@ -524,17 +524,17 @@
              static_cast<Pimpl *>(data)->handleAudioUnitPropertyChange(unit, propertyID, scope, element);
          }
 @@ -1567,10 +1907,11 @@
- 
+
          BigInteger requestedInputChannels, requestedOutputChannels;
- 
+
 -        bool isRunning = false;
 +        bool isRunning = false;
 +        bool v2SessionActive = false;
 +
 +        AudioIODeviceCallback *callback = nullptr;
- 
+
 -        AudioIODeviceCallback *callback = nullptr;
 -
          String lastError;
- 
+
  #if TARGET_IPHONE_SIMULATOR
