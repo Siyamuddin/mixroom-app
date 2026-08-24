@@ -24,7 +24,7 @@ void main() {
     expect(plugin, contains('prepareBuiltInRecordingV2(generation)'));
     expect(
       plugin,
-      contains('prepareBluetoothDuplexV2(generation, operationMode)'),
+      contains('prepareSystemSelectedRecordingV2(generation, operationMode)'),
     );
     expect(plugin, contains('"systemSelectedRecording"'));
     expect(plugin, contains('restoreRecordingPlaybackV2(generation)'));
@@ -139,7 +139,7 @@ void main() {
       expect(capture, isNot(contains(forbidden)));
     }
     expect(capture, contains('JuceBridge.startRecordingJNI'));
-    expect(capture, contains('!operation.mode.allowsCapture()'));
+    expect(capture, isNot(contains('allowsCapture')));
   });
 
   test(
@@ -162,12 +162,8 @@ void main() {
       );
       final validate = plugin.substring(validateStart, validateEnd);
 
-      expect(
-        prepare,
-        contains(
-          'JuceBridge.prepareBluetoothDuplexV2JNI(mode.allowsCapture())',
-        ),
-      );
+      expect(prepare, contains('JuceBridge.prepareBluetoothDuplexV2JNI()'));
+      expect(prepare, isNot(contains('allowsCapture')));
       expect(prepare, contains('AndroidBluetoothDuplexReadinessV2.validate'));
       expect(
         validate,

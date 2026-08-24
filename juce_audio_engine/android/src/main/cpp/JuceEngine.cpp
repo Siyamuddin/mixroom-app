@@ -1168,7 +1168,6 @@ bool JuceEngine::initialisePlaybackV2Android()
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     hasRecordingRestorePlaybackSetup = false;
     androidV2RecordingPrepared = false;
-    androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
     ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
@@ -1237,7 +1236,6 @@ bool JuceEngine::reconfigurePlaybackV2Android()
         return false;
 
     androidV2RecordingPrepared = false;
-    androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
     quiescePlaybackV2Android(false);
@@ -1278,15 +1276,15 @@ bool JuceEngine::reconfigurePlaybackV2Android()
 
 bool JuceEngine::prepareRecordingV2Android()
 {
-    return prepareDefaultDuplexV2Android(true);
+    return prepareDefaultDuplexV2Android();
 }
 
-bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android(bool recordingCapable)
+bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android()
 {
-    return prepareDefaultDuplexV2Android(recordingCapable);
+    return prepareDefaultDuplexV2Android();
 }
 
-bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)
+bool JuceEngine::prepareDefaultDuplexV2Android()
 {
 #if JUCE_ANDROID
     if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
@@ -1294,7 +1292,6 @@ bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)
 
     pause();
     androidV2RecordingPrepared = false;
-    androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
     if (!v2PlaybackCallbackDetached && audioCallbackAttached)
@@ -1334,18 +1331,15 @@ bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)
     deviceManager.addAudioCallback(metronomeCallback.get());
     audioCallbackAttached = true;
     v2PlaybackCallbackDetached = false;
-    androidV2RecordingPrepared = recordingCapable;
-    androidV2DuplexProbePrepared = !recordingCapable;
-    logCurrentAudioDeviceState(recordingCapable
-                                   ? "android-v2-recording-prepared"
-                                   : "android-v2-system-selected-media-probe");
+    androidV2RecordingPrepared = true;
+    logCurrentAudioDeviceState("android-v2-recording-prepared");
     return true;
 #else
     return false;
 #endif
 }
 
-bool JuceEngine::prepareBluetoothDuplexV2Android(bool recordingCapable)
+bool JuceEngine::prepareBluetoothDuplexV2Android()
 {
 #if JUCE_ANDROID
     if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
@@ -1353,7 +1347,6 @@ bool JuceEngine::prepareBluetoothDuplexV2Android(bool recordingCapable)
 
     pause();
     androidV2RecordingPrepared = false;
-    androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
     if (!v2PlaybackCallbackDetached && audioCallbackAttached)
@@ -1389,11 +1382,8 @@ bool JuceEngine::prepareBluetoothDuplexV2Android(bool recordingCapable)
     deviceManager.addAudioCallback(metronomeCallback.get());
     audioCallbackAttached = true;
     v2PlaybackCallbackDetached = false;
-    androidV2RecordingPrepared = recordingCapable;
-    androidV2DuplexProbePrepared = !recordingCapable;
-    logCurrentAudioDeviceState(recordingCapable
-                                   ? "android-v2-bluetooth-recording"
-                                   : "android-v2-bluetooth-duplex-probe");
+    androidV2RecordingPrepared = true;
+    logCurrentAudioDeviceState("android-v2-bluetooth-recording");
     return true;
 #else
     return false;
@@ -1418,7 +1408,6 @@ void JuceEngine::shutdownEngine()
 
     wavCapture.stop(true);
     androidV2RecordingPrepared = false;
-    androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
 
@@ -1533,7 +1522,6 @@ void JuceEngine::shutdownEngine()
     audioCallbackAttached = false;
     v2PlaybackCallbackDetached = false;
     androidV2RecordingPrepared = false;
-    androidV2DuplexProbePrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
 }
@@ -10526,7 +10514,7 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                                      int channelStart,
                                      int channelCount)
 {
-    if (wavCapture.isActive() || androidV2DuplexProbePrepared)
+    if (wavCapture.isActive())
         return false;
 
     const bool v2Recording = androidV2RecordingPrepared;

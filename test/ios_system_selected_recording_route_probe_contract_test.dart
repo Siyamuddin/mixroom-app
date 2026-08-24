@@ -1,15 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:juce_audio_engine/audio_route_v2.dart';
-import 'package:mixroom/helpers/bluetooth_route_report_v2.dart';
 
 void main() {
   late String policyHeader;
   late String policyPatch;
   late String engine;
   late String plugin;
-  late String editor;
 
   setUpAll(() {
     policyHeader = File(
@@ -24,7 +21,6 @@ void main() {
     plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
     ).readAsStringSync();
-    editor = File('lib/screens/audio_editor.dart').readAsStringSync();
   });
 
   test('system-selected policy permits routes without selecting an input', () {
@@ -108,73 +104,4 @@ void main() {
       expect(probe, isNot(contains('liveInputMonitoringEnabled = true')));
     },
   );
-
-  test(
-    'debug action is writer-free and uses the existing serialized intent',
-    () {
-      final start = editor.indexOf(
-        'Future<void> _runIOSSystemSelectedRouteProbeV2()',
-      );
-      final end = editor.indexOf('String _bluetoothImplementationLabel', start);
-      final probe = editor.substring(start, end);
-
-      expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
-      expect(
-        probe,
-        contains('operation: AudioRouteIntentOperationV2.systemSelectedProbe'),
-      );
-      expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
-      expect(probe, isNot(contains('AudioRouteIntentV2.recording')));
-      expect(probe, isNot(contains('_startAudioRecordingJuce')));
-      expect(editor, contains('Run System Recording Route Check'));
-    },
-  );
-
-  test('probe diagnostics retain selection mode without raw identities', () {
-    const endpoint = AudioRouteEndpointV2(
-      direction: AudioRouteDirectionV2.input,
-      nativePortType: 'MicrophoneBuiltIn',
-      normalizedKind: AudioRouteKindV2.builtIn,
-      uid: 'private-input-uid',
-      name: 'Private Input Name',
-      channelCount: 1,
-    );
-    final probe = AudioRouteDuplexProbeFactsV2.fromMap(<String, dynamic>{
-      'status': 'restored',
-      'diagnosticCode': 'ok',
-      'validationStage': 'duplexVerified',
-      'categoryOptions': <String>[
-        'mixWithOthers',
-        'allowBluetoothA2DP',
-        'allowBluetoothHFP',
-      ],
-      'selectionMode': 'systemSelected',
-      'operationId': 4,
-      'elapsedMs': 300,
-      'duplexInput': endpoint.toRawMap(),
-    });
-    final snapshot = AudioRouteSnapshotV2(
-      capturedAtUtc: DateTime.utc(2026, 8, 16),
-      captureDurationMs: 1,
-      implementation: BluetoothImplementationV2.v2,
-      generation: 0,
-      transitionId: 1,
-      coordinatorManaged: true,
-      captureConsistency: AudioRouteCaptureConsistencyV2.stable,
-      inputs: const <AudioRouteEndpointV2>[],
-      outputs: const <AudioRouteEndpointV2>[],
-      session: const AudioSessionFactsV2(),
-      juce: const JuceRouteFactsV2(),
-      unavailableReasons: const <String, String>{},
-      duplexProbe: probe,
-    );
-    final report = BluetoothRouteReportSerializerV2(
-      sessionSalt: List<int>.filled(32, 5),
-    ).encode(snapshot);
-
-    expect(probe.selectionMode, 'systemSelected');
-    expect(report, contains('"selectionMode":"systemSelected"'));
-    expect(report, isNot(contains('private-input-uid')));
-    expect(report, isNot(contains('Private Input Name')));
-  });
 }

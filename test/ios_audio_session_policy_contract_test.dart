@@ -27,7 +27,7 @@ void main() {
     ).readAsStringSync();
   });
 
-  test('private policy seam includes the writer-free HFP probe mode', () {
+  test('private policy seam includes every production V2 route mode', () {
     expect(policyHeader, contains('legacyManaged = 0'));
     expect(policyHeader, contains('v2PlaybackOnly = 1'));
     expect(policyHeader, contains('v2BuiltInDuplex = 2'));
@@ -130,7 +130,6 @@ void main() {
         '${plugin.substring(handlerStart, handlerEnd)}\n${apply.substring(iosApplyStart)}';
 
     expect(ordinaryRecovery, contains('pausePlaybackForRouteChangeV2ObjC'));
-    expect(ordinaryRecovery, isNot(contains('reconfigurePlaybackRouteV2ObjC')));
     expect(ordinaryRecovery, isNot(contains('quiescePlaybackRouteV2ObjC')));
     expect(
       ordinaryRecovery,

@@ -963,31 +963,6 @@ void main() {
     await coordinator.dispose();
   });
 
-  test('forwards the private system-selected probe on the existing intent',
-      () async {
-    final adapter = _FakeAdapter();
-    final coordinator = AudioRouteCoordinatorV2(
-      adapter: adapter,
-      settlingDelay: Duration.zero,
-    );
-    await coordinator.start();
-
-    final result = await coordinator.transitionIntent(
-      AudioRouteIntentV2.preparingRecording,
-      operation: AudioRouteIntentOperationV2.systemSelectedProbe,
-    );
-
-    expect(result.succeeded, isTrue);
-    expect(
-      adapter.appliedIntents,
-      <AudioRouteIntentV2>[AudioRouteIntentV2.preparingRecording],
-    );
-    expect(adapter.appliedOperations, <AudioRouteIntentOperationV2>[
-      AudioRouteIntentOperationV2.systemSelectedProbe,
-    ]);
-    await coordinator.dispose();
-  });
-
   test('forwards system-selected recording without adding coordinator state',
       () async {
     final adapter = _FakeAdapter();

@@ -7,7 +7,6 @@ void main() {
   late String recordingRoute;
   late String engine;
   late String bridge;
-  late String editor;
 
   setUpAll(() {
     plugin = File(
@@ -22,26 +21,20 @@ void main() {
     bridge = File(
       'juce_audio_engine/android/src/main/java/com/mixroom/juce_audio_engine/JuceBridge.kt',
     ).readAsStringSync();
-    editor = File('lib/screens/audio_editor.dart').readAsStringSync();
   });
 
-  test('probe is a private mode on the existing serialized lifecycle', () {
-    expect(plugin, contains('SYSTEM_SELECTED_MEDIA_PROBE'));
-    expect(plugin, contains('"systemSelectedMediaProbe" ->'));
+  test('media recording uses the existing serialized lifecycle', () {
+    expect(plugin, isNot(contains('SYSTEM_SELECTED_MEDIA_PROBE')));
+    expect(plugin, isNot(contains('systemSelectedMediaProbe')));
     expect(
       plugin,
-      contains('prepareSystemSelectedMediaDuplexV2(generation, operationMode)'),
+      contains('prepareSystemSelectedMediaDuplexV2(generation, mode)'),
     );
     expect(plugin, contains('audioLifecycleExecutorV2.execute'));
     expect(plugin, contains('TimeUnit.SECONDS.toNanos(5)'));
-    expect(editor, contains('Run System Recording Route Check'));
-    expect(
-      editor,
-      contains('AudioRouteIntentOperationV2.systemSelectedMediaProbe'),
-    );
   });
 
-  test('media probe never selects communication routing or capture', () {
+  test('media recording never selects communication routing', () {
     final start = plugin.indexOf(
       'private fun prepareSystemSelectedMediaDuplexV2(',
     );
@@ -49,22 +42,22 @@ void main() {
       'private fun bluetoothCommunicationCandidatesV2(',
       start,
     );
-    final probe = plugin.substring(start, end);
+    final preparation = plugin.substring(start, end);
 
-    expect(probe, contains('preparePlaybackOnlyModeV2()'));
+    expect(preparation, contains('preparePlaybackOnlyModeV2()'));
     expect(
-      probe,
+      preparation,
       contains(
         'setAndroidStreamPolicyV2(AndroidStreamPolicyV2.BLUETOOTH_MEDIA)',
       ),
     );
+    expect(preparation, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
     expect(
-      probe,
-      contains('prepareSystemSelectedMediaDuplexV2JNI(mode.allowsCapture())'),
+      preparation,
+      contains('waitForV2CallbackReadyJNI(callbackTimeoutMillis)'),
     );
-    expect(probe, contains('waitForV2CallbackReadyJNI(callbackTimeoutMillis)'));
     expect(
-      probe,
+      preparation,
       contains('AndroidSystemSelectedMediaDuplexReadinessV2.validate'),
     );
     for (final forbidden in <String>[
@@ -78,39 +71,27 @@ void main() {
       'postDelayed',
       'while (',
     ]) {
-      expect(probe, isNot(contains(forbidden)));
+      expect(preparation, isNot(contains(forbidden)));
     }
   });
 
-  test(
-    'native open uses the normal media policy and is not record capable',
-    () {
-      expect(bridge, contains('prepareSystemSelectedMediaDuplexV2JNI'));
-      expect(
-        engine,
-        contains('return prepareDefaultDuplexV2Android(recordingCapable);'),
-      );
-      final start = engine.indexOf(
-        'bool JuceEngine::prepareDefaultDuplexV2Android(bool recordingCapable)',
-      );
-      final end = engine.indexOf(
-        'bool JuceEngine::prepareBluetoothDuplexV2Android',
-        start,
-      );
-      final open = engine.substring(start, end);
-      expect(
-        open,
-        contains('deviceManager.initialise(\n        1,\n        2'),
-      );
-      expect(open, contains('liveInputMonitoringEnabled = false'));
-      expect(open, contains('androidV2RecordingPrepared = recordingCapable'));
-      expect(
-        open,
-        contains('androidV2DuplexProbePrepared = !recordingCapable'),
-      );
-      expect(open, isNot(contains('startRecordingToWav')));
-    },
-  );
+  test('native open uses the normal media policy and is capture capable', () {
+    expect(bridge, contains('prepareSystemSelectedMediaDuplexV2JNI'));
+    expect(engine, contains('return prepareDefaultDuplexV2Android();'));
+    final start = engine.indexOf(
+      'bool JuceEngine::prepareDefaultDuplexV2Android()',
+    );
+    final end = engine.indexOf(
+      'bool JuceEngine::prepareBluetoothDuplexV2Android',
+      start,
+    );
+    final open = engine.substring(start, end);
+    expect(open, contains('deviceManager.initialise(\n        1,\n        2'));
+    expect(open, contains('liveInputMonitoringEnabled = false'));
+    expect(open, contains('androidV2RecordingPrepared = true'));
+    expect(open, isNot(contains('androidV2DuplexProbePrepared')));
+    expect(open, isNot(contains('startRecordingToWav')));
+  });
 
   test('readiness preserves exact A2DP and rejects SCO', () {
     expect(
@@ -195,36 +176,16 @@ void main() {
         validation,
         contains('AndroidSystemSelectedMediaDuplexReadinessV2.validate'),
       );
-      expect(
-        engine,
-        contains('return prepareDefaultDuplexV2Android(recordingCapable);'),
-      );
-      expect(
-        plugin,
-        contains('prepareSystemSelectedMediaDuplexV2JNI(mode.allowsCapture())'),
-      );
+      expect(engine, contains('return prepareDefaultDuplexV2Android();'));
+      expect(plugin, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
     },
   );
 
-  test('debug action restores playback and cannot start a writer', () {
-    final start = editor.indexOf(
-      'Future<void> _runAndroidSystemSelectedMediaProbeV2()',
-    );
-    final end = editor.indexOf('String _bluetoothImplementationLabel', start);
-    final probe = editor.substring(start, end);
-    expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
-    expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(probe, contains('exactSourceOutput'));
-    expect(probe, isNot(contains('_startAudioRecordingJuce')));
-    expect(probe, isNot(contains('startRecording(')));
-  });
-
   test(
-    'diagnostics identify the media-selection proof without schema changes',
+    'diagnostics identify the media-selection route without schema changes',
     () {
       expect(plugin, contains('"androidSystemSelectedMedia"'));
       expect(plugin, contains('operation.mode.reportsDuplexFacts()'));
-      expect(editor, contains('_copyBluetoothReportV2'));
     },
   );
 }

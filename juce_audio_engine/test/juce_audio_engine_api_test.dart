@@ -670,46 +670,6 @@ void main() {
     });
   }
 
-  test('iOS system-selected probe reuses the existing intent contract',
-      () async {
-    await JuceAudioEngine.setAudioRouteIntentV2(
-      AudioRouteIntentV2.preparingRecording,
-      generation: 9,
-      operation: AudioRouteIntentOperationV2.systemSelectedProbe,
-      platformOverride: TargetPlatform.iOS,
-    );
-
-    expect(calls.single.method, 'setAudioRouteIntentV2');
-    expect(
-      Map<String, dynamic>.from(calls.single.arguments as Map),
-      <String, dynamic>{
-        'generation': 9,
-        'intent': 'preparingRecording',
-        'intentOperation': 'systemSelectedProbe',
-      },
-    );
-  });
-
-  test('Android media-route probe reuses the existing intent contract',
-      () async {
-    await JuceAudioEngine.setAudioRouteIntentV2(
-      AudioRouteIntentV2.preparingRecording,
-      generation: 11,
-      operation: AudioRouteIntentOperationV2.systemSelectedMediaProbe,
-      platformOverride: TargetPlatform.android,
-    );
-
-    expect(calls.single.method, 'setAudioRouteIntentV2');
-    expect(
-      Map<String, dynamic>.from(calls.single.arguments as Map),
-      <String, dynamic>{
-        'generation': 11,
-        'intent': 'preparingRecording',
-        'intentOperation': 'systemSelectedMediaProbe',
-      },
-    );
-  });
-
   test('iOS system-selected recording reuses the existing intent contract',
       () async {
     await JuceAudioEngine.setAudioRouteIntentV2(

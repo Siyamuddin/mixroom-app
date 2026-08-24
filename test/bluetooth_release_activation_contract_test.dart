@@ -13,29 +13,13 @@ void main() {
     ).readAsStringSync();
   });
 
-  test('supported non-debug sessions select V2 before reading preferences', () {
-    final loadStart = sessionPolicy.indexOf(
-      'Future<BluetoothImplementationSessionV2> loadSession',
-    );
-    final loadEnd = sessionPolicy.indexOf(
-      '\n  Future<bool> saveNextSession',
-      loadStart,
-    );
-    final load = sessionPolicy.substring(loadStart, loadEnd);
-    final releaseBranch = load.indexOf('if (!debug)');
-    final v2Selection = load.indexOf(
-      'active: BluetoothImplementationV2.v2',
-      releaseBranch,
-    );
-    final preferenceRead = load.indexOf('SharedPreferences.getInstance()');
-
-    expect(releaseBranch, greaterThanOrEqualTo(0));
-    expect(v2Selection, greaterThan(releaseBranch));
-    expect(v2Selection, lessThan(preferenceRead));
-    expect(
-      load.substring(releaseBranch, preferenceRead),
-      contains('selectionEnabled: false'),
-    );
+  test('supported sessions select V2 without a stored debug preference', () {
+    expect(sessionPolicy, contains('active: BluetoothImplementationV2.v2'));
+    expect(sessionPolicy, contains('active: BluetoothImplementationV2.legacy'));
+    expect(sessionPolicy, isNot(contains('SharedPreferences')));
+    expect(sessionPolicy, isNot(contains('debugOverride')));
+    expect(sessionPolicy, isNot(contains('saveNextSession')));
+    expect(sessionPolicy, isNot(contains('selectionEnabled')));
   });
 
   test('editor startup has one selected implementation and no fallback', () {
@@ -58,9 +42,7 @@ void main() {
     expect(failure, greaterThan(initialization));
     expect(
       startup,
-      contains(
-        "_showSmallNotice('Bluetooth 2.0 playback is not available yet.')",
-      ),
+      contains("_showSmallNotice('Audio output is not available yet.')"),
     );
     expect(startup, isNot(contains('JuceAudioEngine.initialise();')));
     expect(startup, isNot(contains('BluetoothImplementationV2.legacy')));

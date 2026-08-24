@@ -19,29 +19,20 @@ void main() {
       'juce_audio_engine/android/src/main/cpp/juce/modules/'
       'juce_audio_devices/native/juce_CoreAudio_mac.cpp';
 
-  test('macOS recording and probe share the system-selected intent route', () {
+  test('macOS recording uses the system-selected production intent route', () {
     final editor = File(editorPath).readAsStringSync();
     final support = _between(
       editor,
       'bool get _supportsV2AudioRecording =>',
       'List<String> _inputDevices',
     );
-    final probe = _between(
-      editor,
-      'Future<void> _runMacOSSystemSelectedRouteProbeV2()',
-      'Future<void> _runIOSSystemSelectedRouteProbeV2()',
-    );
-
     expect(support, contains('Platform.isMacOS'));
     expect(
       editor,
       contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
     );
-    expect(probe, contains('AudioRouteIntentOperationV2.systemSelectedProbe'));
-    expect(probe, contains("'macOSIndependentInput'"));
-    expect(probe, contains('inputCallbackCount'));
-    expect(probe, contains('outputCallbackCount'));
-    expect(editor, contains('Run System Recording Route Check'));
+    expect(editor, isNot(contains('systemSelectedProbe')));
+    expect(editor, isNot(contains('Run System Recording Route Check')));
   });
 
   test('macOS V2 input selector stores preference without opening input', () {
@@ -74,7 +65,7 @@ void main() {
     expect(v2Selection, isNot(contains('requestMicrophone')));
   });
 
-  test('macOS probe owns an independent input and output-only JUCE route', () {
+  test('macOS recording owns an independent input and output-only JUCE route', () {
     final plugin = File(pluginPath).readAsStringSync();
     final intent = _between(
       plugin,
@@ -82,7 +73,8 @@ void main() {
       '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
     );
 
-    expect(intent, contains('systemSelectedProbe'));
+    expect(intent, contains('systemSelectedRecording'));
+    expect(intent, isNot(contains('systemSelectedProbe')));
     expect(intent, contains('startMacInputProbeV2ObjC'));
     expect(intent, contains('waitForMacInputProbeCallbackV2ObjC'));
     expect(intent, contains('beginMacOutputCallbackProofV2ObjC'));

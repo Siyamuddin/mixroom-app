@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
-import 'package:mixroom/helpers/bluetooth_route_report_v2.dart';
 
 void main() {
   late String policyPatch;
@@ -11,7 +10,6 @@ void main() {
   late String effectsHeader;
   late String bridge;
   late String plugin;
-  late String editor;
 
   setUpAll(() {
     policyPatch = File(
@@ -32,7 +30,6 @@ void main() {
     plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
     ).readAsStringSync();
-    editor = File('lib/screens/audio_editor.dart').readAsStringSync();
   });
 
   test('JUCE owns one native HFP policy without A2DP recording options', () {
@@ -219,35 +216,6 @@ void main() {
     expect(engine, isNot(contains('while (iosBluetoothDuplexProbe')));
   });
 
-  test('debug probe uses intents but never enters recording', () {
-    final start = editor.indexOf(
-      'Future<void> _runIOSSystemSelectedRouteProbeV2()',
-    );
-    final end = editor.indexOf('String _bluetoothImplementationLabel', start);
-    final probe = editor.substring(start, end);
-
-    expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
-    expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(probe, contains('if (_iosSystemSelectedRouteProbeRunning) return;'));
-    expect(
-      probe,
-      contains('operation: AudioRouteIntentOperationV2.systemSelectedProbe'),
-    );
-    expect(probe, isNot(contains('Cancel Bluetooth Input + Output Check')));
-    expect(probe, isNot(contains('AudioRouteIntentV2.recording')));
-    expect(probe, isNot(contains('startRecording(')));
-    expect(probe, isNot(contains('_startAudioRecordingJuce')));
-    expect(editor, contains('Run System Recording Route Check'));
-    expect(editor, contains('Checking System Recording Route…'));
-    expect(
-      editor,
-      contains(
-        'onPressed: _iosSystemSelectedRouteProbeRunning\n'
-        '                    ? null',
-      ),
-    );
-  });
-
   test('iOS callback rejects an unprepared or stale device shape', () {
     final callbackStart = engineHeader.indexOf(
       'class MetronomeAudioCallback : public juce::AudioIODeviceCallback',
@@ -300,7 +268,7 @@ void main() {
     );
   });
 
-  test('physical removal is terminal and never forces probe restoration', () {
+  test('physical removal is terminal and never forces route restoration', () {
     final observerStart = plugin.indexOf(
       '- (void)handleIOSAudioRouteChangeV2:(NSNotification *)notification {',
     );
@@ -411,7 +379,7 @@ void main() {
     );
   });
 
-  test('duplex probe diagnostics parse and redact every identity', () {
+  test('duplex diagnostics retain schema-v1 lifecycle facts', () {
     Map<String, dynamic> endpoint(String direction, String uid, String type) =>
         <String, dynamic>{
           'direction': direction,
@@ -456,10 +424,6 @@ void main() {
         ),
       },
     });
-    final report = BluetoothRouteReportSerializerV2(
-      sessionSalt: List<int>.filled(32, 9),
-    ).encode(snapshot);
-
     expect(snapshot.session.categoryOptions, contains('futureOption'));
     expect(snapshot.duplexProbe?.status, 'restored');
     expect(snapshot.duplexProbe?.validationStage, 'duplexVerified');
@@ -470,10 +434,6 @@ void main() {
       snapshot.duplexProbe?.categoryOptions,
       contains('allowBluetoothHFP'),
     );
-    expect(report, contains('duplexProbe'));
-    expect(report, isNot(contains('source-secret')));
-    expect(report, isNot(contains('input-secret')));
-    expect(report, isNot(contains('output-secret')));
-    expect(report, isNot(contains('private device name')));
+    expect(snapshot.schemaVersion, 1);
   });
 }

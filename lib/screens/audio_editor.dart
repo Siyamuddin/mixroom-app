@@ -128,7 +128,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:juce_audio_engine/audio_route_coordinator_v2.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
-import 'package:mixroom/helpers/bluetooth_route_report_v2.dart';
 import 'package:mixroom/helpers/bluetooth_implementation_session_v2.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
@@ -4278,12 +4277,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const Key _projectSettingsCloseButtonKey = Key(
     'project_settings_close_button',
   );
-  static const Key _androidBluetoothV2DebugCardKey = Key(
-    'android_bluetooth_v2_debug_card',
-  );
-  static const Key _androidBluetoothV2SelectorKey = Key(
-    'android_bluetooth_v2_selector',
-  );
   static const double _kTransportBarHeight = 88.0;
   static const double _kIosSnackBarExtraLift = 16.0;
   static const double _kChatBarStackHeight = 68.0;
@@ -5682,10 +5675,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
   AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
-  bool _iosSystemSelectedRouteProbeRunning = false;
-  bool _macOSSystemSelectedRouteProbeRunning = false;
-  bool _androidBluetoothDuplexProbeRunning = false;
-  bool _androidSystemSelectedMediaProbeRunning = false;
   bool _bluetoothRecordingQualityNoticeShown = false;
   bool _macBluetoothCommunicationQualityNoticeShown = false;
   bool _v2AudioSessionInvalidated = false;
@@ -5802,11 +5791,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String? _macOutputDeviceName;
   bool _macV2InputSelectionInFlight = false;
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
-  static final BluetoothRouteReportSerializerV2 _bluetoothReportSerializerV2 =
-      BluetoothRouteReportSerializerV2();
-  static const BluetoothImplementationPreferencesV2
-  _bluetoothImplementationPreferencesV2 =
-      BluetoothImplementationPreferencesV2();
+  static const BluetoothImplementationSessionResolverV2
+  _bluetoothImplementationSessionResolverV2 =
+      BluetoothImplementationSessionResolverV2();
   BluetoothImplementationSessionV2? _bluetoothImplementationSessionV2;
 
   bool get _isBluetoothV2Session =>
@@ -9247,7 +9234,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // _startMeterPolling();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final bluetoothSession = await _bluetoothImplementationPreferencesV2
+      final bluetoothSession = await _bluetoothImplementationSessionResolverV2
           .loadSession();
       if (!mounted) return;
       setState(() {
@@ -9260,7 +9247,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           await priorShutdown;
         } catch (_) {
           if (!mounted) return;
-          _showSmallNotice('Bluetooth 2.0 playback is not available yet.');
+          _showSmallNotice('Audio output is not available yet.');
           setState(() => _isLoadingNextScreen = false);
           return;
         }
@@ -9278,7 +9265,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
       if (!mounted) return;
       if (!engineInitialised) {
-        _showSmallNotice('Bluetooth 2.0 playback is not available yet.');
+        _showSmallNotice('Audio output is not available yet.');
         setState(() => _isLoadingNextScreen = false);
         return;
       }
@@ -9310,7 +9297,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (initialRoute.captureConsistency ==
             AudioRouteCaptureConsistencyV2.unavailable) {
           await _shutdownAudioEngineV2Aware();
-          _showSmallNotice('Bluetooth 2.0 route monitoring is unavailable.');
+          _showSmallNotice('Audio output monitoring is unavailable.');
           setState(() => _isLoadingNextScreen = false);
           return;
         }
@@ -9362,7 +9349,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (initialRoute.captureConsistency ==
             AudioRouteCaptureConsistencyV2.unavailable) {
           await _shutdownAudioEngineV2Aware();
-          _showSmallNotice('Bluetooth 2.0 route monitoring is unavailable.');
+          _showSmallNotice('Audio output monitoring is unavailable.');
           setState(() => _isLoadingNextScreen = false);
           return;
         }
@@ -12803,10 +12790,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!ready && mounted) {
         _showSmallNotice(
           Platform.isAndroid
-              ? 'Bluetooth 2.0 audio output is unavailable. Reopen the audio editor.'
+              ? 'Audio output could not be restored. Reopen the audio editor.'
               : Platform.isIOS
               ? 'Audio output is unavailable. Check the iOS audio output.'
-              : 'Bluetooth 2.0 route changed. Reopen the audio editor.',
+              : 'Audio output could not be restored. Reopen the audio editor.',
         );
       }
       if (!ready) return false;
@@ -20982,18 +20969,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_isBluetoothV2Session) {
       if (!_supportsV2AudioRecording) {
         _showSmallNotice(
-          Platform.isMacOS
-              ? 'Recording is temporarily unavailable in Bluetooth 2.0 on macOS.'
-              : 'Recording is unavailable for the current Bluetooth 2.0 route.',
+          'Recording is unavailable for the current audio route.',
         );
         return;
       }
       if (_selectedRow < 0 ||
           _selectedRow >= _rows.length ||
           _rows[_selectedRow].kind == TimelineRowKind.instrument) {
-        _showSmallNotice(
-          'Select an audio row to record. MIDI recording is not available in this Bluetooth 2.0 checkpoint.',
-        );
+        _showSmallNotice('Select an audio row to record.');
         return;
       }
       await _startAudioRecordingJuce();
@@ -39945,11 +39928,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              if (kDebugMode &&
-                                  (Platform.isAndroid || Platform.isIOS)) ...[
-                                _buildMobileBluetoothV2DebugControls(),
-                                const SizedBox(height: 10),
-                              ],
                               if (showAudioRoutingLauncher) ...[
                                 _buildAudioRoutingLauncher(),
                                 const SizedBox(height: 10),
@@ -41457,619 +41435,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<void> _copyBluetoothReportV2() async {
-    if (!kDebugMode ||
-        (!Platform.isMacOS && !Platform.isAndroid && !Platform.isIOS)) {
-      return;
-    }
-
-    final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    if (!mounted) return;
-    if (snapshot.captureConsistency ==
-        AudioRouteCaptureConsistencyV2.unavailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bluetooth report unavailable')),
-      );
-      return;
-    }
-
-    try {
-      final report = _bluetoothReportSerializerV2.encode(snapshot);
-      await Clipboard.setData(ClipboardData(text: report));
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Bluetooth report copied')));
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bluetooth report unavailable')),
-      );
-    }
-  }
-
-  Future<void> _runMacOSSystemSelectedRouteProbeV2() async {
-    if (!kDebugMode || !Platform.isMacOS || !_isBluetoothV2Session) return;
-    if (_macOSSystemSelectedRouteProbeRunning) return;
-
-    final coordinator = _audioRouteCoordinatorV2;
-    if (_isPlaying || _transportDesiredPlaying) {
-      _showSmallNotice('Stop playback before checking the recording route.');
-      return;
-    }
-    if (coordinator == null ||
-        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
-        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
-      return;
-    }
-
-    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    if (!mounted) return;
-    final sourceReady =
-        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-        source.outputs.length == 1 &&
-        source.inputs.isEmpty &&
-        source.juce.deviceOpen == true &&
-        source.juce.audioCallbackAttached == true &&
-        source.juce.activeInputChannels == 0 &&
-        (source.juce.activeOutputChannels ?? 0) > 0;
-    if (!sourceReady) {
-      _showSmallNotice('The current macOS audio output is not ready yet.');
-      return;
-    }
-    if (!await _ensureMicrophonePermissionForRecording()) return;
-    if (!mounted) return;
-
-    setState(() => _macOSSystemSelectedRouteProbeRunning = true);
-    await _letRecordingVisualStatePaint();
-
-    try {
-      final duplexResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.preparingRecording,
-        operation: AudioRouteIntentOperationV2.systemSelectedProbe,
-      );
-      if (!mounted) return;
-      if (!duplexResult.succeeded) {
-        final removed =
-            duplexResult.snapshot.duplexProbe?.validationStage ==
-            'physicalRouteInvalidation';
-        _showSmallNotice(
-          removed
-              ? 'The audio device disconnected during the check. Reopen the audio editor.'
-              : 'The system-selected recording route is unavailable.',
-        );
-        return;
-      }
-
-      final duplex = duplexResult.snapshot;
-      final duplexVerified =
-          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-          duplex.duplexProbe?.selectionMode == 'macOSIndependentInput' &&
-          (duplex.duplexProbe?.inputCallbackCount ?? 0) > 0 &&
-          (duplex.duplexProbe?.outputCallbackCount ?? 0) > 0 &&
-          duplex.inputs.length == 1 &&
-          duplex.outputs.length == 1 &&
-          (duplex.inputs.single.channelCount ?? 0) > 0 &&
-          (duplex.outputs.single.channelCount ?? 0) > 0 &&
-          duplex.juce.deviceOpen == true &&
-          duplex.juce.audioCallbackAttached == true &&
-          duplex.juce.activeInputChannels == 0 &&
-          (duplex.juce.activeOutputChannels ?? 0) > 0 &&
-          (duplex.juce.sampleRateHz ?? 0) > 1000 &&
-          (duplex.juce.bufferFrames ?? 0) > 0;
-      if (!duplexVerified) {
-        final restoreResult = await coordinator.transitionIntent(
-          AudioRouteIntentV2.playbackOnly,
-        );
-        if (restoreResult.succeeded) {
-          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-        }
-        _showSmallNotice('The system-selected recording route is unavailable.');
-        return;
-      }
-
-      final restoreResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.playbackOnly,
-      );
-      if (!mounted) return;
-      if (!restoreResult.succeeded) {
-        _showSmallNotice(
-          restoreResult.snapshot.duplexProbe?.validationStage ==
-                  'physicalRouteInvalidation'
-              ? 'The audio device disconnected during the check. Reopen the audio editor.'
-              : 'Audio output could not be restored. Reopen the audio editor.',
-        );
-        return;
-      }
-      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-      _showSmallNotice('System recording route verified. Playback restored.');
-    } finally {
-      if (mounted) {
-        setState(() => _macOSSystemSelectedRouteProbeRunning = false);
-      }
-    }
-  }
-
-  Future<void> _runIOSSystemSelectedRouteProbeV2() async {
-    if (!kDebugMode || !Platform.isIOS || !_isBluetoothV2Session) return;
-    if (_iosSystemSelectedRouteProbeRunning) return;
-
-    final coordinator = _audioRouteCoordinatorV2;
-    if (_isPlaying || _transportDesiredPlaying) {
-      _showSmallNotice('Stop playback before running the Bluetooth check.');
-      return;
-    }
-    if (coordinator == null ||
-        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
-        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
-      return;
-    }
-
-    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    if (!mounted) return;
-    final sourceReady =
-        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-        source.outputs.length == 1 &&
-        source.inputs.isEmpty &&
-        source.juce.deviceOpen == true &&
-        source.juce.audioCallbackAttached == true &&
-        source.juce.activeInputChannels == 0 &&
-        (source.juce.activeOutputChannels ?? 0) > 0;
-    if (!sourceReady) {
-      _showSmallNotice('The current iOS audio output is not ready yet.');
-      return;
-    }
-    if (!await _ensureMicrophonePermissionForRecording()) return;
-    if (!mounted) return;
-
-    setState(() {
-      _iosSystemSelectedRouteProbeRunning = true;
-    });
-    await _letRecordingVisualStatePaint();
-
-    try {
-      final duplexResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.preparingRecording,
-        operation: AudioRouteIntentOperationV2.systemSelectedProbe,
-      );
-      if (!mounted) return;
-      if (!duplexResult.succeeded) {
-        final physicalInvalidation =
-            duplexResult.snapshot.duplexProbe?.validationStage ==
-            'physicalRouteInvalidation';
-        _showSmallNotice(
-          physicalInvalidation
-              ? 'The audio device disconnected during the check. Reopen the audio editor.'
-              : 'The system-selected recording route is unavailable.',
-        );
-        return;
-      }
-
-      final duplex = duplexResult.snapshot;
-      final duplexVerified =
-          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-          duplex.inputs.length == 1 &&
-          duplex.outputs.length == 1 &&
-          (duplex.inputs.single.channelCount ?? 0) > 0 &&
-          (duplex.outputs.single.channelCount ?? 0) > 0 &&
-          duplex.juce.deviceOpen == true &&
-          duplex.juce.audioCallbackAttached == true &&
-          duplex.juce.activeInputChannels == 1 &&
-          (duplex.juce.activeOutputChannels ?? 0) > 0;
-      if (!duplexVerified) {
-        final restoreResult = await coordinator.transitionIntent(
-          AudioRouteIntentV2.playbackOnly,
-        );
-        if (restoreResult.succeeded) {
-          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-        } else {
-          await JuceAudioEngine.abortRecordingV2();
-        }
-        _showSmallNotice('System recording-route verification failed.');
-        return;
-      }
-
-      final restoreResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.playbackOnly,
-      );
-      if (!mounted) return;
-      if (!restoreResult.succeeded) {
-        await JuceAudioEngine.abortRecordingV2();
-        _showSmallNotice(
-          'Bluetooth playback could not be restored. Reopen the audio editor.',
-        );
-        return;
-      }
-      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-      _showSmallNotice('System recording route verified. Playback restored.');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _iosSystemSelectedRouteProbeRunning = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _runAndroidBluetoothDuplexProbeV2() async {
-    if (!kDebugMode || !Platform.isAndroid || !_isBluetoothV2Session) return;
-    if (_androidBluetoothDuplexProbeRunning ||
-        _androidSystemSelectedMediaProbeRunning) {
-      return;
-    }
-
-    final coordinator = _audioRouteCoordinatorV2;
-    if (_isPlaying || _transportDesiredPlaying) {
-      _showSmallNotice('Stop playback before running the Bluetooth check.');
-      return;
-    }
-    if (coordinator == null ||
-        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
-        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
-      return;
-    }
-
-    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    if (!mounted) return;
-    final sourceReady =
-        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-        source.outputs.length == 1 &&
-        source.outputs.single.normalizedKind ==
-            AudioRouteKindV2.bluetoothMedia &&
-        source.inputs.isEmpty &&
-        source.juce.deviceOpen == true &&
-        source.juce.audioCallbackAttached == true &&
-        source.juce.activeInputChannels == 0 &&
-        (source.juce.activeOutputChannels ?? 0) > 0;
-    if (!sourceReady) {
-      _showSmallNotice('Select Bluetooth headphones before running the check.');
-      return;
-    }
-    if (!await _ensureMicrophonePermissionForRecording()) return;
-    if (!mounted) return;
-
-    setState(() {
-      _androidBluetoothDuplexProbeRunning = true;
-    });
-    await _letRecordingVisualStatePaint();
-
-    try {
-      final duplexResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.preparingRecording,
-        operation: AudioRouteIntentOperationV2.systemSelectedProbe,
-      );
-      if (!mounted) return;
-      if (!duplexResult.succeeded) {
-        _showSmallNotice(
-          duplexResult.diagnosticCode == 'route_unstable'
-              ? 'The Bluetooth device disconnected during the check.'
-              : 'Bluetooth input + output is unavailable on the current route.',
-        );
-        return;
-      }
-
-      final duplex = duplexResult.snapshot;
-      final duplexVerified =
-          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-          duplex.inputs.length == 1 &&
-          duplex.outputs.length == 1 &&
-          duplex.inputs.single.normalizedKind ==
-              AudioRouteKindV2.bluetoothDuplex &&
-          duplex.outputs.single.normalizedKind ==
-              AudioRouteKindV2.bluetoothDuplex &&
-          duplex.juce.deviceOpen == true &&
-          duplex.juce.audioCallbackAttached == true &&
-          duplex.juce.activeInputChannels == 1 &&
-          duplex.juce.activeOutputChannels == 1;
-      if (!duplexVerified) {
-        final restoreResult = await coordinator.transitionIntent(
-          AudioRouteIntentV2.playbackOnly,
-        );
-        if (restoreResult.succeeded) {
-          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-        } else {
-          await JuceAudioEngine.abortRecordingV2();
-        }
-        _showSmallNotice('Bluetooth input + output verification failed.');
-        return;
-      }
-
-      final restoreResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.playbackOnly,
-      );
-      if (!mounted) return;
-      if (!restoreResult.succeeded) {
-        await JuceAudioEngine.abortRecordingV2();
-        _showSmallNotice(
-          'Bluetooth playback could not be restored. Reopen the audio editor.',
-        );
-        return;
-      }
-      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-      _showSmallNotice(
-        'Bluetooth input + output verified. Media playback restored.',
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _androidBluetoothDuplexProbeRunning = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _runAndroidSystemSelectedMediaProbeV2() async {
-    if (!kDebugMode || !Platform.isAndroid || !_isBluetoothV2Session) return;
-    if (_androidBluetoothDuplexProbeRunning ||
-        _androidSystemSelectedMediaProbeRunning) {
-      return;
-    }
-
-    final coordinator = _audioRouteCoordinatorV2;
-    if (_isPlaying || _transportDesiredPlaying) {
-      _showSmallNotice('Stop playback before running the Bluetooth check.');
-      return;
-    }
-    if (coordinator == null ||
-        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
-        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-      _showSmallNotice('Bluetooth 2.0 audio output is not ready yet.');
-      return;
-    }
-
-    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    if (!mounted) return;
-    final sourceReady =
-        source.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-        source.outputs.length == 1 &&
-        source.outputs.single.normalizedKind ==
-            AudioRouteKindV2.bluetoothMedia &&
-        source.inputs.isEmpty &&
-        source.juce.deviceOpen == true &&
-        source.juce.audioCallbackAttached == true &&
-        source.juce.activeInputChannels == 0 &&
-        (source.juce.activeOutputChannels ?? 0) > 0;
-    if (!sourceReady) {
-      _showSmallNotice('Select a Bluetooth media output before the check.');
-      return;
-    }
-    if (!await _ensureMicrophonePermissionForRecording()) return;
-    if (!mounted) return;
-
-    final sourceOutput = source.outputs.single;
-    setState(() {
-      _androidSystemSelectedMediaProbeRunning = true;
-    });
-    await _letRecordingVisualStatePaint();
-
-    try {
-      final duplexResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.preparingRecording,
-        operation: AudioRouteIntentOperationV2.systemSelectedMediaProbe,
-      );
-      if (!mounted) return;
-      if (!duplexResult.succeeded) {
-        _showSmallNotice(
-          duplexResult.diagnosticCode == 'route_unstable'
-              ? 'The audio device disconnected during the check.'
-              : 'The system-selected recording route is unavailable.',
-        );
-        return;
-      }
-
-      final duplex = duplexResult.snapshot;
-      final duplexOutput = duplex.outputs.length == 1
-          ? duplex.outputs.single
-          : null;
-      final exactSourceOutput =
-          duplexOutput?.uid == sourceOutput.uid &&
-          duplexOutput?.nativePortType == sourceOutput.nativePortType &&
-          duplexOutput?.normalizedKind == sourceOutput.normalizedKind &&
-          duplexOutput?.channelCount == sourceOutput.channelCount;
-      final inputKind = duplex.inputs.length == 1
-          ? duplex.inputs.single.normalizedKind
-          : AudioRouteKindV2.unknown;
-      final acceptedInputKind = <AudioRouteKindV2>{
-        AudioRouteKindV2.builtIn,
-        AudioRouteKindV2.wired,
-        AudioRouteKindV2.external,
-      }.contains(inputKind);
-      final duplexVerified =
-          duplex.captureConsistency == AudioRouteCaptureConsistencyV2.stable &&
-          duplex.inputs.length == 1 &&
-          duplex.outputs.length == 1 &&
-          acceptedInputKind &&
-          exactSourceOutput &&
-          duplex.juce.deviceOpen == true &&
-          duplex.juce.audioCallbackAttached == true &&
-          duplex.juce.activeInputChannels == 1 &&
-          (duplex.juce.activeOutputChannels ?? 0) > 0 &&
-          (duplex.juce.sampleRateHz ?? 0) > 0 &&
-          (duplex.juce.bufferFrames ?? 0) > 0;
-      if (!duplexVerified) {
-        final restoreResult = await coordinator.transitionIntent(
-          AudioRouteIntentV2.playbackOnly,
-        );
-        if (restoreResult.succeeded) {
-          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-        } else {
-          await JuceAudioEngine.abortRecordingV2();
-        }
-        _showSmallNotice('System recording-route verification failed.');
-        return;
-      }
-
-      final restoreResult = await coordinator.transitionIntent(
-        AudioRouteIntentV2.playbackOnly,
-      );
-      if (!mounted) return;
-      if (!restoreResult.succeeded) {
-        await JuceAudioEngine.abortRecordingV2();
-        _showSmallNotice(
-          'Bluetooth playback could not be restored. Reopen the audio editor.',
-        );
-        return;
-      }
-      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(restoreResult);
-      _showSmallNotice('System recording route verified. Playback restored.');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _androidSystemSelectedMediaProbeRunning = false;
-        });
-      }
-    }
-  }
-
-  String _bluetoothImplementationLabel(BluetoothImplementationV2 value) {
-    return value == BluetoothImplementationV2.v2 ? 'Bluetooth 2.0' : 'Legacy';
-  }
-
-  Future<bool> _setBluetoothImplementationForNextSession(
-    BluetoothImplementationV2 implementation,
-  ) async {
-    final session = _bluetoothImplementationSessionV2;
-    if (session == null || !session.selectionEnabled) return false;
-    final saved = await _bluetoothImplementationPreferencesV2.saveNextSession(
-      implementation,
-    );
-    if (!mounted || !saved) return false;
-    setState(() {
-      _bluetoothImplementationSessionV2 = session.withNextSession(
-        implementation,
-      );
-    });
-    _showSmallNotice('Reopen the audio editor to apply.');
-    return true;
-  }
-
   bool get _usesLiveAudioRouteCoordinatorV2 =>
       Platform.isMacOS || Platform.isAndroid || Platform.isIOS;
-
-  Widget _buildMobileBluetoothV2DebugControls() {
-    final session = _bluetoothImplementationSessionV2;
-    if (!kDebugMode ||
-        (!Platform.isAndroid && !Platform.isIOS) ||
-        session == null) {
-      return const SizedBox.shrink();
-    }
-    return Container(
-      key: _androidBluetoothV2DebugCardKey,
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.08),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Internal audio implementation',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Active: ${_bluetoothImplementationLabel(session.active)}',
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Next editor session',
-            style: TextStyle(color: Colors.white54, fontSize: 11),
-          ),
-          SizedBox(
-            width: double.infinity,
-            child: DropdownButton<BluetoothImplementationV2>(
-              key: _androidBluetoothV2SelectorKey,
-              value: session.nextSession,
-              isExpanded: true,
-              dropdownColor: const Color(0xFF242424),
-              style: const TextStyle(color: Colors.white),
-              underline: const SizedBox.shrink(),
-              items: BluetoothImplementationV2.values
-                  .map(
-                    (value) => DropdownMenuItem(
-                      value: value,
-                      child: Text(_bluetoothImplementationLabel(value)),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: (value) {
-                if (value != null) {
-                  unawaited(_setBluetoothImplementationForNextSession(value));
-                }
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              onPressed: () => unawaited(_copyBluetoothReportV2()),
-              child: const Text('Copy Bluetooth Report'),
-            ),
-          ),
-          if (Platform.isIOS &&
-              session.active == BluetoothImplementationV2.v2) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: _iosSystemSelectedRouteProbeRunning
-                    ? null
-                    : () => unawaited(_runIOSSystemSelectedRouteProbeV2()),
-                child: Text(
-                  _iosSystemSelectedRouteProbeRunning
-                      ? 'Checking System Recording Route…'
-                      : 'Run System Recording Route Check',
-                ),
-              ),
-            ),
-          ],
-          if (Platform.isAndroid &&
-              session.active == BluetoothImplementationV2.v2) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed:
-                    _androidBluetoothDuplexProbeRunning ||
-                        _androidSystemSelectedMediaProbeRunning
-                    ? null
-                    : () => unawaited(_runAndroidSystemSelectedMediaProbeV2()),
-                child: Text(
-                  _androidSystemSelectedMediaProbeRunning
-                      ? 'Checking System Recording Route…'
-                      : 'Run System Recording Route Check',
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed:
-                    _androidBluetoothDuplexProbeRunning ||
-                        _androidSystemSelectedMediaProbeRunning
-                    ? null
-                    : () => unawaited(_runAndroidBluetoothDuplexProbeV2()),
-                child: Text(
-                  _androidBluetoothDuplexProbeRunning
-                      ? 'Checking Bluetooth Input + Output…'
-                      : 'Run Bluetooth Input + Output Check',
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   Future<void> _showDesktopDiagnosticsDialog() async {
     if (!mounted || !PlatformCapabilities.current.isDesktop) return;
@@ -42091,15 +41458,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             Future<void> resetRealtimeStats() async {
               await JuceAudioEngine.resetRealtimePerformanceStats();
               await refreshDiagnostics();
-            }
-
-            Future<void> selectBluetoothImplementation(
-              BluetoothImplementationV2 implementation,
-            ) async {
-              final saved = await _setBluetoothImplementationForNextSession(
-                implementation,
-              );
-              if (saved && context.mounted) setModalState(() {});
             }
 
             final overBudget = diagnostics.realtimeCallbackOverBudgetCount;
@@ -42145,13 +41503,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         onPressed: resetRealtimeStats,
                         child: const Text('Reset RT'),
                       ),
-                      if (kDebugMode && Platform.isMacOS) ...[
-                        const SizedBox(width: 6),
-                        TextButton(
-                          onPressed: () => unawaited(_copyBluetoothReportV2()),
-                          child: const Text('Copy Bluetooth Report'),
-                        ),
-                      ],
                       const SizedBox(width: 2),
                       IconButton(
                         onPressed: () => Navigator.of(dialogContext).pop(),
@@ -42163,73 +41514,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ],
                   ),
                   const SizedBox(height: 10),
-                  if (kDebugMode &&
-                      Platform.isMacOS &&
-                      _bluetoothImplementationSessionV2 != null) ...[
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Active: ${_bluetoothImplementationLabel(_bluetoothImplementationSessionV2!.active)}',
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.78),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Text(
-                          'Next session',
-                          style: TextStyle(
-                            color: Color(0xFFBDBDBD),
-                            fontSize: 12,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        DropdownButton<BluetoothImplementationV2>(
-                          value: _bluetoothImplementationSessionV2!.nextSession,
-                          dropdownColor: const Color(0xFF242424),
-                          style: const TextStyle(color: Colors.white),
-                          underline: const SizedBox.shrink(),
-                          items: BluetoothImplementationV2.values
-                              .map(
-                                (value) => DropdownMenuItem(
-                                  value: value,
-                                  child: Text(
-                                    _bluetoothImplementationLabel(value),
-                                  ),
-                                ),
-                              )
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            if (value != null) {
-                              unawaited(selectBluetoothImplementation(value));
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed:
-                            _bluetoothImplementationSessionV2!.active ==
-                                    BluetoothImplementationV2.v2 &&
-                                !_macOSSystemSelectedRouteProbeRunning
-                            ? () => unawaited(
-                                _runMacOSSystemSelectedRouteProbeV2(),
-                              )
-                            : null,
-                        child: Text(
-                          _macOSSystemSelectedRouteProbeRunning
-                              ? 'Checking System Recording Route…'
-                              : 'Run System Recording Route Check',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
                   Wrap(
                     spacing: 10,
                     runSpacing: 10,
@@ -44788,7 +44072,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _setRoutingSheetMonitoring(bool enabled) async {
     if (_isBluetoothV2Session) {
       _showSmallNotice(
-        'Monitoring is not available in this Bluetooth 2.0 checkpoint.',
+        'Monitoring is unavailable for the current audio route.',
       );
       return;
     }
@@ -44804,7 +44088,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _showAudioRoutingSheet() async {
     if (_isBluetoothV2Session) {
       _showSmallNotice(
-        'Recording and routing controls are not available in this Bluetooth 2.0 checkpoint.',
+        'Recording and routing controls are unavailable for the current audio route.',
       );
       return;
     }
@@ -45842,7 +45126,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_isBluetoothV2Session) {
       if (!_supportsV2AudioRecording) {
         _showSmallNotice(
-          'Recording is not available in this Bluetooth 2.0 checkpoint.',
+          'Recording is unavailable for the current audio route.',
         );
         return;
       }

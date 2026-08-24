@@ -16,10 +16,8 @@ object JuceBridge {
     @JvmStatic external fun quiescePlaybackV2JNI(closeDevice: Boolean): Boolean
     @JvmStatic external fun reconfigurePlaybackV2JNI(): Boolean
     @JvmStatic external fun prepareRecordingV2JNI(): Boolean
-    @JvmStatic external fun prepareSystemSelectedMediaDuplexV2JNI(
-        recordingCapable: Boolean,
-    ): Boolean
-    @JvmStatic external fun prepareBluetoothDuplexV2JNI(recordingCapable: Boolean): Boolean
+    @JvmStatic external fun prepareSystemSelectedMediaDuplexV2JNI(): Boolean
+    @JvmStatic external fun prepareBluetoothDuplexV2JNI(): Boolean
     @JvmStatic external fun waitForV2CallbackReadyJNI(timeoutMs: Int): Boolean
     @JvmStatic external fun beginBluetoothMediaRouteMigrationV2JNI(): Long
     @JvmStatic external fun waitForBluetoothMediaRouteMigrationV2JNI(

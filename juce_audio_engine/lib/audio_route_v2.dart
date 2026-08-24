@@ -31,8 +31,6 @@ enum AudioRouteIntentV2 {
 /// coordinator state and does not create another route owner.
 enum AudioRouteIntentOperationV2 {
   standard,
-  systemSelectedProbe,
-  systemSelectedMediaProbe,
   systemSelectedRecording,
 }
 

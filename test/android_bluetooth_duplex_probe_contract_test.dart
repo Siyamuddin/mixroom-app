@@ -8,7 +8,6 @@ void main() {
   late String legacySco;
   late String engine;
   late String oboe;
-  late String editor;
 
   setUpAll(() {
     plugin = File(
@@ -26,7 +25,6 @@ void main() {
     oboe = File(
       'juce_audio_engine/android/src/main/cpp/juce/modules/juce_audio_devices/native/juce_Oboe_android.cpp',
     ).readAsStringSync();
-    editor = File('lib/screens/audio_editor.dart').readAsStringSync();
   });
 
   test(
@@ -128,10 +126,8 @@ void main() {
         ),
       ),
     );
-    expect(
-      transaction,
-      contains('prepareBluetoothDuplexV2JNI(mode.allowsCapture())'),
-    );
+    expect(transaction, contains('prepareBluetoothDuplexV2JNI()'));
+    expect(transaction, isNot(contains('allowsCapture')));
     expect(plugin, contains('"physicalValidationPending" to'));
     expect(plugin, contains('AndroidBluetoothRouteSelectionModeV2.LEGACY_SCO'));
   });
@@ -170,45 +166,26 @@ void main() {
     );
   });
 
-  test('probe proves the project callback but cannot record', () {
+  test('production duplex proves the project callback before capture', () {
     final start = engine.indexOf(
-      'bool JuceEngine::prepareBluetoothDuplexV2Android(bool recordingCapable)',
+      'bool JuceEngine::prepareBluetoothDuplexV2Android()',
     );
     final end = engine.indexOf(
       'bool JuceEngine::waitForV2CallbackReady',
       start,
     );
-    final probe = engine.substring(start, end);
+    final preparation = engine.substring(start, end);
 
-    expect(probe, contains('deviceManager.initialise(1, 1'));
-    expect(probe, contains('liveInputMonitoringEnabled = false'));
-    expect(probe, contains('androidV2CallbackProofPending.store(true'));
+    expect(preparation, contains('deviceManager.initialise(1, 1'));
+    expect(preparation, contains('liveInputMonitoringEnabled = false'));
+    expect(preparation, contains('androidV2CallbackProofPending.store(true'));
     expect(
-      probe,
+      preparation,
       contains('deviceManager.addAudioCallback(metronomeCallback.get())'),
     );
-    expect(probe, isNot(contains('startRecordingToWav')));
-    expect(probe, contains('androidV2RecordingPrepared = recordingCapable'));
-    expect(probe, contains('androidV2DuplexProbePrepared = !recordingCapable'));
-    expect(
-      engine,
-      contains('wavCapture.isActive() || androidV2DuplexProbePrepared'),
-    );
-  });
-
-  test('debug action uses the existing intent and stays writer-free', () {
-    final start = editor.indexOf(
-      'Future<void> _runAndroidBluetoothDuplexProbeV2()',
-    );
-    final end = editor.indexOf('String _bluetoothImplementationLabel', start);
-    final probe = editor.substring(start, end);
-
-    expect(probe, contains('AudioRouteIntentV2.preparingRecording'));
-    expect(probe, contains('AudioRouteIntentOperationV2.systemSelectedProbe'));
-    expect(probe, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(probe, isNot(contains('startRecording')));
-    expect(probe, isNot(contains('_startAudioRecordingJuce')));
-    expect(editor, contains('Run Bluetooth Input + Output Check'));
+    expect(preparation, isNot(contains('startRecordingToWav')));
+    expect(preparation, contains('androidV2RecordingPrepared = true'));
+    expect(engine, isNot(contains('androidV2DuplexProbePrepared')));
   });
 
   test('success restores exact A2DP and invalidation never forces it', () {

@@ -4604,8 +4604,8 @@ public:
     bool quiescePlaybackV2Android(bool closeDevice);
     bool reconfigurePlaybackV2Android();
     bool prepareRecordingV2Android();
-    bool prepareSystemSelectedMediaDuplexV2Android(bool recordingCapable);
-    bool prepareBluetoothDuplexV2Android(bool recordingCapable);
+    bool prepareSystemSelectedMediaDuplexV2Android();
+    bool prepareBluetoothDuplexV2Android();
     bool waitForV2CallbackReady(int timeoutMs);
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
@@ -4954,7 +4954,7 @@ public:
                                   juce::MidiBuffer &scratchMidi) override;
 
 private:
-    bool prepareDefaultDuplexV2Android(bool recordingCapable);
+    bool prepareDefaultDuplexV2Android();
     JuceEngine();
     ~JuceEngine();
 
@@ -4999,7 +4999,6 @@ private:
     bool audioCallbackAttached = false;
     bool v2PlaybackCallbackDetached = false;
     bool androidV2RecordingPrepared = false;
-    bool androidV2DuplexProbePrepared = false;
     juce::WaitableEvent androidV2CallbackReady;
     std::atomic<bool> androidV2CallbackProofPending{false};
     juce::AudioFormatManager formatManager;

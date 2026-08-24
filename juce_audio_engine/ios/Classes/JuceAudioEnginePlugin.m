@@ -1386,7 +1386,7 @@ static BOOL MixroomOutputSupportsV2Recording(
         return YES;
     }
     // Classic Bluetooth is the only Bluetooth recording-output combination
-    // covered by this checkpoint. Requiring stereo output also rejects the
+    // supported here. Requiring stereo output also rejects the
     // observable call-quality shape without guessing a profile from its name.
     return transport == kAudioDeviceTransportTypeBluetooth &&
         channels.integerValue >= 2;
@@ -2916,7 +2916,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             @"generation": @(self.audioRouteGenerationV2),
             @"cause": recordingWasActive
                 ? @"recordingRouteInvalidated"
-                : @"systemProbeRouteInvalidated",
+                : @"recordingPreparationInvalidated",
             @"fingerprint": fingerprint ?: @"",
             @"transportWasPlaying": @NO,
             @"snapshot": [self buildAudioRouteSnapshotV2],
@@ -3253,7 +3253,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 ? @"route_unstable" : @"actual_state_unavailable";
         }
     } else if ([intent isEqualToString:@"preparingRecording"] &&
-               ![intentOperation isEqualToString:@"systemSelectedProbe"] &&
                ![intentOperation isEqualToString:@"systemSelectedRecording"]) {
         diagnosticCode = @"recording_route_unsupported";
     } else if ([intent isEqualToString:@"preparingRecording"]) {
@@ -3776,7 +3775,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         [args[@"intentOperation"] isKindOfClass:[NSString class]]
             ? args[@"intentOperation"] : @"standard";
     const BOOL systemSelectedRoute =
-        [intentOperation isEqualToString:@"systemSelectedProbe"] ||
         [intentOperation isEqualToString:@"systemSelectedRecording"];
 
     if (!self.audioRouteMonitoringV2 ||
@@ -3787,10 +3785,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     } else if (![intent isEqualToString:@"playbackOnly"] &&
                ![intent isEqualToString:@"preparingRecording"] &&
                ![intent isEqualToString:@"recording"]) {
-        diagnosticCode = @"recording_route_unsupported";
-    } else if ([intent isEqualToString:@"recording"] &&
-               [self.iosIntentOperationModeV2
-                   isEqualToString:@"systemSelectedProbe"]) {
         diagnosticCode = @"recording_route_unsupported";
     } else if ([intent isEqualToString:@"preparingRecording"]) {
         AVAudioSessionRouteDescription *sourceRoute = session.currentRoute;
@@ -4171,15 +4165,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             MixroomIOSSingleOutputEndpoint(session.currentRoute);
         const BOOL activeBluetoothOperation =
             self.iosIntentOperationActiveV2;
-        const BOOL terminalSystemProbeInvalidation =
-            activeBluetoothOperation &&
-            [self.iosIntentOperationModeV2
-                isEqualToString:@"systemSelectedProbe"] &&
-            [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
         const BOOL recoveringAfterPhysicalInvalidation =
             activeBluetoothOperation &&
-            ![self.iosIntentOperationModeV2
-                isEqualToString:@"systemSelectedProbe"] &&
             [JuceBridge isIOSIntentRouteInvalidatedV2ObjC];
         NSDictionary<NSString *, id> *expectedOutput =
             recordingSourceOutput ?: currentSystemOutput;
@@ -4191,11 +4178,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             self.iosIntentLifecyclePhaseV2 = recoveringAfterPhysicalInvalidation
                 ? @"recoveringSystemOutput" : @"restoringPlayback";
         }
-        if (terminalSystemProbeInvalidation) {
-            [JuceBridge discardRecordingCaptureObjC];
-            [JuceBridge quiescePlaybackRouteV2ObjC:YES];
-            diagnosticCode = @"route_unstable";
-        } else if (recoveringAfterPhysicalInvalidation) {
+        if (recoveringAfterPhysicalInvalidation) {
             [JuceBridge discardRecordingCaptureObjC];
             // The terminal route event already selected the replacement output.
             // End HFP transaction ownership before installing playback policy so
@@ -4211,9 +4194,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         } else if ([JuceBridge isRecordingObjC]) {
             [JuceBridge stopRecordingObjC];
         }
-        if (terminalSystemProbeInvalidation) {
-            success = NO;
-        } else if (expectedOutput == nil) {
+        if (expectedOutput == nil) {
             diagnosticCode = @"no_output";
         } else if (!MixroomIOSOutputIdentityIsObservable(expectedOutput)) {
             diagnosticCode = @"actual_state_unavailable";
