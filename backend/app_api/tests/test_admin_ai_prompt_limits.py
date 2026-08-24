@@ -58,14 +58,14 @@ class _FakeRepo:
         self.get_calls = 0
         self.update_calls = []
         self.get_payload = {
-            "free_daily_prompt_limit": 200,
-            "free_weekly_prompt_limit": 600,
+            "free_daily_prompt_limit": 100,
+            "free_weekly_prompt_limit": 400,
             "source": "default",
             "configurable": True,
         }
         self.update_payload = {
-            "free_daily_prompt_limit": 200,
-            "free_weekly_prompt_limit": 600,
+            "free_daily_prompt_limit": 100,
+            "free_weekly_prompt_limit": 400,
             "source": "remote",
             "configurable": True,
             "updated_by_email": "admin@example.com",
@@ -74,6 +74,21 @@ class _FakeRepo:
     def get_prompt_limits(self):
         self.get_calls += 1
         return dict(self.get_payload)
+
+    def get_default_prompt_limits(self):
+        return {
+            "free_daily_prompt_limit": 100,
+            "free_weekly_prompt_limit": 400,
+        }
+
+    def clear_prompt_limits(self):
+        self.clear_calls = getattr(self, "clear_calls", 0) + 1
+        return {
+            "free_daily_prompt_limit": 100,
+            "free_weekly_prompt_limit": 400,
+            "source": "default",
+            "configurable": True,
+        }
 
     def update_prompt_limits(
         self,
@@ -156,7 +171,8 @@ class AdminAiPromptLimitsHandlerTests(unittest.TestCase):
 
         self.assertEqual(result["statusCode"], 200)
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
-        self.assertIn('"free_daily_prompt_limit": 200', result["body"])
+        self.assertIn('"free_daily_prompt_limit": 100', result["body"])
+        self.assertIn('"defaults": {"free_daily_prompt_limit": 100, "free_weekly_prompt_limit": 400}', result["body"])
         self.assertIn('"can_edit": false', result["body"])
 
     def test_updates_prompt_limits(self):
@@ -168,15 +184,46 @@ class AdminAiPromptLimitsHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/settings/ai-prompt-limits",
                 "requestContext": {"http": {"method": "PUT"}},
-                "body": '{"free_daily_prompt_limit":200,"free_weekly_prompt_limit":600}',
+                "body": '{"free_daily_prompt_limit":100,"free_weekly_prompt_limit":400}',
             },
             object(),
         )
 
         self.assertEqual(result["statusCode"], 200)
-        self.assertEqual(repo.update_calls[0]["free_daily_prompt_limit"], 200)
-        self.assertEqual(repo.update_calls[0]["free_weekly_prompt_limit"], 600)
+        self.assertEqual(repo.update_calls[0]["free_daily_prompt_limit"], 100)
+        self.assertEqual(repo.update_calls[0]["free_weekly_prompt_limit"], 400)
         self.assertEqual(repo.update_calls[0]["updated_by_email"], "andrew@mixroom.ai")
+
+    def test_clears_prompt_limit_override(self):
+        self._authenticate(email="andrew@mixroom.ai")
+        repo = _FakeRepo()
+        admin_module.repo = repo
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/ai-prompt-limits",
+                "requestContext": {"http": {"method": "DELETE"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(repo.clear_calls, 1)
+        self.assertIn('"source": "default"', result["body"])
+
+    def test_clear_requires_ai_editor_email(self):
+        self._authenticate(email="other-admin@example.com")
+        admin_module.repo = _FakeRepo()
+
+        result = admin_module.handler(
+            {
+                "rawPath": "/v1/internal/admin/settings/ai-prompt-limits",
+                "requestContext": {"http": {"method": "DELETE"}},
+            },
+            object(),
+        )
+
+        self.assertEqual(result["statusCode"], 403)
 
     def test_update_requires_ai_editor_email(self):
         self._authenticate(email="other-admin@example.com")
@@ -186,7 +233,7 @@ class AdminAiPromptLimitsHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/settings/ai-prompt-limits",
                 "requestContext": {"http": {"method": "PUT"}},
-                "body": '{"free_daily_prompt_limit":200,"free_weekly_prompt_limit":600}',
+                "body": '{"free_daily_prompt_limit":100,"free_weekly_prompt_limit":400}',
             },
             object(),
         )

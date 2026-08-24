@@ -1130,6 +1130,29 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       options.wavBitDepth = FindInt(args, "wavBitDepth", 16);
       options.wavDithering = FindBool(args, "wavDithering", true);
       options.mp3BitrateKbps = FindInt(args, "mp3BitrateKbps", 192);
+      options.clipSnapshotJson =
+          ToJuceString(FindString(args, "clipSnapshotJson"));
+      options.dryClipRender = FindBool(args, "dryClipRender", false);
+      options.bypassMasterProcessing =
+          FindBool(args, "bypassMasterProcessing", false);
+      options.bypassGroupProcessing =
+          FindBool(args, "bypassGroupProcessing", false);
+      options.preserveRealtimePlayback =
+          FindBool(args, "preserveRealtimePlayback", false);
+      options.timelineStartSeconds =
+          FindDouble(args, "timelineStartSeconds", 0.0);
+      if (const auto* raw_ids = FindValue(args, "audibleClipIds")) {
+        if (const auto* ids = std::get_if<flutter::EncodableList>(raw_ids)) {
+          options.restrictToAudibleClipIds = true;
+          for (const auto& raw_id : *ids) {
+            if (const auto* value = std::get_if<int32_t>(&raw_id)) {
+              options.audibleClipIds.add(*value);
+            } else if (const auto* value = std::get_if<int64_t>(&raw_id)) {
+              options.audibleClipIds.add(static_cast<int>(*value));
+            }
+          }
+        }
+      }
 
       const std::string exported = CallOnMessageThreadSync([out_path, options] {
         return JuceEngine::get()
@@ -1307,6 +1330,39 @@ void JuceAudioEnginePlugin::HandleMethodCall(
             notes, params, source_tempo);
       });
       result->Success(flutter::EncodableValue(ok));
+      return;
+    }
+
+    if (method_call.method_name() == "setMidiClipPluginParameter") {
+      const int clip = FindInt(args, "clip", -1);
+      const auto param_id = ToJuceString(FindString(args, "paramId"));
+      const float value = static_cast<float>(FindDouble(args, "value", 0.0));
+      CallOnMessageThreadSync([clip, param_id, value] {
+        JuceEngine::get().setMidiClipPluginParameter(clip, param_id, value);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "setMidiClipPluginAutomationPoints") {
+      const int clip = FindInt(args, "clip", -1);
+      const auto param_id = ToJuceString(FindString(args, "paramId"));
+      const auto points =
+          ParseAutomationPoints(FindValue(args, "points"), 1.0f);
+      CallOnMessageThreadSync([clip, param_id, points] {
+        JuceEngine::get().setMidiClipPluginAutomationPoints(
+            clip, param_id, points);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "clearMidiClipPluginAutomation") {
+      const int clip = FindInt(args, "clip", -1);
+      CallOnMessageThreadSync([clip] {
+        JuceEngine::get().clearMidiClipPluginAutomation(clip);
+      });
+      result->Success(flutter::EncodableValue());
       return;
     }
 

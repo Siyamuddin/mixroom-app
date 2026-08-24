@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom successful billing purchases delivered to Slack #development
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+  BillingSuccessTopicArn:
+    Type: String
+  SlackWorkspaceId:
+    Type: String
+  SlackChannelId:
+    Type: String
+  SlackChannelName:
+    Type: String
+    Default: development
+
+Resources:
+  SlackChannelRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub mixroom-billing-success-slack-${StageName}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: chatbot.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+  SlackChannelConfiguration:
+    Type: AWS::Chatbot::SlackChannelConfiguration
+    Properties:
+      ConfigurationName: !Sub mixroom-billing-success-${StageName}
+      IamRoleArn: !GetAtt SlackChannelRole.Arn
+      SlackWorkspaceId: !Ref SlackWorkspaceId
+      SlackChannelId: !Ref SlackChannelId
+      SlackChannelName: !Ref SlackChannelName
+      SnsTopicArns:
+        - !Ref BillingSuccessTopicArn
+      GuardrailPolicies:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      LoggingLevel: ERROR

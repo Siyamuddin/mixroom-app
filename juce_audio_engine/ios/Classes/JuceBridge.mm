@@ -2784,23 +2784,41 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     NSNumber *dryClipRender = settings[@"dryClipRender"];
     if ([dryClipRender isKindOfClass:[NSNumber class]])
         options.dryClipRender = [dryClipRender boolValue];
+    NSNumber *bypassMasterProcessing = settings[@"bypassMasterProcessing"];
+    if ([bypassMasterProcessing isKindOfClass:[NSNumber class]])
+        options.bypassMasterProcessing = [bypassMasterProcessing boolValue];
+    NSNumber *bypassGroupProcessing = settings[@"bypassGroupProcessing"];
+    if ([bypassGroupProcessing isKindOfClass:[NSNumber class]])
+        options.bypassGroupProcessing = [bypassGroupProcessing boolValue];
+    NSNumber *preserveRealtimePlayback = settings[@"preserveRealtimePlayback"];
+    if ([preserveRealtimePlayback isKindOfClass:[NSNumber class]])
+        options.preserveRealtimePlayback = [preserveRealtimePlayback boolValue];
+    NSNumber *timelineStartSeconds = settings[@"timelineStartSeconds"];
+    if ([timelineStartSeconds isKindOfClass:[NSNumber class]])
+        options.timelineStartSeconds = [timelineStartSeconds doubleValue];
     NSString *clipSnapshotJson = settings[@"clipSnapshotJson"];
     if ([clipSnapshotJson isKindOfClass:[NSString class]] && clipSnapshotJson.length > 0)
         options.clipSnapshotJson = juceStringFromNSString(clipSnapshotJson);
-    juce::String result;
-
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
+    NSArray *audibleClipIds = settings[@"audibleClipIds"];
+    if ([audibleClipIds isKindOfClass:[NSArray class]])
+    {
+        options.restrictToAudibleClipIds = true;
+        for (id rawClipId in audibleClipIds)
+            if ([rawClipId isKindOfClass:[NSNumber class]])
+                options.audibleClipIds.add([(NSNumber *)rawClipId intValue]);
+    }
+    // The Flutter plug-in already invokes exports on a user-initiated worker
+    // queue. JuceEngine marshals only plug-in graph construction back to the
+    // message thread, leaving the long offline render loop on this worker.
+    const juce::String result =
+        JuceEngine::get().exportMix(juce::File(jucePath), options);
 
     return [NSString stringWithUTF8String:result.toRawUTF8()];
 }
 
 + (double)getExportProgressObjC
 {
-    double progress = 0.0;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { progress = JuceEngine::get().getExportProgress(); });
-    return progress;
+    return JuceEngine::get().getExportProgress();
 }
 
 + (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings
@@ -3321,19 +3339,29 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
-#if JUCE_MAC && !JUCE_IOS
-    applied = JuceEngine::get().setTrackEffectStateBase64(
-        (int)trackRow,
-        (int)effectIndex,
-        state,
-        (bool)forceIndividualRow);
-#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
-        mm->callSync([trackRow, effectIndex, forceIndividualRow, &applied, state]
-                     { applied = JuceEngine::get().setTrackEffectStateBase64((int)trackRow, (int)effectIndex, state, (bool)forceIndividualRow); });
+        const auto apply = [trackRow, effectIndex, forceIndividualRow, &applied, state]
+        {
+            applied = JuceEngine::get().setTrackEffectStateBase64(
+                (int)trackRow,
+                (int)effectIndex,
+                state,
+                (bool)forceIndividualRow);
+        };
+        if (mm->isThisTheMessageThread())
+            apply();
+        else
+            mm->callSync(apply);
     }
-#endif
+    else
+    {
+        applied = JuceEngine::get().setTrackEffectStateBase64(
+            (int)trackRow,
+            (int)effectIndex,
+            state,
+            (bool)forceIndividualRow);
+    }
     return (BOOL)applied;
 }
 
@@ -3541,17 +3569,25 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
-#if JUCE_MAC && !JUCE_IOS
-    applied = JuceEngine::get().setMasterEffectStateBase64(
-        (int)effectIndex,
-        state);
-#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
-        mm->callSync([effectIndex, &applied, state]
-                     { applied = JuceEngine::get().setMasterEffectStateBase64((int)effectIndex, state); });
+        const auto apply = [effectIndex, &applied, state]
+        {
+            applied = JuceEngine::get().setMasterEffectStateBase64(
+                (int)effectIndex,
+                state);
+        };
+        if (mm->isThisTheMessageThread())
+            apply();
+        else
+            mm->callSync(apply);
     }
-#endif
+    else
+    {
+        applied = JuceEngine::get().setMasterEffectStateBase64(
+            (int)effectIndex,
+            state);
+    }
     return (BOOL)applied;
 }
 
@@ -3973,14 +4009,25 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         stateBase64 != nil ? juceStringFromNSString(stateBase64)
                            : juce::String();
     bool applied = false;
-#if JUCE_MAC && !JUCE_IOS
-    applied = JuceEngine::get().setMidiClipPluginStateBase64(
-        (int)clipIndex,
-        state);
-#else
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { applied = JuceEngine::get().setMidiClipPluginStateBase64((int)clipIndex, state); });
-#endif
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        const auto apply = [clipIndex, &applied, state]
+        {
+            applied = JuceEngine::get().setMidiClipPluginStateBase64(
+                (int)clipIndex,
+                state);
+        };
+        if (mm->isThisTheMessageThread())
+            apply();
+        else
+            mm->callSync(apply);
+    }
+    else
+    {
+        applied = JuceEngine::get().setMidiClipPluginStateBase64(
+            (int)clipIndex,
+            state);
+    }
     return (BOOL)applied;
 }
 

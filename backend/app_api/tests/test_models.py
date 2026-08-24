@@ -64,8 +64,8 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(snapshot["tier"], "free")
         self.assertEqual(snapshot["plan_code"], "free")
         self.assertEqual(snapshot["limits"]["cloud_projects"], 1)
-        self.assertEqual(snapshot["limits"]["ai_prompts_daily"], 200)
-        self.assertEqual(snapshot["limits"]["ai_prompts_weekly"], 600)
+        self.assertEqual(snapshot["limits"]["ai_prompts_daily"], 100)
+        self.assertEqual(snapshot["limits"]["ai_prompts_weekly"], 400)
 
     def test_plan_limits_include_weekly_prompt_caps(self):
         self.assertEqual(default_limits_for_plan("starter")["ai_prompts_weekly"], 1500)

@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Mixroom successful billing purchase SNS topic
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+Resources:
+  BillingSuccessTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub mixroom-billing-success-${StageName}
+
+  BillingSuccessTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref BillingSuccessTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref BillingSuccessTopic
+
+Outputs:
+  BillingSuccessTopicArn:
+    Description: Pass to the app API BillingSuccessTopicArn parameter.
+    Value: !Ref BillingSuccessTopic
