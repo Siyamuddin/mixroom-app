@@ -29,6 +29,7 @@ Future<AudioTrack> _buildClip({
   int durationMs = _kClipDurationMsInt,
   int row = 0,
   int rowId = 1,
+  int engineClipId = 1,
 }) {
   return AudioTrack.create(
     file: File('test_audio.wav'),
@@ -39,7 +40,7 @@ Future<AudioTrack> _buildClip({
     offset: 0.0,
     rowIndex: row,
     rowId: rowId,
-    engineClipId: 1,
+    engineClipId: engineClipId,
     label: 'Fixture Clip',
   );
 }
@@ -114,6 +115,8 @@ Offset _clipCenter(
   WidgetTester tester, {
   double additionalDx = 0.0,
   double clipDurationMs = _kClipDurationMs,
+  int row = 0,
+  double rowHeight = 80.0,
 }) {
   final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
   final playheadPx = (_kTestTimelineWidth / 2.0) - _kHeaderWidth;
@@ -121,7 +124,7 @@ Offset _clipCenter(
   return topLeft +
       Offset(
         _kHeaderWidth + playheadPx + (clipWidthPx / 2.0) + additionalDx,
-        _kRulerHeight + 40.0,
+        _kRulerHeight + (row * rowHeight) + (rowHeight / 2.0),
       );
 }
 
@@ -571,6 +574,76 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(moveCommits, <int>[0, 1]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'tablet long-press box selects and highlights clips from the bottom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.android);
+    try {
+      final top = await _buildClip(row: 0, rowId: 1, engineClipId: 1);
+      final bottom = await _buildClip(row: 1, rowId: 2, engineClipId: 2);
+      final selectionSnapshots = <List<int>>[];
+      const tabletRowHeight = 84.0;
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[top, bottom],
+          rowsOverride: <TimelineRow>[
+            TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
+            TimelineRow(rowId: 2, name: 'Track 2', iconId: 0),
+          ],
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (selectedClipIndices, _) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final bottomCenter = _clipCenter(
+        tester,
+        row: 1,
+        rowHeight: tabletRowHeight,
+      );
+      final topCenter = _clipCenter(
+        tester,
+        row: 0,
+        rowHeight: tabletRowHeight,
+      );
+
+      final upGesture = await tester.startGesture(bottomCenter);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+      expect(
+        selectionSnapshots.where((snapshot) => snapshot.contains(1)),
+        isNotEmpty,
+        reason: 'starting clip must stay selected when the box begins',
+      );
+
+      await upGesture.moveTo(topCenter);
+      await tester.pump();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+
+      await upGesture.up();
+      await tester.pumpAndSettle();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+
+      selectionSnapshots.clear();
+      final downGesture = await tester.startGesture(topCenter);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+      await downGesture.moveTo(bottomCenter);
+      await tester.pump();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+      await downGesture.up();
+      await tester.pumpAndSettle();
     } finally {
       _setTestTargetPlatform(null);
     }

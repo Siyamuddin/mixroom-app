@@ -273,6 +273,9 @@ Parameters:
   AlarmTopicArn:
     Type: String
     Default: ''
+  BillingSuccessTopicArn:
+    Type: String
+    Default: ''
   CloudProjectStorageProvider:
     Type: String
     AllowedValues: ['s3', 'r2']
@@ -317,6 +320,7 @@ Conditions:
   HasPaddleApiKeySecretArn: !Not [!Equals [!Ref PaddleApiKeySecretArn, '']]
   HasTossSecretKeySecretArn: !Not [!Equals [!Ref TossSecretKeySecretArn, '']]
   HasAlarmTopicArn: !Not [!Equals [!Ref AlarmTopicArn, '']]
+  HasBillingSuccessTopicArn: !Not [!Equals [!Ref BillingSuccessTopicArn, '']]
   HasPostHogPersonalApiKeySecretArn: !Not [!Equals [!Ref PostHogPersonalApiKeySecretArn, '']]
   IsCloudProjectR2Storage: !Equals [!Ref CloudProjectStorageProvider, 'r2']
   HasCloudProjectR2SecretAccessKeySecretArn: !Not [!Equals [!Ref CloudProjectR2SecretAccessKeySecretArn, '']]
@@ -2106,6 +2110,12 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/settings/ai-prompt-limits
             Method: put
+        AdminAiPromptLimitsDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/settings/ai-prompt-limits
+            Method: delete
 
   AdminAiRuntimeApiFunction:
     Type: AWS::Serverless::Function
@@ -2489,6 +2499,21 @@ Resources:
           Properties:
             Queue: !GetAtt BillingProjectionQueue.Arn
             BatchSize: 10
+
+  BillingPurchaseSuccessRule:
+    Type: AWS::Events::Rule
+    Condition: HasBillingSuccessTopicArn
+    Properties:
+      Description: Sends verified successful subscription purchases to Slack via SNS.
+      EventPattern:
+        source:
+          - mixroom.subscriptions
+        detail-type:
+          - billing.purchase_completed
+      State: ENABLED
+      Targets:
+        - Arn: !Ref BillingSuccessTopicArn
+          Id: billing-purchase-success-slack
 
   ReconcileFunction:
     Type: AWS::Serverless::Function

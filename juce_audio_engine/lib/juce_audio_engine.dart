@@ -1414,7 +1414,12 @@ class JuceAudioEngine {
     bool wavDithering = true,
     int mp3BitrateKbps = 192,
     String? clipSnapshotJson,
+    List<int>? audibleClipIds,
     bool dryClipRender = false,
+    bool bypassMasterProcessing = false,
+    bool bypassGroupProcessing = false,
+    bool preserveRealtimePlayback = false,
+    double timelineStartSeconds = 0.0,
   }) async {
     try {
       final result = await _ch.invokeMethod<String>(
@@ -1427,8 +1432,13 @@ class JuceAudioEngine {
           'wavDithering': wavDithering,
           'mp3BitrateKbps': mp3BitrateKbps,
           'dryClipRender': dryClipRender,
+          'bypassMasterProcessing': bypassMasterProcessing,
+          'bypassGroupProcessing': bypassGroupProcessing,
+          'preserveRealtimePlayback': preserveRealtimePlayback,
+          'timelineStartSeconds': timelineStartSeconds,
           if (clipSnapshotJson != null && clipSnapshotJson.isNotEmpty)
             'clipSnapshotJson': clipSnapshotJson,
+          if (audibleClipIds != null) 'audibleClipIds': audibleClipIds,
         },
       );
       return result ?? '';

@@ -453,6 +453,7 @@ class AutomationPoint {
 class EffectSnapshot {
   final String effectId; // name or path
   final String displayName;
+  final String pluginOrigin;
   final bool bypassed;
   final Map<String, dynamic> params;
   final String stateBase64;
@@ -462,8 +463,11 @@ class EffectSnapshot {
     this.bypassed,
     this.params, {
     this.displayName = '',
+    String pluginOrigin = '',
     this.stateBase64 = '',
-  });
+  }) : pluginOrigin = pluginOrigin.trim().isEmpty
+            ? _pluginOriginForId(effectId)
+            : pluginOrigin.trim();
 }
 
 class RowEffectsSnapshot {
@@ -667,12 +671,27 @@ extension AudioTrackSerialization on AudioTrack {
       "clipId": clipId,
       "automation": volumeAutomation.map((e) => e.toJson()).toList(),
       "instrumentId": instrumentId,
+      if (instrumentId.trim().isNotEmpty)
+        "instrumentOrigin": _pluginOriginForId(instrumentId),
       "instrumentName": instrumentName,
       "instrumentParams": instrumentParams,
       "midiNotes": midiNotes.map((n) => n.toJson()).toList(),
       "hostedInstrumentStateB64": hostedInstrumentStateBase64,
     };
   }
+}
+
+String _pluginOriginForId(String rawId) {
+  final id = rawId.trim().toLowerCase();
+  if (id.startsWith('audiounit') ||
+      id.startsWith('au:') ||
+      id.startsWith('vst3:') ||
+      id.endsWith('.vst3') ||
+      id.contains('/audio/plug-ins/') ||
+      id.contains(r'\')) {
+    return 'third_party';
+  }
+  return id.isEmpty ? '' : 'mixroom';
 }
 
 // ---- JSON helpers for project save/load ----
@@ -782,6 +801,7 @@ extension EffectSnapshotJson on EffectSnapshot {
   Map<String, dynamic> toJson() => {
         "effectId": effectId,
         if (displayName.trim().isNotEmpty) "displayName": displayName.trim(),
+        if (pluginOrigin.isNotEmpty) "pluginOrigin": pluginOrigin,
         "bypassed": bypassed,
         "params": params,
         if (stateBase64.trim().isNotEmpty) "stateBase64": stateBase64.trim(),
@@ -794,6 +814,7 @@ extension EffectSnapshotJson on EffectSnapshot {
       json["bypassed"] as bool,
       rawParams,
       displayName: (json["displayName"] as String?)?.trim() ?? '',
+      pluginOrigin: (json["pluginOrigin"] as String?)?.trim() ?? '',
       stateBase64: (json["stateBase64"] as String?)?.trim() ?? '',
     );
   }

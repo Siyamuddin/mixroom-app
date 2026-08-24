@@ -376,7 +376,7 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(locations["ws-studio"]["organization_status"], "locked")
         self.assertFalse(payload["cloud_projects"][0]["can_write"])
 
-    def test_education_student_gets_personal_storage_without_shared_location(self):
+    def test_education_student_can_select_personal_or_education_cloud(self):
         module.billing_repo.get_entitlement.return_value = {
             "user_id": "user-1",
             "status": "active",
@@ -436,13 +436,17 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 200)
         payload = decode_json_response(response)
         storage = payload["storage"]
-        self.assertEqual(storage["plan_code"], "education")
-        self.assertEqual(storage["limit_bytes"], 5368709120)
-        self.assertEqual(
-            [item["storage_scope"] for item in storage.get("locations", [])],
-            ["personal"],
-        )
-        self.assertEqual(storage["locations"][0]["limit_bytes"], 5368709120)
+        self.assertEqual(storage["plan_code"], "free")
+        self.assertEqual(storage["limit_bytes"], 107374182)
+        locations = {
+            item["workspace_id"]: item for item in storage.get("locations", [])
+        }
+        self.assertEqual(set(locations), {"", "ws-edu"})
+        self.assertEqual(locations[""]["label"], "Personal Cloud")
+        self.assertEqual(locations[""]["limit_bytes"], 107374182)
+        self.assertEqual(locations["ws-edu"]["label"], "Academy Cloud")
+        self.assertEqual(locations["ws-edu"]["plan_code"], "education")
+        self.assertEqual(locations["ws-edu"]["limit_bytes"], 5368709120)
 
     def test_education_teacher_does_not_receive_student_personal_storage(self):
         module.billing_repo.get_entitlement.return_value = {

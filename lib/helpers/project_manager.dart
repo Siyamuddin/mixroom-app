@@ -25,6 +25,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive_io.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
+import 'package:mixroom/helpers/project_compatibility_service.dart';
 
 class ProjectMeta {
   final Directory dir;
@@ -34,6 +35,8 @@ class ProjectMeta {
   final String? cloudWorkspaceId;
   final String? cloudOrganizationId;
   final int? cloudDocumentRevision;
+  final String? cloudSourceFingerprint;
+  final String sourceFingerprint;
   final DateTime createdAt;
   final DateTime lastOpenedAt;
   final String? bundledDemoAssetPath;
@@ -46,20 +49,48 @@ class ProjectMeta {
     this.cloudWorkspaceId,
     this.cloudOrganizationId,
     this.cloudDocumentRevision,
+    this.cloudSourceFingerprint,
+    this.sourceFingerprint = '',
     required this.createdAt,
     required this.lastOpenedAt,
     this.bundledDemoAssetPath,
   });
 }
 
+enum ProjectCloudFreshness {
+  synced,
+  localChanges,
+  cloudAhead,
+  diverged,
+  linkedUnknown,
+}
+
+ProjectCloudFreshness resolveProjectCloudFreshness({
+  required ProjectMeta project,
+  required bool cloudStatusAvailable,
+  int? latestCloudRevision,
+}) {
+  final syncedFingerprint = (project.cloudSourceFingerprint ?? '').trim();
+  final hasLocalChanges =
+      syncedFingerprint.isNotEmpty &&
+      project.sourceFingerprint.isNotEmpty &&
+      syncedFingerprint != project.sourceFingerprint;
+  if (!cloudStatusAvailable) return ProjectCloudFreshness.linkedUnknown;
+  final cloudAhead =
+      latestCloudRevision != null &&
+      (project.cloudDocumentRevision == null ||
+          latestCloudRevision != project.cloudDocumentRevision);
+  if (cloudAhead && hasLocalChanges) return ProjectCloudFreshness.diverged;
+  if (cloudAhead) return ProjectCloudFreshness.cloudAhead;
+  if (hasLocalChanges) return ProjectCloudFreshness.localChanges;
+  return ProjectCloudFreshness.synced;
+}
+
 class BundledDemoProjectAsset {
   final String assetPath;
   final String name;
 
-  const BundledDemoProjectAsset({
-    required this.assetPath,
-    required this.name,
-  });
+  const BundledDemoProjectAsset({required this.assetPath, required this.name});
 }
 
 class ProjectManager {
@@ -68,8 +99,9 @@ class ProjectManager {
   static const String _bundledDemoAssetPrefix = 'assets/demo_projects/';
   static const String _bundledDemoDismissedStateFileName =
       '.bundled_demo_dismissed_v1.json';
-  static final ValueNotifier<int> projectLibraryRevision =
-      ValueNotifier<int>(0);
+  static final ValueNotifier<int> projectLibraryRevision = ValueNotifier<int>(
+    0,
+  );
   static Directory? _rootDirectoryOverrideForTesting;
 
   @visibleForTesting
@@ -111,7 +143,8 @@ class ProjectManager {
   }
 
   static Future<Directory> _nextAvailableProjectDirName(
-      String preferredName) async {
+    String preferredName,
+  ) async {
     final root = await _rootDir();
     final base = _sanitizeFolderName(preferredName);
 
@@ -136,8 +169,8 @@ class ProjectManager {
       if (!await f.exists()) continue;
       try {
         final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-        final bundledDemoAssetPath =
-            (json['bundledDemoAssetPath'] as String?)?.trim();
+        final bundledDemoAssetPath = (json['bundledDemoAssetPath'] as String?)
+            ?.trim();
         final cloudProjectId =
             (json["cloudProjectId"] ?? json["cloud_project_id"])
                 ?.toString()
@@ -150,29 +183,40 @@ class ProjectManager {
             (json["cloudOrganizationId"] ?? json["cloud_organization_id"])
                 ?.toString()
                 .trim();
+        final cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+            .toString()
+            .trim();
         metas.add(
           ProjectMeta(
             dir: d,
             name: (json["name"] ?? "Untitled") as String,
-            projectId:
-                (json["projectId"] ?? json["project_id"] ?? '').toString(),
+            projectId: (json["projectId"] ?? json["project_id"] ?? '')
+                .toString(),
             cloudProjectId: cloudProjectId == null || cloudProjectId.isEmpty
                 ? null
                 : cloudProjectId,
             cloudWorkspaceId:
                 cloudWorkspaceId == null || cloudWorkspaceId.isEmpty
-                    ? null
-                    : cloudWorkspaceId,
+                ? null
+                : cloudWorkspaceId,
             cloudOrganizationId:
                 cloudOrganizationId == null || cloudOrganizationId.isEmpty
-                    ? null
-                    : cloudOrganizationId,
-            cloudDocumentRevision:
-                (json["cloudDocumentRevision"] as num?)?.toInt(),
+                ? null
+                : cloudOrganizationId,
+            cloudDocumentRevision: (json["cloudDocumentRevision"] as num?)
+                ?.toInt(),
+            cloudSourceFingerprint: cloudSourceFingerprint.isEmpty
+                ? null
+                : cloudSourceFingerprint,
+            sourceFingerprint: ProjectCompatibilityService.sourceFingerprint(
+              json,
+            ),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
-                (json["createdAt"] ?? 0) as int),
+              (json["createdAt"] ?? 0) as int,
+            ),
             lastOpenedAt: DateTime.fromMillisecondsSinceEpoch(
-                (json["lastOpenedAt"] ?? 0) as int),
+              (json["lastOpenedAt"] ?? 0) as int,
+            ),
             bundledDemoAssetPath: bundledDemoAssetPath?.isEmpty == true
                 ? null
                 : bundledDemoAssetPath,
@@ -185,14 +229,16 @@ class ProjectManager {
     return metas;
   }
 
-  static Future<bool> canCreateNew(
-      {int maxProjects = ProjectManager.maxProjects}) async {
+  static Future<bool> canCreateNew({
+    int maxProjects = ProjectManager.maxProjects,
+  }) async {
     final list = await listProjects();
     return list.length < maxProjects;
   }
 
-  static Future<Directory> createNewProjectDir(
-      {String name = "Untitled Project"}) async {
+  static Future<Directory> createNewProjectDir({
+    String name = "Untitled Project",
+  }) async {
     final dir = await _nextAvailableProjectDirName(name);
     await dir.create(recursive: true);
 
@@ -264,8 +310,9 @@ class ProjectManager {
       final desiredDir = Directory(desiredPath);
       final desiredExists = await desiredDir.exists();
       final takenByOtherDir = desiredExists && desiredNorm != selfPathNorm;
-      final takenBySiblingFolder =
-          siblingFolderNamesLower.contains(resolved.toLowerCase());
+      final takenBySiblingFolder = siblingFolderNamesLower.contains(
+        resolved.toLowerCase(),
+      );
       if (!takenByOtherDir && !takenBySiblingFolder) break;
       resolved = "$base #$i";
       i++;
@@ -275,8 +322,9 @@ class ProjectManager {
     // 1) Rename folder FIRST (so folder+json will match)
     Directory finalDir = dir;
     if (p.normalize(dir.path) != p.normalize(desired.path)) {
-      finalDir = await dir
-          .rename(desired.path); // IMPORTANT: capture returned Directory
+      finalDir = await dir.rename(
+        desired.path,
+      ); // IMPORTANT: capture returned Directory
     }
 
     // 2) Update JSON name INSIDE the NEW folder.
@@ -294,8 +342,9 @@ class ProjectManager {
 
   static Future<Directory> duplicateProject(Directory dir) async {
     final sourceJson = await readProjectJson(dir);
-    final sourceName =
-        (sourceJson["name"] ?? p.basename(dir.path)).toString().trim();
+    final sourceName = (sourceJson["name"] ?? p.basename(dir.path))
+        .toString()
+        .trim();
     final duplicateDir = await createNewProjectDir(
       name: sourceName.isEmpty ? "Untitled Project Copy" : "$sourceName Copy",
     );
@@ -364,8 +413,9 @@ class ProjectManager {
   }
 
   static String ensureProjectIdInJson(Map<String, dynamic> json) {
-    final existing =
-        (json['projectId'] ?? json['project_id'] ?? '').toString().trim();
+    final existing = (json['projectId'] ?? json['project_id'] ?? '')
+        .toString()
+        .trim();
     if (existing.isNotEmpty) return existing;
     final next = _nextProjectId();
     json['projectId'] = next;
@@ -373,7 +423,8 @@ class ProjectManager {
   }
 
   static Map<int, int> persistedRowOrderIndexById(
-      List<Map<String, dynamic>> rows) {
+    List<Map<String, dynamic>> rows,
+  ) {
     final byId = <int, int>{};
     for (var i = 0; i < rows.length; i++) {
       final rowId = (rows[i]['rowId'] as num?)?.toInt() ?? -1;
@@ -416,8 +467,9 @@ class ProjectManager {
 
   static Future<String> ensureProjectId(Directory dir) async {
     final json = await readProjectJson(dir);
-    final before =
-        (json['projectId'] ?? json['project_id'] ?? '').toString().trim();
+    final before = (json['projectId'] ?? json['project_id'] ?? '')
+        .toString()
+        .trim();
     final projectId = ensureProjectIdInJson(json);
     if (before != projectId) {
       await writeProjectJson(dir, json);
@@ -432,7 +484,9 @@ class ProjectManager {
   }
 
   static Future<void> writeProjectJson(
-      Directory dir, Map<String, dynamic> json) async {
+    Directory dir,
+    Map<String, dynamic> json,
+  ) async {
     final f = _projectJsonFile(dir);
     final temp = File('${f.path}.tmp');
     await temp.writeAsString(jsonEncode(json), flush: true);
@@ -454,6 +508,7 @@ class ProjectManager {
     json.remove('cloudOrganizationId');
     json.remove('cloud_organization_id');
     json.remove('cloudDocumentRevision');
+    json.remove('cloudSourceFingerprint');
     json.remove('cloud_document_revision');
     json.remove('cloudSyncedAt');
     json.remove('cloud_synced_at');
@@ -467,7 +522,7 @@ class ProjectManager {
   }
 
   static Future<List<BundledDemoProjectAsset>>
-      listBundledDemoProjectAssets() async {
+  listBundledDemoProjectAssets() async {
     final paths = await _discoverBundledDemoAssetPaths();
     return paths
         .map(
@@ -489,7 +544,8 @@ class ProjectManager {
   }
 
   static Future<void> dismissBundledDemoAssets(
-      Iterable<String> assetPaths) async {
+    Iterable<String> assetPaths,
+  ) async {
     final normalized = assetPaths
         .map((path) => path.trim())
         .where((path) => isBundledDemoAssetPath(path))
@@ -551,10 +607,10 @@ class ProjectManager {
       final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
       discovered.addAll(
         manifest.listAssets().where(
-              (path) =>
-                  path.startsWith(_bundledDemoAssetPrefix) &&
-                  path.toLowerCase().endsWith('.mixroom'),
-            ),
+          (path) =>
+              path.startsWith(_bundledDemoAssetPrefix) &&
+              path.toLowerCase().endsWith('.mixroom'),
+        ),
       );
     } catch (_) {
       // Continue with legacy fallback below.
@@ -567,10 +623,10 @@ class ProjectManager {
         if (decoded is Map) {
           discovered.addAll(
             decoded.keys.whereType<String>().where(
-                  (path) =>
-                      path.startsWith(_bundledDemoAssetPrefix) &&
-                      path.toLowerCase().endsWith('.mixroom'),
-                ),
+              (path) =>
+                  path.startsWith(_bundledDemoAssetPrefix) &&
+                  path.toLowerCase().endsWith('.mixroom'),
+            ),
           );
         }
       } catch (_) {
@@ -588,7 +644,8 @@ class ProjectManager {
   }
 
   static Future<Set<String>> _readDismissedBundledDemoAssetPaths(
-      File stateFile) async {
+    File stateFile,
+  ) async {
     if (!await stateFile.exists()) return <String>{};
     try {
       final decoded = jsonDecode(await stateFile.readAsString());
@@ -611,6 +668,7 @@ class ProjectBundle {
   static Future<String> exportMixroomBundle({
     required Directory projectDir,
     required BundleAudioMode audioMode,
+    bool requireCurrentCompatibility = true,
   }) async {
     final projectJson = File(p.join(projectDir.path, "project.json"));
     if (!projectJson.existsSync()) {
@@ -620,6 +678,17 @@ class ProjectBundle {
     final jsonMap =
         jsonDecode(projectJson.readAsStringSync()) as Map<String, dynamic>;
     final projectName = (jsonMap["name"] as String?) ?? "Mixroom Project";
+    final compatibility = ProjectCompatibilityService.inspect(jsonMap);
+    final hasCurrentCompatibility =
+        compatibility.needsPluginAudio &&
+        await ProjectCompatibilityService.isCurrent(projectDir);
+    if (requireCurrentCompatibility &&
+        compatibility.needsPluginAudio &&
+        !hasCurrentCompatibility) {
+      throw StateError(
+        'This project needs an up-to-date compatible version. Open it on the desktop that has its plugins, then choose Prepare under Project Settings before sharing it with devices that do not have those plugins.',
+      );
+    }
     ProjectManager.stripCloudSyncMetadata(jsonMap);
 
     final tmpDir = await getTemporaryDirectory();
@@ -627,8 +696,12 @@ class ProjectBundle {
     String bundlePath = p.join(tmpDir.path, "$base.mixroom");
 
     // staging folders
-    final staging = Directory(p.join(tmpDir.path,
-        "mixroom_bundle_staging_${DateTime.now().millisecondsSinceEpoch}"));
+    final staging = Directory(
+      p.join(
+        tmpDir.path,
+        "mixroom_bundle_staging_${DateTime.now().millisecondsSinceEpoch}",
+      ),
+    );
     await staging.create(recursive: true);
 
     // copy/convert audio
@@ -672,17 +745,33 @@ class ProjectBundle {
       }
     }
 
-    await File(p.join(staging.path, "project.json"))
-        .writeAsString(jsonEncode(jsonMap));
+    await File(
+      p.join(staging.path, "project.json"),
+    ).writeAsString(jsonEncode(jsonMap));
+
+    final sourceCompatibilityDir = ProjectCompatibilityService.directoryFor(
+      projectDir,
+    );
+    final stagedCompatibilityDir = Directory(
+      p.join(staging.path, ProjectCompatibilityService.directoryName),
+    );
+    // Cloud autosave may publish the canonical editable source before the
+    // producer explicitly prepares portable audio. Never package a stale
+    // projection beside a newer source revision.
+    if (hasCurrentCompatibility && await sourceCompatibilityDir.exists()) {
+      await _copyDirectory(sourceCompatibilityDir, stagedCompatibilityDir);
+    }
 
     // meta.json
     final meta = {
-      "bundleVersion": 1,
+      "bundleVersion": 2,
       "audioMode": audioMode.name,
       "exportedAt": DateTime.now().toIso8601String(),
+      "hasCompatibilityAudio": await stagedCompatibilityDir.exists(),
     };
-    await File(p.join(staging.path, "meta.json"))
-        .writeAsString(jsonEncode(meta));
+    await File(
+      p.join(staging.path, "meta.json"),
+    ).writeAsString(jsonEncode(meta));
 
     // --------------------------------------------
     // BUILD THE ZIP USING archive (no ZipFileEncoder)
@@ -706,12 +795,22 @@ class ProjectBundle {
       for (final file in audioDirInStaging.listSync().whereType<File>()) {
         final bytes = file.readAsBytesSync();
         archive.addFile(
-          ArchiveFile(
-            "audio/${p.basename(file.path)}",
-            bytes.length,
-            bytes,
-          ),
+          ArchiveFile("audio/${p.basename(file.path)}", bytes.length, bytes),
         );
+      }
+    }
+
+    if (stagedCompatibilityDir.existsSync()) {
+      for (final entity in stagedCompatibilityDir.listSync(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (entity is! File) continue;
+        final relative = p
+            .relative(entity.path, from: staging.path)
+            .replaceAll('\\', '/');
+        final bytes = entity.readAsBytesSync();
+        archive.addFile(ArchiveFile(relative, bytes.length, bytes));
       }
     }
 
@@ -739,8 +838,33 @@ class ProjectBundle {
     return bundlePath;
   }
 
-  static Future<void> _convertToFlacLossless(
-      {required String inPath, required String outPath}) async {
+  /// Reads only the canonical source document from a downloaded bundle.
+  /// This is used to distinguish a real concurrent edit from a harmless cloud
+  /// revision that changed only local/session metadata.
+  static Future<Map<String, dynamic>?> readCanonicalProjectJsonFromBundle(
+    File bundleFile,
+  ) async {
+    if (!await bundleFile.exists()) return null;
+    final input = InputFileStream(bundleFile.path);
+    try {
+      final archive = ZipDecoder().decodeStream(input);
+      for (final item in archive) {
+        if (item.isDirectory || item.name != 'project.json') continue;
+        final decoded = jsonDecode(utf8.decode(item.content));
+        return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+      }
+    } catch (_) {
+      return null;
+    } finally {
+      input.closeSync();
+    }
+    return null;
+  }
+
+  static Future<void> _convertToFlacLossless({
+    required String inPath,
+    required String outPath,
+  }) async {
     // FLAC is lossless. This preserves audio quality; it just compresses storage.
     // You can add -ar 48000 if you WANT to standardize, but it’s not required.
     final cmd = '-y -i "$inPath" -c:a flac "$outPath"';
@@ -751,11 +875,28 @@ class ProjectBundle {
     final cleaned = s.trim().replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     return cleaned.isEmpty ? "MixroomProject" : cleaned;
   }
+
+  static Future<void> _copyDirectory(Directory source, Directory target) async {
+    await target.create(recursive: true);
+    await for (final entity in source.list(
+      recursive: true,
+      followLinks: false,
+    )) {
+      final relative = p.relative(entity.path, from: source.path);
+      final destination = p.join(target.path, relative);
+      if (entity is Directory) {
+        await Directory(destination).create(recursive: true);
+      } else if (entity is File) {
+        await File(destination).parent.create(recursive: true);
+        await entity.copy(destination);
+      }
+    }
+  }
 }
 
 enum ImportAudioStrategy {
   keepAsBundled, // if bundle has flac, keep flac; if wav keep wav
-  convertFlacToWav48k // if bundle has flac, convert to wav 48k (useful if your engine expects wav)
+  convertFlacToWav48k, // if bundle has flac, convert to wav 48k (useful if your engine expects wav)
 }
 
 class ProjectBundleImport {
@@ -774,8 +915,12 @@ class ProjectBundleImport {
     if (!bundleFile.existsSync()) throw Exception("Bundle file missing");
 
     final tmpDir = await getTemporaryDirectory();
-    final unpackDir = Directory(p.join(tmpDir.path,
-        "mixroom_unpacked_${DateTime.now().millisecondsSinceEpoch}"));
+    final unpackDir = Directory(
+      p.join(
+        tmpDir.path,
+        "mixroom_unpacked_${DateTime.now().millisecondsSinceEpoch}",
+      ),
+    );
     await unpackDir.create(recursive: true);
 
     Directory? destProjectDir;
@@ -813,8 +958,9 @@ class ProjectBundleImport {
       final jsonMap = Map<String, dynamic>.from(decoded);
       final incomingName = (jsonMap["name"] as String?) ?? "Imported Project";
 
-      destProjectDir =
-          await ProjectManager.createNewProjectDir(name: incomingName);
+      destProjectDir = await ProjectManager.createNewProjectDir(
+        name: incomingName,
+      );
 
       final resolvedName = p.basename(destProjectDir.path);
       jsonMap["name"] = resolvedName;
@@ -827,8 +973,9 @@ class ProjectBundleImport {
       final fileNameRemap = <String, String>{};
 
       if (await srcAudioDir.exists()) {
-        final files =
-            srcAudioDir.listSync(followLinks: false).whereType<File>();
+        final files = srcAudioDir
+            .listSync(followLinks: false)
+            .whereType<File>();
         for (final f in files) {
           final ext = p.extension(f.path).toLowerCase();
           final base = p.basenameWithoutExtension(f.path);
@@ -860,8 +1007,25 @@ class ProjectBundleImport {
         }
       }
 
-      await File(p.join(destProjectDir.path, "project.json"))
-          .writeAsString(jsonEncode(jsonMap));
+      await File(
+        p.join(destProjectDir.path, "project.json"),
+      ).writeAsString(jsonEncode(jsonMap));
+
+      final sourceCompatibilityDir = Directory(
+        p.join(unpackDir.path, ProjectCompatibilityService.directoryName),
+      );
+      if (await sourceCompatibilityDir.exists()) {
+        final destinationCompatibilityDir =
+            ProjectCompatibilityService.directoryFor(destProjectDir);
+        await ProjectBundle._copyDirectory(
+          sourceCompatibilityDir,
+          destinationCompatibilityDir,
+        );
+        await ProjectCompatibilityService.rebaseForImportedProject(
+          projectDir: destProjectDir,
+          sourceProject: jsonMap,
+        );
+      }
 
       importCompleted = true;
       return destProjectDir;
@@ -916,8 +1080,10 @@ class ProjectBundleImport {
       if (item.isSymbolicLink) {
         throw Exception("Bundle contains unsupported symbolic links");
       }
-      if (!_isAllowedArchivePath(normalizedName,
-          isDirectory: item.isDirectory)) {
+      if (!_isAllowedArchivePath(
+        normalizedName,
+        isDirectory: item.isDirectory,
+      )) {
         throw Exception("Bundle contains unsupported files");
       }
 
@@ -944,8 +1110,9 @@ class ProjectBundleImport {
 
   static String _normalizeArchiveEntryName(String rawName) {
     final normalized = p.posix.normalize(rawName.replaceAll('\\', '/').trim());
-    final withoutLeadingSlash =
-        normalized.startsWith('/') ? normalized.substring(1) : normalized;
+    final withoutLeadingSlash = normalized.startsWith('/')
+        ? normalized.substring(1)
+        : normalized;
     if (withoutLeadingSlash.isEmpty ||
         withoutLeadingSlash == '.' ||
         withoutLeadingSlash == '..' ||
@@ -967,15 +1134,31 @@ class ProjectBundleImport {
     if (normalizedPath == 'audio') {
       return isDirectory;
     }
-    if (!normalizedPath.startsWith('audio/')) {
-      return false;
+    if (normalizedPath.startsWith('audio/')) {
+      final relative = normalizedPath.substring('audio/'.length);
+      if (relative.isEmpty) return isDirectory;
+      return !isDirectory &&
+          !relative.contains('/') &&
+          !relative.contains('\\') &&
+          p.basename(relative) == relative;
     }
-
-    final relative = normalizedPath.substring('audio/'.length);
-    if (relative.isEmpty) {
+    final root = ProjectCompatibilityService.directoryName;
+    if (normalizedPath == root ||
+        normalizedPath ==
+            '$root/${ProjectCompatibilityService.audioDirectoryName}') {
       return isDirectory;
     }
+    if (normalizedPath ==
+            '$root/${ProjectCompatibilityService.projectionFileName}' ||
+        normalizedPath ==
+            '$root/${ProjectCompatibilityService.manifestFileName}') {
+      return !isDirectory;
+    }
+    final prefix = '$root/${ProjectCompatibilityService.audioDirectoryName}/';
+    if (!normalizedPath.startsWith(prefix)) return false;
+    final relative = normalizedPath.substring(prefix.length);
     return !isDirectory &&
+        relative.isNotEmpty &&
         !relative.contains('/') &&
         !relative.contains('\\') &&
         p.basename(relative) == relative;
@@ -983,10 +1166,7 @@ class ProjectBundleImport {
 
   static String _resolveExtractPath(Directory unpackDir, String archivePath) {
     final resolved = p.normalize(
-      p.joinAll(<String>[
-        unpackDir.path,
-        ...p.posix.split(archivePath),
-      ]),
+      p.joinAll(<String>[unpackDir.path, ...p.posix.split(archivePath)]),
     );
     final root = p.normalize(unpackDir.path);
     if (resolved != root && !p.isWithin(root, resolved)) {

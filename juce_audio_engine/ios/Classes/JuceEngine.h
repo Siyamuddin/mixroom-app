@@ -5873,7 +5873,18 @@ public:
         bool wavDithering{true};
         int mp3BitrateKbps{192};
         juce::String clipSnapshotJson;
+        juce::Array<int> audibleClipIds;
+        bool restrictToAudibleClipIds{false};
         bool dryClipRender{false};
+        bool bypassMasterProcessing{false};
+        bool bypassGroupProcessing{false};
+        // Compatibility renders use an isolated offline graph. Keep the
+        // realtime callback attached while that graph renders so background
+        // sharing preparation cannot pause live playback.
+        bool preserveRealtimePlayback{false};
+        // Trim leading project silence from an offline artifact while keeping
+        // the source clip's absolute placement in its caller.
+        double timelineStartSeconds{0.0};
     };
 
     static JuceEngine &get();

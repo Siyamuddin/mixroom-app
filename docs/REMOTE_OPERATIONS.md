@@ -70,6 +70,7 @@ Relevant API:
 
 - `GET /v1/internal/admin/settings/ai-prompt-limits`
 - `PUT /v1/internal/admin/settings/ai-prompt-limits`
+- `DELETE /v1/internal/admin/settings/ai-prompt-limits` to remove the override and restore deployed defaults
 
 ### 3. Remote Magnitude Models
 
@@ -295,7 +296,7 @@ How to change:
 
 Rollback:
 
-- restore previous limit values in admin
+- restore previous limit values in admin, or remove the override to return to deployed defaults
 
 ## SOP: Remote Magnitude Models
 

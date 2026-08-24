@@ -1053,6 +1053,29 @@ void main() {
     expect(calls.single.arguments, <String, dynamic>{'reason': 'midiPreview'});
   });
 
+  test('exportMix forwards compatibility processing bypasses', () async {
+    await JuceAudioEngine.exportMix(
+      '/tmp/frozen.wav',
+      audibleClipIds: <int>[3, 5],
+      bypassMasterProcessing: true,
+      bypassGroupProcessing: true,
+      preserveRealtimePlayback: true,
+      timelineStartSeconds: 4.25,
+    );
+
+    expect(calls.single.method, 'exportMix');
+    expect(
+      calls.single.arguments,
+      containsPair('bypassGroupProcessing', true),
+    );
+    expect(
+      calls.single.arguments,
+      containsPair('bypassMasterProcessing', true),
+    );
+    expect(calls.single.arguments, containsPair('audibleClipIds', <int>[3, 5]));
+    expect(calls.single.arguments, containsPair('timelineStartSeconds', 4.25));
+  });
+
   test('getInputDeviceInfos parses macOS input metadata', () async {
     final infos = await JuceAudioEngine.getInputDeviceInfos();
 
