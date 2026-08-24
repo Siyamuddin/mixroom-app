@@ -102,34 +102,76 @@ void main() {
     expect(v2.allowsLegacyInputLifecycle, isFalse);
   });
 
-  test(
-    'release and unsupported sessions force Legacy and ignore writes',
-    () async {
+  test('supported non-debug sessions always use V2', () async {
+    for (final stored in <String?>[null, 'legacy', 'v2', 'malformed']) {
       SharedPreferences.setMockInitialValues(<String, Object>{
-        BluetoothImplementationPreferencesV2.preferenceKey: 'v2',
+        if (stored != null)
+          BluetoothImplementationPreferencesV2.preferenceKey: stored,
       });
 
-      for (final configuration in <({bool debug, TargetPlatform platform})>[
-        (debug: false, platform: TargetPlatform.macOS),
-        (debug: false, platform: TargetPlatform.android),
-        (debug: false, platform: TargetPlatform.iOS),
-        (debug: true, platform: TargetPlatform.windows),
+      for (final platform in <TargetPlatform>[
+        TargetPlatform.macOS,
+        TargetPlatform.android,
+        TargetPlatform.iOS,
       ]) {
         final session = await preferences.loadSession(
-          debugOverride: configuration.debug,
-          platformOverride: configuration.platform,
-        );
-        final saved = await preferences.saveNextSession(
-          BluetoothImplementationV2.v2,
-          debugOverride: configuration.debug,
-          platformOverride: configuration.platform,
+          debugOverride: false,
+          platformOverride: platform,
         );
 
-        expect(session.active, BluetoothImplementationV2.legacy);
-        expect(session.nextSession, BluetoothImplementationV2.legacy);
+        expect(session.active, BluetoothImplementationV2.v2);
+        expect(session.nextSession, BluetoothImplementationV2.v2);
         expect(session.selectionEnabled, isFalse);
-        expect(saved, isFalse);
       }
-    },
-  );
+    }
+  });
+
+  test('non-debug sessions reject implementation preference writes', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      BluetoothImplementationPreferencesV2.preferenceKey: 'legacy',
+    });
+
+    for (final platform in <TargetPlatform>[
+      TargetPlatform.macOS,
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+    ]) {
+      final saved = await preferences.saveNextSession(
+        BluetoothImplementationV2.v2,
+        debugOverride: false,
+        platformOverride: platform,
+      );
+
+      expect(saved, isFalse);
+    }
+
+    final stored = await SharedPreferences.getInstance();
+    expect(
+      stored.getString(BluetoothImplementationPreferencesV2.preferenceKey),
+      'legacy',
+    );
+  });
+
+  test('unsupported sessions remain Legacy and ignore writes', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      BluetoothImplementationPreferencesV2.preferenceKey: 'v2',
+    });
+
+    for (final debug in <bool>[false, true]) {
+      final session = await preferences.loadSession(
+        debugOverride: debug,
+        platformOverride: TargetPlatform.windows,
+      );
+      final saved = await preferences.saveNextSession(
+        BluetoothImplementationV2.v2,
+        debugOverride: debug,
+        platformOverride: TargetPlatform.windows,
+      );
+
+      expect(session.active, BluetoothImplementationV2.legacy);
+      expect(session.nextSession, BluetoothImplementationV2.legacy);
+      expect(session.selectionEnabled, isFalse);
+      expect(saved, isFalse);
+    }
+  });
 }

@@ -37,14 +37,20 @@ class BluetoothImplementationPreferencesV2 {
     bool? debugOverride,
     TargetPlatform? platformOverride,
   }) async {
-    final enabled = _selectionEnabled(
-      debugOverride: debugOverride,
-      platformOverride: platformOverride,
-    );
-    if (!enabled) {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (!_isSupportedPlatform(platform)) {
       return const BluetoothImplementationSessionV2(
         active: BluetoothImplementationV2.legacy,
         nextSession: BluetoothImplementationV2.legacy,
+        selectionEnabled: false,
+      );
+    }
+
+    final debug = debugOverride ?? kDebugMode;
+    if (!debug) {
+      return const BluetoothImplementationSessionV2(
+        active: BluetoothImplementationV2.v2,
+        nextSession: BluetoothImplementationV2.v2,
         selectionEnabled: false,
       );
     }
@@ -78,12 +84,14 @@ class BluetoothImplementationPreferencesV2 {
     TargetPlatform? platformOverride,
   }) {
     final platform = platformOverride ?? defaultTargetPlatform;
-    return !kIsWeb &&
-        (debugOverride ?? kDebugMode) &&
-        (platform == TargetPlatform.macOS ||
-            platform == TargetPlatform.android ||
-            platform == TargetPlatform.iOS);
+    return (debugOverride ?? kDebugMode) && _isSupportedPlatform(platform);
   }
+
+  bool _isSupportedPlatform(TargetPlatform platform) =>
+      !kIsWeb &&
+      (platform == TargetPlatform.macOS ||
+          platform == TargetPlatform.android ||
+          platform == TargetPlatform.iOS);
 
   BluetoothImplementationV2 _parse(String? value) {
     return value == BluetoothImplementationV2.v2.name
