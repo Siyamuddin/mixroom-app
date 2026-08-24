@@ -136,7 +136,7 @@ Map<String, bool> defaultCapabilitiesForPlanCode(String planCode) {
     SubscriptionCapability.wavStarterSamples: false,
     SubscriptionCapability.selectableAiModels: false,
     SubscriptionCapability.advancedAiModels: false,
-    SubscriptionCapability.producerProfilePresets: false,
+    SubscriptionCapability.producerProfilePresets: true,
     SubscriptionCapability.premiumSoundLibraries: false,
     SubscriptionCapability.cloudFileBrowser: false,
     SubscriptionCapability.customSamplePacks: false,
@@ -308,7 +308,7 @@ Map<String, dynamic> defaultLimitsForPlanCode(String planCode) {
         'ai_prompts_daily': 200,
         'ai_prompts_weekly': 600,
         'ai_model_tier': 'standard',
-        'producer_profile_presets': 'mixroom_producer',
+        'producer_profile_presets': 'expanded',
       };
   }
 }
@@ -1361,6 +1361,7 @@ class BillingCatalogSnapshot {
           description:
               'Basic DAW functionality, limited AI, starter samples, and standard sharing.',
           capabilities: <String, bool>{
+            SubscriptionCapability.producerProfilePresets: true,
             SubscriptionCapability.cloudProjects: true,
           },
           limits: <String, dynamic>{
@@ -1371,7 +1372,7 @@ class BillingCatalogSnapshot {
             'ai_prompts_daily': 200,
             'ai_prompts_weekly': 600,
             'ai_model_tier': 'standard',
-            'producer_profile_presets': 'mixroom_producer',
+            'producer_profile_presets': 'expanded',
           },
         ),
         BillingPlanDefinition(

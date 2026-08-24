@@ -22,7 +22,7 @@ _BASE_CAPABILITIES: Dict[str, bool] = {
     "wav_starter_samples": False,
     "selectable_ai_models": False,
     "advanced_ai_models": False,
-    "producer_profile_presets": False,
+    "producer_profile_presets": True,
     "premium_sound_libraries": False,
     "cloud_file_browser": False,
     "custom_sample_packs": False,
@@ -58,7 +58,7 @@ PLAN_CATALOG: Dict[str, Dict[str, Any]] = {
             "ai_prompts_daily": 200,
             "ai_prompts_weekly": 600,
             "ai_model_tier": "standard",
-            "producer_profile_presets": "mixroom_producer",
+            "producer_profile_presets": "expanded",
         },
     },
     "starter": {
