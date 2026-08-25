@@ -176,8 +176,9 @@ juce::File hostedPluginListCacheFile()
 }
 
 #if JUCE_MAC && !JUCE_IOS
-constexpr int kPluginScannerTimeoutMs = 45000;
+constexpr int kPluginScannerTimeoutMs = 15000;
 constexpr int kPluginCacheCheckpointInterval = 20;
+constexpr int kPluginCacheVersion = 2;
 
 bool scanPluginCandidateInChild(const juce::String &formatName,
                                 const juce::String &candidate,
@@ -237,8 +238,16 @@ bool scanPluginCandidateInChild(const juce::String &formatName,
     resultFile.deleteFile();
     if (exitCode != 0 || xml == nullptr || !xml->hasTagName("KNOWNPLUGINS"))
     {
-        failure = "Isolated plugin validation failed (exit " +
-                  juce::String((int)exitCode) + "): " + candidate;
+        if (exitCode >= 128 && exitCode <= 255)
+        {
+            failure = "Isolated plugin scanner caught fatal signal " +
+                      juce::String((int)exitCode - 128) + ": " + candidate;
+        }
+        else
+        {
+            failure = "Isolated plugin validation failed (exit " +
+                      juce::String((int)exitCode) + "): " + candidate;
+        }
         return false;
     }
 
@@ -7424,7 +7433,7 @@ bool JuceEngine::restoreCachedPluginList()
     auto xml = juce::XmlDocument::parse(cacheFile);
     if (xml == nullptr ||
         !xml->hasTagName("KNOWNPLUGINS") ||
-        xml->getIntAttribute("mixroomCacheVersion") != 1)
+        xml->getIntAttribute("mixroomCacheVersion") != kPluginCacheVersion)
     {
         juceLogToFlutter("Ignoring invalid desktop plugin cache");
         return false;
@@ -7453,7 +7462,7 @@ void JuceEngine::persistPluginListCache() const
     if (xml == nullptr)
         return;
 
-    xml->setAttribute("mixroomCacheVersion", 1);
+    xml->setAttribute("mixroomCacheVersion", kPluginCacheVersion);
     const auto temporaryFile = cacheDirectory.getNonexistentChildFile(
         "known-plugins-v1", ".tmp", false);
     if (!xml->writeTo(temporaryFile) || !temporaryFile.replaceFileIn(cacheFile))
@@ -7614,6 +7623,7 @@ void JuceEngine::performPluginScan(bool reuseUnchangedPlugins)
                 validatedSinceCheckpoint = 0;
             }
         }
+
 #else
         PluginDirectoryScanner scanner(pluginList, *format, searchPath, true, File());
         String err;

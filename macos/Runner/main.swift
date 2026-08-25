@@ -8,9 +8,21 @@ private func MixroomPluginScanChildMain(
   _ outputPath: UnsafePointer<CChar>
 ) -> Int32
 
+private func mixroomPluginScanFatalSignalHandler(_ signalNumber: Int32) {
+  Darwin._exit(128 + signalNumber)
+}
+
+private func installPluginScanFatalSignalHandlers() {
+  let fatalSignals = [SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV, SIGTRAP]
+  for signalNumber in fatalSignals {
+    Darwin.signal(signalNumber, mixroomPluginScanFatalSignalHandler)
+  }
+}
+
 let arguments = ProcessInfo.processInfo.arguments
 if let marker = arguments.firstIndex(of: "--mixroom-plugin-scan-child"),
    marker + 3 < arguments.count {
+  installPluginScanFatalSignalHandlers()
   let status = arguments[marker + 1].withCString { formatName in
     arguments[marker + 2].withCString { pluginIdentifier in
       arguments[marker + 3].withCString { outputPath in
