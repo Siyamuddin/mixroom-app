@@ -96,32 +96,33 @@ void main() {
         );
 
         await _waitUntilNativeLoadIsStalled();
+        final stalledState = await _stallState();
+        expect(stalledState['preparationOnMainThread'], isFalse);
+        var eventLoopResponsive = false;
+        Timer(const Duration(milliseconds: 20), () {
+          eventLoopResponsive = true;
+        });
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(eventLoopResponsive, isTrue);
         expect(await timedLoad, isNull);
         expect(await cancellationResult.future, isTrue);
 
-        var retryCompleted = false;
-        final retryLoad =
-            JuceAudioEngine.loadMidiClip(
-              _clipId,
-              rowId,
-              instrumentId: 'mixroom.basic_synth',
-              instrumentName: 'Basic Synth',
-              notes: <Map<String, dynamic>>[_note(2, 72)],
-              params: const <String, double>{},
-              sourceTempoBpm: 120.0,
-              startSec: 0.0,
-              lengthSec: 2.0,
-              loadRequestId: _retryRequestId,
-            ).then((loaded) {
-              retryCompleted = true;
-              return loaded;
-            });
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final retryLoad = JuceAudioEngine.loadMidiClip(
+          _clipId,
+          rowId,
+          instrumentId: 'mixroom.basic_synth',
+          instrumentName: 'Basic Synth',
+          notes: <Map<String, dynamic>>[_note(2, 72)],
+          params: const <String, double>{},
+          sourceTempoBpm: 120.0,
+          startSec: 0.0,
+          lengthSec: 2.0,
+          loadRequestId: _retryRequestId,
+        );
         expect(
-          retryCompleted,
-          isFalse,
-          reason:
-              'Retry must remain queued behind the deliberately stalled load',
+          await retryLoad.timeout(const Duration(seconds: 5)),
+          isTrue,
+          reason: 'A stalled built-in preparation must not block its retry',
         );
 
         expect(
@@ -134,7 +135,6 @@ void main() {
         stallReleased = true;
 
         expect(await firstNativeLoad, isFalse);
-        expect(await retryLoad, isTrue);
 
         expect(
           await JuceAudioEngine.cancelMidiClipLoad(

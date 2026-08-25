@@ -220,6 +220,24 @@ static dispatch_queue_t MixroomMidiClipLoadQueue(void) {
     return queue;
 }
 
+static dispatch_queue_t MixroomBuiltInMidiClipPreparationQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attr =
+            dispatch_queue_attr_make_with_qos_class(
+                DISPATCH_QUEUE_CONCURRENT,
+                QOS_CLASS_USER_INITIATED,
+                0
+            );
+        queue = dispatch_queue_create(
+            "com.mixroom.juce_audio_engine.builtin_midi_prepare",
+            attr
+        );
+    });
+    return queue;
+}
+
 #if MIXROOM_ENABLE_TEST_HOOKS
 static NSCondition *MixroomMidiClipLoadTestCondition(void) {
     static NSCondition *condition;
@@ -233,6 +251,7 @@ static NSCondition *MixroomMidiClipLoadTestCondition(void) {
 static int64_t mixroomMidiClipLoadTestRequestId = 0;
 static BOOL mixroomMidiClipLoadTestWaiting = NO;
 static BOOL mixroomMidiClipLoadTestReleased = YES;
+static BOOL mixroomMidiClipLoadTestPreparationOnMainThread = NO;
 
 static BOOL MixroomConfigureMidiClipLoadTestStall(int64_t requestId) {
     if (requestId <= 0) {
@@ -247,6 +266,7 @@ static BOOL MixroomConfigureMidiClipLoadTestStall(int64_t requestId) {
     mixroomMidiClipLoadTestRequestId = requestId;
     mixroomMidiClipLoadTestWaiting = NO;
     mixroomMidiClipLoadTestReleased = NO;
+    mixroomMidiClipLoadTestPreparationOnMainThread = NO;
     [condition unlock];
     return YES;
 }
@@ -260,6 +280,7 @@ static void MixroomWaitForMidiClipLoadTestStall(int64_t requestId) {
         return;
     }
     mixroomMidiClipLoadTestWaiting = YES;
+    mixroomMidiClipLoadTestPreparationOnMainThread = [NSThread isMainThread];
     [condition broadcast];
     while (requestId == mixroomMidiClipLoadTestRequestId &&
            !mixroomMidiClipLoadTestReleased) {
@@ -292,6 +313,8 @@ static NSDictionary *MixroomMidiClipLoadTestState(void) {
         @"requestId": @(mixroomMidiClipLoadTestRequestId),
         @"waiting": @(mixroomMidiClipLoadTestWaiting),
         @"released": @(mixroomMidiClipLoadTestReleased),
+        @"preparationOnMainThread":
+            @(mixroomMidiClipLoadTestPreparationOnMainThread),
     };
     [condition unlock];
     return state;
@@ -6399,6 +6422,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     });
 }
 
++ (void)panicLiveMidiNotesForApplicationDeactivation {
+    [JuceBridge panicLiveMidiNotesForApplicationDeactivationObjC];
+}
+
 - (BOOL)hasActiveLogListener {
     return self.logSink != nil;
 }
@@ -6827,9 +6854,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
         int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         FlutterResult loadResult = [result copy];
-        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+        const BOOL builtInInstrument =
+            [JuceBridge isBuiltInMidiInstrumentObjC:instrumentId];
+        dispatch_queue_t loadQueue = builtInInstrument
+            ? MixroomBuiltInMidiClipPreparationQueue()
+            : MixroomMidiClipLoadQueue();
+        dispatch_async(loadQueue, ^{
 #if MIXROOM_ENABLE_TEST_HOOKS
-            MixroomWaitForMidiClipLoadTestStall(loadRequestId);
+            if (builtInInstrument) {
+                MixroomWaitForMidiClipLoadTestStall(loadRequestId);
+            }
 #endif
             if (self.applicationTerminationStarted) {
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -8105,6 +8139,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 void JuceAudioEnginePluginShutdownForApplicationTermination(void) {
     [JuceAudioEnginePlugin shutdownForApplicationTermination];
+}
+
+void JuceAudioEnginePluginPanicLiveMidiNotesForApplicationDeactivation(void) {
+    [JuceAudioEnginePlugin panicLiveMidiNotesForApplicationDeactivation];
 }
 
 @interface JucePluginEventStreamHandler ()

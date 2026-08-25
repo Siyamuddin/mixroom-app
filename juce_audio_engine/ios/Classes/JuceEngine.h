@@ -1961,6 +1961,12 @@ struct TimelineMidiNote
     double velocity = 0.8;
 };
 
+enum class LiveMidiPanicMode : std::uint8_t
+{
+    liveOnly = 1,
+    full = 3,
+};
+
 class TimelineClipProcessorBase
 {
 public:
@@ -1975,6 +1981,7 @@ public:
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
     virtual void primeForOfflineRender() = 0;
+    virtual void requestLiveMidiPanic(LiveMidiPanicMode) noexcept {}
 };
 
 inline float mixroomUiGainToLinear(float gainUi)
@@ -2935,6 +2942,13 @@ public:
         return enqueueLiveMidiEventLockFree(event);
     }
 
+    void requestLiveMidiPanic(LiveMidiPanicMode mode) noexcept override
+    {
+        liveMidiPanicRequest.fetch_or(
+            static_cast<std::uint8_t>(mode),
+            std::memory_order_release);
+    }
+
     bool prepareLiveMidiSample(int pitch,
                                float velocity,
                                PreparedLiveSample &preparedSample)
@@ -3016,6 +3030,7 @@ public:
         {
         }
 
+        liveMidiPanicRequest.store(0, std::memory_order_relaxed);
         activeLiveNotes.clear();
         activeTimelineNotes.reset();
         cachedStateRaw = nullptr;
@@ -3042,6 +3057,7 @@ public:
     {
         renderGeneration.fetch_add(1, std::memory_order_acq_rel);
         buffer.clear();
+        applyPendingLiveMidiPanic();
 
         if (muted.load(std::memory_order_relaxed))
             return;
@@ -5573,6 +5589,25 @@ private:
                             tempoPlaybackRatio.load(std::memory_order_relaxed));
     }
 
+    void applyPendingLiveMidiPanic() noexcept
+    {
+        const auto request = liveMidiPanicRequest.exchange(
+            0, std::memory_order_acq_rel);
+        if (request == 0)
+            return;
+
+        LiveMidiEvent dropped;
+        while (dequeueLiveMidiEventLockFree(dropped))
+        {
+        }
+        activeLiveNotes.clear();
+
+        const auto fullMask =
+            static_cast<std::uint8_t>(LiveMidiPanicMode::full);
+        if ((request & fullMask) == fullMask)
+            activeTimelineNotes.reset();
+    }
+
     void applyPendingLiveMidiEvents()
     {
         std::size_t pendingCount = 0;
@@ -5829,6 +5864,7 @@ private:
     std::atomic<std::size_t> liveMidiEnqueuePosition{0};
     std::atomic<std::size_t> liveMidiDequeuePosition{0};
     std::vector<ActiveLiveNote> activeLiveNotes;
+    std::atomic<std::uint8_t> liveMidiPanicRequest{0};
     std::atomic<int> liveSamplePrepareSequenceCounter{0};
     std::bitset<kMaxTimelineMidiNotes> activeTimelineNotes;
     std::vector<size_t> blockNoteIndices;
@@ -5897,6 +5933,10 @@ public:
     };
 
     static JuceEngine &get();
+    static bool isBuiltInMidiInstrumentIdentifier(const juce::String &instrumentId);
+
+    struct PreparedMidiClipLoad;
+    using PreparedMidiClipLoadPtr = std::shared_ptr<PreparedMidiClipLoad>;
 
     void initialiseEngine(const juce::String &v2OutputDeviceName = {},
                           double v2OutputSampleRate = 0.0,
@@ -5976,6 +6016,7 @@ public:
     void insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback);
     void shutdownEngine();
     void shutdownForApplicationTermination();
+    void panicLiveMidiNotesForApplicationDeactivation();
 
     // Rows
     int addRow(const juce::String &name, int iconId, int preferredRowId = -1);
@@ -6005,6 +6046,20 @@ public:
                       double lengthSec,
                       double inFileOffsetSec = 0.0,
                       std::int64_t loadRequestId = 0);
+    PreparedMidiClipLoadPtr prepareBuiltInMidiClipLoad(
+        int clipId,
+        int rowId,
+        const juce::String &instrumentId,
+        const juce::String &instrumentName,
+        const juce::Array<TimelineMidiNote> &notes,
+        const juce::NamedValueSet &params,
+        double sourceTempoBpm,
+        double startSec,
+        double lengthSec,
+        double inFileOffsetSec,
+        std::int64_t loadRequestId);
+    bool installPreparedMidiClipLoad(
+        const PreparedMidiClipLoadPtr &preparedLoad);
     bool cancelMidiClipLoad(int clipId, std::int64_t loadRequestId);
     bool prepareMidiClipSampleAssets(const juce::String &instrumentId,
                                      const juce::String &instrumentName,
@@ -6356,6 +6411,11 @@ private:
     void reapplyClipProcessorStateLocked();
     void primeClipProcessorsForOfflineRenderLocked();
     std::shared_ptr<DecodedClipAudioAsset> getOrDecodeClipAudioAsset(const juce::File &file);
+    bool isMidiClipLoadRequestCancelled(int clipId,
+                                        std::int64_t loadRequestId);
+    void requestLiveMidiPanicForClip(int clipId,
+                                     LiveMidiPanicMode mode) noexcept;
+    void requestLiveMidiPanicForAll(LiveMidiPanicMode mode) noexcept;
     void armOutputSafetyForCurrentRoute() noexcept;
     void armOutputSafetyForCurrentRouteLocked() noexcept;
     void ensureBusGraphInitialised(bool commitImmediately = true); // rows + master
@@ -6391,6 +6451,7 @@ private:
     bool engineInitialized = false;
     std::atomic<bool> applicationTerminationStarted{false};
     std::mutex engineLifecycleMutex;
+    std::atomic<std::uint64_t> engineLifecycleGeneration{1};
     bool formatsRegistered = false; // will only be flipped once to true
     AudioRouteImplementation audioRouteImplementation =
         AudioRouteImplementation::none;

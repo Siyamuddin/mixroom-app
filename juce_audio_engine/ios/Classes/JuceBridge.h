@@ -62,6 +62,7 @@
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
 + (void)shutdownForApplicationTerminationObjC;
++ (void)panicLiveMidiNotesForApplicationDeactivationObjC;
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath;
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
@@ -152,6 +153,7 @@
 + (void)beginGraphMutationBatchObjC;
 + (void)endGraphMutationBatchObjC;
 + (BOOL)supportsLiveMidiClipPlaybackObjC;
++ (BOOL)isBuiltInMidiInstrumentObjC:(NSString *)instrumentId;
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
             instrumentId:(NSString *)instrumentId

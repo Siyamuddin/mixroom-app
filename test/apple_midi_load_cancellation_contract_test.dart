@@ -25,9 +25,85 @@ void main() {
     expect(bridgeHeader, contains('cancelMidiClipLoadObjC'));
     expect(bridge, contains('cancelMidiClipLoad('));
     expect(engineHeader, contains('midiLoadRequestId'));
-    expect(engine, contains('requestWasCancelled()'));
+    expect(engine, contains('isMidiClipLoadRequestCancelled('));
     expect(engine, contains('clip.midiLoadRequestId != loadRequestId'));
     expect(engine, contains('return unloadClip(clipId);'));
+  });
+
+  test('built-in MIDI preparation stays off the Apple message thread', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final bridge = File(
+      'juce_audio_engine/ios/Classes/JuceBridge.mm',
+    ).readAsStringSync();
+    final engine = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.cpp',
+    ).readAsStringSync();
+
+    expect(plugin, contains('DISPATCH_QUEUE_CONCURRENT'));
+    expect(plugin, contains('MixroomBuiltInMidiClipPreparationQueue()'));
+    expect(plugin, contains('MixroomMidiClipLoadQueue()'));
+    expect(plugin, contains('preparationOnMainThread'));
+
+    expect(engine, contains('id.startsWith("mixroom.")'));
+    expect(engine, contains('id.startsWith("sfz.")'));
+    expect(engine, contains('id.startsWith("sfz_asset:")'));
+    expect(engine, contains('prepareBuiltInMidiClipLoad('));
+    expect(
+      engine,
+      contains('graphBufferFramesAtomic.load(std::memory_order_acquire)'),
+    );
+
+    final builtInBranch = bridge.indexOf(
+      'if (JuceEngine::isBuiltInMidiInstrumentIdentifier(iid))',
+    );
+    final prepare = bridge.indexOf(
+      'prepareBuiltInMidiClipLoad(',
+      builtInBranch,
+    );
+    final callSync = bridge.indexOf(
+      'mm->callSync(installPreparedMidiClip)',
+      prepare,
+    );
+    final install = bridge.indexOf('installPreparedMidiClipLoad(', prepare);
+    expect(builtInBranch, greaterThanOrEqualTo(0));
+    expect(prepare, greaterThan(builtInBranch));
+    expect(install, greaterThan(prepare));
+    expect(callSync, greaterThan(install));
+  });
+
+  test('external and unknown MIDI identifiers retain the legacy load path', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final engine = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.cpp',
+    ).readAsStringSync();
+    final bridge = File(
+      'juce_audio_engine/ios/Classes/JuceBridge.mm',
+    ).readAsStringSync();
+
+    final classifierStart = engine.indexOf(
+      'bool JuceEngine::isBuiltInMidiInstrumentIdentifier(',
+    );
+    final classifierEnd = engine.indexOf('\n}', classifierStart);
+    expect(classifierStart, greaterThanOrEqualTo(0));
+    expect(classifierEnd, greaterThan(classifierStart));
+    final classifier = engine.substring(classifierStart, classifierEnd);
+    expect(classifier, isNot(contains('audiounit')));
+    expect(classifier, isNot(contains('.vst3')));
+
+    expect(
+      plugin,
+      contains(
+        'builtInInstrument\n'
+        '            ? MixroomBuiltInMidiClipPreparationQueue()\n'
+        '            : MixroomMidiClipLoadQueue()',
+      ),
+    );
+    expect(bridge, contains('mm->callSync(installMidiClip)'));
+    expect(bridge, contains('JuceEngine::get().loadMidiClip('));
   });
 
   test('native MIDI stall controls compile only in debug configurations', () {

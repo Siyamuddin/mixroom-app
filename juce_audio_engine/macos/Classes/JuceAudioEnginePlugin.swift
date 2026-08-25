@@ -9,6 +9,9 @@ private func JuceAudioEnginePluginRegisterWithRegistrar(
 @_silgen_name("JuceAudioEnginePluginShutdownForApplicationTermination")
 private func JuceAudioEnginePluginShutdownForApplicationTermination()
 
+@_silgen_name("JuceAudioEnginePluginPanicLiveMidiNotesForApplicationDeactivation")
+private func JuceAudioEnginePluginPanicLiveMidiNotesForApplicationDeactivation()
+
 public final class JuceAudioEnginePluginSwift: NSObject, FlutterPlugin {
   public static func register(with registrar: FlutterPluginRegistrar) {
     JuceAudioEnginePluginRegisterWithRegistrar(registrar)
@@ -16,5 +19,9 @@ public final class JuceAudioEnginePluginSwift: NSObject, FlutterPlugin {
 
   public static func shutdownForApplicationTermination() {
     JuceAudioEnginePluginShutdownForApplicationTermination()
+  }
+
+  public static func panicLiveMidiNotesForApplicationDeactivation() {
+    JuceAudioEnginePluginPanicLiveMidiNotesForApplicationDeactivation()
   }
 }

@@ -22,6 +22,10 @@ void main() {
       appDelegate,
       contains('JuceAudioEnginePluginSwift.shutdownForApplicationTermination'),
     );
+    expect(
+      appDelegate,
+      isNot(contains('super.applicationWillTerminate(notification)')),
+    );
     expect(swiftPlugin, contains('shutdownForApplicationTermination'));
     expect(nativePlugin, contains('dispatch_once(&onceToken'));
     expect(nativePlugin, contains('shutdownForApplicationTerminationObjC'));

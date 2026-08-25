@@ -23,7 +23,11 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
   @objc(applicationWillTerminate:)
   dynamic override func applicationWillTerminate(_ notification: Notification) {
     JuceAudioEnginePluginSwift.shutdownForApplicationTermination()
-    super.applicationWillTerminate(notification)
+  }
+
+  @objc(applicationDidResignActive:)
+  dynamic override func applicationDidResignActive(_ notification: Notification) {
+    JuceAudioEnginePluginSwift.panicLiveMidiNotesForApplicationDeactivation()
   }
 
   @objc(application:openFiles:)
