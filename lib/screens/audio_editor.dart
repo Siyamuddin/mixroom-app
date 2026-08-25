@@ -21,6 +21,7 @@ import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
 import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
+import 'package:mixroom/helpers/timed_native_operation.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
 import 'package:mixroom/helpers/automation_target_labels.dart';
@@ -26260,7 +26261,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentId,
       instrumentParams,
     );
-    final loaded = await _runProjectPluginRestoreStep<bool>(
+    final loaded = await runTimedNativeOperation<bool>(
       'MIDI instrument load $liveInstrumentId clip=$engineClipId',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.loadMidiClip(
@@ -26447,7 +26448,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
 
-    final applied = await _runProjectPluginRestoreStep<bool>(
+    final applied = await runTimedNativeOperation<bool>(
       'MIDI instrument state ${clip.instrumentId} clip=${clip.engineClipId}',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.setMidiClipPluginState(
@@ -92546,32 +92547,6 @@ class _EffectRestoreResult {
 const Duration _kProjectPluginInstanceRestoreTimeout = Duration(seconds: 18);
 const Duration _kProjectPluginStateRestoreTimeout = Duration(seconds: 12);
 
-Future<T?> _runProjectPluginRestoreStep<T>(
-  String label,
-  Future<T> Function() task, {
-  required Duration timeout,
-}) async {
-  final sw = Stopwatch()..start();
-  debugPrint('[PluginRestore] start $label');
-  try {
-    final result = await task().timeout(timeout);
-    debugPrint(
-      '[PluginRestore] done $label in ${sw.elapsedMilliseconds}ms result=$result',
-    );
-    return result;
-  } on TimeoutException {
-    debugPrint(
-      '[PluginRestore] timeout $label after ${sw.elapsedMilliseconds}ms',
-    );
-    return null;
-  } catch (e, st) {
-    debugPrint(
-      '[PluginRestore] failed $label after ${sw.elapsedMilliseconds}ms: $e\n$st',
-    );
-    return null;
-  }
-}
-
 Future<void> _waitUntilAsync(
   Future<bool> Function() predicate, {
   int maxAttempts = 30,
@@ -92709,7 +92684,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
         continue;
       }
       final insertAccepted =
-          await _runProjectPluginRestoreStep<bool>(
+          await runTimedNativeOperation<bool>(
             'Row ${snap.row + 1} FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertTrackEffect(snap.row, fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
@@ -92746,7 +92721,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
       var stateApplied = false;
       if (expectsState) {
         stateApplied =
-            await _runProjectPluginRestoreStep<bool>(
+            await runTimedNativeOperation<bool>(
               'Row ${snap.row + 1} FX state ${_effectSnapshotName(fx)}',
               () => JuceAudioEngine.setTrackEffectState(
                 snap.row,
@@ -92861,7 +92836,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
         continue;
       }
       final insertAccepted =
-          await _runProjectPluginRestoreStep<bool>(
+          await runTimedNativeOperation<bool>(
             'Master FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertMasterEffect(fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
@@ -92898,7 +92873,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
       var stateApplied = false;
       if (expectsState) {
         stateApplied =
-            await _runProjectPluginRestoreStep<bool>(
+            await runTimedNativeOperation<bool>(
               'Master FX state ${_effectSnapshotName(fx)}',
               () => JuceAudioEngine.setMasterEffectState(
                 insertedIndex,
