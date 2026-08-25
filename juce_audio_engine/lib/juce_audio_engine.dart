@@ -1,5 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+import 'audio_route_coordinator_v2.dart';
+import 'audio_route_snapshot_provider_v2.dart';
+import 'audio_route_v2.dart';
 
 class JuceEngineCapabilities {
   final bool externalPluginHosting;
@@ -40,6 +46,65 @@ class JuceEngineCapabilities {
       'supportedPluginFormats': supportedPluginFormats,
       'nativePluginEditor': nativePluginEditor,
     };
+  }
+}
+
+class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
+  const MethodChannelAudioRouteAdapterV2({this.platformOverride});
+
+  final TargetPlatform? platformOverride;
+
+  @override
+  Stream<AudioRouteChangeEventV2> get events =>
+      JuceAudioEngine.audioRouteChangeEventsV2;
+
+  @override
+  Future<AudioRouteSnapshotV2> startMonitoring() {
+    return JuceAudioEngine.startAudioRouteMonitoringV2(
+      platformOverride: platformOverride,
+    );
+  }
+
+  @override
+  Future<AudioRouteTransitionResultV2> applyPlaybackRoute(
+    int generation, {
+    String? outputDeviceName,
+    String? inputDeviceName,
+    bool updateInputPreference = false,
+    int? preferredSampleRateHz,
+    int? preferredBufferFrames,
+    bool updateHardwarePreferences = false,
+  }) {
+    return JuceAudioEngine.applyAudioRouteConfigurationV2(
+      generation,
+      outputDeviceName: outputDeviceName,
+      inputDeviceName: inputDeviceName,
+      updateInputPreference: updateInputPreference,
+      preferredSampleRateHz: preferredSampleRateHz,
+      preferredBufferFrames: preferredBufferFrames,
+      updateHardwarePreferences: updateHardwarePreferences,
+      platformOverride: platformOverride,
+    );
+  }
+
+  @override
+  Future<AudioRouteTransitionResultV2> applyIntent(
+      AudioRouteIntentV2 intent, int generation,
+      {AudioRouteIntentOperationV2 operation =
+          AudioRouteIntentOperationV2.standard}) {
+    return JuceAudioEngine.setAudioRouteIntentV2(
+      intent,
+      generation: generation,
+      operation: operation,
+      platformOverride: platformOverride,
+    );
+  }
+
+  @override
+  Future<void> stopMonitoring() {
+    return JuceAudioEngine.stopAudioRouteMonitoringV2(
+      platformOverride: platformOverride,
+    );
   }
 }
 
@@ -149,6 +214,53 @@ class JuceEngineDiagnostics {
   }
 }
 
+class RecordingCaptureResult {
+  const RecordingCaptureResult({
+    required this.success,
+    required this.diagnosticCode,
+    required this.attemptedSamples,
+    required this.acceptedSamples,
+    required this.droppedSamples,
+    required this.invalidBlockCount,
+    required this.actualSampleRate,
+    required this.channelCount,
+  });
+
+  final bool success;
+  final String diagnosticCode;
+  final int attemptedSamples;
+  final int acceptedSamples;
+  final int droppedSamples;
+  final int invalidBlockCount;
+  final double actualSampleRate;
+  final int channelCount;
+
+  factory RecordingCaptureResult.fromMap(Map<String, dynamic> map) {
+    return RecordingCaptureResult(
+      success: map['success'] == true,
+      diagnosticCode:
+          map['diagnosticCode']?.toString() ?? 'writer_finalize_failed',
+      attemptedSamples: (map['attemptedSamples'] as num?)?.toInt() ?? 0,
+      acceptedSamples: (map['acceptedSamples'] as num?)?.toInt() ?? 0,
+      droppedSamples: (map['droppedSamples'] as num?)?.toInt() ?? 0,
+      invalidBlockCount: (map['invalidBlockCount'] as num?)?.toInt() ?? 0,
+      actualSampleRate: (map['actualSampleRate'] as num?)?.toDouble() ?? 0.0,
+      channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  static const failed = RecordingCaptureResult(
+    success: false,
+    diagnosticCode: 'writer_finalize_failed',
+    attemptedSamples: 0,
+    acceptedSamples: 0,
+    droppedSamples: 0,
+    invalidBlockCount: 0,
+    actualSampleRate: 0.0,
+    channelCount: 0,
+  );
+}
+
 enum AudioRouteKind {
   unknown,
   speaker,
@@ -242,39 +354,26 @@ class AudioInputDeviceInfo {
 class JuceAudioEngine {
   static const _ch = MethodChannel('juce_audio_engine');
   static const _eventCh = EventChannel('juce_audio_engine/events');
+  static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
+      MethodChannelAudioRouteSnapshotProviderV2();
+  static AudioRouteSnapshotV2? _v2StartupSnapshot;
+  static bool _v2BluetoothCommunicationQualityReduced = false;
 
-  static Stream<Map<String, dynamic>> get _events => _eventCh
+  static bool get v2BluetoothCommunicationQualityReduced =>
+      _v2BluetoothCommunicationQualityReduced;
+  static Future<void>? _shutdownInFlight;
+
+  static final Stream<Map<String, dynamic>> _events = _eventCh
       .receiveBroadcastStream()
       .cast<Map<dynamic, dynamic>>()
-      .map((e) => Map<String, dynamic>.from(e));
+      .map((e) => Map<String, dynamic>.from(e))
+      .asBroadcastStream();
 
   static Stream<Map<String, dynamic>> get eventsStream => _events;
 
-  static void initialiseEventListeners() {
-    try {
-      _events.listen(
-        (event) {
-          if (event['event'] == 'pluginLoaded') {
-            final track = event['track'] as int;
-            final path = event['path'] as String;
-            final success = event['success'] as bool;
-            debugPrint("Plugin loaded: $success for $path on track $track");
-          }
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          if (error is MissingPluginException || error is PlatformException) {
-            _logError('initialiseEventListeners', error);
-            return;
-          }
-          _logError('initialiseEventListeners', error);
-        },
-      );
-    } on MissingPluginException {
-      return;
-    } on PlatformException catch (e) {
-      _logError('initialiseEventListeners', e);
-    }
-  }
+  static Stream<AudioRouteChangeEventV2> get audioRouteChangeEventsV2 => _events
+      .where((event) => event['event'] == 'audioRouteChangedV2')
+      .map(AudioRouteChangeEventV2.fromMap);
 
   // -------------------------------
   // Helpers
@@ -298,19 +397,397 @@ class JuceAudioEngine {
   // -------------------------------
   // Core controls
   // -------------------------------
-  static Future<void> initialise() async {
+  static Future<bool> initialise() async {
+    final shutdown = _shutdownInFlight;
+    if (shutdown != null) await shutdown;
     try {
       await _ch.invokeMethod('initialise');
+      return true;
+    } on MissingPluginException catch (e) {
+      _logError('initialise', e);
+      return false;
     } on PlatformException catch (e) {
       _logError('initialise', e);
+      return false;
     }
   }
 
-  static Future<void> shutdown() async {
+  static Future<bool> initialiseForImplementation(
+    BluetoothImplementationV2 implementation,
+  ) async {
+    if (implementation == BluetoothImplementationV2.v2) {
+      final result = await initialisePlaybackV2();
+      _v2StartupSnapshot = result.success ? result.snapshot : null;
+      _v2BluetoothCommunicationQualityReduced =
+          result.success && result.bluetoothCommunicationQualityReduced;
+      return result.success;
+    }
+    return initialise();
+  }
+
+  static Future<AudioPlaybackStartupResultV2> initialisePlaybackV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    final shutdown = _shutdownInFlight;
+    if (shutdown != null) await shutdown;
+    _v2BluetoothCommunicationQualityReduced = false;
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      _v2StartupSnapshot = null;
+      return _unavailablePlaybackStartupV2();
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'initialisePlaybackV2',
+      );
+      if (raw == null) {
+        _v2StartupSnapshot = null;
+        return _unavailablePlaybackStartupV2();
+      }
+      final result = AudioPlaybackStartupResultV2.fromMap(
+        Map<String, dynamic>.from(raw),
+      );
+      _v2StartupSnapshot = result.success ? result.snapshot : null;
+      _v2BluetoothCommunicationQualityReduced =
+          result.success && result.bluetoothCommunicationQualityReduced;
+      return result;
+    } on MissingPluginException {
+      _v2StartupSnapshot = null;
+      _v2BluetoothCommunicationQualityReduced = false;
+      return _unavailablePlaybackStartupV2();
+    } on PlatformException catch (error) {
+      _v2StartupSnapshot = null;
+      return _unavailablePlaybackStartupV2(
+        error.code.isEmpty ? 'actual_state_unavailable' : error.code,
+      );
+    } on Object {
+      _v2StartupSnapshot = null;
+      return _unavailablePlaybackStartupV2();
+    }
+  }
+
+  static AudioPlaybackStartupResultV2 _unavailablePlaybackStartupV2([
+    String diagnosticCode = 'actual_state_unavailable',
+  ]) {
+    return AudioPlaybackStartupResultV2(
+      success: false,
+      diagnosticCode: diagnosticCode,
+      snapshot: AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+        'captureConsistency': 'unavailable',
+        'unavailableReasons': const <String, String>{
+          'startup': 'nativeV2PlaybackUnavailable',
+        },
+      }),
+    );
+  }
+
+  static Future<AudioRouteSnapshotV2> startAudioRouteMonitoringV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      return _unavailableRouteSnapshotV2('platformMonitoringUnavailable');
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'startAudioRouteMonitoringV2',
+      );
+      if (raw == null) {
+        return _unavailableRouteSnapshotV2('nativeMonitoringUnavailable');
+      }
+      return AudioRouteSnapshotV2.fromMap(Map<String, dynamic>.from(raw));
+    } on MissingPluginException {
+      return _unavailableRouteSnapshotV2('nativeMonitoringUnavailable');
+    } on PlatformException catch (error) {
+      return _unavailableRouteSnapshotV2(
+        error.code.isEmpty ? 'nativeMonitoringUnavailable' : error.code,
+      );
+    }
+  }
+
+  static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
+    int generation, {
+    String? outputDeviceName,
+    String? inputDeviceName,
+    bool updateInputPreference = false,
+    int? preferredSampleRateHz,
+    int? preferredBufferFrames,
+    bool updateHardwarePreferences = false,
+    TargetPlatform? platformOverride,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      return _unavailableRouteTransitionV2(generation);
+    }
+    try {
+      final arguments = <String, Object>{
+        'generation': generation,
+        'intent': 'playbackOnly',
+        'desiredInputChannels': 0,
+        'followSystemOutput': outputDeviceName?.trim().isNotEmpty != true,
+        'allowBuiltInFallback': true,
+        if (outputDeviceName?.trim().isNotEmpty == true)
+          'outputDeviceName': outputDeviceName!.trim(),
+        if (updateInputPreference) 'updateInputPreference': true,
+        if (updateInputPreference)
+          'followSystemInput': inputDeviceName?.trim().isNotEmpty != true,
+        if (updateInputPreference && inputDeviceName?.trim().isNotEmpty == true)
+          'inputDeviceName': inputDeviceName!.trim(),
+        if (updateHardwarePreferences) 'updateHardwarePreferences': true,
+        if (updateHardwarePreferences && preferredSampleRateHz != null)
+          'preferredSampleRateHz': preferredSampleRateHz,
+        if (updateHardwarePreferences && preferredBufferFrames != null)
+          'preferredBufferFrames': preferredBufferFrames,
+      };
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'applyAudioRouteConfigurationV2',
+        arguments,
+      );
+      if (raw == null) return _unavailableRouteTransitionV2(generation);
+      return AudioRouteTransitionResultV2.fromMap(
+        Map<String, dynamic>.from(raw),
+      );
+    } on MissingPluginException {
+      return _unavailableRouteTransitionV2(generation);
+    } on PlatformException catch (error) {
+      return _unavailableRouteTransitionV2(
+        generation,
+        error.code.isEmpty ? 'actual_state_unavailable' : error.code,
+      );
+    }
+  }
+
+  static Future<AudioRouteTransitionResultV2> setAudioRouteIntentV2(
+    AudioRouteIntentV2 intent, {
+    required int generation,
+    AudioRouteIntentOperationV2 operation =
+        AudioRouteIntentOperationV2.standard,
+    TargetPlatform? platformOverride,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      return _unavailableRouteTransitionV2(
+        generation,
+        'recording_route_unsupported',
+      );
+    }
+    try {
+      final raw = await _ch.invokeMethod<Map<dynamic, dynamic>>(
+        'setAudioRouteIntentV2',
+        <String, Object>{
+          'generation': generation,
+          'intent': intent.name,
+          if (operation != AudioRouteIntentOperationV2.standard)
+            'intentOperation': operation.name,
+        },
+      );
+      if (raw == null) return _unavailableRouteTransitionV2(generation);
+      return AudioRouteTransitionResultV2.fromMap(
+        Map<String, dynamic>.from(raw),
+      );
+    } on MissingPluginException {
+      return _unavailableRouteTransitionV2(generation);
+    } on PlatformException catch (error) {
+      return _unavailableRouteTransitionV2(
+        generation,
+        error.code.isEmpty ? 'actual_state_unavailable' : error.code,
+      );
+    }
+  }
+
+  static Future<void> stopAudioRouteMonitoringV2({
+    TargetPlatform? platformOverride,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      return;
+    }
+    try {
+      await _ch.invokeMethod<void>('stopAudioRouteMonitoringV2');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (error) {
+      _logError('stopAudioRouteMonitoringV2', error);
+    }
+  }
+
+  static Future<void> abortRecordingV2({
+    TargetPlatform? platformOverride,
+    bool restorePlayback = true,
+    bool cancelOnly = false,
+  }) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (kIsWeb ||
+        (platform != TargetPlatform.macOS &&
+            platform != TargetPlatform.android &&
+            platform != TargetPlatform.iOS)) {
+      return;
+    }
+    try {
+      await _ch.invokeMethod<void>('abortRecordingV2', <String, dynamic>{
+        'restorePlayback': restorePlayback,
+        'cancelOnly': cancelOnly,
+      });
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (error) {
+      _logError('abortRecordingV2', error);
+    }
+  }
+
+  static AudioRouteSnapshotV2 _unavailableRouteSnapshotV2(String reason) {
+    return AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'captureConsistency': 'unavailable',
+      'unavailableReasons': <String, String>{'coordinator': reason},
+    });
+  }
+
+  static AudioRouteTransitionResultV2 _unavailableRouteTransitionV2(
+    int generation, [
+    String diagnosticCode = 'actual_state_unavailable',
+  ]) {
+    return AudioRouteTransitionResultV2(
+      status: AudioRouteTransitionStatusV2.failure,
+      generation: generation,
+      transitionId: 0,
+      diagnosticCode: diagnosticCode,
+      elapsedMs: 0,
+      transportWasPlaying: false,
+      snapshot: _unavailableRouteSnapshotV2('nativeApplyUnavailable'),
+    );
+  }
+
+  static void acceptVerifiedAudioRouteTransitionV2(
+    AudioRouteTransitionResultV2 result,
+  ) {
+    if (result.succeeded) {
+      _v2StartupSnapshot = result.snapshot;
+      _v2BluetoothCommunicationQualityReduced =
+          result.bluetoothCommunicationQualityReduced;
+    }
+  }
+
+  static Future<bool> validatePlaybackV2(
+      {TargetPlatform? platformOverride}) async {
+    final platform = platformOverride ?? defaultTargetPlatform;
+    if (!kIsWeb && platform == TargetPlatform.android) {
+      try {
+        final code = await _ch.invokeMethod<String>('validatePlaybackV2');
+        return code == 'ok';
+      } on MissingPluginException {
+        return false;
+      } on PlatformException catch (error) {
+        _logError('validatePlaybackV2', error);
+        return false;
+      }
+    }
+    final startup = _v2StartupSnapshot;
+    if (startup == null || startup.outputs.length != 1) return false;
+    final current = await getAudioRouteSnapshotV2();
+    final expectedInputChannels =
+        startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
+    if (current.implementation != BluetoothImplementationV2.v2 ||
+        current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
+        current.juce.deviceOpen != true ||
+        (platform == TargetPlatform.iOS &&
+            current.juce.audioCallbackAttached != true) ||
+        (platform == TargetPlatform.iOS &&
+            (current.session.category !=
+                    (expectedInputChannels == 0
+                        ? 'AVAudioSessionCategoryPlayback'
+                        : 'AVAudioSessionCategoryPlayAndRecord') ||
+                current.session.mode != 'AVAudioSessionModeDefault')) ||
+        (platform == TargetPlatform.iOS &&
+            current.session.inputChannelCount != expectedInputChannels) ||
+        current.juce.activeInputChannels != expectedInputChannels ||
+        (current.juce.activeOutputChannels ?? 0) <= 0 ||
+        (current.juce.sampleRateHz ?? 0) <= 0 ||
+        (current.juce.bufferFrames ?? 0) <= 0 ||
+        current.outputs.length != 1) {
+      return false;
+    }
+    if ((platform == TargetPlatform.macOS || platform == TargetPlatform.iOS) &&
+        expectedInputChannels == 1) {
+      if (startup.inputs.length != 1 ||
+          current.intent == AudioRouteIntentV2.playbackOnly ||
+          current.inputs.length != 1 ||
+          current.inputs.single.uid.isEmpty ||
+          startup.inputs.single.uid.isEmpty ||
+          startup.inputs.single.uid != current.inputs.single.uid ||
+          (platform == TargetPlatform.iOS
+              ? startup.inputs.single.nativePortType !=
+                      current.inputs.single.nativePortType ||
+                  startup.inputs.single.normalizedKind !=
+                      current.inputs.single.normalizedKind
+              : current.inputs.single.normalizedKind !=
+                  AudioRouteKindV2.builtIn)) {
+        return false;
+      }
+    }
+    final expected = startup.outputs.single;
+    final actual = current.outputs.single;
+    if (platform == TargetPlatform.iOS) {
+      return expected.uid.isNotEmpty &&
+          actual.uid.isNotEmpty &&
+          expected.nativePortType.isNotEmpty &&
+          actual.nativePortType.isNotEmpty &&
+          expected.uid == actual.uid &&
+          expected.nativePortType == actual.nativePortType &&
+          expected.normalizedKind == actual.normalizedKind;
+    }
+    if (expected.uid.isNotEmpty && actual.uid.isNotEmpty) {
+      return expected.uid == actual.uid;
+    }
+    return expected.name.isNotEmpty && expected.name == actual.name;
+  }
+
+  static Future<void> shutdown() {
+    final existing = _shutdownInFlight;
+    if (existing != null) return existing;
+    final shutdown = _performShutdown();
+    _shutdownInFlight = shutdown;
+    unawaited(
+      shutdown.then<void>(
+        (_) {
+          if (identical(_shutdownInFlight, shutdown)) {
+            _shutdownInFlight = null;
+          }
+        },
+        onError: (Object _, StackTrace __) {
+          if (identical(_shutdownInFlight, shutdown)) {
+            _shutdownInFlight = null;
+          }
+        },
+      ),
+    );
+    return shutdown;
+  }
+
+  static Future<void> _performShutdown() async {
     try {
       await _ch.invokeMethod('shutdown');
+    } on MissingPluginException catch (e) {
+      _logError('shutdown', e);
     } on PlatformException catch (e) {
       _logError('shutdown', e);
+    } finally {
+      _v2StartupSnapshot = null;
+      _v2BluetoothCommunicationQualityReduced = false;
     }
   }
 
@@ -356,7 +833,7 @@ class JuceAudioEngine {
   static Future<bool> play() async {
     try {
       final res = await _ch.invokeMethod<bool>('play');
-      return res ?? true;
+      return res ?? false;
     } on PlatformException catch (e) {
       _logError('play', e);
       return false;
@@ -2753,6 +3230,22 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<bool> preparePlaybackGraph({
+    String reason = 'dart',
+  }) async {
+    try {
+      final res = await _ch.invokeMethod<bool>('preparePlaybackGraph', {
+        'reason': reason,
+      });
+      return res ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      _logError('preparePlaybackGraph', e);
+      return false;
+    }
+  }
+
   static Future<void> refreshAudioRoute({
     String reason = 'dart',
   }) async {
@@ -2807,6 +3300,10 @@ class JuceAudioEngine {
       _logError('getAudioRouteInfo', e);
       return AudioRouteInfo.unknown;
     }
+  }
+
+  static Future<AudioRouteSnapshotV2> getAudioRouteSnapshotV2() {
+    return _audioRouteSnapshotProviderV2.readSnapshot();
   }
 
   static Future<void> setLiveInputMonitoringEnabled(bool enabled) async {
@@ -2930,21 +3427,34 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<void> stopRecording() async {
+  static Future<RecordingCaptureResult> stopRecording() async {
     try {
-      await _ch.invokeMethod('stopRecording');
+      final raw = await _ch.invokeMethod<Object?>('stopRecording');
+      if (raw is Map) {
+        return RecordingCaptureResult.fromMap(Map<String, dynamic>.from(raw));
+      }
+      return RecordingCaptureResult.failed;
     } on PlatformException catch (e) {
       _logError('stopRecording', e);
+      return RecordingCaptureResult.failed;
     }
   }
 
-  static Future<void> stopRecordingWithoutPlaybackRestore() async {
+  static Future<RecordingCaptureResult>
+      stopRecordingWithoutPlaybackRestore() async {
     try {
-      await _ch.invokeMethod('stopRecordingWithoutPlaybackRestore');
+      final raw = await _ch.invokeMethod<Object?>(
+        'stopRecordingWithoutPlaybackRestore',
+      );
+      if (raw is Map) {
+        return RecordingCaptureResult.fromMap(Map<String, dynamic>.from(raw));
+      }
+      return RecordingCaptureResult.failed;
     } on MissingPluginException {
-      await stopRecording();
+      return stopRecording();
     } on PlatformException catch (e) {
       _logError('stopRecordingWithoutPlaybackRestore', e);
+      return RecordingCaptureResult.failed;
     }
   }
 

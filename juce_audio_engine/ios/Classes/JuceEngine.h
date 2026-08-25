@@ -4,6 +4,7 @@
 #include "SimpleGainProcessor.h"
 #include "NativeEffects.h"
 #include "JuceLogBridge.h"
+#include "../../native/RealtimeWavCapture.h"
 
 #include <array>
 #include <atomic>
@@ -70,6 +71,7 @@ extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
                                                           void *ownerHandle);
 
 class MetronomeAudioCallback;
+class IOSBluetoothDuplexProbeCallback;
 
 class RoutedClipSource
 {
@@ -5856,6 +5858,22 @@ class JuceEngine : public juce::MidiInputCallback,
                    public RoutedClipSource
 {
 public:
+    // Mixroom route-ownership modes; these are not JUCE API versions. A
+    // session selects exactly one mode before engine initialisation and never
+    // falls back to the other mode in the same editor session.
+    enum class AudioRouteImplementation
+    {
+        // No route owner has initialised the engine yet.
+        none,
+        // AudioDeviceManager's original self-managed route lifecycle. Retained
+        // for platforms that have not adopted Mixroom's verified coordinator.
+        legacy,
+        // The coordinator owns serial route transitions, validates native
+        // device facts, and requires a real callback before admitting audio.
+        // Despite the historical name, this mode also owns recording routes.
+        v2Playback,
+    };
+
     struct ExportOptions
     {
         juce::String format{"wav"}; // "wav" | "mp3"
@@ -5880,7 +5898,45 @@ public:
 
     static JuceEngine &get();
 
-    void initialiseEngine();
+    void initialiseEngine(const juce::String &v2OutputDeviceName = {},
+                          double v2OutputSampleRate = 0.0,
+                          int v2OutputBufferFrames = 0);
+    bool initialisePlaybackV2(const juce::String &outputDeviceName,
+                              double sampleRate = 0.0,
+                              int bufferFrames = 0);
+    bool pausePlaybackForRouteChangeV2();
+    bool quiescePlaybackRouteV2(bool closeRemovedDevice);
+    bool reconfigurePlaybackRouteV2(const juce::String &outputDeviceName,
+                                    double sampleRate = 0.0,
+                                    int bufferFrames = 0);
+#if JUCE_MAC && !JUCE_IOS
+    bool reconfigureMacPlaybackRouteV2(const juce::String &outputDeviceName,
+                                       double sampleRate,
+                                       int bufferFrames);
+#endif
+    void beginMacOutputCallbackProofV2() noexcept;
+    bool waitForMacOutputCallbackProofV2(int timeoutMilliseconds) noexcept;
+    void cancelMacOutputCallbackProofV2() noexcept;
+    std::uint64_t getMacOutputCallbackProofCountV2() const noexcept;
+    int getMacOutputCallbackProofFramesV2() const noexcept;
+    double getMacOutputCallbackProofSampleRateV2() const noexcept;
+    bool reconfigureRecordingRouteV2(const juce::String &outputDeviceName,
+                                     const juce::String &inputDeviceName);
+    bool prepareBluetoothDuplexSessionV2();
+    bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
+    bool prepareSystemSelectedDuplexSessionV2();
+    bool openPreparedSystemSelectedDuplexRouteV2(int timeoutMilliseconds,
+                                                  int outputChannels);
+    bool reconfigureBluetoothDuplexRouteV2();
+    bool validateRecordingRouteV2() const;
+    bool isBluetoothDuplexProjectCallbackReadyV2() const noexcept;
+    void beginIOSIntentOperationV2() noexcept;
+    void endIOSIntentOperationV2() noexcept;
+    void markIOSIntentRouteInvalidatedV2() noexcept;
+    bool isIOSIntentOperationActiveV2() const noexcept;
+    bool isIOSIntentRouteInvalidatedV2() const noexcept;
+    juce::String getAudioRouteImplementationName() const;
+    bool isV2PlaybackSession() const noexcept;
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -6013,7 +6069,7 @@ public:
     int updateClipFadesBatch(const juce::Array<juce::NamedValueSet> &updates);
 
     // Transport
-    void play();
+    bool play();
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
@@ -6047,6 +6103,17 @@ public:
             transportSec.load(std::memory_order_relaxed) + delta;
         transportSec.store(next, std::memory_order_relaxed);
         mixroom::fx::setGlobalTransportSeconds(next);
+    }
+
+    void beginAudioDeviceClockV2(double sampleRate) noexcept
+    {
+        hostSampleRateAtomic.store(sampleRate, std::memory_order_release);
+    }
+
+    void completeGraphClockV2(double sampleRate, int bufferFrames) noexcept
+    {
+        graphSampleRateAtomic.store(sampleRate, std::memory_order_release);
+        graphBufferFramesAtomic.store(bufferFrames, std::memory_order_release);
     }
     // (deprecated/unused) special functions for "video audio" lane
     void loadVideoAudio(const juce::File &file);
@@ -6198,6 +6265,7 @@ public:
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);
     bool preparePlaybackRoute(const juce::String &reason);
+    bool preparePlaybackGraph(const juce::String &reason);
     void prepareRecordingInputsAsync(int desiredInputChannels,
                                      const juce::String &reason);
     void refreshAudioRouteAsync(const juce::String &reason);
@@ -6207,7 +6275,14 @@ public:
     bool startRecordingToWav(const juce::File &file,
                              int channelStart,
                              int channelCount);
-    void stopRecording();
+#if JUCE_MAC && !JUCE_IOS
+    bool startIndependentInputRecordingToWav(const juce::File &file,
+                                             double inputSampleRate);
+    void captureIndependentInput(const float *input, int numSamples) noexcept;
+    juce::NamedValueSet getIndependentInputCaptureFacts() const;
+#endif
+    RealtimeWavCapture::StopResult stopRecording();
+    void discardRecordingCapture();
     bool isRecording() const;
     void captureInput(const float *const *input,
                       int numInputChannels,
@@ -6309,12 +6384,25 @@ private:
 
     bool engineInitialized = false;
     bool formatsRegistered = false; // will only be flipped once to true
+    AudioRouteImplementation audioRouteImplementation =
+        AudioRouteImplementation::none;
+    bool v2PlaybackCallbackDetached = false;
+    std::atomic<bool> iosIntentOperationActiveV2{false};
+    std::atomic<bool> iosIntentRouteInvalidatedV2{false};
+    std::unique_ptr<IOSBluetoothDuplexProbeCallback>
+        iosBluetoothDuplexProbeCallback;
+    bool iosBluetoothDuplexProbeCallbackAttached = false;
+    void detachIOSBluetoothDuplexProbeCallback() noexcept;
+    bool openPlaybackOutputOnlyV2(const juce::String &outputDeviceName,
+                                  double preferredSampleRate = 0.0,
+                                  int preferredBufferFrames = 0);
+    bool openRecordingInputV2(const juce::String &outputDeviceName,
+                              const juce::String &inputDeviceName,
+                              bool bluetoothHfp = false);
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorGraph exportGraph;
-
-    juce::SpinLock recordLock;
 
     juce::AudioProcessorGraph::Node::Ptr inputNode;
     juce::AudioProcessorGraph::Node::Ptr outputNode;
@@ -6342,6 +6430,8 @@ private:
     std::atomic<double> transportSec{0.0};           // source of truth
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
+    std::atomic<double> graphSampleRateAtomic{0.0};
+    std::atomic<int> graphBufferFramesAtomic{0};
     std::atomic<double> preferredAudioSampleRate{44100.0};
     std::atomic<int> preferredAudioBufferSize{512};
     std::atomic<bool> isPlayingAtomic{false};
@@ -6829,13 +6919,8 @@ private:
     std::unique_ptr<MetronomeAudioCallback> metronomeCallback;
 
     // Recording state
-    std::unique_ptr<juce::AudioFormatWriter> recorderWriter;
-    std::unique_ptr<juce::FileOutputStream> recorderStream;
-
-    bool recordingActive = false;
-    int recordChannelStart = 0;
-    int recordChannelCount = 1;
-    int recordChannelOffset = 0;
+    RealtimeWavCapture wavCapture;
+    std::atomic<bool> independentInputCaptureMode{false};
     std::atomic<int> recordingRestoreDesiredInputs{0};
     std::atomic<int> desiredInputOpenChannels{0};
     juce::String preferredInputDeviceName;
@@ -6847,7 +6932,6 @@ private:
     int liveMonitorChannelStart = 0;
     juce::Array<juce::AudioProcessorGraph::Connection> liveMonitorConnections;
 
-    juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
     void pushMasterWaveformSamples(const float *const *out,
                                    int numOutCh,
                                    int numSamples) noexcept;
@@ -7027,26 +7111,108 @@ public:
 
     void setIsPlaying(bool p) { isPlaying = p; }
 
+    void beginFirstValidCallbackProof() noexcept
+    {
+        firstValidCallbackCompleted.store(false, std::memory_order_release);
+        firstValidCallbackCount.store(0, std::memory_order_relaxed);
+        firstValidCallbackFrames.store(0, std::memory_order_relaxed);
+        firstValidCallbackSampleRate.store(0.0, std::memory_order_relaxed);
+        firstValidCallbackRequested.store(true, std::memory_order_release);
+        firstValidCallback.reset();
+    }
+
+    bool waitForFirstValidCallback(int timeoutMilliseconds) noexcept
+    {
+        const double deadlineMs = juce::Time::getMillisecondCounterHiRes() +
+            juce::jmax(0, timeoutMilliseconds);
+        while (firstValidCallbackRequested.load(std::memory_order_acquire))
+        {
+            if (hasCompletedFirstValidCallback())
+            {
+                firstValidCallbackRequested.store(
+                    false, std::memory_order_release);
+                return true;
+            }
+
+            const int remainingMs = static_cast<int>(juce::jmax(
+                0.0, deadlineMs - juce::Time::getMillisecondCounterHiRes()));
+            if (remainingMs <= 0 || !firstValidCallback.wait(remainingMs))
+                break;
+        }
+
+        firstValidCallbackRequested.store(false, std::memory_order_release);
+        return false;
+    }
+
+    void cancelFirstValidCallbackProofWait() noexcept
+    {
+        firstValidCallbackRequested.store(false, std::memory_order_release);
+        firstValidCallbackCompleted.store(false, std::memory_order_release);
+        firstValidCallbackFrames.store(0, std::memory_order_relaxed);
+        firstValidCallbackSampleRate.store(0.0, std::memory_order_relaxed);
+        firstValidCallback.signal();
+    }
+
+    bool hasCompletedFirstValidCallback() const noexcept
+    {
+        return callbackReady.load(std::memory_order_acquire) &&
+            firstValidCallbackCompleted.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t getFirstValidCallbackCount() const noexcept
+    {
+        return firstValidCallbackCount.load(std::memory_order_acquire);
+    }
+
+    int getFirstValidCallbackFrames() const noexcept
+    {
+        return firstValidCallbackFrames.load(std::memory_order_acquire);
+    }
+
+    double getFirstValidCallbackSampleRate() const noexcept
+    {
+        return firstValidCallbackSampleRate.load(std::memory_order_acquire);
+    }
+
     // ===== AudioIODeviceCallback =====
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
+        callbackReady.store(false, std::memory_order_release);
         sampleRate = device->getCurrentSampleRate();
-        expectedBlockSize = device->getCurrentBufferSizeSamples();
-        expectedInputChannels = device->getActiveInputChannels().countNumberOfSetBits();
-        expectedOutputChannels = device->getActiveOutputChannels().countNumberOfSetBits();
+        const int preparedBlockCapacity = device->getCurrentBufferSizeSamples();
+        const int preparedInputChannels =
+            device->getActiveInputChannels().countNumberOfSetBits();
+        const int preparedOutputChannels =
+            device->getActiveOutputChannels().countNumberOfSetBits();
         updateMsPerBeat();
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
+        engine.beginAudioDeviceClockV2(sampleRate);
         engine.setBlockPlayingState(false);
         player.audioDeviceAboutToStart(device);
         engine.prepareLiveClipProcessorsForCurrentDevice();
+        engine.completeGraphClockV2(sampleRate, preparedBlockCapacity);
         alignToTransport();
+        expectedBlockCapacity.store(preparedBlockCapacity, std::memory_order_relaxed);
+        expectedInputChannels.store(preparedInputChannels, std::memory_order_relaxed);
+        expectedOutputChannels.store(preparedOutputChannels, std::memory_order_relaxed);
+        callbackReady.store(
+            preparedBlockCapacity > 0 && preparedOutputChannels > 0,
+            std::memory_order_release);
     }
 
     void audioDeviceStopped() override
     {
-        expectedBlockSize = 0;
-        expectedInputChannels = 0;
-        expectedOutputChannels = 0;
+        callbackReady.store(false, std::memory_order_release);
+        firstValidCallbackCompleted.store(false, std::memory_order_release);
+        firstValidCallbackFrames.store(0, std::memory_order_relaxed);
+        firstValidCallbackSampleRate.store(0.0, std::memory_order_relaxed);
+        expectedBlockCapacity.store(0, std::memory_order_relaxed);
+        expectedInputChannels.store(0, std::memory_order_relaxed);
+        expectedOutputChannels.store(0, std::memory_order_relaxed);
+        // CoreAudio may stop and restart an owned device while a Bluetooth
+        // profile settles. Keep an active proof armed for the restarted
+        // callback; explicit cancellation or its bounded deadline ends it.
+        firstValidCallback.signal();
         player.audioDeviceStopped();
     }
 
@@ -7058,25 +7224,35 @@ public:
         int numSamples,
         const juce::AudioIODeviceCallbackContext &context) override
     {
-        const int knownBlockSize = expectedBlockSize;
-        const int knownInputs = expectedInputChannels;
-        const int knownOutputs = expectedOutputChannels;
+        const bool ready = callbackReady.load(std::memory_order_acquire);
+        const int knownBlockCapacity =
+            expectedBlockCapacity.load(std::memory_order_relaxed);
+        const int knownInputs =
+            expectedInputChannels.load(std::memory_order_relaxed);
+        const int knownOutputs =
+            expectedOutputChannels.load(std::memory_order_relaxed);
         const bool unexpectedCallbackShape =
+            !ready ||
+            numSamples <= 0 ||
             (numInputChannels > 0 && inputChannelData == nullptr) ||
             (numOutputChannels > 0 && outputChannelData == nullptr) ||
-            (knownBlockSize > 0 && numSamples > knownBlockSize) ||
-            (knownInputs > 0 && numInputChannels != knownInputs) ||
-            (knownOutputs > 0 && numOutputChannels != knownOutputs);
+            numSamples > knownBlockCapacity ||
+            numInputChannels != knownInputs ||
+            numOutputChannels != knownOutputs;
 
         if (unexpectedCallbackShape)
         {
-            for (int ch = 0; ch < numOutputChannels; ++ch)
+            if (outputChannelData != nullptr && numSamples > 0)
             {
-                if (outputChannelData[ch] != nullptr)
-                    juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                {
+                    if (outputChannelData[ch] != nullptr)
+                        juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+                }
             }
 
-            engine.requestAudioDeviceRefreshAsync("unexpected-callback-shape");
+            if (!engine.isV2PlaybackSession())
+                engine.requestAudioDeviceRefreshAsync("unexpected-callback-shape");
             return;
         }
 
@@ -7122,6 +7298,7 @@ public:
                 numSamples,
                 sampleRate,
                 juce::Time::getHighResolutionTicks() - callbackStartTicks);
+            completeFirstValidCallbackProof(numSamples);
             return;
         }
 
@@ -7192,6 +7369,7 @@ public:
             numSamples,
             sampleRate,
             juce::Time::getHighResolutionTicks() - callbackStartTicks);
+        completeFirstValidCallbackProof(numSamples);
     }
 
     void setupClickFilter(bool accent)
@@ -7234,11 +7412,29 @@ public:
     }
 
 private:
+    void completeFirstValidCallbackProof(int numSamples) noexcept
+    {
+        if (!firstValidCallbackRequested.load(std::memory_order_acquire))
+            return;
+        firstValidCallbackFrames.store(numSamples, std::memory_order_release);
+        firstValidCallbackSampleRate.store(sampleRate, std::memory_order_release);
+        firstValidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+        firstValidCallbackCompleted.store(true, std::memory_order_release);
+        firstValidCallback.signal();
+    }
+
     juce::AudioProcessorPlayer &player;
     JuceEngine &engine;
-    int expectedBlockSize = 0;
-    int expectedInputChannels = 0;
-    int expectedOutputChannels = 0;
+    std::atomic<bool> callbackReady{false};
+    std::atomic<int> expectedBlockCapacity{0};
+    std::atomic<int> expectedInputChannels{0};
+    std::atomic<int> expectedOutputChannels{0};
+    std::atomic<bool> firstValidCallbackRequested{false};
+    std::atomic<bool> firstValidCallbackCompleted{false};
+    std::atomic<std::uint64_t> firstValidCallbackCount{0};
+    std::atomic<int> firstValidCallbackFrames{0};
+    std::atomic<double> firstValidCallbackSampleRate{0.0};
+    juce::WaitableEvent firstValidCallback;
 
     bool enabled = false;
     bool isPlaying = false;
@@ -7306,4 +7502,112 @@ private:
         currentBeat = (int)std::floor(beatIndex) % beatsPerBar;
         nextBeatMs = (std::floor(beatIndex) + 1.0) * msPerBeat;
     }
+};
+
+class IOSBluetoothDuplexProbeCallback final
+    : public juce::AudioIODeviceCallback
+{
+public:
+    void audioDeviceAboutToStart(juce::AudioIODevice *device) override
+    {
+        ready.store(false, std::memory_order_release);
+        callbackCount.store(0, std::memory_order_relaxed);
+        firstValidCallback.reset();
+        if (device == nullptr)
+            return;
+
+        const int blockCapacity = device->getCurrentBufferSizeSamples();
+        const int inputChannels =
+            device->getActiveInputChannels().countNumberOfSetBits();
+        const int outputChannels =
+            device->getActiveOutputChannels().countNumberOfSetBits();
+        expectedBlockCapacity.store(blockCapacity, std::memory_order_relaxed);
+        expectedInputChannels.store(inputChannels, std::memory_order_relaxed);
+        expectedOutputChannels.store(outputChannels, std::memory_order_relaxed);
+        ready.store(
+            device->getCurrentSampleRate() > 1000.0 &&
+                blockCapacity > 0 && inputChannels == 1 &&
+                outputChannels > 0,
+            std::memory_order_release);
+    }
+
+    void audioDeviceStopped() override
+    {
+        ready.store(false, std::memory_order_release);
+        expectedBlockCapacity.store(0, std::memory_order_relaxed);
+        expectedInputChannels.store(0, std::memory_order_relaxed);
+        expectedOutputChannels.store(0, std::memory_order_relaxed);
+        firstValidCallback.signal();
+    }
+
+    void audioDeviceIOCallbackWithContext(
+        const float *const *inputChannelData,
+        int numInputChannels,
+        float *const *outputChannelData,
+        int numOutputChannels,
+        int numSamples,
+        const juce::AudioIODeviceCallbackContext &) override
+    {
+        if (outputChannelData != nullptr && numSamples > 0)
+        {
+            for (int ch = 0; ch < numOutputChannels; ++ch)
+                if (outputChannelData[ch] != nullptr)
+                    juce::FloatVectorOperations::clear(
+                        outputChannelData[ch], numSamples);
+        }
+
+        bool pointersValid = inputChannelData != nullptr &&
+            outputChannelData != nullptr;
+        for (int ch = 0; pointersValid && ch < numInputChannels; ++ch)
+            pointersValid = inputChannelData[ch] != nullptr;
+        for (int ch = 0; pointersValid && ch < numOutputChannels; ++ch)
+            pointersValid = outputChannelData[ch] != nullptr;
+
+        const bool valid = ready.load(std::memory_order_acquire) &&
+            numSamples > 0 &&
+            numSamples <= expectedBlockCapacity.load(
+                std::memory_order_relaxed) &&
+            numInputChannels == expectedInputChannels.load(
+                std::memory_order_relaxed) &&
+            numOutputChannels == expectedOutputChannels.load(
+                std::memory_order_relaxed) &&
+            pointersValid;
+        if (valid)
+        {
+            callbackCount.fetch_add(1, std::memory_order_relaxed);
+            firstValidCallback.signal();
+        }
+    }
+
+    bool isReady() const noexcept
+    {
+        return ready.load(std::memory_order_acquire);
+    }
+
+    bool hasCompletedValidCallback() const noexcept
+    {
+        return isReady() &&
+            callbackCount.load(std::memory_order_acquire) > 0;
+    }
+
+    bool waitForFirstValidCallback(int timeoutMilliseconds) noexcept
+    {
+        if (hasCompletedValidCallback())
+            return true;
+        return firstValidCallback.wait(timeoutMilliseconds) &&
+            hasCompletedValidCallback();
+    }
+
+    std::uint64_t getCallbackCount() const noexcept
+    {
+        return callbackCount.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<bool> ready{false};
+    std::atomic<int> expectedBlockCapacity{0};
+    std::atomic<int> expectedInputChannels{0};
+    std::atomic<int> expectedOutputChannels{0};
+    std::atomic<std::uint64_t> callbackCount{0};
+    juce::WaitableEvent firstValidCallback;
 };

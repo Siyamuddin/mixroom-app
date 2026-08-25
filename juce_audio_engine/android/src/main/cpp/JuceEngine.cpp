@@ -600,7 +600,7 @@ void JuceEngine::captureRecordingRestorePlaybackSetupIfNeeded(
     int desiredInputChannels,
     const juce::AudioDeviceManager::AudioDeviceSetup &currentSetup)
 {
-    if (desiredInputChannels <= 0 || recordingActive)
+    if (desiredInputChannels <= 0 || wavCapture.isActive())
         return;
 
     const int previousDesiredInputs =
@@ -712,8 +712,10 @@ void JuceEngine::flushDeferredAudioRouteRefreshAsync(const juce::String &reason)
         if (midiLiveInputActive || midiInputCallbacksInitialized.load(std::memory_order_relaxed))
             refreshMidiInputCallbacks();
 
-        if (recordingActive)
-            routeLiveInputToRow(/*row=*/0, recordChannelCount, recordChannelOffset); });
+        if (wavCapture.isActive())
+            routeLiveInputToRow(/*row=*/0,
+                                liveMonitorChannelCount,
+                                liveMonitorChannelStart); });
 }
 
 void JuceEngine::prepareRecordingInputsAsync(int desiredInputChannels,
@@ -910,6 +912,8 @@ void JuceEngine::recordRealtimeAudioCallback(int numSamples,
     }
 
     realtimeCallbackCount.fetch_add(1, std::memory_order_relaxed);
+    if (androidV2CallbackProofPending.exchange(false, std::memory_order_acq_rel))
+        androidV2CallbackReady.signal();
     realtimeCallbackTotalTicks.fetch_add((std::uint64_t)elapsedTicks, std::memory_order_relaxed);
     realtimeCallbackLastTicks.store(elapsedTicks, std::memory_order_relaxed);
     updateAtomicMax(realtimeCallbackMaxTicks, elapsedTicks);
@@ -1045,59 +1049,21 @@ void JuceEngine::clearMidiInputCallbacks()
 // ============================================================
 // Initialise / Shutdown
 // ============================================================
-void JuceEngine::initialiseEngine()
+void JuceEngine::registerFormatsIfNeeded()
 {
-    juceLogToFlutter("Hello from JuceEngine::initialiseEngine()");
-
-    if (engineInitialized)
-    {
-        juceLogToFlutter("JuceEngine::initialiseEngine() already called — skipping.");
+    if (formatsRegistered)
         return;
-    }
 
-    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
-    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
-    hasRecordingRestorePlaybackSetup = false;
-    ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
-
-    if (!formatsRegistered)
-    {
-        // Audio formats
-        formatManager.registerBasicFormats();
-        // Plugin formats
-        pluginFormatManager.addDefaultFormats();
+    formatManager.registerBasicFormats();
+    pluginFormatManager.addDefaultFormats();
 #if JUCE_IOS
-        pluginFormatManager.addFormat(new juce::AudioUnitPluginFormat());
+    pluginFormatManager.addFormat(new juce::AudioUnitPluginFormat());
 #endif
-        // Android startup should not depend on mic input availability/permission.
-        // Arm inputs only when recording is explicitly requested.
-        juce::String initError = deviceManager.initialise(
-            0, // numInputChannels
-            2, // numOutputChannels
-            nullptr,
-            true);
-        if (!initError.isEmpty())
-        {
-            juceLogToFlutter(("AudioDevice initialise failed [0-in/2-out]: " + initError).toRawUTF8());
-            // Last-resort fallback to JUCE default route selection.
-            initError = deviceManager.initialise(0, 2, nullptr, true, {}, nullptr);
-            if (!initError.isEmpty())
-            {
-                juceLogToFlutter(("AudioDevice initialise fallback failed: " + initError).toRawUTF8());
-            }
-        }
-        logCurrentAudioDeviceState("initialise");
+    formatsRegistered = true;
+}
 
-        formatsRegistered = true;
-    }
-    deviceManager.removeChangeListener(this);
-    deviceManager.addChangeListener(this);
-
-#if JUCE_ANDROID
-    if (applyPreferredAudioDeviceSetup(0, true, "initialise-playback-buffer"))
-        logCurrentAudioDeviceState("initialise-playback-buffer");
-#endif
-
+void JuceEngine::initialiseSharedPlaybackGraph()
+{
     const double hostRate = getKnownDeviceSampleRate(deviceManager, 44100.0);
     const int blockSize = getKnownDeviceBufferSize(deviceManager, 512);
 
@@ -1136,15 +1102,314 @@ void JuceEngine::initialiseEngine()
 
     // Only expose the live callback after the graph and IO nodes are fully ready.
     deviceManager.addAudioCallback(metronomeCallback.get());
+    audioCallbackAttached = true;
 
     // Register plugin/MIDI input callbacks lazily on demand.
     // Eager scanning here can stall first project open on iOS route discovery.
     engineInitialized = true;
 }
 
+void JuceEngine::initialiseEngine()
+{
+    juceLogToFlutter("Hello from JuceEngine::initialiseEngine()");
+
+    if (engineInitialized)
+    {
+        juceLogToFlutter("JuceEngine::initialiseEngine() already called — skipping.");
+        return;
+    }
+
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    hasRecordingRestorePlaybackSetup = false;
+    ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
+
+    const bool shouldOpenInitialDevice = !formatsRegistered;
+    registerFormatsIfNeeded();
+    if (shouldOpenInitialDevice)
+    {
+        // Android startup should not depend on mic input availability/permission.
+        // Arm inputs only when recording is explicitly requested.
+        juce::String initError = deviceManager.initialise(
+            0, // numInputChannels
+            2, // numOutputChannels
+            nullptr,
+            true);
+        if (!initError.isEmpty())
+        {
+            juceLogToFlutter(("AudioDevice initialise failed [0-in/2-out]: " + initError).toRawUTF8());
+            // Last-resort fallback to JUCE default route selection.
+            initError = deviceManager.initialise(0, 2, nullptr, true, {}, nullptr);
+            if (!initError.isEmpty())
+            {
+                juceLogToFlutter(("AudioDevice initialise fallback failed: " + initError).toRawUTF8());
+            }
+        }
+        logCurrentAudioDeviceState("initialise");
+    }
+    deviceManager.removeChangeListener(this);
+    deviceManager.addChangeListener(this);
+
+#if JUCE_ANDROID
+    if (applyPreferredAudioDeviceSetup(0, true, "initialise-playback-buffer"))
+        logCurrentAudioDeviceState("initialise-playback-buffer");
+#endif
+
+    initialiseSharedPlaybackGraph();
+}
+
+bool JuceEngine::initialisePlaybackV2Android()
+{
+#if JUCE_ANDROID
+    if (engineInitialized)
+        return false;
+
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    hasRecordingRestorePlaybackSetup = false;
+    androidV2RecordingPrepared = false;
+    androidV2CallbackReady.reset();
+    androidV2CallbackProofPending.store(false, std::memory_order_release);
+    ignoredDeviceChangeCallbacks.store(0, std::memory_order_relaxed);
+
+    registerFormatsIfNeeded();
+    const juce::String initError = deviceManager.initialise(
+        0, // numInputChannels
+        2, // numOutputChannels
+        nullptr,
+        true);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    if (!initError.isEmpty() || device == nullptr || !device->isOpen() ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        device->getActiveInputChannels().countNumberOfSetBits() != 0)
+    {
+        juceLogToFlutter(("Android V2 output-only initialise failed: " + initError).toRawUTF8());
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    deviceManager.removeChangeListener(this);
+    androidV2CallbackProofPending.store(true, std::memory_order_release);
+    initialiseSharedPlaybackGraph();
+    v2PlaybackCallbackDetached = false;
+    logCurrentAudioDeviceState("android-v2-initialise");
+    const bool initialised = engineInitialized && audioCallbackAttached;
+    if (!initialised)
+    {
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
+        androidV2CallbackReady.reset();
+    }
+    return initialised;
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::quiescePlaybackV2Android(bool closeDevice)
+{
+#if JUCE_ANDROID
+    if (!engineInitialized || metronomeCallback == nullptr)
+        return false;
+
+    const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
+    pause();
+    if (!v2PlaybackCallbackDetached && audioCallbackAttached)
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        audioCallbackAttached = false;
+        v2PlaybackCallbackDetached = true;
+    }
+    if (closeDevice)
+        deviceManager.closeAudioDevice();
+    return wasPlaying;
+#else
+    juce::ignoreUnused(closeDevice);
+    return false;
+#endif
+}
+
+bool JuceEngine::reconfigurePlaybackV2Android()
+{
+#if JUCE_ANDROID
+    if (!engineInitialized || metronomeCallback == nullptr)
+        return false;
+
+    androidV2RecordingPrepared = false;
+    androidV2CallbackReady.reset();
+    androidV2CallbackProofPending.store(false, std::memory_order_release);
+    quiescePlaybackV2Android(false);
+    deviceManager.closeAudioDevice();
+    const juce::String initError = deviceManager.initialise(
+        0, // numInputChannels
+        2, // numOutputChannels
+        nullptr,
+        true);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool valid = initError.isEmpty() && device != nullptr && device->isOpen() &&
+        device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
+        device->getActiveInputChannels().countNumberOfSetBits() == 0 &&
+        device->getCurrentSampleRate() > 1000.0 &&
+        device->getCurrentBufferSizeSamples() > 0;
+    if (!valid)
+    {
+        juceLogToFlutter(("Android V2 route reopen failed: " + initError).toRawUTF8());
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
+    desiredInputOpenChannels.store(0, std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute(true);
+    androidV2CallbackProofPending.store(true, std::memory_order_release);
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    audioCallbackAttached = true;
+    v2PlaybackCallbackDetached = false;
+    logCurrentAudioDeviceState("android-v2-route-transition");
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::prepareRecordingV2Android()
+{
+    return prepareDefaultDuplexV2Android();
+}
+
+bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android()
+{
+    return prepareDefaultDuplexV2Android();
+}
+
+bool JuceEngine::prepareDefaultDuplexV2Android()
+{
+#if JUCE_ANDROID
+    if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
+        return false;
+
+    pause();
+    androidV2RecordingPrepared = false;
+    androidV2CallbackReady.reset();
+    androidV2CallbackProofPending.store(false, std::memory_order_release);
+    if (!v2PlaybackCallbackDetached && audioCallbackAttached)
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        audioCallbackAttached = false;
+        v2PlaybackCallbackDetached = true;
+    }
+
+    deviceManager.closeAudioDevice();
+    const juce::String initError = deviceManager.initialise(
+        1,
+        2,
+        nullptr,
+        true);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool valid = initError.isEmpty() && device != nullptr && device->isOpen() &&
+        device->getActiveInputChannels().countNumberOfSetBits() == 1 &&
+        device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
+        device->getCurrentSampleRate() > 1000.0 &&
+        device->getCurrentBufferSizeSamples() > 0;
+    if (!valid)
+    {
+        juceLogToFlutter(("Android V2 built-in recording open failed: " + initError).toRawUTF8());
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    liveInputMonitoringEnabled = false;
+    hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute(true);
+    androidV2CallbackProofPending.store(true, std::memory_order_release);
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    audioCallbackAttached = true;
+    v2PlaybackCallbackDetached = false;
+    androidV2RecordingPrepared = true;
+    logCurrentAudioDeviceState("android-v2-recording-prepared");
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::prepareBluetoothDuplexV2Android()
+{
+#if JUCE_ANDROID
+    if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
+        return false;
+
+    pause();
+    androidV2RecordingPrepared = false;
+    androidV2CallbackReady.reset();
+    androidV2CallbackProofPending.store(false, std::memory_order_release);
+    if (!v2PlaybackCallbackDetached && audioCallbackAttached)
+    {
+        deviceManager.removeAudioCallback(metronomeCallback.get());
+        audioCallbackAttached = false;
+        v2PlaybackCallbackDetached = true;
+    }
+
+    deviceManager.closeAudioDevice();
+    const juce::String initError = deviceManager.initialise(1, 1, nullptr, true);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool valid = initError.isEmpty() && device != nullptr && device->isOpen() &&
+        device->getActiveInputChannels().countNumberOfSetBits() == 1 &&
+        device->getActiveOutputChannels().countNumberOfSetBits() == 1 &&
+        device->getCurrentSampleRate() > 1000.0 &&
+        device->getCurrentBufferSizeSamples() > 0;
+    if (!valid)
+    {
+        juceLogToFlutter(("Android V2 Bluetooth duplex open failed: " + initError).toRawUTF8());
+        androidV2CallbackProofPending.store(false, std::memory_order_release);
+        deviceManager.closeAudioDevice();
+        return false;
+    }
+
+    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
+    liveInputMonitoringEnabled = false;
+    hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
+    prepareLiveClipProcessorsForCurrentDevice();
+    armOutputSafetyForCurrentRoute(true);
+    androidV2CallbackProofPending.store(true, std::memory_order_release);
+    deviceManager.addAudioCallback(metronomeCallback.get());
+    audioCallbackAttached = true;
+    v2PlaybackCallbackDetached = false;
+    androidV2RecordingPrepared = true;
+    logCurrentAudioDeviceState("android-v2-bluetooth-recording");
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool JuceEngine::waitForV2CallbackReady(int timeoutMs)
+{
+#if JUCE_ANDROID
+    const bool ready = androidV2CallbackReady.wait(juce::jlimit(1, 5000, timeoutMs));
+    androidV2CallbackProofPending.store(false, std::memory_order_release);
+    return ready;
+#else
+    juce::ignoreUnused(timeoutMs);
+    return false;
+#endif
+}
+
 void JuceEngine::shutdownEngine()
 {
     juceLogToFlutter("JuceEngine::shutdownEngine called");
+
+    wavCapture.stop(true);
+    androidV2RecordingPrepared = false;
+    androidV2CallbackReady.reset();
+    androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
 
     if (!engineInitialized)
     {
@@ -1155,6 +1420,7 @@ void JuceEngine::shutdownEngine()
     if (metronomeCallback)
     {
         deviceManager.removeAudioCallback(metronomeCallback.get());
+        audioCallbackAttached = false;
         metronomeCallback.reset();
     }
     deviceManager.removeChangeListener(this);
@@ -1253,6 +1519,11 @@ void JuceEngine::shutdownEngine()
     }
     busGraphInitialised = false;
     engineInitialized = false;
+    audioCallbackAttached = false;
+    v2PlaybackCallbackDetached = false;
+    androidV2RecordingPrepared = false;
+    androidV2CallbackReady.reset();
+    androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
 }
 
 // ============================================================
@@ -5315,6 +5586,37 @@ void JuceEngine::play()
         metronomeCallback->setIsPlaying(true);
 }
 
+bool JuceEngine::playPlaybackV2Android()
+{
+#if JUCE_ANDROID
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int activeInputChannels =
+        device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0;
+    const bool verifiedRecordingInputActive =
+        wavCapture.isActive() &&
+        androidV2RecordingPrepared &&
+        desiredInputOpenChannels.load(std::memory_order_relaxed) == 1 &&
+        activeInputChannels == 1;
+    if (!engineInitialized || !audioCallbackAttached ||
+        metronomeCallback == nullptr || device == nullptr || !device->isOpen() ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        (activeInputChannels != 0 && !verifiedRecordingInputActive))
+        return false;
+
+    {
+        const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+        ensureMasterOutputRouting();
+    }
+
+    isPlayingAtomic.store(true, std::memory_order_relaxed);
+    mixroom::fx::setGlobalTransportPlaying(true);
+    metronomeCallback->setIsPlaying(true);
+    return true;
+#else
+    return false;
+#endif
+}
+
 void JuceEngine::pause()
 {
     isPlayingAtomic.store(false, std::memory_order_relaxed);
@@ -5449,7 +5751,7 @@ juce::Array<juce::PluginDescription> JuceEngine::getKnownPlugins()
 juce::NamedValueSet JuceEngine::getEngineDiagnostics()
 {
     juce::NamedValueSet out;
-    const auto *device = deviceManager.getCurrentAudioDevice();
+    auto *device = deviceManager.getCurrentAudioDevice();
     const auto sampleRate =
         getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
     const auto bufferSize = getKnownDeviceBufferSize(deviceManager, 512);
@@ -5463,6 +5765,8 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
     out.set("pluginScanFailures", juce::var(juce::Array<juce::var>()));
     out.set("rowCount", (int)rows.size());
     out.set("clipCount", (int)clips.size());
+    out.set("deviceOpen", device != nullptr && device->isOpen());
+    out.set("audioCallbackAttached", audioCallbackAttached);
     out.set("inputDeviceName", getCurrentInputDeviceName());
     out.set("outputDeviceName", getCurrentOutputDeviceName());
     out.set("inputChannelCount",
@@ -10188,6 +10492,14 @@ void JuceEngine::syncLiveInputMonitorRoutingLocked(
 
 void JuceEngine::routeLiveInputToRow(int row, int channelCount, int channelStart)
 {
+    if (androidV2RecordingPrepared)
+    {
+        liveMonitorTargetRow = row;
+        liveMonitorChannelCount = channelCount;
+        liveMonitorChannelStart = channelStart;
+        return;
+    }
+
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
     liveMonitorTargetRow = row;
@@ -10202,9 +10514,10 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                                      int channelStart,
                                      int channelCount)
 {
-    if (recordingActive)
+    if (wavCapture.isActive())
         return false;
 
+    const bool v2Recording = androidV2RecordingPrepared;
     const int previousDesiredInputs = desiredInputOpenChannels.load(std::memory_order_relaxed);
     juce::ignoreUnused(previousDesiredInputs);
     // Recording input prewarm intentionally opens inputs before capture starts.
@@ -10212,14 +10525,21 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     // mode, so post-record should return to playback-only instead.
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
 
-    const auto failAndRestorePlaybackMode = [this]()
+    const auto failAndRestorePlaybackMode = [this, v2Recording]()
     {
+        if (v2Recording)
+            return false;
         applyPreferredAudioDeviceSetup(0, true, "startRecording-restore");
         return false;
     };
 
     const int requiredInputs = juce::jmax(1, channelStart + channelCount);
-    if (!applyPreferredAudioDeviceSetup(requiredInputs, false, "startRecording"))
+    if (v2Recording)
+    {
+        if (channelStart != 0 || channelCount != 1)
+            return false;
+    }
+    else if (!applyPreferredAudioDeviceSetup(requiredInputs, false, "startRecording"))
     {
         if (!applyPreferredAudioDeviceSetup(requiredInputs, true, "startRecording-reopen"))
             return false;
@@ -10238,6 +10558,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
         numInputs = dev->getInputChannelNames().size();
     if (numInputs <= 0)
     {
+        if (v2Recording)
+            return false;
         // Hard fallback for stale routes that report no active inputs right
         // after arm. Re-open a minimal mono input path and retry.
         if (!applyPreferredAudioDeviceSetup(1, true, "startRecording-fallback-mono"))
@@ -10256,48 +10578,40 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     const int maxCount = juce::jmax(1, numInputs - channelStart);
     channelCount = juce::jlimit(1, juce::jmin(2, maxCount), channelCount);
 
-    recorderStream.reset(file.createOutputStream().release());
-    if (!recorderStream)
+    const double acceptedSampleRate = getKnownDeviceSampleRate(
+        deviceManager,
+        hostSampleRateAtomic.load(std::memory_order_relaxed));
+    if (!wavCapture.start(file,
+                          acceptedSampleRate,
+                          channelCount,
+                          channelStart))
         return failAndRestorePlaybackMode();
-
-    juce::WavAudioFormat wav;
-    recorderWriter.reset(
-        wav.createWriterFor(
-            recorderStream.get(),
-            getKnownDeviceSampleRate(
-                deviceManager,
-                hostSampleRateAtomic.load(std::memory_order_relaxed)),
-            (unsigned int)channelCount,
-            24,
-            {},
-            0));
-
-    if (!recorderWriter)
-        return failAndRestorePlaybackMode();
-
-    recorderStream.release();
-
-    recordChannelStart = channelStart;
-    recordChannelOffset = channelStart;
-    recordChannelCount = channelCount;
 
     routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
-
-    recordingActive = true;
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
 
-void JuceEngine::stopRecording(bool restorePlaybackRoute)
+void JuceEngine::discardRecordingCaptureV2Android()
 {
-    recordingActive = false;
+    wavCapture.stop(true);
+    routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
+}
 
-    {
-        juce::SpinLock::ScopedLockType lock(recordLock);
-        recorderWriter.reset(); // flush + finalize WAV
-        recorderStream.reset();
-    }
+RealtimeWavCapture::StopResult JuceEngine::stopRecording(bool restorePlaybackRoute)
+{
+    auto captureResult = finalizeRecordingCapture();
+    completeRecordingStop(restorePlaybackRoute);
+    return captureResult;
+}
 
+RealtimeWavCapture::StopResult JuceEngine::finalizeRecordingCapture()
+{
+    return wavCapture.stop();
+}
+
+void JuceEngine::completeRecordingStop(bool restorePlaybackRoute)
+{
     routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
     const int restoreInputs = juce::jmax(
         0,
@@ -10324,71 +10638,31 @@ void JuceEngine::stopRecording(bool restorePlaybackRoute)
 
 bool JuceEngine::isRecording() const
 {
-    return recordingActive;
+    return wavCapture.isActive();
 }
 
 void JuceEngine::captureInput(const float *const *input, int numInputChannels, int numSamples)
 {
-    if (!recordingActive || !recorderWriter)
-        return;
-
-    // Create the buffer object here so it has memory to copy into
-    juce::AudioBuffer<float> buffer(recordChannelCount, numSamples);
-
-    float peak = 0.0f;
-
-    // Use the offset to grab the correct pointer from the input array
-    // E.g., if offset is 2, we start at input[2] (the 3rd channel)
-    for (int ch = 0; ch < recordChannelCount; ++ch)
-    {
-        // int sourceCh = ch + recordChannelOffset;
-        // if (sourceCh < numInputChannels)
-        //     buffer.copyFrom(ch, 0, input[sourceCh], numSamples);
-
-        int sourceCh = ch + recordChannelOffset;
-
-        // Safety: Check if the hardware actually provided this channel
-        if (sourceCh < numInputChannels && input[sourceCh] != nullptr)
-        {
-            buffer.copyFrom(ch, 0, input[sourceCh], numSamples);
-
-            // for waveform visualization while recording
-            const float *data = input[sourceCh];
-            for (int i = 0; i < numSamples; ++i)
-                peak = juce::jmax(peak, std::abs(data[i]));
-        }
-        else
-        {
-            buffer.clear(ch, 0, numSamples); // Write silence if channel doesn't exist
-        }
-    }
-
-    recPeak.setTargetValue(peak);
-    recorderWriter->writeFromAudioSampleBuffer(buffer, 0, numSamples);
+    wavCapture.capture(input, numInputChannels, numSamples);
 }
 
 double JuceEngine::getRecordingPeak() const
 {
-    return recPeak.getCurrentValue();
+    return wavCapture.consumePeak();
 }
 
 void JuceEngine::captureOutput(float *const *output,
                                int numOutputChannels,
                                int numSamples)
 {
-    juce::SpinLock::ScopedLockType lock(recordLock);
-
-    if (!recordingActive || !recorderWriter)
-        return;
-
-    const int chCount = juce::jlimit(1, numOutputChannels, recordChannelCount);
-
-    juce::AudioBuffer<float> buffer(chCount, numSamples);
-
-    for (int ch = 0; ch < chCount; ++ch)
-        buffer.copyFrom(ch, 0, output[ch], numSamples);
-
-    recorderWriter->writeFromAudioSampleBuffer(buffer, 0, numSamples);
+    std::array<const float *, 2> channels{{nullptr, nullptr}};
+    const int availableChannels = juce::jlimit(0, 2, numOutputChannels);
+    for (int channel = 0; channel < availableChannels; ++channel)
+        channels[(size_t)channel] = output != nullptr ? output[channel] : nullptr;
+    wavCapture.capture(channels.data(),
+                       availableChannels,
+                       numSamples,
+                       0);
 }
 
 void JuceEngine::setMasterMeterEnabled(bool enabled)

@@ -28,6 +28,45 @@ import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
 import 'package:uuid/uuid.dart';
 
+@visibleForTesting
+List<Offset> buildRecordingPreviewEnvelopePoints({
+  required List<double> peaks,
+  required List<double> peakTimesMs,
+  required double durationMs,
+}) {
+  final sampleCount = math.min(peaks.length, peakTimesMs.length);
+  if (sampleCount <= 0 || !durationMs.isFinite || durationMs <= 0.0) {
+    return const <Offset>[];
+  }
+
+  double safeAmplitude(double value) =>
+      value.isFinite ? value.clamp(0.0, 1.0).toDouble() : 0.0;
+
+  final points = <Offset>[];
+  var lastTimeMs = 0.0;
+  for (var index = 0; index < sampleCount; index++) {
+    final rawTimeMs = peakTimesMs[index];
+    if (!rawTimeMs.isFinite || rawTimeMs < 0.0 || rawTimeMs > durationMs) {
+      continue;
+    }
+    final timeMs = math.max(lastTimeMs, rawTimeMs).toDouble();
+    final amplitude = safeAmplitude(peaks[index]);
+    if (points.isEmpty) {
+      points.add(Offset(0.0, amplitude));
+    }
+    points.add(Offset(timeMs, amplitude));
+    lastTimeMs = timeMs;
+  }
+  if (points.isEmpty) return const <Offset>[];
+
+  // Accepted interval endpoints are immutable. The sole provisional point is
+  // a continuation of the latest amplitude to the current playhead.
+  if (points.last.dx < durationMs) {
+    points.add(Offset(durationMs, points.last.dy));
+  }
+  return points;
+}
+
 class _QuantizePreset {
   final int divisionsPerBar;
   final String label;
@@ -572,6 +611,7 @@ class AudioCanvasTimeline extends StatefulWidget {
   final int? recordingRowIndex;
   final double recordingStartMs;
   final List<double> recordingPeaks;
+  final List<double> recordingPeakTimesMs;
   final bool recordingInProgress; // sent from above if user is recording
   final int selectedClipIndex;
   final List<int> selectedClipIndices;
@@ -814,6 +854,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.recordingRowIndex,
     required this.recordingStartMs,
     required this.recordingPeaks,
+    this.recordingPeakTimesMs = const <double>[],
     this.selectedClipIndex = -1,
     this.selectedClipIndices = const <int>[],
     required this.getRowEffects,
@@ -3687,6 +3728,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _dragXAxisLocked = false;
   }
 
+  void _cancelClipGestureAfterTopologyChange() {
+    _clearPendingClipTapState();
+    _resetTrimInteractionState();
+    _interactionMode = '';
+    _isUserInteracting = false;
+    _dragGroupStartMs.clear();
+    _dragGroupStartRows.clear();
+    _dragDeltaMs = 0.0;
+    _dragDeltaRows = 0;
+    _timelineKeyboardModifierPointer = null;
+  }
+
   void _restoreTentativeClipSelectionIfNeeded() {
     if (!_tentativeClipSelectionActive) return;
     _tentativeClipSelectionActive = false;
@@ -5673,6 +5726,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       );
     }
     if (oldWidget.clips.length != widget.clips.length) {
+      // Clip indices are transient. A deletion or insertion can invalidate an
+      // active drag/trim before its next pointer update is delivered.
+      _cancelClipGestureAfterTopologyChange();
       _syncSelectionAfterClipTopologyChange();
       if (_pendingPaintPastes.isNotEmpty) {
         _ensureClipSpatialIndex();
@@ -10341,6 +10397,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           recordingRowIndex: widget.recordingRowIndex,
                           recordingStartMs: widget.recordingStartMs,
                           recordingPeaks: widget.recordingPeaks,
+                          recordingPeakTimesMs: widget.recordingPeakTimesMs,
                           bpm: widget.bpm,
                           beatsPerBar: widget.beatsPerBar,
                           beatUnit: widget.beatUnit,
@@ -10462,6 +10519,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               recordingRowIndex: widget.recordingRowIndex,
                               recordingStartMs: widget.recordingStartMs,
                               recordingPeaks: widget.recordingPeaks,
+                              recordingPeakTimesMs: widget.recordingPeakTimesMs,
                               bpm: widget.bpm,
                               beatsPerBar: widget.beatsPerBar,
                               beatUnit: widget.beatUnit,
@@ -12467,11 +12525,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         onUpgradeRequested: widget.onUpgradeRequested,
         minHeight: _effectsPanelMinHeight,
         onHeightChanged: (h) {
-          if (mounted) {
-            setState(() {
-              _effectsPanelHeights[row] = math.max(h, _effectsPanelMinHeight);
-            });
+          if (!mounted || row < 0 || row >= _effectsPanelHeights.length) {
+            return;
           }
+          final nextHeight = math.max(h, _effectsPanelMinHeight);
+          if ((_effectsPanelHeights[row] - nextHeight).abs() <= 0.5) return;
+          setState(() {
+            _effectsPanelHeights[row] = nextHeight;
+          });
+          _syncVerticalScrollOffsetAfterGeometryChange();
         },
         // callbacks
         getEffectsForRow: widget.getRowEffects,
@@ -16754,10 +16816,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       return;
     }
-    if (_draggedClipIndex == null || _dragStartGlobalOffset == null) return;
+    final draggedIndex = _draggedClipIndex;
+    if (draggedIndex == null || _dragStartGlobalOffset == null) return;
+    if (draggedIndex < 0 || draggedIndex >= widget.clips.length) {
+      setState(_cancelClipGestureAfterTopologyChange);
+      return;
+    }
 
     setState(() {
-      final draggedIndex = _draggedClipIndex!;
       final draggedClip = widget.clips[draggedIndex];
 
       // Calculate TOTAL delta from drag start (for row)
@@ -16845,9 +16911,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       }
       return;
     }
-    if (_trimClipIndex == null || _trimStartAnchorX == null) return;
+    final trimClipIndex = _trimClipIndex;
+    if (trimClipIndex == null || _trimStartAnchorX == null) return;
+    if (trimClipIndex < 0 || trimClipIndex >= widget.clips.length) {
+      setState(_cancelClipGestureAfterTopologyChange);
+      return;
+    }
 
-    final clip = widget.clips[_trimClipIndex!];
+    final clip = widget.clips[trimClipIndex];
     final fullDuration = widget.getFullDurationMs(clip);
     final isReversed = clip.isReversed;
     final timelineScale = (_trimTimelineScaleValue ?? 1.0).clamp(
@@ -18195,6 +18266,7 @@ class _TimelinePainter extends CustomPainter {
   final int? recordingRowIndex;
   final double recordingStartMs;
   final List<double> recordingPeaks;
+  final List<double> recordingPeakTimesMs;
   final double bpm;
   final int beatsPerBar;
   final int beatUnit;
@@ -18213,7 +18285,6 @@ class _TimelinePainter extends CustomPainter {
   final Set<int> rowsHiddenByCollapsedGroups;
   final double? leftVisibleExtensionPx;
   final int _clipDataHash;
-  final int _visibleClipIndicesHash;
   final int _automationClipHash;
   final int _rowsHiddenByCollapsedGroupsHash;
   final int _selectedClipIndicesHash;
@@ -18224,6 +18295,7 @@ class _TimelinePainter extends CustomPainter {
   final int _expandedHeightsHash;
   final int _automationLaneHeightsHash;
   final int _recordingPeaksHash;
+  final int _recordingPeakTimesHash;
   final int _rowKindHash;
   final int _rowVisualHash;
 
@@ -18271,6 +18343,7 @@ class _TimelinePainter extends CustomPainter {
     required this.recordingRowIndex,
     required this.recordingStartMs,
     required this.recordingPeaks,
+    required this.recordingPeakTimesMs,
     required this.bpm,
     required this.beatsPerBar,
     required this.beatUnit,
@@ -18289,7 +18362,6 @@ class _TimelinePainter extends CustomPainter {
     required this.rowsHiddenByCollapsedGroups,
     this.leftVisibleExtensionPx,
   }) : _clipDataHash = clipVisualRevision,
-       _visibleClipIndicesHash = _hashList(visibleClipIndices),
        _automationClipHash = _computeAutomationClipHash(automationClipVisuals),
        _rowsHiddenByCollapsedGroupsHash = _hashList(
          (rowsHiddenByCollapsedGroups.toList()..sort()),
@@ -18302,6 +18374,7 @@ class _TimelinePainter extends CustomPainter {
        _expandedHeightsHash = _hashDoubleList(expandedHeights),
        _automationLaneHeightsHash = _hashDoubleList(automationLaneHeights),
        _recordingPeaksHash = _hashDoubleList(recordingPeaks),
+       _recordingPeakTimesHash = _hashDoubleList(recordingPeakTimesMs),
        _rowKindHash = _hashList(
          rows
              .map((row) => row.kind == TimelineRowKind.instrument ? 1 : 0)
@@ -18699,6 +18772,7 @@ class _TimelinePainter extends CustomPainter {
             recordingStartMs - scrollOffsetMs,
             recDurationMs,
             recordingPeaks,
+            recordingPeakTimesMs,
           );
         }
       }
@@ -20263,13 +20337,16 @@ class _TimelinePainter extends CustomPainter {
     double recStartMs,
     double recDurationMs,
     List<double> peaks,
+    List<double> peakTimesMs,
   ) {
-    if (recDurationMs <= 0 || peaks.isEmpty) return;
+    final envelope = buildRecordingPreviewEnvelopePoints(
+      peaks: peaks,
+      peakTimesMs: peakTimesMs,
+      durationMs: recDurationMs,
+    );
+    if (envelope.isEmpty) return;
 
     final double left = recStartMs * msToPx;
-    final double right = left + recDurationMs * msToPx;
-    final double width = right - left;
-    if (width <= 0) return;
 
     final paint = Paint()
       ..color = const Color(0xCCFF4A4A)
@@ -20279,13 +20356,11 @@ class _TimelinePainter extends CustomPainter {
     final double maxHeight = rowRect.height * 0.7;
 
     final Path path = Path();
-    final int n = peaks.length;
-
     // TOP EDGE
-    for (int i = 0; i < n; i++) {
-      final double x = left + (i / (n - 1)) * width;
-      final double amp = peaks[i].clamp(0.0, 1.0);
-      final double y = centerY - amp * maxHeight * 0.5;
+    for (int i = 0; i < envelope.length; i++) {
+      final point = envelope[i];
+      final double x = left + point.dx * msToPx;
+      final double y = centerY - point.dy * maxHeight * 0.5;
       if (i == 0) {
         path.moveTo(x, y);
       } else {
@@ -20294,10 +20369,10 @@ class _TimelinePainter extends CustomPainter {
     }
 
     // BOTTOM EDGE (reverse)
-    for (int i = n - 1; i >= 0; i--) {
-      final double x = left + (i / (n - 1)) * width;
-      final double amp = peaks[i].clamp(0.0, 1.0);
-      final double y = centerY + amp * maxHeight * 0.5;
+    for (int i = envelope.length - 1; i >= 0; i--) {
+      final point = envelope[i];
+      final double x = left + point.dx * msToPx;
+      final double y = centerY + point.dy * maxHeight * 0.5;
       path.lineTo(x, y);
     }
 
@@ -20351,7 +20426,7 @@ class _TimelinePainter extends CustomPainter {
         _clipDataHash < 0 ||
         old._clipDataHash < 0 ||
         _clipDataHash != old._clipDataHash ||
-        _visibleClipIndicesHash != old._visibleClipIndicesHash ||
+        !listEquals(visibleClipIndices, old.visibleClipIndices) ||
         _automationClipHash != old._automationClipHash ||
         quantizeDivisions != old.quantizeDivisions ||
         foregroundGridEnabled != old.foregroundGridEnabled ||
@@ -20367,7 +20442,8 @@ class _TimelinePainter extends CustomPainter {
         isRecording != old.isRecording ||
         recordingRowIndex != old.recordingRowIndex ||
         recordingStartMs != old.recordingStartMs ||
-        _recordingPeaksHash != old._recordingPeaksHash;
+        _recordingPeaksHash != old._recordingPeaksHash ||
+        _recordingPeakTimesHash != old._recordingPeakTimesHash;
   }
 }
 

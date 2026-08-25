@@ -13,6 +13,14 @@ extern "C"
 
     // Engine lifecycle
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialiseEngineJNI(JNIEnv *env, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexV2JNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForV2CallbackReadyJNI(JNIEnv *, jclass, jint);
+    JNIEXPORT jlong JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginBluetoothMediaRouteMigrationV2JNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForBluetoothMediaRouteMigrationV2JNI(JNIEnv *, jclass, jlong, jint);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_finishBluetoothMediaRouteMigrationV2JNI(JNIEnv *, jclass, jlong);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeInputStreamFactsV2JNI(JNIEnv *, jclass);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_shutdownEngineJNI(JNIEnv *, jclass);
 
     // Legacy track API
@@ -158,8 +166,9 @@ extern "C"
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentOutputDeviceNameJNI(JNIEnv *, jclass);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveInputMonitoringEnabledJNI(JNIEnv *, jclass, jboolean);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_startRecordingJNI(JNIEnv *, jclass, jstring, jint, jint);
-    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *, jclass);
-    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *, jclass);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_discardRecordingCaptureV2JNI(JNIEnv *, jclass);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_isRecordingJNI(JNIEnv *, jclass);
 
     // Meters and waveforms

@@ -4,6 +4,7 @@
 #include "SimpleGainProcessor.h"
 #include "NativeEffects.h"
 #include "JuceLogBridge.h"
+#include "../../../../native/RealtimeWavCapture.h"
 
 #include <array>
 #include <atomic>
@@ -4599,6 +4600,13 @@ public:
     static JuceEngine &get();
 
     void initialiseEngine();
+    bool initialisePlaybackV2Android();
+    bool quiescePlaybackV2Android(bool closeDevice);
+    bool reconfigurePlaybackV2Android();
+    bool prepareRecordingV2Android();
+    bool prepareSystemSelectedMediaDuplexV2Android();
+    bool prepareBluetoothDuplexV2Android();
+    bool waitForV2CallbackReady(int timeoutMs);
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -4705,6 +4713,7 @@ public:
 
     // Transport
     void play();
+    bool playPlaybackV2Android();
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
@@ -4886,7 +4895,10 @@ public:
     bool startRecordingToWav(const juce::File &file,
                              int channelStart,
                              int channelCount);
-    void stopRecording(bool restorePlaybackRoute = true);
+    RealtimeWavCapture::StopResult finalizeRecordingCapture();
+    void completeRecordingStop(bool restorePlaybackRoute);
+    RealtimeWavCapture::StopResult stopRecording(bool restorePlaybackRoute = true);
+    void discardRecordingCaptureV2Android();
     bool isRecording() const;
     void captureInput(const float *const *input,
                       int numInputChannels,
@@ -4942,6 +4954,7 @@ public:
                                   juce::MidiBuffer &scratchMidi) override;
 
 private:
+    bool prepareDefaultDuplexV2Android();
     JuceEngine();
     ~JuceEngine();
 
@@ -4983,12 +4996,15 @@ private:
 
     bool engineInitialized = false;
     bool formatsRegistered = false; // will only be flipped once to true
+    bool audioCallbackAttached = false;
+    bool v2PlaybackCallbackDetached = false;
+    bool androidV2RecordingPrepared = false;
+    juce::WaitableEvent androidV2CallbackReady;
+    std::atomic<bool> androidV2CallbackProofPending{false};
     juce::AudioFormatManager formatManager;
     juce::AudioPluginFormatManager pluginFormatManager;
     juce::AudioProcessorGraph graph;
     juce::AudioProcessorGraph exportGraph;
-
-    juce::SpinLock recordLock;
 
     juce::AudioProcessorGraph::Node::Ptr inputNode;
     juce::AudioProcessorGraph::Node::Ptr outputNode;
@@ -5486,13 +5502,7 @@ private:
     std::unique_ptr<MetronomeAudioCallback> metronomeCallback;
 
     // Recording state
-    std::unique_ptr<juce::AudioFormatWriter> recorderWriter;
-    std::unique_ptr<juce::FileOutputStream> recorderStream;
-
-    bool recordingActive = false;
-    int recordChannelStart = 0;
-    int recordChannelCount = 1;
-    int recordChannelOffset = 0;
+    RealtimeWavCapture wavCapture;
     std::atomic<int> recordingRestoreDesiredInputs{0};
     juce::AudioDeviceManager::AudioDeviceSetup recordingRestorePlaybackSetup;
     bool hasRecordingRestorePlaybackSetup = false;
@@ -5505,7 +5515,6 @@ private:
     int liveMonitorChannelStart = 0;
     juce::Array<juce::AudioProcessorGraph::Connection> liveMonitorConnections;
 
-    juce::LinearSmoothedValue<float> recPeak; // optional amplitude meter
     // Recursive because public graph mutation entrypoints can call one another.
     std::recursive_mutex graphRenderMutex;
     std::atomic<std::int64_t> realtimeTicksPerSecond{0};
@@ -5629,6 +5638,8 @@ private:
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
     void clearLiveInputMonitorConnectionsLocked(
         juce::AudioProcessorGraph::UpdateKind updateKind = juce::AudioProcessorGraph::UpdateKind::sync);
+    void registerFormatsIfNeeded();
+    void initialiseSharedPlaybackGraph();
 };
 
 class MetronomeAudioCallback : public juce::AudioIODeviceCallback
@@ -5670,8 +5681,14 @@ public:
     // ===== AudioIODeviceCallback =====
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
+        callbackReady.store(false, std::memory_order_release);
         sampleRate = device->getCurrentSampleRate();
-        graphRenderBlockSize = juce::jmax(1, device->getCurrentBufferSizeSamples());
+        const int preparedBlockCapacity = device->getCurrentBufferSizeSamples();
+        const int preparedInputChannels =
+            device->getActiveInputChannels().countNumberOfSetBits();
+        const int preparedOutputChannels =
+            device->getActiveOutputChannels().countNumberOfSetBits();
+        graphRenderBlockSize = juce::jmax(1, preparedBlockCapacity);
         updateMsPerBeat();
         clickPhaseInc = juce::MathConstants<double>::twoPi * clickFrequency / sampleRate;
         engine.clearOutputSafetyState();
@@ -5679,10 +5696,20 @@ public:
         player.audioDeviceAboutToStart(device);
         engine.prepareLiveClipProcessorsForCurrentDevice();
         alignToTransport();
+        expectedBlockCapacity.store(preparedBlockCapacity, std::memory_order_relaxed);
+        expectedInputChannels.store(preparedInputChannels, std::memory_order_relaxed);
+        expectedOutputChannels.store(preparedOutputChannels, std::memory_order_relaxed);
+        callbackReady.store(
+            preparedBlockCapacity > 0 && preparedOutputChannels > 0,
+            std::memory_order_release);
     }
 
     void audioDeviceStopped() override
     {
+        callbackReady.store(false, std::memory_order_release);
+        expectedBlockCapacity.store(0, std::memory_order_relaxed);
+        expectedInputChannels.store(0, std::memory_order_relaxed);
+        expectedOutputChannels.store(0, std::memory_order_relaxed);
         player.audioDeviceStopped();
     }
 
@@ -5694,6 +5721,34 @@ public:
         int numSamples,
         const juce::AudioIODeviceCallbackContext &context) override
     {
+        const int knownBlockCapacity =
+            expectedBlockCapacity.load(std::memory_order_relaxed);
+        const int knownInputs = expectedInputChannels.load(std::memory_order_relaxed);
+        const int knownOutputs = expectedOutputChannels.load(std::memory_order_relaxed);
+        bool pointersValid = inputChannelData != nullptr || numInputChannels == 0;
+        pointersValid = pointersValid && (outputChannelData != nullptr || numOutputChannels == 0);
+        for (int ch = 0; pointersValid && ch < numInputChannels; ++ch)
+            pointersValid = inputChannelData[ch] != nullptr;
+        for (int ch = 0; pointersValid && ch < numOutputChannels; ++ch)
+            pointersValid = outputChannelData[ch] != nullptr;
+        const bool unexpectedCallbackShape =
+            !callbackReady.load(std::memory_order_acquire) ||
+            !pointersValid ||
+            numSamples <= 0 ||
+            numSamples > knownBlockCapacity ||
+            numInputChannels != knownInputs ||
+            numOutputChannels != knownOutputs;
+        if (unexpectedCallbackShape)
+        {
+            if (outputChannelData != nullptr && numSamples > 0)
+            {
+                for (int ch = 0; ch < numOutputChannels; ++ch)
+                    if (outputChannelData[ch] != nullptr)
+                        juce::FloatVectorOperations::clear(outputChannelData[ch], numSamples);
+            }
+            return;
+        }
+
         const auto callbackStartTicks = juce::Time::getHighResolutionTicks();
 
         engine.captureInput(inputChannelData, numInputChannels, numSamples);
@@ -5879,6 +5934,10 @@ private:
     int beatUnit = 4;
 
     double sampleRate = 44100.0;
+    std::atomic<bool> callbackReady{false};
+    std::atomic<int> expectedBlockCapacity{0};
+    std::atomic<int> expectedInputChannels{0};
+    std::atomic<int> expectedOutputChannels{0};
     double msPerBeat = 500.0;
     double transportMs = 0.0;
     double nextBeatMs = 0.0;

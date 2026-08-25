@@ -666,13 +666,22 @@ public:
             return "Couldn't change buffer size";
         }
 
-        // Annoyingly, after changing the rate and buffer size, some devices fail to
-        // correctly report their new settings until some random time in the future, so
-        // after calling updateDetailsFromDevice, we need to manually bodge these values
-        // to make sure we're using the correct numbers..
+        // Mixroom's macOS V2 route owner supplies the exact CoreAudio-native
+        // settings for the selected output. A Bluetooth profile change can make
+        // a successful property write stale before the device is reopened. In
+        // that case it is unsafe to overwrite the readback: doing so makes JUCE
+        // process a different frame count from CoreAudio's callback cadence.
         updateDetailsFromDevice (ins, outs);
-        sampleRate = newSampleRate;
-        bufferSize = bufferSizeSamples;
+        if (std::abs (sampleRate - newSampleRate) >= 1.0
+            || bufferSize != bufferSizeSamples)
+        {
+            Logger::writeToLog ("CoreAudio: route settings changed during reopen; "
+                                "reportedRate=" + String (sampleRate)
+                                + " requestedRate=" + String (newSampleRate)
+                                + " reportedBuffer=" + String (bufferSize)
+                                + " requestedBuffer=" + String (bufferSizeSamples));
+            return "CoreAudio route settings changed during reopen";
+        }
 
         if (sampleRates.size() == 0)
             return "Device has no available sample-rates";

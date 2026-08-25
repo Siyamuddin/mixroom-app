@@ -6,12 +6,49 @@ IOS_DIR="$ROOT_DIR/juce_audio_engine/ios"
 DEVICE_HEADERS="$IOS_DIR/JuceModules.xcframework/ios-arm64/Headers"
 SIM_HEADERS="$IOS_DIR/JuceModules.xcframework/ios-arm64_x86_64-simulator/Headers"
 WRAPPER_DIR="$ROOT_DIR/tools/ios/juce_vendor"
+POLICY_PATCH="$WRAPPER_DIR/mixroom_ios_audio_session_policy.patch"
+POLICY_INCLUDE_DIR="$IOS_DIR/Classes"
+EXPECTED_IOS_AUDIO_SOURCE_SHA="cb90606887e7c9fc925f8c004a651135edf86880cfd2ddf8590239f0a0abca05"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/juce_vendor_rebuild.XXXXXX")"
 
 cleanup() {
   rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT
+
+prepare_header_tree() {
+  local source_root="$1"
+  local destination_root="$2"
+  local source_file="$source_root/juce_audio_devices/native/juce_Audio_ios.cpp"
+
+  local source_sha
+  source_sha="$(shasum -a 256 "$source_file" | awk '{print $1}')"
+  if [[ "$source_sha" != "$EXPECTED_IOS_AUDIO_SOURCE_SHA" ]]; then
+    echo "Unexpected JUCE iOS audio source revision: $source_sha" >&2
+    exit 1
+  fi
+
+  mkdir -p "$destination_root"
+  cp -R "$source_root/." "$destination_root"
+  perl -pi -e 's/\r$//' \
+    "$destination_root/juce_audio_devices/native/juce_Audio_ios.cpp"
+  patch -d "$destination_root" -p1 < "$POLICY_PATCH"
+}
+
+DEVICE_PATCHED_HEADERS="$TMP_DIR/device-headers"
+SIM_PATCHED_HEADERS="$TMP_DIR/simulator-headers"
+
+device_source_sha="$(shasum -a 256 \
+  "$DEVICE_HEADERS/juce_audio_devices/native/juce_Audio_ios.cpp" | awk '{print $1}')"
+sim_source_sha="$(shasum -a 256 \
+  "$SIM_HEADERS/juce_audio_devices/native/juce_Audio_ios.cpp" | awk '{print $1}')"
+if [[ "$device_source_sha" != "$sim_source_sha" ]]; then
+  echo "Device and simulator JUCE iOS sources differ." >&2
+  exit 1
+fi
+
+prepare_header_tree "$DEVICE_HEADERS" "$DEVICE_PATCHED_HEADERS"
+prepare_header_tree "$SIM_HEADERS" "$SIM_PATCHED_HEADERS"
 
 compile_module() {
   local sdk="$1"
@@ -60,6 +97,7 @@ compile_module() {
     -isysroot "$sdk_path" \
     -I"$header_root" \
     -I"$WRAPPER_DIR" \
+    -I"$POLICY_INCLUDE_DIR" \
     "${defs[@]}" \
     -c "$wrapper" \
     -o "$out"
@@ -107,14 +145,14 @@ SIM_ARM64_UTILS_O="$TMP_DIR/include_juce_audio_utils.debug.sim.arm64.o"
 SIM_X64_DEVICES_O="$TMP_DIR/include_juce_audio_devices.debug.sim.x86_64.o"
 SIM_X64_UTILS_O="$TMP_DIR/include_juce_audio_utils.debug.sim.x86_64.o"
 
-compile_module iphoneos arm64 debug "$DEVICE_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$DEVICE_DEBUG_DEVICES_O"
-compile_module iphoneos arm64 debug "$DEVICE_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$DEVICE_DEBUG_UTILS_O"
-compile_module iphoneos arm64 release "$DEVICE_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$DEVICE_RELEASE_DEVICES_O"
-compile_module iphoneos arm64 release "$DEVICE_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$DEVICE_RELEASE_UTILS_O"
-compile_module iphonesimulator arm64 debug "$SIM_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$SIM_ARM64_DEVICES_O"
-compile_module iphonesimulator arm64 debug "$SIM_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$SIM_ARM64_UTILS_O"
-compile_module iphonesimulator x86_64 debug "$SIM_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$SIM_X64_DEVICES_O"
-compile_module iphonesimulator x86_64 debug "$SIM_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$SIM_X64_UTILS_O"
+compile_module iphoneos arm64 debug "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$DEVICE_DEBUG_DEVICES_O"
+compile_module iphoneos arm64 debug "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$DEVICE_DEBUG_UTILS_O"
+compile_module iphoneos arm64 release "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$DEVICE_RELEASE_DEVICES_O"
+compile_module iphoneos arm64 release "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$DEVICE_RELEASE_UTILS_O"
+compile_module iphonesimulator arm64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$SIM_ARM64_DEVICES_O"
+compile_module iphonesimulator arm64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$SIM_ARM64_UTILS_O"
+compile_module iphonesimulator x86_64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$SIM_X64_DEVICES_O"
+compile_module iphonesimulator x86_64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$SIM_X64_UTILS_O"
 
 replace_objects_in_archive \
   "$IOS_DIR/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a" \

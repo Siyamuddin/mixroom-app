@@ -1,6 +1,7 @@
 #define JUCE_GUI_BASICS_INCLUDE_ANDROID 1
 #include "JuceEngine.h"
 #include "JuceBridge.h"
+#include "MixroomOboePlaybackV2.h"
 #include "InstrumentRenderers.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_core/native/juce_JNIHelpers_android.h>
@@ -1314,11 +1315,221 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialiseEngineJNI(JNIEnv *env,
     JuceEngine::get().initialiseEngine();
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialisePlaybackV2JNI(JNIEnv *env, jclass)
+{
+    if (!ensureJuceAndroidRuntimeInitialised(env))
+        return JNI_FALSE;
+
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().initialisePlaybackV2Android(); });
+    else
+        success = JuceEngine::get().initialisePlaybackV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_quiescePlaybackV2JNI(
+    JNIEnv *, jclass, jboolean closeDevice)
+{
+    bool wasPlaying = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&wasPlaying, closeDevice]
+                     { wasPlaying = JuceEngine::get().quiescePlaybackV2Android(closeDevice != JNI_FALSE); });
+    else
+        wasPlaying = JuceEngine::get().quiescePlaybackV2Android(closeDevice != JNI_FALSE);
+    return wasPlaying ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_reconfigurePlaybackV2JNI(JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().reconfigurePlaybackV2Android(); });
+    else
+        success = JuceEngine::get().reconfigurePlaybackV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().prepareRecordingV2Android(); });
+    else
+        success = JuceEngine::get().prepareRecordingV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(
+    JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(); });
+    else
+        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexV2JNI(
+    JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().prepareBluetoothDuplexV2Android(); });
+    else
+        success = JuceEngine::get().prepareBluetoothDuplexV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForV2CallbackReadyJNI(
+    JNIEnv *, jclass, jint timeoutMs)
+{
+    return JuceEngine::get().waitForV2CallbackReady((int)timeoutMs)
+               ? JNI_TRUE
+               : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginBluetoothMediaRouteMigrationV2JNI(
+    JNIEnv *, jclass)
+{
+    return static_cast<jlong> (
+        mixroom::android_audio_v2::beginBluetoothMediaRouteMigration());
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForBluetoothMediaRouteMigrationV2JNI(
+    JNIEnv *, jclass, jlong token, jint timeoutMs)
+{
+    return mixroom::android_audio_v2::waitForBluetoothMediaRouteMigration (
+               static_cast<uint64_t> (token),
+               juce::jlimit (1, 5000, static_cast<int> (timeoutMs)))
+               ? JNI_TRUE
+               : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_finishBluetoothMediaRouteMigrationV2JNI(
+    JNIEnv *, jclass, jlong token)
+{
+    mixroom::android_audio_v2::finishBluetoothMediaRouteMigration (
+        static_cast<uint64_t> (token));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setBluetoothMediaPlaybackPolicyV2JNI(
+    JNIEnv *, jclass, jboolean enabled)
+{
+    mixroom::android_audio_v2::setBluetoothMediaPolicyEnabled(enabled != JNI_FALSE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAndroidStreamPolicyV2JNI(
+    JNIEnv *, jclass, jint policy)
+{
+    using Policy = mixroom::android_audio_v2::StreamPolicy;
+    const auto selected = policy == static_cast<jint> (Policy::bluetoothMedia)
+                              ? Policy::bluetoothMedia
+                              : policy == static_cast<jint> (Policy::bluetoothCommunicationDuplex)
+                                    ? Policy::bluetoothCommunicationDuplex
+                                    : Policy::normal;
+    mixroom::android_audio_v2::setStreamPolicy(selected);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_resetPlaybackPolicyV2JNI(JNIEnv *, jclass)
+{
+    mixroom::android_audio_v2::resetPlaybackPolicy();
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeOutputStreamFactsV2JNI(JNIEnv *env, jclass)
+{
+    const auto facts = mixroom::android_audio_v2::getOutputStreamFacts();
+    juce::NamedValueSet values;
+    values.set("available", facts.available);
+    values.set("running", facts.running);
+    if (facts.available)
+    {
+        values.set("streamEpoch", static_cast<juce::int64>(facts.streamEpoch));
+        values.set("routedDeviceId", facts.routedDeviceId);
+        values.set("channelCount", facts.channelCount);
+        values.set("requestedSampleRateHz", facts.requestedSampleRate);
+        values.set("sampleRateHz", facts.sampleRate);
+        values.set("requestedBufferFrames", facts.requestedBufferSizeFrames);
+        values.set("bufferFrames", facts.bufferSizeFrames);
+        values.set("bufferCapacityFrames", facts.bufferCapacityFrames);
+        values.set("framesPerBurst", facts.framesPerBurst);
+        values.set("framesPerCallback", facts.framesPerCallback);
+        if (facts.xRunCount >= 0)
+            values.set("xRunCount", facts.xRunCount);
+        values.set("audioBackend", juce::String(facts.audioApi));
+        values.set("performanceMode", juce::String(facts.performanceMode));
+        values.set("sharingMode", juce::String(facts.sharingMode));
+        values.set("streamState", juce::String(facts.streamState));
+    }
+    return namedValueStatsToJavaMap(env, values);
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getOboeInputStreamFactsV2JNI(JNIEnv *env, jclass)
+{
+    const auto facts = mixroom::android_audio_v2::getInputStreamFacts();
+    juce::NamedValueSet values;
+    values.set("available", facts.available);
+    values.set("running", facts.running);
+    if (facts.available)
+    {
+        values.set("streamEpoch", static_cast<juce::int64>(facts.streamEpoch));
+        values.set("routedDeviceId", facts.routedDeviceId);
+        values.set("channelCount", facts.channelCount);
+        values.set("requestedSampleRateHz", facts.requestedSampleRate);
+        values.set("sampleRateHz", facts.sampleRate);
+        values.set("requestedBufferFrames", facts.requestedBufferSizeFrames);
+        values.set("bufferFrames", facts.bufferSizeFrames);
+        values.set("bufferCapacityFrames", facts.bufferCapacityFrames);
+        values.set("framesPerBurst", facts.framesPerBurst);
+        values.set("framesPerCallback", facts.framesPerCallback);
+        if (facts.xRunCount >= 0)
+            values.set("xRunCount", facts.xRunCount);
+        values.set("audioBackend", juce::String(facts.audioApi));
+        values.set("performanceMode", juce::String(facts.performanceMode));
+        values.set("sharingMode", juce::String(facts.sharingMode));
+        values.set("streamState", juce::String(facts.streamState));
+    }
+    return namedValueStatsToJavaMap(env, values);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_shutdownEngineJNI(JNIEnv *, jclass)
 {
     juce::MessageManager::callAsync([]
                                     { JuceEngine::get().shutdownEngine(); });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_shutdownEngineSynchronouslyJNI(JNIEnv *, jclass)
+{
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([]
+                     { JuceEngine::get().shutdownEngine(); });
+        return;
+    }
+    JuceEngine::get().shutdownEngine();
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -1331,6 +1542,18 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_playJNI(JNIEnv *, jclass)
         return;
     }
     JuceEngine::get().play();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_playPlaybackV2JNI(JNIEnv *, jclass)
+{
+    bool success = false;
+    if (auto *mm = juce::MessageManager::getInstance())
+        mm->callSync([&success]
+                     { success = JuceEngine::get().playPlaybackV2Android(); });
+    else
+        success = JuceEngine::get().playPlaybackV2Android();
+    return success ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -3194,18 +3417,28 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_startRecordingJNI(JNIEnv *env,
     return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *, jclass)
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *env, jclass)
 {
+    auto result = JuceEngine::get().finalizeRecordingCapture();
     juce::MessageManager::getInstance()->callSync([]
-                                                  { JuceEngine::get().stopRecording(true); });
+                                                  { JuceEngine::get().completeRecordingStop(true); });
+    return namedValueStatsToJavaMap(env, result.toNamedValueSet());
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *env, jclass)
+{
+    auto result = JuceEngine::get().finalizeRecordingCapture();
+    juce::MessageManager::getInstance()->callSync([]
+                                                  { JuceEngine::get().completeRecordingStop(false); });
+    return namedValueStatsToJavaMap(env, result.toNamedValueSet());
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *, jclass)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_discardRecordingCaptureV2JNI(JNIEnv *, jclass)
 {
-    juce::MessageManager::getInstance()->callSync([]
-                                                  { JuceEngine::get().stopRecording(false); });
+    JuceEngine::get().discardRecordingCaptureV2Android();
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

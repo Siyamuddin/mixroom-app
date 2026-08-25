@@ -1,10 +1,14 @@
 #include "JuceLogBridge.h"
 #include <android/log.h>
 #include <jni.h>
+#include <mutex>
 
 // Global references
 static JavaVM *g_JavaVM = nullptr;
 static jobject g_FlutterChannel = nullptr;
+static jobject g_RouteEventTargetV2 = nullptr;
+static jmethodID g_BluetoothDuplexDisconnectedMethodV2 = nullptr;
+static std::mutex g_RouteEventTargetMutexV2;
 
 void setJavaVM(JNIEnv *env)
 {
@@ -76,6 +80,83 @@ void juceLogToFlutter(const char *msg)
     {
         g_JavaVM->DetachCurrentThread();
     }
+}
+
+void notifyAndroidBluetoothDuplexDisconnectedV2(uint64_t streamEpoch)
+{
+    if (g_JavaVM == nullptr)
+        return;
+
+    JNIEnv *env = nullptr;
+    bool didAttach = false;
+    const auto environmentStatus = g_JavaVM->GetEnv((void **)&env, JNI_VERSION_1_6);
+    if (environmentStatus == JNI_EDETACHED)
+    {
+        if (g_JavaVM->AttachCurrentThread(&env, nullptr) != 0)
+            return;
+        didAttach = true;
+    }
+    else if (environmentStatus != JNI_OK || env == nullptr)
+    {
+        return;
+    }
+
+    jobject localTarget = nullptr;
+    jmethodID method = nullptr;
+    {
+        const std::lock_guard<std::mutex> lock(g_RouteEventTargetMutexV2);
+        if (g_RouteEventTargetV2 != nullptr)
+            localTarget = env->NewLocalRef(g_RouteEventTargetV2);
+        method = g_BluetoothDuplexDisconnectedMethodV2;
+    }
+
+    if (localTarget != nullptr && method != nullptr)
+    {
+        env->CallVoidMethod(localTarget, method, static_cast<jlong>(streamEpoch));
+        if (env->ExceptionCheck())
+            env->ExceptionClear();
+        env->DeleteLocalRef(localTarget);
+    }
+
+    if (didAttach)
+        g_JavaVM->DetachCurrentThread();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceAudioEnginePlugin_nativeSetRouteEventTargetV2(
+    JNIEnv *env,
+    jobject target,
+    jboolean enabled)
+{
+    setJavaVM(env);
+    const std::lock_guard<std::mutex> lock(g_RouteEventTargetMutexV2);
+    if (g_RouteEventTargetV2 != nullptr)
+    {
+        env->DeleteGlobalRef(g_RouteEventTargetV2);
+        g_RouteEventTargetV2 = nullptr;
+    }
+    g_BluetoothDuplexDisconnectedMethodV2 = nullptr;
+
+    if (enabled == JNI_FALSE || target == nullptr)
+        return;
+
+    const auto targetClass = env->GetObjectClass(target);
+    if (targetClass == nullptr)
+        return;
+    const auto method = env->GetMethodID(
+        targetClass,
+        "onNativeBluetoothDuplexDisconnectedV2",
+        "(J)V");
+    env->DeleteLocalRef(targetClass);
+    if (method == nullptr)
+    {
+        if (env->ExceptionCheck())
+            env->ExceptionClear();
+        return;
+    }
+
+    g_RouteEventTargetV2 = env->NewGlobalRef(target);
+    g_BluetoothDuplexDisconnectedMethodV2 = method;
 }
 
 // Called from Kotlin to initialize
