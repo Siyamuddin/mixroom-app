@@ -19,6 +19,7 @@ import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
@@ -5687,6 +5688,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, DesktopEditorWindowLayout> _desktopWindowLayouts =
       <String, DesktopEditorWindowLayout>{};
   int _lastLiveMidiInputTargetClipId = -2;
+  final MidiPreviewNoteCoordinator _pianoRollPreviewNotes =
+      MidiPreviewNoteCoordinator();
+  bool _closingPianoRollPreview = false;
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
@@ -21302,15 +21306,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        final liveReady = await _ensureLiveMidiClipReadyForPreview(clip);
-        if (!liveReady) return;
-        final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
-          noteOn: true,
+        final key = MidiPreviewNoteKey(
+          clipId: clip.engineClipId,
           channel: 1,
-          pitch: pitch,
-          velocity: velocity,
+          pitch: pitch.clamp(0, 127).toInt(),
         );
-        if (sent) return;
+        final result = await _pianoRollPreviewNotes.noteOn(
+          key: key,
+          prepare: () => _ensureLiveMidiClipReadyForPreview(clip),
+          sendNoteOn: () => JuceAudioEngine.sendLiveMidiInputEvent(
+            noteOn: true,
+            channel: key.channel,
+            pitch: key.pitch,
+            velocity: velocity,
+          ),
+          sendNoteOff: () => _sendPianoRollPreviewNoteOff(key),
+        );
+        if (result == MidiPreviewNoteOnResult.delivered ||
+            result == MidiPreviewNoteOnResult.cancelled) {
+          return;
+        }
       }
       await _previewPianoRollNote(pitch, velocity);
       return;
@@ -21358,18 +21373,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
-          clip.engineClipId,
-          clearPendingEvents: false,
+        final key = MidiPreviewNoteKey(
+          clipId: clip.engineClipId,
+          channel: 1,
+          pitch: pitch.clamp(0, 127).toInt(),
         );
-        if (targetReady) {
-          await JuceAudioEngine.sendLiveMidiInputEvent(
-            noteOn: false,
-            channel: 1,
-            pitch: pitch,
-            velocity: 0.0,
-          );
+        if (_closingPianoRollPreview) {
+          return;
         }
+        await _pianoRollPreviewNotes.noteOff(
+          key: key,
+          sendNoteOff: () => _sendPianoRollPreviewNoteOff(key),
+        );
       }
       return;
     }
@@ -21397,6 +21412,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {});
     }
   }
+
+  Future<bool> _sendPianoRollPreviewNoteOff(MidiPreviewNoteKey key) async {
+    final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
+      key.clipId,
+      clearPendingEvents: false,
+    );
+    if (!targetReady) return false;
+    return JuceAudioEngine.sendLiveMidiInputEvent(
+      noteOn: false,
+      channel: key.channel,
+      pitch: key.pitch,
+      velocity: 0.0,
+    );
+  }
+
+  Future<void> _releaseAllPianoRollPreviewNotes() => _pianoRollPreviewNotes
+      .releaseAll(sendNoteOff: _sendPianoRollPreviewNoteOff);
 
   bool _extendMidiClipForBeat(AudioTrack clip, double endBeat) {
     final sourceTempo = _resolvedClipSourceTempoBpm(clip);
@@ -80242,7 +80274,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _closeMidiClipEditor() {
-    unawaited(_releaseAllDesktopMidiNotes());
+    _closingPianoRollPreview = true;
+    final desktopRelease = _releaseAllDesktopMidiNotes();
+    final pianoRollRelease = _releaseAllPianoRollPreviewNotes();
     setState(() {
       _showPianoRoll = false;
       _pianoRollFullscreen = false;
@@ -80251,9 +80285,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
     _setDawPanelVisible('piano_roll', false);
     _syncMeterPollingForVisibility();
-    if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
-      unawaited(_syncLiveMidiInputTargetClip());
-    }
+    unawaited(() async {
+      try {
+        await Future.wait(<Future<void>>[desktopRelease, pianoRollRelease]);
+        if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
+          await _syncLiveMidiInputTargetClip();
+        }
+      } finally {
+        _closingPianoRollPreview = false;
+      }
+    }());
   }
 
   void _openPitchLabEditor(int clipIndex) {
