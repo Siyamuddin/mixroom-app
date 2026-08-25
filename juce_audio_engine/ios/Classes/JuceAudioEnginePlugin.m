@@ -6380,6 +6380,23 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     return _sharedInstance;
 }
 
++ (void)shutdownForApplicationTermination {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        JuceAudioEnginePlugin *plugin = [JuceAudioEnginePlugin sharedInstance];
+#if TARGET_OS_OSX
+        plugin.macIntentOperationCancelledV2 = YES;
+        [plugin signalMacIntentRouteConditionV2];
+        [plugin signalMacHardwareSettingsConditionV2];
+#else
+        plugin.iosIntentOperationCancelledV2 = YES;
+        [plugin signalIOSIntentRouteConditionV2];
+#endif
+        [plugin stopAudioRouteMonitoringV2];
+        [JuceBridge shutdownEngineObjC];
+    });
+}
+
 - (BOOL)hasActiveLogListener {
     return self.logSink != nil;
 }
@@ -6823,6 +6840,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"debugReleaseMidiClipLoadStall"]) {
         int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         result(@(MixroomReleaseMidiClipLoadTestStall(loadRequestId)));
+    } else if ([call.method isEqualToString:@"debugShutdownForApplicationTermination"]) {
+        [JuceAudioEnginePlugin shutdownForApplicationTermination];
+        result(nil);
 #endif
     } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
         NSInteger clip = [args[@"clip"] integerValue];
@@ -8056,6 +8076,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 
 @end
+
+void JuceAudioEnginePluginShutdownForApplicationTermination(void) {
+    [JuceAudioEnginePlugin shutdownForApplicationTermination];
+}
 
 @interface JucePluginEventStreamHandler ()
 @property (nonatomic, assign) JuceAudioEnginePlugin *plugin;

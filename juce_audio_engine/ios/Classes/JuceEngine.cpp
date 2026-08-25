@@ -1750,8 +1750,12 @@ void clearStereoConnectionsBetweenNodes(
 // ============================================================
 JuceEngine &JuceEngine::get()
 {
-    static JuceEngine instance;
-    return instance;
+    // Process-lifetime audio threads and platform queues must never observe a
+    // partially destructed engine during C++ static teardown. The operating
+    // system reclaims this singleton after the explicit application shutdown
+    // boundary has detached callbacks and closed the audio device.
+    static JuceEngine *instance = new JuceEngine();
+    return *instance;
 }
 
 // ============================================================
@@ -1768,7 +1772,6 @@ JuceEngine::JuceEngine()
 
 JuceEngine::~JuceEngine()
 {
-    // shutdownEngine();
 }
 
 juce::Array<juce::NamedValueSet> JuceEngine::getQuarantinedHostedPlugins() const

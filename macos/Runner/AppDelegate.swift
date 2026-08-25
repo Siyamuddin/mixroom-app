@@ -1,6 +1,7 @@
 import Cocoa
 import FlutterMacOS
 import AuthenticationServices
+import juce_audio_engine
 
 @objcMembers
 class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextProviding {
@@ -17,6 +18,12 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
   @objc(applicationDidFinishLaunching:)
   dynamic override func applicationDidFinishLaunching(_ notification: Notification) {
     bindChannelsIfNeeded()
+  }
+
+  @objc(applicationWillTerminate:)
+  dynamic override func applicationWillTerminate(_ notification: Notification) {
+    JuceAudioEnginePluginSwift.shutdownForApplicationTermination()
+    super.applicationWillTerminate(notification)
   }
 
   @objc(application:openFiles:)
