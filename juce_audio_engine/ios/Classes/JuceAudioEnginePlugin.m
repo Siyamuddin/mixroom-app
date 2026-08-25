@@ -30,6 +30,7 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @interface JuceAudioEnginePlugin ()
 @property (nonatomic, copy) FlutterEventSink eventSink;
 @property (nonatomic, copy) FlutterEventSink logSink;
+@property (atomic, assign) BOOL applicationTerminationStarted;
 @property (nonatomic, assign) BOOL audioRouteMonitoringV2;
 @property (atomic, assign) uint64_t audioRouteGenerationV2;
 @property (atomic, assign) uint64_t audioRouteTransitionIdV2;
@@ -6380,6 +6381,24 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     return _sharedInstance;
 }
 
++ (void)shutdownForApplicationTermination {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        JuceAudioEnginePlugin *plugin = [JuceAudioEnginePlugin sharedInstance];
+        plugin.applicationTerminationStarted = YES;
+#if TARGET_OS_OSX
+        plugin.macIntentOperationCancelledV2 = YES;
+        [plugin signalMacIntentRouteConditionV2];
+        [plugin signalMacHardwareSettingsConditionV2];
+#else
+        plugin.iosIntentOperationCancelledV2 = YES;
+        [plugin signalIOSIntentRouteConditionV2];
+#endif
+        [plugin stopAudioRouteMonitoringV2];
+        [JuceBridge shutdownForApplicationTerminationObjC];
+    });
+}
+
 - (BOOL)hasActiveLogListener {
     return self.logSink != nil;
 }
@@ -6484,6 +6503,24 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 - (void)handleMethodCall:(FlutterMethodCall*)call
                   result:(FlutterResult)result {
     NSDictionary* args = call.arguments;
+
+    const BOOL terminationDiagnosticCall =
+        [call.method isEqualToString:@"getEngineDiagnostics"];
+#if MIXROOM_ENABLE_TEST_HOOKS
+    const BOOL terminationTestCall =
+        [call.method isEqualToString:@"debugShutdownForApplicationTermination"] ||
+        [call.method isEqualToString:@"debugReleaseMidiClipLoadStall"] ||
+        [call.method isEqualToString:@"debugGetMidiClipLoadStallState"];
+#else
+    const BOOL terminationTestCall = NO;
+#endif
+    if (self.applicationTerminationStarted &&
+        !terminationDiagnosticCall && !terminationTestCall) {
+        result([FlutterError errorWithCode:@"application_terminating"
+                                   message:@"The audio engine is shutting down."
+                                   details:nil]);
+        return;
+    }
 
     if ([call.method isEqualToString:@"initialise"]) {
         [JuceBridge initialiseEngineObjC];
@@ -6794,6 +6831,12 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 #if MIXROOM_ENABLE_TEST_HOOKS
             MixroomWaitForMidiClipLoadTestStall(loadRequestId);
 #endif
+            if (self.applicationTerminationStarted) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    loadResult(@(NO));
+                });
+                return;
+            }
             BOOL ok = [JuceBridge loadMidiClipObjC:clip
                                              rowId:rowId
                                       instrumentId:instrumentId
@@ -6823,6 +6866,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"debugReleaseMidiClipLoadStall"]) {
         int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         result(@(MixroomReleaseMidiClipLoadTestStall(loadRequestId)));
+    } else if ([call.method isEqualToString:@"debugShutdownForApplicationTermination"]) {
+        [JuceAudioEnginePlugin shutdownForApplicationTermination];
+        result(nil);
 #endif
     } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
         NSInteger clip = [args[@"clip"] integerValue];
@@ -8056,6 +8102,10 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 
 @end
+
+void JuceAudioEnginePluginShutdownForApplicationTermination(void) {
+    [JuceAudioEnginePlugin shutdownForApplicationTermination];
+}
 
 @interface JucePluginEventStreamHandler ()
 @property (nonatomic, assign) JuceAudioEnginePlugin *plugin;

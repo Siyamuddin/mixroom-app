@@ -1750,8 +1750,11 @@ void clearStereoConnectionsBetweenNodes(
 // ============================================================
 JuceEngine &JuceEngine::get()
 {
-    static JuceEngine instance;
-    return instance;
+    // The engine is explicitly quiesced by the application-termination
+    // boundary. Keeping its storage alive until process exit prevents C++
+    // static teardown from racing platform audio or dispatch callbacks.
+    static JuceEngine *instance = new JuceEngine();
+    return *instance;
 }
 
 // ============================================================
@@ -1769,6 +1772,20 @@ JuceEngine::JuceEngine()
 JuceEngine::~JuceEngine()
 {
     // shutdownEngine();
+}
+
+bool JuceEngine::attachAudioCallbackIfAllowed(
+    juce::AudioIODeviceCallback *callback)
+{
+    if (callback == nullptr || isApplicationTerminating())
+        return false;
+
+    deviceManager.addAudioCallback(callback);
+    if (!isApplicationTerminating())
+        return true;
+
+    deviceManager.removeAudioCallback(callback);
+    return false;
 }
 
 juce::Array<juce::NamedValueSet> JuceEngine::getQuarantinedHostedPlugins() const
@@ -2002,7 +2019,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
     if (!error.isEmpty())
     {
         if (detachLiveCallback)
-            deviceManager.addAudioCallback(metronomeCallback.get());
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
         if (forceReopen)
             ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
         juceLogToFlutter(("setAudioDeviceSetup failed [" + reason + "]: " + error).toRawUTF8());
@@ -2014,7 +2031,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
     if (!routeMatchesDesiredInputs())
     {
         if (detachLiveCallback)
-            deviceManager.addAudioCallback(metronomeCallback.get());
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
         juceLogToFlutter(("setAudioDeviceSetup route mismatch [" + reason + "]").toRawUTF8());
         logCurrentAudioDeviceState(reason + "-post-verify-mismatch");
         desiredInputOpenChannels.store(previousDesiredInputs, std::memory_order_relaxed);
@@ -2022,7 +2039,7 @@ bool JuceEngine::applyPreferredAudioDeviceSetup(int desiredInputChannels,
     }
 
     if (detachLiveCallback)
-        deviceManager.addAudioCallback(metronomeCallback.get());
+        attachAudioCallbackIfAllowed(metronomeCallback.get());
 
     const double sr =
         getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
@@ -2168,14 +2185,14 @@ bool JuceEngine::preparePlaybackRoute(const juce::String &reason)
     if (!error.isEmpty())
     {
         if (detachLiveCallback)
-            deviceManager.addAudioCallback(metronomeCallback.get());
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
         ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
         juceLogToFlutter(("preparePlaybackRoute failed [" + reason + "]: " + error).toRawUTF8());
         return false;
     }
 
     if (detachLiveCallback)
-        deviceManager.addAudioCallback(metronomeCallback.get());
+        attachAudioCallbackIfAllowed(metronomeCallback.get());
 
     const double sr =
         getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
@@ -2449,7 +2466,14 @@ void JuceEngine::initialiseEngine(const juce::String &v2OutputDeviceName,
                                   double v2OutputSampleRate,
                                   int v2OutputBufferFrames)
 {
+    const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
     juceLogToFlutter("Hello from JuceEngine::initialiseEngine()");
+
+    if (isApplicationTerminating())
+    {
+        juceLogToFlutter("JuceEngine::initialiseEngine() rejected during application termination.");
+        return;
+    }
 
     if (engineInitialized)
     {
@@ -2581,11 +2605,12 @@ void JuceEngine::initialiseEngine(const juce::String &v2OutputDeviceName,
 
     // audioDeviceAboutToStart is the single owner of the live graph clock and
     // preparation. AudioDeviceManager invokes it before admitting callbacks.
-    deviceManager.addAudioCallback(metronomeCallback.get());
+    engineInitialized = true;
+    if (!attachAudioCallbackIfAllowed(metronomeCallback.get()))
+        return;
 
     // Register plugin/MIDI input callbacks lazily on demand.
     // Eager scanning here can stall first project open on iOS route discovery.
-    engineInitialized = true;
 }
 
 bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName,
@@ -2593,6 +2618,8 @@ bool JuceEngine::initialisePlaybackV2(const juce::String &outputDeviceName,
                                       int bufferFrames)
 {
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
+    if (isApplicationTerminating())
+        return false;
 #if JUCE_MAC && !JUCE_IOS
     if (outputDeviceName.isEmpty() || sampleRate <= 1000.0 || bufferFrames <= 0)
         return false;
@@ -2748,9 +2775,9 @@ bool JuceEngine::reconfigureMacPlaybackRouteV2(
         return false;
 
     armOutputSafetyForCurrentRoute();
-    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr)
+    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr &&
+        attachAudioCallbackIfAllowed(metronomeCallback.get()))
     {
-        deviceManager.addAudioCallback(metronomeCallback.get());
         v2PlaybackCallbackDetached = false;
     }
     logCurrentAudioDeviceState("v2-route-transition");
@@ -2862,9 +2889,9 @@ bool JuceEngine::reconfigurePlaybackRouteV2(
     const double actualSampleRate = device->getCurrentSampleRate();
     hostSampleRateAtomic.store(actualSampleRate, std::memory_order_relaxed);
     armOutputSafetyForCurrentRoute();
-    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr)
+    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr &&
+        attachAudioCallbackIfAllowed(metronomeCallback.get()))
     {
-        deviceManager.addAudioCallback(metronomeCallback.get());
         v2PlaybackCallbackDetached = false;
     }
     logCurrentAudioDeviceState("v2-route-transition");
@@ -2928,9 +2955,9 @@ bool JuceEngine::reconfigureRecordingRouteV2(const juce::String &outputDeviceNam
     hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
     prepareLiveClipProcessorsForCurrentDevice();
     armOutputSafetyForCurrentRoute();
-    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr)
+    if (v2PlaybackCallbackDetached && metronomeCallback != nullptr &&
+        attachAudioCallbackIfAllowed(metronomeCallback.get()))
     {
-        deviceManager.addAudioCallback(metronomeCallback.get());
         v2PlaybackCallbackDetached = false;
     }
     logCurrentAudioDeviceState("v2-recording-input-prepared");
@@ -3031,7 +3058,8 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     if (iosBluetoothDuplexProbeCallback == nullptr)
         iosBluetoothDuplexProbeCallback =
             std::make_unique<IOSBluetoothDuplexProbeCallback>();
-    deviceManager.addAudioCallback(iosBluetoothDuplexProbeCallback.get());
+    if (!attachAudioCallbackIfAllowed(iosBluetoothDuplexProbeCallback.get()))
+        return false;
     iosBluetoothDuplexProbeCallbackAttached = true;
     if (!iosBluetoothDuplexProbeCallback->waitForFirstValidCallback(
             remainingTimeout()))
@@ -3058,7 +3086,8 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
         return false;
     }
     metronomeCallback->beginFirstValidCallbackProof();
-    deviceManager.addAudioCallback(metronomeCallback.get());
+    if (!attachAudioCallbackIfAllowed(metronomeCallback.get()))
+        return false;
     v2PlaybackCallbackDetached = false;
     if (!metronomeCallback->waitForFirstValidCallback(remainingTimeout()))
     {
@@ -3201,8 +3230,27 @@ bool JuceEngine::isV2PlaybackSession() const noexcept
     return audioRouteImplementation == AudioRouteImplementation::v2Playback;
 }
 
+bool JuceEngine::isApplicationTerminating() const noexcept
+{
+    return applicationTerminationStarted.load(std::memory_order_acquire);
+}
+
+void JuceEngine::shutdownForApplicationTermination()
+{
+    bool expected = false;
+    if (!applicationTerminationStarted.compare_exchange_strong(
+            expected,
+            true,
+            std::memory_order_acq_rel,
+            std::memory_order_acquire))
+        return;
+
+    shutdownEngine();
+}
+
 void JuceEngine::shutdownEngine()
 {
+    const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
     juceLogToFlutter("JuceEngine::shutdownEngine called");
 
     wavCapture.stop(true);
@@ -3758,7 +3806,7 @@ bool JuceEngine::loadClipWithPreparedAudioAsset(
     double lengthSec,
     double inFileOffsetSec)
 {
-    if (clipId < 0 || clipId >= kMaxClips)
+    if (isApplicationTerminating() || clipId < 0 || clipId >= kMaxClips)
         return false;
 
     if (decodedAsset == nullptr)
@@ -3884,7 +3932,7 @@ bool JuceEngine::loadMidiClip(int clipId,
                               double inFileOffsetSec,
                               std::int64_t loadRequestId)
 {
-    if (clipId < 0 || clipId >= kMaxClips)
+    if (isApplicationTerminating() || clipId < 0 || clipId >= kMaxClips)
         return false;
 
     const auto requestLabel =
@@ -3901,7 +3949,7 @@ bool JuceEngine::loadMidiClip(int clipId,
         return cancelled != cancelledMidiLoadRequestThrough.end() &&
                loadRequestId <= cancelled->second;
     };
-    if (requestWasCancelled())
+    if (isApplicationTerminating() || requestWasCancelled())
     {
         juceLogToFlutter(("MidiLoad cancelled before prepare " + requestLabel).toRawUTF8());
         return false;
@@ -3948,7 +3996,7 @@ bool JuceEngine::loadMidiClip(int clipId,
     player->setPlayConfigDetails(0, 2, prepareSampleRate, prepareBlockSize);
     player->prepareToPlay(prepareSampleRate, prepareBlockSize);
 
-    if (requestWasCancelled())
+    if (isApplicationTerminating() || requestWasCancelled())
     {
         juceLogToFlutter(("MidiLoad cancelled after prepare " + requestLabel).toRawUTF8());
         return false;
@@ -3965,7 +4013,7 @@ bool JuceEngine::loadMidiClip(int clipId,
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
-        if (requestWasCancelled())
+        if (isApplicationTerminating() || requestWasCancelled())
         {
             juceLogToFlutter(("MidiLoad cancelled before install " + requestLabel).toRawUTF8());
             return false;
@@ -4148,8 +4196,9 @@ void JuceEngine::endProjectClipLoad()
         projectClipLoadDetachedAudioCallback = false;
         completed = true;
     }
-    if (shouldRestoreAudioCallback && engineInitialized && metronomeCallback != nullptr)
-        deviceManager.addAudioCallback(metronomeCallback.get());
+    if (shouldRestoreAudioCallback && engineInitialized &&
+        !isApplicationTerminating() && metronomeCallback != nullptr)
+        attachAudioCallbackIfAllowed(metronomeCallback.get());
     if (completed)
         juceLogToFlutter(("ProjectClipLoad end done rebuilt=" +
                           juce::String(rebuiltGraph ? "true" : "false") +
@@ -7583,7 +7632,7 @@ juce::String JuceEngine::exportMix(const juce::File &outFile, const ExportOption
         ~LiveCallbackRestoreGuard()
         {
             if (shouldRestore && engine.metronomeCallback != nullptr)
-                engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
+                engine.attachAudioCallbackIfAllowed(engine.metronomeCallback.get());
         }
     } liveCallbackRestoreGuard{*this, hadLiveCallback};
     liveCallbackRestoreGuard.shouldRestore = hadLiveCallback;
@@ -7855,7 +7904,7 @@ juce::String JuceEngine::exportTrack(int trackIndex,
         ~LiveCallbackRestoreGuard()
         {
             if (shouldRestore && engine.metronomeCallback != nullptr)
-                engine.deviceManager.addAudioCallback(engine.metronomeCallback.get());
+                engine.attachAudioCallbackIfAllowed(engine.metronomeCallback.get());
         }
     } liveCallbackRestoreGuard{*this, hadLiveCallback};
     liveCallbackRestoreGuard.shouldRestore = hadLiveCallback;
@@ -14262,7 +14311,7 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
     if (!error.isEmpty())
     {
         if (detachLiveCallback)
-            deviceManager.addAudioCallback(metronomeCallback.get());
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
         ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
         preferredInputDeviceName = previousPreferredInputDeviceName;
         juceLogToFlutter(("selectInputDevice failed: " + error).toRawUTF8());
@@ -14270,7 +14319,7 @@ bool JuceEngine::selectInputDevice(const juce::String &name)
     }
 
     if (detachLiveCallback)
-        deviceManager.addAudioCallback(metronomeCallback.get());
+        attachAudioCallbackIfAllowed(metronomeCallback.get());
 
     const double sr =
         getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
@@ -14306,14 +14355,14 @@ bool JuceEngine::selectOutputDevice(const juce::String &name)
     if (!error.isEmpty())
     {
         if (detachLiveCallback)
-            deviceManager.addAudioCallback(metronomeCallback.get());
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
         ignoredDeviceChangeCallbacks.fetch_sub(1, std::memory_order_acq_rel);
         juceLogToFlutter(("selectOutputDevice failed: " + error).toRawUTF8());
         return false;
     }
 
     if (detachLiveCallback)
-        deviceManager.addAudioCallback(metronomeCallback.get());
+        attachAudioCallbackIfAllowed(metronomeCallback.get());
 
     const double sr =
         getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));

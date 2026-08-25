@@ -5937,6 +5937,7 @@ public:
     bool isIOSIntentRouteInvalidatedV2() const noexcept;
     juce::String getAudioRouteImplementationName() const;
     bool isV2PlaybackSession() const noexcept;
+    bool isApplicationTerminating() const noexcept;
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -5974,6 +5975,7 @@ public:
                                                       double sampleRate);
     void insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback);
     void shutdownEngine();
+    void shutdownForApplicationTermination();
 
     // Rows
     int addRow(const juce::String &name, int iconId, int preferredRowId = -1);
@@ -6377,6 +6379,7 @@ private:
     bool dequeueLiveMidiInputAudioEvent(LiveMidiInputEvent &event) noexcept;
     bool prepareLiveMidiInputEventForAudioQueue(LiveMidiInputEvent &event);
     void clearLiveMidiInputAudioQueue() noexcept;
+    bool attachAudioCallbackIfAllowed(juce::AudioIODeviceCallback *callback);
     float panUIToNormalized(float uiPan)         // OLD: uiPan ∈ [-1, 1] NEW: uiPan ∈ [0, 1]
     {
         // return juce::jmap(uiPan, -1.0f, 1.0f, 0.0f, 1.0f); // map to [0, 1]
@@ -6386,6 +6389,8 @@ private:
     static const juce::StringArray mixroomPlugins;
 
     bool engineInitialized = false;
+    std::atomic<bool> applicationTerminationStarted{false};
+    std::mutex engineLifecycleMutex;
     bool formatsRegistered = false; // will only be flipped once to true
     AudioRouteImplementation audioRouteImplementation =
         AudioRouteImplementation::none;

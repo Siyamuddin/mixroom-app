@@ -3198,6 +3198,23 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     }
 }
 
++ (void)shutdownForApplicationTerminationObjC
+{
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            JuceEngine::get().shutdownForApplicationTermination();
+        else
+            messageManager->callSync([] {
+                JuceEngine::get().shutdownForApplicationTermination();
+            });
+    }
+    else
+    {
+        JuceEngine::get().shutdownForApplicationTermination();
+    }
+}
+
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
 + (void)loadTrackObjC:(NSInteger)idx path:(NSString *)path
 {

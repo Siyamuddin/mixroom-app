@@ -61,6 +61,7 @@
 + (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
++ (void)shutdownForApplicationTerminationObjC;
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath;
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
