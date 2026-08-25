@@ -5858,10 +5858,19 @@ class JuceEngine : public juce::MidiInputCallback,
                    public RoutedClipSource
 {
 public:
+    // Mixroom route-ownership modes; these are not JUCE API versions. A
+    // session selects exactly one mode before engine initialisation and never
+    // falls back to the other mode in the same editor session.
     enum class AudioRouteImplementation
     {
+        // No route owner has initialised the engine yet.
         none,
+        // AudioDeviceManager's original self-managed route lifecycle. Retained
+        // for platforms that have not adopted Mixroom's verified coordinator.
         legacy,
+        // The coordinator owns serial route transitions, validates native
+        // device facts, and requires a real callback before admitting audio.
+        // Despite the historical name, this mode also owns recording routes.
         v2Playback,
     };
 

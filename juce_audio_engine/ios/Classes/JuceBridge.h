@@ -4,6 +4,9 @@
 @interface JuceBridge : NSObject
 
 + (void)initialiseEngineObjC;
+// "V2" denotes Mixroom's coordinator-owned, verified route lifecycle, not a
+// JUCE API version. These calls serialize route mutation and prove the native
+// device/callback state before playback or recording is admitted.
 + (BOOL)initialisePlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName;
 + (BOOL)pausePlaybackForRouteChangeV2ObjC;
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
