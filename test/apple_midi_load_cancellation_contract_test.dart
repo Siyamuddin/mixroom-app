@@ -29,4 +29,50 @@ void main() {
     expect(engine, contains('clip.midiLoadRequestId != loadRequestId'));
     expect(engine, contains('return unloadClip(clipId);'));
   });
+
+  test('native MIDI stall controls compile only in debug configurations', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final macPodspec = File(
+      'juce_audio_engine/macos/juce_audio_engine.podspec',
+    ).readAsStringSync();
+    final iosPodspec = File(
+      'juce_audio_engine/ios/juce_audio_engine.podspec',
+    ).readAsStringSync();
+
+    expect(
+      plugin,
+      contains(
+        '#if MIXROOM_ENABLE_TEST_HOOKS\n'
+        'static NSCondition *MixroomMidiClipLoadTestCondition',
+      ),
+    );
+    expect(plugin, contains('@"debugConfigureMidiClipLoadStall"'));
+    expect(
+      macPodspec,
+      contains(
+        "'GCC_PREPROCESSOR_DEFINITIONS[config=Debug]' => "
+        "'\$(inherited) MIXROOM_ENABLE_TEST_HOOKS=1'",
+      ),
+    );
+    expect(
+      iosPodspec,
+      contains(
+        "'GCC_PREPROCESSOR_DEFINITIONS[config=Debug]'   => "
+        "'\$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 "
+        "JUCE_IOS_AUDIO_EXPLICIT_SAMPLERATES=44100 "
+        "MIXROOM_ENABLE_TEST_HOOKS=1'",
+      ),
+    );
+    expect(
+      macPodspec,
+      isNot(
+        contains(
+          "'GCC_PREPROCESSOR_DEFINITIONS[config=Release]' => "
+          "'\$(inherited) MIXROOM_ENABLE_TEST_HOOKS=1'",
+        ),
+      ),
+    );
+  });
 }

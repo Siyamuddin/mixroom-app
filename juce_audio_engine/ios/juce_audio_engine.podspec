@@ -49,7 +49,7 @@ Pod::Spec.new do |s|
     'CLANG_CXX_LIBRARY'           => 'libc++',
     'GCC_PREPROCESSOR_DEFINITIONS[config=Release]' => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 NDEBUG=1',
     'GCC_PREPROCESSOR_DEFINITIONS[config=Profile]' => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 NDEBUG=1',
-    'GCC_PREPROCESSOR_DEFINITIONS[config=Debug]'   => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 JUCE_IOS_AUDIO_EXPLICIT_SAMPLERATES=44100',
+    'GCC_PREPROCESSOR_DEFINITIONS[config=Debug]'   => '$(inherited) JUCE_PLUGINHOST_AU=1 JUCE_IOS=1 JUCE_IOS_AUDIO_EXPLICIT_SAMPLERATES=44100 MIXROOM_ENABLE_TEST_HOOKS=1',
     'HEADER_SEARCH_PATHS' => '$(inherited) "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/Headers" "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64_x86_64-simulator/Headers"',
     'OTHER_LDFLAGS[sdk=iphoneos*][config=Debug]' => '$(inherited) -force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a"',
     'OTHER_LDFLAGS[sdk=iphoneos*][config=Profile]' => '$(inherited) -force_load "${PODS_TARGET_SRCROOT}/JuceModules.xcframework/ios-arm64/libJuceModules.a"',

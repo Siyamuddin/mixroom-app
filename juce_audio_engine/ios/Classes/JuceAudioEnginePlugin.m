@@ -219,6 +219,84 @@ static dispatch_queue_t MixroomMidiClipLoadQueue(void) {
     return queue;
 }
 
+#if MIXROOM_ENABLE_TEST_HOOKS
+static NSCondition *MixroomMidiClipLoadTestCondition(void) {
+    static NSCondition *condition;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        condition = [NSCondition new];
+    });
+    return condition;
+}
+
+static int64_t mixroomMidiClipLoadTestRequestId = 0;
+static BOOL mixroomMidiClipLoadTestWaiting = NO;
+static BOOL mixroomMidiClipLoadTestReleased = YES;
+
+static BOOL MixroomConfigureMidiClipLoadTestStall(int64_t requestId) {
+    if (requestId <= 0) {
+        return NO;
+    }
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    if (mixroomMidiClipLoadTestWaiting && !mixroomMidiClipLoadTestReleased) {
+        [condition unlock];
+        return NO;
+    }
+    mixroomMidiClipLoadTestRequestId = requestId;
+    mixroomMidiClipLoadTestWaiting = NO;
+    mixroomMidiClipLoadTestReleased = NO;
+    [condition unlock];
+    return YES;
+}
+
+static void MixroomWaitForMidiClipLoadTestStall(int64_t requestId) {
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    if (requestId != mixroomMidiClipLoadTestRequestId ||
+        mixroomMidiClipLoadTestReleased) {
+        [condition unlock];
+        return;
+    }
+    mixroomMidiClipLoadTestWaiting = YES;
+    [condition broadcast];
+    while (requestId == mixroomMidiClipLoadTestRequestId &&
+           !mixroomMidiClipLoadTestReleased) {
+        [condition wait];
+    }
+    mixroomMidiClipLoadTestWaiting = NO;
+    if (requestId == mixroomMidiClipLoadTestRequestId) {
+        mixroomMidiClipLoadTestRequestId = 0;
+    }
+    [condition broadcast];
+    [condition unlock];
+}
+
+static BOOL MixroomReleaseMidiClipLoadTestStall(int64_t requestId) {
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    const BOOL matches = requestId == mixroomMidiClipLoadTestRequestId;
+    if (matches) {
+        mixroomMidiClipLoadTestReleased = YES;
+        [condition broadcast];
+    }
+    [condition unlock];
+    return matches;
+}
+
+static NSDictionary *MixroomMidiClipLoadTestState(void) {
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    NSDictionary *state = @{
+        @"requestId": @(mixroomMidiClipLoadTestRequestId),
+        @"waiting": @(mixroomMidiClipLoadTestWaiting),
+        @"released": @(mixroomMidiClipLoadTestReleased),
+    };
+    [condition unlock];
+    return state;
+}
+#endif
+
 static dispatch_queue_t MixroomPluginScanQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t onceToken;
@@ -6713,6 +6791,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         FlutterResult loadResult = [result copy];
         dispatch_async(MixroomMidiClipLoadQueue(), ^{
+#if MIXROOM_ENABLE_TEST_HOOKS
+            MixroomWaitForMidiClipLoadTestStall(loadRequestId);
+#endif
             BOOL ok = [JuceBridge loadMidiClipObjC:clip
                                              rowId:rowId
                                       instrumentId:instrumentId
@@ -6733,6 +6814,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         result(@([JuceBridge cancelMidiClipLoadObjC:clip
                                              requestId:loadRequestId]));
+#if MIXROOM_ENABLE_TEST_HOOKS
+    } else if ([call.method isEqualToString:@"debugConfigureMidiClipLoadStall"]) {
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
+        result(@(MixroomConfigureMidiClipLoadTestStall(loadRequestId)));
+    } else if ([call.method isEqualToString:@"debugGetMidiClipLoadStallState"]) {
+        result(MixroomMidiClipLoadTestState());
+    } else if ([call.method isEqualToString:@"debugReleaseMidiClipLoadStall"]) {
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
+        result(@(MixroomReleaseMidiClipLoadTestStall(loadRequestId)));
+#endif
     } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSString *instrumentId = [args[@"instrumentId"] ?: @"mixroom.basic_synth" copy];
