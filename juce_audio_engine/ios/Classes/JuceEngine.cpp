@@ -3881,10 +3881,31 @@ bool JuceEngine::loadMidiClip(int clipId,
                               double sourceTempoBpm,
                               double startSec,
                               double lengthSec,
-                              double inFileOffsetSec)
+                              double inFileOffsetSec,
+                              std::int64_t loadRequestId)
 {
     if (clipId < 0 || clipId >= kMaxClips)
         return false;
+
+    const auto requestLabel =
+        "clip=" + juce::String(clipId) +
+        " request=" + juce::String((juce::int64)loadRequestId);
+    juceLogToFlutter(("MidiLoad start " + requestLabel).toRawUTF8());
+
+    const auto requestWasCancelled = [this, clipId, loadRequestId]
+    {
+        if (loadRequestId <= 0)
+            return false;
+        const std::lock_guard<std::mutex> requestLock(midiLoadRequestMutex);
+        const auto cancelled = cancelledMidiLoadRequestThrough.find(clipId);
+        return cancelled != cancelledMidiLoadRequestThrough.end() &&
+               loadRequestId <= cancelled->second;
+    };
+    if (requestWasCancelled())
+    {
+        juceLogToFlutter(("MidiLoad cancelled before prepare " + requestLabel).toRawUTF8());
+        return false;
+    }
 
     const double safeStartSec = juce::jmax(0.0, startSec);
     const double safeOffsetSec = juce::jmax(0.0, inFileOffsetSec);
@@ -3927,6 +3948,12 @@ bool JuceEngine::loadMidiClip(int clipId,
     player->setPlayConfigDetails(0, 2, prepareSampleRate, prepareBlockSize);
     player->prepareToPlay(prepareSampleRate, prepareBlockSize);
 
+    if (requestWasCancelled())
+    {
+        juceLogToFlutter(("MidiLoad cancelled after prepare " + requestLabel).toRawUTF8());
+        return false;
+    }
+
     if (auto *timelineProcessor =
             dynamic_cast<TimelineClipProcessorBase *>(player.get()))
     {
@@ -3937,6 +3964,12 @@ bool JuceEngine::loadMidiClip(int clipId,
     std::shared_ptr<juce::AudioProcessor> detachedProcessor;
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+
+        if (requestWasCancelled())
+        {
+            juceLogToFlutter(("MidiLoad cancelled before install " + requestLabel).toRawUTF8());
+            return false;
+        }
 
         if (clips.empty())
             clips.resize(kMaxClips);
@@ -3977,6 +4010,7 @@ bool JuceEngine::loadMidiClip(int clipId,
         c.midiNotes = notes;
         c.midiParams = params;
         c.midiSourceTempoBpm = safeSourceTempo;
+        c.midiLoadRequestId = loadRequestId;
 
         std::atomic_store_explicit(
             &c.playerProcessor,
@@ -4002,7 +4036,38 @@ bool JuceEngine::loadMidiClip(int clipId,
         drainRetiredLiveClipProcessorsLocked();
     }
 
+    juceLogToFlutter(("MidiLoad installed " + requestLabel).toRawUTF8());
     return true;
+}
+
+bool JuceEngine::cancelMidiClipLoad(int clipId, std::int64_t loadRequestId)
+{
+    if (clipId < 0 || clipId >= kMaxClips || loadRequestId <= 0)
+        return false;
+
+    {
+        const std::lock_guard<std::mutex> requestLock(midiLoadRequestMutex);
+        auto &cancelledThrough = cancelledMidiLoadRequestThrough[clipId];
+        cancelledThrough = juce::jmax(cancelledThrough, loadRequestId);
+    }
+
+    juceLogToFlutter(
+        ("MidiLoad cancel requested clip=" + juce::String(clipId) +
+         " request=" + juce::String((juce::int64)loadRequestId))
+            .toRawUTF8());
+
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (clips.empty() || clipId >= (int)clips.size())
+        return true;
+
+    const auto &clip = clips[(size_t)clipId];
+    if (!clip.alive || !clip.isMidi ||
+        clip.midiLoadRequestId != loadRequestId)
+    {
+        return true;
+    }
+
+    return unloadClip(clipId);
 }
 
 void JuceEngine::beginProjectClipLoad()

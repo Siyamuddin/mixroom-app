@@ -219,6 +219,7 @@ void main() {
         case 'supportsLiveMidiClipPlayback':
           return true;
         case 'loadMidiClip':
+        case 'cancelMidiClipLoad':
         case 'updateMidiClipEvents':
           return true;
         default:
@@ -1169,6 +1170,11 @@ void main() {
       startSec: 1.0,
       lengthSec: 2.0,
       inFileOffsetSec: 0.25,
+      loadRequestId: 91,
+    );
+    final cancelled = await JuceAudioEngine.cancelMidiClipLoad(
+      clipIndex: 3,
+      loadRequestId: 91,
     );
     final updated = await JuceAudioEngine.updateMidiClipEvents(
       3,
@@ -1189,9 +1195,16 @@ void main() {
 
     expect(supports, isTrue);
     expect(loaded, isTrue);
+    expect(cancelled, isTrue);
     expect(updated, isTrue);
     expect(calls[0].method, 'supportsLiveMidiClipPlayback');
     expect(calls[1].method, 'loadMidiClip');
-    expect(calls[2].method, 'updateMidiClipEvents');
+    expect((calls[1].arguments as Map)['loadRequestId'], 91);
+    expect(calls[2].method, 'cancelMidiClipLoad');
+    expect(calls[2].arguments, <String, dynamic>{
+      'clip': 3,
+      'loadRequestId': 91,
+    });
+    expect(calls[3].method, 'updateMidiClipEvents');
   });
 }

@@ -4629,6 +4629,7 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
          inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId
 {
     const juce::String iid =
         instrumentId != nil ? juceStringFromNSString(instrumentId)
@@ -4654,7 +4655,8 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                                             sourceTempoBpm,
                                             startSec,
                                             lengthSec,
-                                            inFileOffsetSec);
+                                            inFileOffsetSec,
+                                            (std::int64_t)loadRequestId);
     };
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -4670,6 +4672,14 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     }
 
     return (BOOL)ok;
+}
+
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                     requestId:(int64_t)loadRequestId
+{
+    return (BOOL)JuceEngine::get().cancelMidiClipLoad(
+        (int)clipIndex,
+        (std::int64_t)loadRequestId);
 }
 
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex

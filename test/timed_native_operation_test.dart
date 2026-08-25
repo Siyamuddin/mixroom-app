@@ -40,4 +40,22 @@ void main() {
       expect(await resultFuture, isNull);
     },
   );
+
+  test('timeout invokes native cancellation before returning', () async {
+    final nativeReply = Completer<bool>();
+    final events = <String>[];
+
+    final result = await runTimedNativeOperation<bool>(
+      'MIDI instrument load clip=7 request=11',
+      () => nativeReply.future,
+      timeout: const Duration(milliseconds: 20),
+      logger: (_) {},
+      onTimeout: () async {
+        events.add('cancel');
+      },
+    );
+
+    expect(result, isNull);
+    expect(events, <String>['cancel']);
+  });
 }

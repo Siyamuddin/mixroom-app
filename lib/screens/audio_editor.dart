@@ -5715,6 +5715,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<int, int> _midiClipEngineRefreshTokens = <int, int>{};
   final Map<int, Future<void>> _midiClipEngineRefreshChains =
       <int, Future<void>>{};
+  static int _nextMidiClipLoadRequestId = DateTime.now().microsecondsSinceEpoch;
   final Set<int> _deferredHostedInstrumentEngineClipIds = <int>{};
   final Map<int, String> _restoredHostedInstrumentStateByClipId =
       <int, String>{};
@@ -26261,8 +26262,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentId,
       instrumentParams,
     );
+    final loadRequestId = ++_nextMidiClipLoadRequestId;
     final loaded = await runTimedNativeOperation<bool>(
-      'MIDI instrument load $liveInstrumentId clip=$engineClipId',
+      'MIDI instrument load $liveInstrumentId '
+      'clip=$engineClipId request=$loadRequestId',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.loadMidiClip(
           engineClipId,
@@ -26275,9 +26278,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           startSec: startSec,
           lengthSec: math.max(0.0, lengthSec),
           inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+          loadRequestId: loadRequestId,
         ),
       ),
       timeout: _kProjectPluginInstanceRestoreTimeout,
+      onTimeout: () {
+        // Cancellation must not extend the user-visible timeout if the native
+        // message thread is the component that is stalled.
+        unawaited(
+          JuceAudioEngine.cancelMidiClipLoad(
+            clipIndex: engineClipId,
+            loadRequestId: loadRequestId,
+          ),
+        );
+      },
     );
     return loaded ?? false;
   }

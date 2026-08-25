@@ -6710,6 +6710,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         double startSec = [args[@"startSec"] doubleValue];
         double lengthSec = [args[@"lengthSec"] doubleValue];
         double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         FlutterResult loadResult = [result copy];
         dispatch_async(MixroomMidiClipLoadQueue(), ^{
             BOOL ok = [JuceBridge loadMidiClipObjC:clip
@@ -6721,11 +6722,17 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                     sourceTempoBpm:sourceTempoBpm
                                           startSec:startSec
                                          lengthSec:lengthSec
-                                   inFileOffsetSec:inFileOffsetSec];
+                                   inFileOffsetSec:inFileOffsetSec
+                                     loadRequestId:loadRequestId];
             dispatch_async(dispatch_get_main_queue(), ^{
                 loadResult(@(ok));
             });
         });
+    } else if ([call.method isEqualToString:@"cancelMidiClipLoad"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
+        result(@([JuceBridge cancelMidiClipLoadObjC:clip
+                                             requestId:loadRequestId]));
     } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSString *instrumentId = [args[@"instrumentId"] ?: @"mixroom.basic_synth" copy];

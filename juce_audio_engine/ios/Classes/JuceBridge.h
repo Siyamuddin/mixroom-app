@@ -160,7 +160,10 @@
            sourceTempoBpm:(double)sourceTempoBpm
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
-         inFileOffsetSec:(double)inFileOffsetSec;
+         inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId;
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                 requestId:(int64_t)loadRequestId;
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex
               instrumentId:(NSString *)instrumentId
             instrumentName:(NSString *)instrumentName

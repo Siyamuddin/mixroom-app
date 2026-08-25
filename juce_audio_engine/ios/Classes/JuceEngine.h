@@ -6001,7 +6001,9 @@ public:
                       double sourceTempoBpm,
                       double startSec,
                       double lengthSec,
-                      double inFileOffsetSec = 0.0);
+                      double inFileOffsetSec = 0.0,
+                      std::int64_t loadRequestId = 0);
+    bool cancelMidiClipLoad(int clipId, std::int64_t loadRequestId);
     bool prepareMidiClipSampleAssets(const juce::String &instrumentId,
                                      const juce::String &instrumentName,
                                      const juce::Array<TimelineMidiNote> &notes);
@@ -6523,6 +6525,7 @@ private:
         juce::Array<TimelineMidiNote> midiNotes;
         juce::NamedValueSet midiParams;
         double midiSourceTempoBpm = 120.0;
+        std::int64_t midiLoadRequestId = 0;
         juce::MemoryBlock midiPluginState;
 
         // nodes/processors
@@ -6608,6 +6611,8 @@ private:
 
     // fixed slots so ids never shift
     std::vector<ClipState> clips;
+    std::mutex midiLoadRequestMutex;
+    std::unordered_map<int, std::int64_t> cancelledMidiLoadRequestThrough;
     MutableRoutedClipSchedules rowRoutedClipSchedules;
     std::unordered_set<int> dirtyRoutedClipScheduleRows;
     RoutedClipItemsById routedClipItemsById;
