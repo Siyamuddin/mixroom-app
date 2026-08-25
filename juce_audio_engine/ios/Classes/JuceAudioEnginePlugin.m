@@ -226,7 +226,7 @@ static dispatch_queue_t MixroomPluginScanQueue(void) {
         dispatch_queue_attr_t attr =
             dispatch_queue_attr_make_with_qos_class(
                 DISPATCH_QUEUE_SERIAL,
-                QOS_CLASS_USER_INITIATED,
+                QOS_CLASS_UTILITY,
                 0
             );
         queue = dispatch_queue_create(
@@ -6512,6 +6512,9 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray* plugins = [JuceBridge rescanPluginsObjC:searchPaths];
         result(plugins);
 #endif
+    } else if ([call.method isEqualToString:@"cancelPluginScan"]) {
+        [JuceBridge cancelPluginScanObjC];
+        result(nil);
     } else if ([call.method isEqualToString:@"getQuarantinedPlugins"]) {
         result([JuceBridge getQuarantinedPluginsObjC]);
     } else if ([call.method isEqualToString:@"isPluginQuarantined"]) {

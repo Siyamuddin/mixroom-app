@@ -2,7 +2,6 @@ import Cocoa
 import FlutterMacOS
 import AuthenticationServices
 
-@main
 @objcMembers
 class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextProviding {
   private let channelName = "mixroom/open_file"

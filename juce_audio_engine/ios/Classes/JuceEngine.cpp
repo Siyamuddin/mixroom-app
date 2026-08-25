@@ -169,6 +169,104 @@ juce::File hostedPluginGuardDirectory()
         .getChildFile("PluginHostGuard");
 }
 
+juce::File hostedPluginListCacheFile()
+{
+    return juce::File::getSpecialLocation(
+               juce::File::userApplicationDataDirectory)
+        .getChildFile("Mixroom")
+        .getChildFile("PluginCache")
+        .getChildFile("known-plugins-v1.xml");
+}
+
+#if JUCE_MAC && !JUCE_IOS
+constexpr int kPluginScannerTimeoutMs = 15000;
+constexpr int kPluginCacheCheckpointInterval = 20;
+constexpr int kPluginCacheVersion = 2;
+
+bool scanPluginCandidateInChild(const juce::String &formatName,
+                                const juce::String &candidate,
+                                juce::Array<juce::PluginDescription> &descriptions,
+                                juce::String &failure,
+                                const std::atomic<bool> &cancellationRequested)
+{
+    const auto resultFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                .getNonexistentChildFile("mixroom-plugin-scan", ".xml", false);
+    juce::StringArray arguments;
+    arguments.add(juce::File::getSpecialLocation(
+                      juce::File::currentExecutableFile)
+                      .getFullPathName());
+    arguments.add("--mixroom-plugin-scan-child");
+    arguments.add(formatName);
+    arguments.add(candidate);
+    arguments.add(resultFile.getFullPathName());
+
+    juce::ChildProcess child;
+    if (!child.start(arguments, 0))
+    {
+        failure = "Unable to start isolated plugin scanner: " + candidate;
+        return false;
+    }
+
+    int elapsedMs = 0;
+    while (child.isRunning() &&
+           elapsedMs < kPluginScannerTimeoutMs &&
+           !cancellationRequested.load(std::memory_order_relaxed))
+    {
+        child.waitForProcessToFinish(100);
+        elapsedMs += 100;
+    }
+
+    if (cancellationRequested.load(std::memory_order_relaxed))
+    {
+        child.kill();
+        child.waitForProcessToFinish(2000);
+        resultFile.deleteFile();
+        failure = "Plugin scan cancelled";
+        return false;
+    }
+
+    if (child.isRunning())
+    {
+        child.kill();
+        child.waitForProcessToFinish(2000);
+        resultFile.deleteFile();
+        failure = "Plugin validation timed out after " +
+                  juce::String(kPluginScannerTimeoutMs / 1000) +
+                  " seconds: " + candidate;
+        return false;
+    }
+
+    const auto exitCode = child.getExitCode();
+    auto xml = juce::XmlDocument::parse(resultFile);
+    resultFile.deleteFile();
+    if (exitCode != 0 || xml == nullptr || !xml->hasTagName("KNOWNPLUGINS"))
+    {
+        if (exitCode >= 128 && exitCode <= 255)
+        {
+            failure = "Isolated plugin scanner caught fatal signal " +
+                      juce::String((int)exitCode - 128) + ": " + candidate;
+        }
+        else
+        {
+            failure = "Isolated plugin validation failed (exit " +
+                      juce::String((int)exitCode) + "): " + candidate;
+        }
+        return false;
+    }
+
+    juce::KnownPluginList isolatedList;
+    isolatedList.recreateFromXml(*xml);
+    descriptions = isolatedList.getTypes();
+    if (descriptions.isEmpty())
+    {
+        failure = "Plugin returned no valid types: " + candidate;
+        return false;
+    }
+
+    return true;
+}
+#endif
+
 juce::String hostedPluginGuardKey(const juce::String &identifier)
 {
     const auto normalised = identifier.trim().toLowerCase();
@@ -8026,6 +8124,71 @@ void JuceEngine::scanPluginsIfNeeded()
     if (pluginsScanned)
         return;
 
+    pluginScanFailures.clear();
+
+#if JUCE_MAC && !JUCE_IOS
+    // Desktop discovery is cache-first. Loading a project, opening the manager,
+    // or exporting must never turn into an implicit validation of every AU/VST3
+    // installed on the machine. The explicit rescan path below owns that work.
+    restoreCachedPluginList();
+    pluginsScanned = true;
+    return;
+#else
+    performPluginScan();
+#endif
+}
+
+bool JuceEngine::restoreCachedPluginList()
+{
+    const auto cacheFile = hostedPluginListCacheFile();
+    if (!cacheFile.existsAsFile())
+        return false;
+
+    auto xml = juce::XmlDocument::parse(cacheFile);
+    if (xml == nullptr ||
+        !xml->hasTagName("KNOWNPLUGINS") ||
+        xml->getIntAttribute("mixroomCacheVersion") != kPluginCacheVersion)
+    {
+        juceLogToFlutter("Ignoring invalid desktop plugin cache");
+        return false;
+    }
+
+    pluginList.recreateFromXml(*xml);
+    juceLogToFlutter(
+        ("Restored " + juce::String(pluginList.getTypes().size()) +
+         " plugins from desktop cache")
+            .toRawUTF8());
+    return true;
+}
+
+void JuceEngine::persistPluginListCache() const
+{
+#if JUCE_MAC && !JUCE_IOS
+    const auto cacheFile = hostedPluginListCacheFile();
+    const auto cacheDirectory = cacheFile.getParentDirectory();
+    if (!cacheDirectory.createDirectory() && !cacheDirectory.isDirectory())
+    {
+        juceLogToFlutter("Unable to create desktop plugin cache directory");
+        return;
+    }
+
+    auto xml = pluginList.createXml();
+    if (xml == nullptr)
+        return;
+
+    xml->setAttribute("mixroomCacheVersion", kPluginCacheVersion);
+    const auto temporaryFile = cacheDirectory.getNonexistentChildFile(
+        "known-plugins-v1", ".tmp", false);
+    if (!xml->writeTo(temporaryFile) || !temporaryFile.replaceFileIn(cacheFile))
+    {
+        temporaryFile.deleteFile();
+        juceLogToFlutter("Unable to persist desktop plugin cache");
+    }
+#endif
+}
+
+void JuceEngine::performPluginScan(bool reuseUnchangedPlugins)
+{
     pluginsScanned = true;
     pluginScanFailures.clear();
 
@@ -8120,17 +8283,65 @@ void JuceEngine::scanPluginsIfNeeded()
 #endif
         }
 
-        PluginDirectoryScanner scanner(pluginList, *format, searchPath, true, File());
-#if JUCE_MAC
+#if JUCE_MAC && !JUCE_IOS
+        auto candidates = format->searchPathsForPlugins(searchPath, true, false);
         if (formatName == "VST3")
+            candidates = filterMacVST3CandidatesForCurrentArchitecture(
+                candidates, pluginScanFailures);
+
+        int validatedSinceCheckpoint = 0;
+        for (const auto &candidate : candidates)
         {
-            auto candidates = format->searchPathsForPlugins(searchPath, true, false);
-            scanner.setFilesOrIdentifiersToScan(
-                filterMacVST3CandidatesForCurrentArchitecture(candidates, pluginScanFailures));
+            if (pluginScanCancellationRequested.load(std::memory_order_relaxed))
+                break;
+
+            if (reuseUnchangedPlugins &&
+                pluginList.isListingUpToDate(candidate, *format))
+                continue;
+
+            juceLogToFlutter(
+                ("Validating plugin in isolated process: " + candidate).toRawUTF8());
+            juce::Array<juce::PluginDescription> descriptions;
+            juce::String failure;
+            const auto succeeded = scanPluginCandidateInChild(
+                formatName,
+                candidate,
+                descriptions,
+                failure,
+                pluginScanCancellationRequested);
+
+            if (pluginScanCancellationRequested.load(std::memory_order_relaxed))
+                break;
+
+            const auto previousTypes = pluginList.getTypes();
+            for (const auto &type : previousTypes)
+                if (type.fileOrIdentifier == candidate)
+                    pluginList.removeType(type);
+
+            if (succeeded)
+            {
+                pluginList.removeFromBlacklist(candidate);
+                for (const auto &description : descriptions)
+                    pluginList.addType(description);
+            }
+            else
+            {
+                pluginList.addToBlacklist(candidate);
+                pluginScanFailures.add(failure);
+                juceLogToFlutter(failure.toRawUTF8());
+            }
+
+            if (++validatedSinceCheckpoint >= kPluginCacheCheckpointInterval)
+            {
+                persistPluginListCache();
+                validatedSinceCheckpoint = 0;
+            }
         }
-#endif
+
+#else
+        PluginDirectoryScanner scanner(pluginList, *format, searchPath, true, File());
         String err;
-        while (scanner.scanNextFile(false, err))
+        while (scanner.scanNextFile(reuseUnchangedPlugins, err))
         {
             if (err.isNotEmpty())
             {
@@ -8138,11 +8349,85 @@ void JuceEngine::scanPluginsIfNeeded()
                 err.clear();
             }
         }
+#endif
+    }
+
+    if (reuseUnchangedPlugins)
+    {
+        const auto cachedTypes = pluginList.getTypes();
+        for (const auto &type : cachedTypes)
+        {
+            for (int i = 0; i < pluginFormatManager.getNumFormats(); ++i)
+            {
+                auto *format = pluginFormatManager.getFormat(i);
+                if (format != nullptr && format->getName() == type.pluginFormatName)
+                {
+                    if (!format->doesPluginStillExist(type))
+                        pluginList.removeType(type);
+                    break;
+                }
+            }
+        }
     }
 
     for (const auto &type : pluginList.getTypes())
         juceLogToFlutter(("Discovered plugin: " + type.name).toRawUTF8());
+
+    persistPluginListCache();
 }
+
+#if JUCE_MAC && !JUCE_IOS
+extern "C" int MixroomPluginScanChildMain(const char *formatNameRaw,
+                                           const char *pluginIdentifierRaw,
+                                           const char *outputPathRaw)
+{
+    if (formatNameRaw == nullptr ||
+        pluginIdentifierRaw == nullptr ||
+        outputPathRaw == nullptr)
+        return 64;
+
+    try
+    {
+        juce::ScopedJuceInitialiser_GUI juceInitialiser;
+        juce::AudioPluginFormatManager formatManager;
+        formatManager.addDefaultFormats();
+
+        const juce::String formatName = juce::String::fromUTF8(formatNameRaw);
+        juce::AudioPluginFormat *selectedFormat = nullptr;
+        for (int i = 0; i < formatManager.getNumFormats(); ++i)
+        {
+            auto *format = formatManager.getFormat(i);
+            if (format != nullptr && format->getName() == formatName)
+            {
+                selectedFormat = format;
+                break;
+            }
+        }
+        if (selectedFormat == nullptr)
+            return 65;
+
+        juce::KnownPluginList isolatedList;
+        juce::OwnedArray<juce::PluginDescription> descriptions;
+        isolatedList.scanAndAddFile(
+            juce::String::fromUTF8(pluginIdentifierRaw),
+            false,
+            descriptions,
+            *selectedFormat);
+        if (descriptions.isEmpty())
+            return 66;
+
+        auto xml = isolatedList.createXml();
+        if (xml == nullptr ||
+            !xml->writeTo(juce::File(juce::String::fromUTF8(outputPathRaw))))
+            return 73;
+        return 0;
+    }
+    catch (...)
+    {
+        return 70;
+    }
+}
+#endif
 
 void JuceEngine::setAdditionalPluginSearchPaths(const juce::StringArray &paths)
 {
@@ -8158,9 +8443,11 @@ void JuceEngine::setAdditionalPluginSearchPaths(const juce::StringArray &paths)
         return;
 
     additionalPluginSearchPaths = normalized;
+#if !(JUCE_MAC && !JUCE_IOS)
     pluginList.clear();
     pluginScanFailures.clear();
     pluginsScanned = false;
+#endif
 }
 
 juce::Array<juce::PluginDescription> JuceEngine::getKnownPlugins()
@@ -8178,12 +8465,25 @@ juce::Array<juce::PluginDescription> JuceEngine::getKnownPlugins()
 
 juce::Array<juce::PluginDescription> JuceEngine::rescanPlugins(const juce::StringArray &paths)
 {
+    pluginScanCancellationRequested.store(false, std::memory_order_relaxed);
     setAdditionalPluginSearchPaths(paths);
+#if JUCE_MAC && !JUCE_IOS
+    if (!pluginsScanned)
+        restoreCachedPluginList();
+    pluginScanFailures.clear();
+    performPluginScan(true);
+#else
     pluginList.clear();
     pluginScanFailures.clear();
     pluginsScanned = false;
-    scanPluginsIfNeeded();
+    performPluginScan();
+#endif
     return pluginList.getTypes();
+}
+
+void JuceEngine::cancelPluginScan()
+{
+    pluginScanCancellationRequested.store(true, std::memory_order_relaxed);
 }
 
 juce::NamedValueSet JuceEngine::getEngineDiagnostics()

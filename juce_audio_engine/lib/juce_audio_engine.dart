@@ -1251,6 +1251,16 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> cancelPluginScan() async {
+    try {
+      await _ch.invokeMethod<void>('cancelPluginScan');
+    } on MissingPluginException {
+      return;
+    } on PlatformException catch (e) {
+      _logError('cancelPluginScan', e);
+    }
+  }
+
   static Future<List<Map<String, dynamic>>> getQuarantinedPlugins() async {
     try {
       final result =

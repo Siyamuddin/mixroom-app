@@ -6032,7 +6032,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Set<String> _desktopFavoritePluginIds = <String>{};
   Set<String> _desktopHiddenPluginIds = <String>{};
   List<String> _desktopPluginSearchPaths = <String>[];
-  bool _desktopHostedPluginWindowsDetached = false;
   int? _desktopLastPluginRescanAtMs;
   final List<_ProjectLoadIssue> _projectLoadIssues = <_ProjectLoadIssue>[];
   final Map<String, _SfzDefinition> _sfzDefinitionCache =
@@ -9561,7 +9560,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _desktopPluginCatalogLoadAttempted =
           _desktopScannedPlugins.isNotEmpty ||
           pluginPrefs.lastRescanAtMs != null;
-      _desktopHostedPluginWindowsDetached = false;
       _desktopLastPluginRescanAtMs = pluginPrefs.lastRescanAtMs;
       _sampleBrowserRoots
         ..clear()
@@ -9681,20 +9679,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         hiddenPluginIds: _desktopHiddenPluginIds,
         scanPaths: _desktopPluginSearchPaths,
         cachedPlugins: _desktopScannedPlugins,
-        hostedWindowsDetached: _desktopHostedPluginWindowsDetached,
+        // Retain the legacy preference key as false so older installs migrate
+        // away from the removed global window-mode control.
+        hostedWindowsDetached: false,
         lastRescanAtMs: _desktopLastPluginRescanAtMs,
       ),
     );
-  }
-
-  Future<void> _setDesktopHostedPluginWindowsDetached(bool detached) async {
-    if (!PlatformCapabilities.current.isDesktop) return;
-    if (_desktopHostedPluginWindowsDetached == detached) return;
-    setState(() {
-      _desktopHostedPluginWindowsDetached = detached;
-    });
-    await _persistDesktopPluginPrefs();
-    await JuceAudioEngine.setHostedPluginWindowsDetached(detached);
   }
 
   DesktopEditorWindowLayout _defaultDesktopWindowLayout(String panelId) {
@@ -41686,6 +41676,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String query = '';
     var filter = _DesktopPluginBrowserFilter.all;
     var rescanning = false;
+    var scanFailureCount = 0;
 
     List<Map<String, dynamic>> filteredPlugins() {
       return currentPlugins
@@ -41762,8 +41753,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               rescanning
                                   ? 'Scanning Audio Unit and VST3 folders'
                                   : _desktopLastPluginRescanAtMs == null
-                                  ? '${currentPlugins.length} cached plug-ins'
-                                  : '${currentPlugins.length} cached plug-ins - Last rescan ${DateTime.fromMillisecondsSinceEpoch(_desktopLastPluginRescanAtMs!).toLocal()}',
+                                  ? '${currentPlugins.length} cached plug-ins${scanFailureCount > 0 ? ' - $scanFailureCount failed validation' : ''}'
+                                  : '${currentPlugins.length} cached plug-ins${scanFailureCount > 0 ? ' - $scanFailureCount failed validation' : ''} - Last rescan ${DateTime.fromMillisecondsSinceEpoch(_desktopLastPluginRescanAtMs!).toLocal()}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -41777,7 +41768,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       const SizedBox(width: 14),
                       TextButton.icon(
                         onPressed: rescanning
-                            ? null
+                            ? () => JuceAudioEngine.cancelPluginScan()
                             : () async {
                                 setModalState(() => rescanning = true);
                                 try {
@@ -41786,20 +41777,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     includeHidden: true,
                                   );
                                   if (!mounted) return;
+                                  final diagnostics =
+                                      await JuceAudioEngine.getEngineDiagnostics();
+                                  if (!mounted || !context.mounted) return;
                                   setModalState(() {
                                     currentPlugins = rescanned;
+                                    scanFailureCount =
+                                        diagnostics.pluginScanFailureCount;
                                   });
                                   await _refreshDesktopHostedInstrumentCatalog();
                                 } finally {
-                                  if (mounted) {
+                                  if (mounted && context.mounted) {
                                     setModalState(() => rescanning = false);
                                   }
                                 }
                               },
-                        icon: const Icon(Icons.refresh_rounded),
+                        icon: Icon(
+                          rescanning
+                              ? Icons.stop_circle_outlined
+                              : Icons.refresh_rounded,
+                        ),
                         label: Text(
                           rescanning
-                              ? 'Scanning...'
+                              ? 'Cancel'
                               : currentPlugins.isEmpty
                               ? 'Discover'
                               : 'Rescan',
@@ -42001,52 +42001,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         alpha: 0.68,
                                       ),
                                       size: 18,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Tooltip(
-                              message:
-                                  'Open hosted plugin editors in separate desktop windows instead of inside Mixroom.',
-                              waitDuration: const Duration(milliseconds: 450),
-                              child: Container(
-                                height: 40,
-                                padding: const EdgeInsets.only(left: 10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.045),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.08),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      'Detached',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.72,
-                                        ),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    Transform.scale(
-                                      scale: 0.78,
-                                      child: Switch.adaptive(
-                                        value:
-                                            _desktopHostedPluginWindowsDetached,
-                                        onChanged: (value) async {
-                                          await _setDesktopHostedPluginWindowsDetached(
-                                            value,
-                                          );
-                                          if (!mounted) return;
-                                          setModalState(() {});
-                                        },
-                                      ),
                                     ),
                                   ],
                                 ),

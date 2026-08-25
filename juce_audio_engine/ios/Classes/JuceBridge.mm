@@ -3891,6 +3891,11 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return resultArray;
 }
 
++ (void)cancelPluginScanObjC
+{
+    JuceEngine::get().cancelPluginScan();
+}
+
 + (NSArray<NSDictionary *> *)getQuarantinedPluginsObjC
 {
     NSMutableArray<NSDictionary *> *resultArray = nil;

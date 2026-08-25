@@ -1142,6 +1142,12 @@ void main() {
     expect(calls[1].method, 'scanPlugins');
   });
 
+  test('cancelPluginScan requests native scan cancellation', () async {
+    await JuceAudioEngine.cancelPluginScan();
+
+    expect(calls.single.method, 'cancelPluginScan');
+  });
+
   test('live midi capability and payloads', () async {
     final supports = await JuceAudioEngine.supportsLiveMidiClipPlayback();
     final loaded = await JuceAudioEngine.loadMidiClip(
