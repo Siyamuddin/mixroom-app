@@ -524,6 +524,39 @@ class MixResolveService:
                 fallback_reason="inference_failed",
             )
 
+    def build_training_feature_vector(
+        self,
+        *,
+        project: dict[str, Any],
+        goal: dict[str, Any],
+        action: dict[str, Any],
+        strict: bool = False,
+    ) -> list[float]:
+        """Build the exact production feature vector without running ONNX.
+
+        Offline dataset conversion calls this method so training and inference
+        cannot independently redefine the mix_refine_v1 feature contract.
+        """
+        normalized_project = _normalize_project(project)
+        normalized_goal = _normalize_goal(goal)
+        normalized_action = _normalize_actions([action])[0]
+        features = [
+            *self._build_context_features(
+                project=normalized_project,
+                goal=normalized_goal,
+                actions=[normalized_action],
+                strict=strict,
+            ),
+            *self._build_action_features(normalized_project, normalized_action),
+        ]
+        if len(features) != _FEATURE_COUNT:
+            raise MixResolveValidationError(
+                f"Expected {_FEATURE_COUNT} features, received {len(features)}."
+            )
+        if not all(math.isfinite(value) for value in features):
+            raise MixResolveValidationError("Feature vector contains non-finite values.")
+        return features
+
     def _fallback_result(
         self,
         actions: list[dict[str, Any]],

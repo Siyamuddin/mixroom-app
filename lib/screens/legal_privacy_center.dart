@@ -3,6 +3,7 @@ import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/core/privacy/privacy_preferences.dart';
+import 'package:mixroom/core/privacy/producer_training_consent.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
@@ -36,6 +37,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   bool _analyticsEnabled = false;
   bool _recommendationsEnabled = false;
   bool _productEmailsEnabled = false;
+  bool _producerTrainingEnabled = false;
   bool _savingProductEmails = false;
 
   @override
@@ -58,15 +60,36 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
       }
     }
     final prefs = await SharedPreferences.getInstance();
+    final producerTrainingEnabled = await ProducerTrainingConsent.isAccepted();
     if (!mounted) return;
     setState(() {
-      _analyticsEnabled = appUser.current?.telemetryEnabled ??
+      _analyticsEnabled =
+          appUser.current?.telemetryEnabled ??
           (prefs.getBool(_analyticsPrefKey) ?? true);
       _recommendationsEnabled = prefs.getBool(_recommendationsPrefKey) ?? false;
-      _productEmailsEnabled = appUser.current?.newsletterOptIn ??
+      _productEmailsEnabled =
+          appUser.current?.newsletterOptIn ??
           (prefs.getBool(_productEmailsPrefKey) ?? false);
+      _producerTrainingEnabled = producerTrainingEnabled;
       _loadingPreferences = false;
     });
+  }
+
+  Future<void> _saveProducerTrainingToggle(bool value) async {
+    setState(() => _producerTrainingEnabled = value);
+    try {
+      if (value) {
+        await ProducerTrainingConsent.accept();
+      } else {
+        await ProducerTrainingConsent.revoke();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _producerTrainingEnabled = !value);
+      _showMessage(
+        L10n.translate(context, 'Could not save preference. Please retry.'),
+      );
+    }
   }
 
   Future<void> _saveToggle({
@@ -104,9 +127,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
 
     try {
       if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
-        await appUser.updateTelemetryPreference(
-          telemetryEnabled: value,
-        );
+        await appUser.updateTelemetryPreference(telemetryEnabled: value);
       } else {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_analyticsPrefKey, value);
@@ -193,10 +214,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
     final uri = Uri(
       scheme: 'mailto',
       path: to,
-      queryParameters: <String, String>{
-        'subject': subject,
-        'body': body,
-      },
+      queryParameters: <String, String>{'subject': subject, 'body': body},
     );
     return _launchUri(uri, mode: LaunchMode.platformDefault);
   }
@@ -250,7 +268,8 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final appUser = context.watch<AppUserService>();
-    final effectiveProductEmailsEnabled = !_savingProductEmails &&
+    final effectiveProductEmailsEnabled =
+        !_savingProductEmails &&
             auth.isSignedIn &&
             appUser.supportsRemoteProfileEdits &&
             appUser.current != null
@@ -260,8 +279,8 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
     final media = MediaQuery.of(context);
     final bottomInset =
         media.viewPadding.bottom > media.systemGestureInsets.bottom
-            ? media.viewPadding.bottom
-            : media.systemGestureInsets.bottom;
+        ? media.viewPadding.bottom
+        : media.systemGestureInsets.bottom;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -371,10 +390,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                       ),
                       _ActionItem(
                         icon: Icons.integration_instructions_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Open-source licenses',
-                        ),
+                        title: L10n.translate(context, 'Open-source licenses'),
                         subtitle: L10n.translate(
                           context,
                           'View software licenses used by this app.',
@@ -430,6 +446,20 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                         ),
                       ),
                       _ToggleItem(
+                        icon: Icons.science_outlined,
+                        title: L10n.translate(
+                          context,
+                          'producer_training_consent_setting',
+                        ),
+                        subtitle: L10n.translate(
+                          context,
+                          'producer_training_consent_setting_body',
+                        ),
+                        value: _producerTrainingEnabled,
+                        enabled: !_loadingPreferences && !isBusy,
+                        onChanged: _saveProducerTrainingToggle,
+                      ),
+                      _ToggleItem(
                         icon: Icons.mark_email_read_outlined,
                         title: L10n.translate(
                           context,
@@ -451,8 +481,10 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                     children: [
                       _ActionItem(
                         icon: Icons.inventory_2_outlined,
-                        title:
-                            L10n.translate(context, 'Request my data export'),
+                        title: L10n.translate(
+                          context,
+                          'Request my data export',
+                        ),
                         subtitle: L10n.translate(
                           context,
                           'Email request for a copy of your data.',
@@ -536,10 +568,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
 }
 
 class _ShellPageTopBar extends StatelessWidget {
-  const _ShellPageTopBar({
-    required this.title,
-    required this.subtitle,
-  });
+  const _ShellPageTopBar({required this.title, required this.subtitle});
 
   final String title;
   final String subtitle;
@@ -1056,10 +1085,7 @@ class _LegalDocumentScreen extends StatelessWidget {
       );
       if (i != sections.length - 1) {
         output.add(
-          Container(
-            height: 1,
-            color: Colors.white.withValues(alpha: 0.08),
-          ),
+          Container(height: 1, color: Colors.white.withValues(alpha: 0.08)),
         );
       }
     }
@@ -1071,8 +1097,8 @@ class _LegalDocumentScreen extends StatelessWidget {
     final media = MediaQuery.of(context);
     final bottomInset =
         media.viewPadding.bottom > media.systemGestureInsets.bottom
-            ? media.viewPadding.bottom
-            : media.systemGestureInsets.bottom;
+        ? media.viewPadding.bottom
+        : media.systemGestureInsets.bottom;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -1118,8 +1144,10 @@ class _LegalDocumentScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          L10n.translate(context, 'Last updated: {date}')
-                              .replaceAll('{date}', updatedAt),
+                          L10n.translate(
+                            context,
+                            'Last updated: {date}',
+                          ).replaceAll('{date}', updatedAt),
                           style: TextStyle(
                             fontFamily: 'Pretendard',
                             color: Colors.white.withValues(alpha: 0.64),
@@ -1167,10 +1195,7 @@ class _LegalDocumentScreen extends StatelessWidget {
 }
 
 class _LegalSection {
-  const _LegalSection({
-    required this.heading,
-    required this.body,
-  });
+  const _LegalSection({required this.heading, required this.body});
 
   final String heading;
   final String body;

@@ -999,6 +999,62 @@ Resources:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
 
+  ProducerTrainingBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireIncompleteProducerUploads
+            Status: Enabled
+            Prefix: pending/
+            ExpirationInDays: 1
+          - Id: ExpireProducerAudioRenders
+            Status: Enabled
+            Prefix: media/
+            ExpirationInDays: 90
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      Tags:
+        - Key: DataCategory
+          Value: producer-training
+        - Key: ContainsUserData
+          Value: 'true'
+        - Key: RetentionModel
+          Value: structured-retained-media-90-days
+
+  ProducerTrainingSessionsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub mixroom-producer-training-sessions-${StageName}
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: user_hash
+          AttributeType: S
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_hash
+          KeyType: HASH
+        - AttributeName: session_id
+          KeyType: RANGE
+
   CloudProjectDocumentsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -1582,6 +1638,66 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/telemetry/project-snapshots
             Method: post
+
+  ProducerTrainingApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_producer_training.handler
+      Environment:
+        Variables:
+          PRODUCER_TRAINING_BUCKET: !Ref ProducerTrainingBucket
+          PRODUCER_TRAINING_SESSIONS_TABLE: !Ref ProducerTrainingSessionsTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/app-auth
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthRateLimitsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProducerTrainingSessionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ProducerTrainingBucket
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
+      Events:
+        ProducerTrainingReserve:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/producer-training/sessions/uploads
+            Method: post
+        ProducerTrainingComplete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/producer-training/sessions/{session_id}/complete
+            Method: post
+        ProducerTrainingDelete:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/producer-training/sessions/{session_id}
+            Method: delete
 
   SocialAuthApiFunction:
     Type: AWS::Serverless::Function
@@ -3035,6 +3151,12 @@ Outputs:
   CloudProjectDocumentsBucketName:
     Description: Cloud project document storage bucket
     Value: !Ref CloudProjectDocumentsBucket
+  ProducerTrainingBucketName:
+    Description: Encrypted producer training capture storage
+    Value: !Ref ProducerTrainingBucket
+  ProducerTrainingSessionsTableName:
+    Description: Producer training ingestion status records
+    Value: !Ref ProducerTrainingSessionsTable
   AppleWebhookUrl:
     Description: App Store Server Notifications endpoint
     Value: !Sub https://${BillingApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/v1/webhooks/apple
