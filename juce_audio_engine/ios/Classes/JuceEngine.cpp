@@ -178,10 +178,11 @@ juce::File hostedPluginListCacheFile()
         .getChildFile("known-plugins-v1.xml");
 }
 
+constexpr int kPluginCacheVersion = 2;
+
 #if JUCE_MAC && !JUCE_IOS
 constexpr int kPluginScannerTimeoutMs = 15000;
 constexpr int kPluginCacheCheckpointInterval = 20;
-constexpr int kPluginCacheVersion = 2;
 
 bool scanPluginCandidateInChild(const juce::String &formatName,
                                 const juce::String &candidate,
