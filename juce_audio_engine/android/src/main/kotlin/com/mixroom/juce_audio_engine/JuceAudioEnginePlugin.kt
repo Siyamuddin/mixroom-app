@@ -89,6 +89,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private lateinit var eventsChannel: EventChannel
   private lateinit var logsChannel: EventChannel
   private val heavyWorkExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+  private val midiPreparationExecutor: ExecutorService = Executors.newFixedThreadPool(2)
   private val audioLifecycleExecutorV2: ExecutorService = Executors.newSingleThreadExecutor()
   private val mainHandler = Handler(Looper.getMainLooper())
   private var instrumentExtractionFuture: Future<*>? = null
@@ -581,6 +582,22 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     task: () -> T,
   ) {
     heavyWorkExecutor.execute {
+      try {
+        val output = task()
+        mainHandler.post { result.success(output) }
+      } catch (e: Exception) {
+        Log.e("JuceAudioEngine", "Error during $taskName", e)
+        mainHandler.post { result.error("JUCE_ERROR", e.message, null) }
+      }
+    }
+  }
+
+  private fun <T> runMidiPreparationTask(
+    taskName: String,
+    result: MethodChannel.Result,
+    task: () -> T,
+  ) {
+    midiPreparationExecutor.execute {
       try {
         val output = task()
         mainHandler.post { result.success(output) }
@@ -3877,7 +3894,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           val startSec = args.doubleValue("startSec")
           val lengthSec = args.doubleValue("lengthSec")
           val inFileOffsetSec = args.doubleValue("inFileOffsetSec")
-          runHeavyTask("loadMidiClip", result) {
+          val loadRequestId = args.longValue("loadRequestId")
+          runMidiPreparationTask("loadMidiClip", result) {
             ensureInstrumentAssetsReadyIfNeeded(instrumentId)
             JuceBridge.loadMidiClipJNI(
               clip,
@@ -3890,8 +3908,17 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
               startSec,
               lengthSec,
               inFileOffsetSec,
+              loadRequestId,
             )
           }
+        }
+        "cancelMidiClipLoad" -> {
+          result.success(
+            JuceBridge.cancelMidiClipLoadJNI(
+              args.intValue("clip"),
+              args.longValue("loadRequestId"),
+            ),
+          )
         }
         "beginProjectClipLoad", "beginProjectClipLoadTransaction" -> {
           JuceBridge.beginProjectClipLoadTransactionJNI()
@@ -4701,6 +4728,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     logsChannel.setStreamHandler(null)
     promptAnalysisService.close()
     heavyWorkExecutor.shutdown()
+    midiPreparationExecutor.shutdown()
     audioLifecycleExecutorV2.shutdown()
     eventsSink = null
     logsSink = null

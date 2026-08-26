@@ -107,6 +107,12 @@ object JuceBridge {
         startSec: Double,
         lengthSec: Double,
         inFileOffsetSec: Double,
+        loadRequestId: Long,
+    ): Boolean
+
+    @JvmStatic external fun cancelMidiClipLoadJNI(
+        clipIndex: Int,
+        loadRequestId: Long,
     ): Boolean
 
     @JvmStatic external fun updateMidiClipEventsJNI(
