@@ -314,19 +314,10 @@ void main() {
         'ai_architecture': 'v3_one_shot_prototype',
       });
       expect(sentBody['store'], isTrue);
-      expect(sentBody.containsKey('instructions'), isFalse);
       expect(
-        jsonEncode(sentBody),
-        isNot(contains('You are Mixroom')),
+        sentBody['instructions'],
+        contains(aiV3MusicalDimensionCompilerInstructions.trim()),
       );
-      expect(
-        jsonEncode(sentBody),
-        isNot(contains('Set goal_kind from ORIGINAL_REQUEST_VERBATIM')),
-      );
-      expect(sentBody['metadata'], <String, dynamic>{
-        'prompt_trace_id': 'trace-proxy',
-        'architecture': 'v3_one_shot_prototype',
-      });
       expect(jsonEncode(sentBody), isNot(contains('sk-')));
       expect(result.requestBody.containsKey('ai_feature'), isFalse);
       expect(result.meta['llm_route'], 'authenticated_proxy');
@@ -701,14 +692,6 @@ void main() {
         <String>['project.set_tempo', 'clip.adjust_pitch_semitones'],
       );
       expect(result.meta['align_tempo_collapse_retried'], isTrue);
-      expect(
-        firstSent['metadata'],
-        isNot(contains('v3_align_tempo_retry')),
-      );
-      expect(
-        (retrySent['metadata'] as Map)['v3_align_tempo_retry'],
-        '1',
-      );
       expect(
         firstSent['instructions'],
         isNot(contains(aiV3AlignTempoCollapseRetryReminder.trim())),

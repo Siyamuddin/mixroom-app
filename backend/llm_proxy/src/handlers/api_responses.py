@@ -25,7 +25,6 @@ from common.ai_limits import (
     validate_feature,
 )
 from common.ai_runtime_config import get_ai_feature_runtime
-from common.ai_v3_planner_contract import apply_v3_server_owned_instructions
 from common.analytics import (
     analytics_enabled_from_body,
     build_event_properties,
@@ -427,25 +426,6 @@ def _configured_v3_reasoning_effort() -> str:
     normalized = _env_value("AI_V3_REASONING_EFFORT", default="low").lower()
     supported = {"none", "minimal", "low", "medium", "high", "xhigh"}
     return normalized if normalized in supported else "low"
-
-
-def _apply_v3_server_owned_runtime(request_body: Dict[str, Any]) -> None:
-    """Pin V3 model/runtime and replace client planner/compiler prompts."""
-    request_body["model"] = _configured_v3_model() or "gpt-5.6-luna"
-    request_body["reasoning"] = {
-        "effort": _configured_v3_reasoning_effort(),
-    }
-    request_body["max_output_tokens"] = min(
-        int(request_body.get("max_output_tokens") or 8192),
-        8192,
-    )
-    request_body["parallel_tool_calls"] = False
-    # The configured V3 Luna model requires the extended cache setting.
-    request_body["prompt_cache_retention"] = "24h"
-    # V3 is intentionally retained in OpenAI Responses for production
-    # diagnostics; the proxy owns and enforces this policy.
-    request_body["store"] = True
-    apply_v3_server_owned_instructions(request_body)
 
 
 def _validate_v3_request_body(body: Dict[str, Any]) -> None:
@@ -3083,7 +3063,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         is_structured_request=is_structured_request,
     )
     if is_v3_request:
-        _apply_v3_server_owned_runtime(request_body)
+        request_body["model"] = configured_model or "gpt-5.6-luna"
+        request_body["reasoning"] = {
+            "effort": _configured_v3_reasoning_effort(),
+        }
+        request_body["max_output_tokens"] = min(
+            int(request_body.get("max_output_tokens") or 8192),
+            8192,
+        )
+        request_body["parallel_tool_calls"] = False
+        # The configured V3 Luna model requires the extended cache setting.
+        request_body["prompt_cache_retention"] = "24h"
+        # V3 is intentionally retained in OpenAI Responses for production
+        # diagnostics; the proxy owns and enforces this policy.
+        request_body["store"] = True
 
     apply_server_output_token_cap(request_body)
     _update_request_log_context_with_cache_request(request_log_context, request_body)
@@ -3218,8 +3211,6 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 runtime_config=runtime_config,
                 is_structured_request=is_structured_request,
             )
-            if is_v3_request:
-                _apply_v3_server_owned_runtime(request_body)
             apply_server_output_token_cap(request_body)
             _update_request_log_context_with_cache_request(
                 request_log_context,

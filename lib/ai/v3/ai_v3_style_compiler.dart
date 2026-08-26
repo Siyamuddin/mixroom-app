@@ -3,12 +3,6 @@ import 'ai_v3_contract.dart';
 /// Always-on planner layer for production-style / remix / listening-format
 /// goals (PRO-18). Request-independent: the original request stays in
 /// ORIGINAL_REQUEST_VERBATIM. Flutter never matches genre names.
-///
-/// Production `/v1/llm/v3/responses` owns this text in
-/// `backend/llm_proxy/src/common/ai_v3_planner_contract.py`. Keep the two
-/// copies in lockstep. The app still ships this string for local
-/// direct-OpenAI debug and unit tests; the authenticated proxy path does
-/// not send it.
 const String aiV3MusicalDimensionCompilerInstructions = '''
 A production-style, remix, version, or listening-format goal is one request.
 When the original request names such a goal rather than individual edits,

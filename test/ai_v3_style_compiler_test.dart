@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
@@ -176,53 +175,6 @@ void main() {
       expect(
         oneShot['instructions'],
         contains(aiV3MusicalDimensionCompilerInstructions.trim()),
-      );
-    });
-
-    test('proxy payload omits owned instructions and sends flags', () {
-      final body = buildAiV3PlannerRequestBody(
-        contextData: const <String, dynamic>{},
-        originalRequest: 'make this a nightcore remix',
-        model: 'test-model',
-        reasoningEffort: 'low',
-        includeOwnedInstructions: false,
-        alignTempoCollapseRetry: true,
-        resourceRefsEnabled: true,
-      );
-      expect(body.containsKey('instructions'), isFalse);
-      expect(jsonEncode(body), isNot(contains('You are Mixroom')));
-      expect(
-        jsonEncode(body),
-        isNot(contains(aiV3MusicalDimensionCompilerInstructions.trim())),
-      );
-      expect(
-        jsonEncode(body['input']),
-        contains('ORIGINAL_REQUEST_VERBATIM'),
-      );
-      expect((body['metadata'] as Map)['v3_align_tempo_retry'], '1');
-      expect((body['metadata'] as Map)['v3_resource_refs'], '1');
-    });
-
-    test('llm_proxy mirrors planner and compiler instructions', () {
-      final serverText = File(
-        'backend/llm_proxy/src/common/ai_v3_planner_contract.py',
-      ).readAsStringSync();
-      expect(
-        serverText,
-        contains(aiV3MusicalDimensionCompilerInstructions.trim()),
-      );
-      expect(
-        serverText,
-        contains(aiV3AlignTempoCollapseRetryReminder.trim()),
-      );
-      expect(
-        serverText,
-        contains("You are Mixroom's sole semantic and musical planner."),
-      );
-      expect(serverText, contains('Never invent a group.'));
-      expect(
-        serverText,
-        contains('Set goal_kind from ORIGINAL_REQUEST_VERBATIM only'),
       );
     });
   });

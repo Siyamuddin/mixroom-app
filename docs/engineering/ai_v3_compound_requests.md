@@ -2,7 +2,7 @@
 
 Owner: AI Engineering  
 Status: In review  
-Last reviewed: 2026-08-26 (V3 planner/compiler owned by llm_proxy)  
+Last reviewed: 2026-08-26  
 PDF: [ai_v3_compound_requests.pdf](ai_v3_compound_requests.pdf)  
 Tickets: [PRO-16](https://linear.app/mixroom/issue/PRO-16/ai-generalized-compound-requests)
 (parent), [PRO-18](https://linear.app/mixroom/issue/PRO-18/generalized-compound-requests-basic-architecture)
@@ -38,7 +38,7 @@ names.
 | Area | Before | After |
 | --- | --- | --- |
 | Style / remix / listening-format goals | Often one nearby edit (tempo-align) | One plan with every Mixroom-legal implied step: tempo, pitch, mix, pan automation; arrangement only when the user asked |
-| Planner prompt | No always-on compiler; brief genre injection was tried and dropped | Always-on compiler. Production `/v1/llm/v3/responses` owns planner + compiler in `backend/llm_proxy/src/common/ai_v3_planner_contract.py` and ignores client `instructions`. The app still ships the same text for local direct-OpenAI debug. Adaptive first-shot/continuation still attach the Dart copy (direct OpenAI). |
+| Planner prompt | No always-on compiler; brief genre injection was tried and dropped | `aiV3MusicalDimensionCompilerInstructions` on every V3 request, including adaptive first-shot and continuation. The app sends that text as `instructions`; `/v1/llm/v3/responses` forwards it and only pins model / reasoning / `store`. |
 | Align-only collapse | First plan could ship as tempo-align only | Retry when the plan's `goal_kind` is `production_goal` **and** every command is `clip.align_tempo_to_project`. Flutter does not regex the user string |
 | Pan / gain automation | `mix:pan` / `mix:gain` often missing from context | Every audio row always exposes `volume`, `mix:gain`, `mix:pan` |
 | Static pan vs sweep | Orbit could also emit mix-widen / static pan | If the plan writes `automation.set_points` on `mix:pan`, pan intents are stripped from `mix.apply_goal` |
@@ -53,14 +53,13 @@ names.
 
 | File | Role |
 | --- | --- |
-| `backend/llm_proxy/src/common/ai_v3_planner_contract.py` | Server-owned planner + compiler. Production V3 overwrites client `instructions` |
-| `lib/ai/v3/ai_v3_style_compiler.dart` | App copy of compiler + align-collapse retry from `goal_kind` |
+| `lib/ai/v3/ai_v3_style_compiler.dart` | Always-on compiler + align-collapse retry from `goal_kind` |
 | `lib/ai/v3/ai_v3_contract.dart` | PlanV3 `goal_kind` enum and optional `skipped` codes |
 | `lib/ai/chat_pipeline.dart` | Receipt text, skip attach from codes, mix-detail collapse |
 | `lib/ai/v3/ai_v3_automation_targets.dart` | Always-on pan/gain targets; strip pan from mix when a sweep exists |
-| `lib/ai/v3/ai_v3_planner_request.dart` | Direct debug still injects compiler; proxy path omits it and sends flags |
+| `lib/ai/v3/ai_v3_planner_request.dart` | Injects planner + compiler into `instructions` for proxy and direct OpenAI |
 | `lib/ai/v3/ai_v3_adaptive_midi_planner.dart` | Same compiler on adaptive first-shot and continuation (direct OpenAI) |
-| `lib/ai/v3/ai_v3_planner_service.dart` | One align-collapse retry; proxy omits owned instructions |
+| `lib/ai/v3/ai_v3_planner_service.dart` | One align-collapse retry; retry reminder goes in `instructions` |
 | `lib/ai/v3/ai_v3_preparer.dart` | Mix pan-intent strip at prepare time |
 | `lib/ai/v3/ai_v3_context.dart`, `ai_v3_planning_snapshot.dart` | Automation targets + stale selection |
 | `lib/screens/audio_editor.dart` | Verified apply still inserts the system execution list plus assistant sentence; no extra action chips |
@@ -133,24 +132,12 @@ flutter test \
 
 Coverage includes: compiler has no genre names or hardcoded +3 / 1.25×;
 nightcore / phonk / set-tempo / questions share identical instructions;
-proxy payloads omit the compiler and send retry/resource-ref flags;
-the Dart compiler stays mirrored in `ai_v3_planner_contract.py`;
+proxy and direct-OpenAI payloads both send the compiler in `instructions`;
 align-collapse retries only `production_goal` align-only plans, not
 `named_edit`; pan targets always
 present; mix pan stripped when a sweep exists; skip notes omitted on named
 singles; skip notes come from `skipped` codes; mix execution details
 collapse to intent; verified AI undo is bound to that apply’s record id.
-
-Proxy contract tests:
-
-```bash
-python3 -m unittest \
-  tests/test_ai_v3_planner_contract.py \
-  tests/test_api_responses.py
-```
-
-from `backend/llm_proxy`. Deploy that Lambda before shipping an app
-build that omits V3 `instructions`.
 
 ## Manual integration checklist
 
@@ -176,6 +163,5 @@ Replay on macOS with a project that already has audio:
 ## Update trigger
 
 Update this page when the compiler instructions, align-collapse retry,
-automation-target guarantee, mix pan-strip, skip-note policy, verified
-chat receipt / undo-record binding, or llm_proxy ownership of the V3
-planner/compiler prompt changes.
+automation-target guarantee, mix pan-strip, skip-note policy, or verified
+chat receipt / undo-record binding changes.
