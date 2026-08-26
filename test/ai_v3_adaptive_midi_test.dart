@@ -453,6 +453,7 @@ Map<String, dynamic> _response(String name, Map<String, dynamic> arguments) =>
 Map<String, dynamic> _respondPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'respond',
+  'goal_kind': 'named_edit',
   'user_message': 'The project is at 120 BPM.',
   'commands': const <Object>[],
   'question_options': const <Object>[],
@@ -461,6 +462,7 @@ Map<String, dynamic> _respondPlan() => <String, dynamic>{
 Map<String, dynamic> _transposePlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Transpose the Keys clip down two semitones.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -478,6 +480,7 @@ Map<String, dynamic> _midiEditPlan(
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Edit the Keys notes.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -525,6 +528,7 @@ Map<String, dynamic> _createMidiPlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Create a short MIDI clip.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -561,6 +565,7 @@ Map<String, dynamic> _setRowInstrumentPlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Changed the Keys instrument.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -578,6 +583,7 @@ Map<String, dynamic> _setRowInstrumentPlan({
 Map<String, dynamic> _createThreePartMidiPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Create a four-bar drum, bass, and piano loop.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -627,6 +633,7 @@ Map<String, dynamic> _ensureEffectPlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Configure Reverb on Keys.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -649,6 +656,7 @@ Map<String, dynamic> _pitchPlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Lower the Vocal clip by two semitones.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -665,6 +673,7 @@ Map<String, dynamic> _gluePlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Glue the two Vocal clips.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -683,6 +692,7 @@ Map<String, dynamic> _stemPlan({String clipId = 'clip-audio'}) =>
     <String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': 'plan',
+      'goal_kind': 'named_edit',
       'user_message': 'Separate the Vocal clip into vocals and instrumental.',
       'commands': <Map<String, dynamic>>[
         <String, dynamic>{
@@ -697,6 +707,7 @@ Map<String, dynamic> _stemPlan({String clipId = 'clip-audio'}) =>
 Map<String, dynamic> _stemPitchRefPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Separated the stems and adjusted the generated clip.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -722,6 +733,7 @@ Map<String, dynamic> _stemPitchRefPlan() => <String, dynamic>{
 Map<String, dynamic> _generatedMidiTransposeRefPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Created and transposed the generated MIDI clip.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -779,6 +791,7 @@ Map<String, dynamic> _audioToMidiPlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Convert the Vocal clip to piano MIDI.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -796,6 +809,7 @@ Map<String, dynamic> _audioToMidiPlan({
 Map<String, dynamic> _bypassPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Bypass the Reverb on Keys.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -813,6 +827,7 @@ Map<String, dynamic> _bypassPlan() => <String, dynamic>{
 Map<String, dynamic> _midiAndEffectPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Transpose Keys and bypass its Reverb.',
   'commands': <Map<String, dynamic>>[
     ...(_transposePlan()['commands'] as List).cast<Map<String, dynamic>>(),
@@ -824,6 +839,7 @@ Map<String, dynamic> _midiAndEffectPlan() => <String, dynamic>{
 Map<String, dynamic> _samplePlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Place the selected kick sample on Keys.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -844,6 +860,7 @@ Map<String, dynamic> _sampleReplacePlan({String assetId = 'sample:kick'}) =>
     <String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': 'plan',
+      'goal_kind': 'named_edit',
       'user_message': 'Replace the selected audio clip.',
       'commands': <Map<String, dynamic>>[
         <String, dynamic>{
@@ -861,6 +878,7 @@ Map<String, dynamic> _sampleReplacePlan({String assetId = 'sample:kick'}) =>
 Map<String, dynamic> _automationPlan({int rowId = 20}) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Add a gain fade to Keys.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -884,6 +902,7 @@ Map<String, dynamic> _automationPointsPlan({
 }) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Set a pan curve on Keys.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -905,6 +924,7 @@ Map<String, dynamic> _automationPointsPlan({
 Map<String, dynamic> _mixPlan({int? referenceRowId}) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Balance the project mix.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -940,6 +960,7 @@ Map<String, dynamic> _mixPlan({int? referenceRowId}) => <String, dynamic>{
 Map<String, dynamic> _zeroMovePlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Transposing the Keys clip.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -3318,6 +3339,7 @@ void main() {
     final finalPlan = <String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': 'plan',
+      'goal_kind': 'named_edit',
       'user_message': 'Place the kick and transpose Keys.',
       'commands': <Map<String, dynamic>>[
         ...(_samplePlan()['commands'] as List).cast<Map<String, dynamic>>(),
@@ -3971,6 +3993,7 @@ void main() {
       final finalPlan = <String, dynamic>{
         'schema_version': aiV3PlanVersion,
         'outcome': 'plan',
+        'goal_kind': 'named_edit',
         'user_message': 'Bypass Reverb and balance the mix.',
         'commands': <Map<String, dynamic>>[
           ...(_bypassPlan()['commands'] as List).cast<Map<String, dynamic>>(),
@@ -4038,6 +4061,7 @@ void main() {
       final combinedPlan = <String, dynamic>{
         'schema_version': aiV3PlanVersion,
         'outcome': 'plan',
+        'goal_kind': 'named_edit',
         'user_message': 'Transpose Keys and place a kick.',
         'commands': <Map<String, dynamic>>[
           ...(_transposePlan()['commands'] as List)

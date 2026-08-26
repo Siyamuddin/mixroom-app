@@ -189,14 +189,19 @@ String aiV3ObserveLine({
   return '[V3 $stage] commands=${commandTypes.join(',')} bpm=$bpm pitches=$pitches';
 }
 
-String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) {
+String aiV3VerifiedCompletionMessage(
+  Map<String, dynamic> bundle, {
+  String Function(List<AiV3SkipCode> codes)? skipNoteLocalizer,
+}) {
   final plan = bundle['plan'];
   final plannerMessage = plan is Map
       ? plan['user_message']?.toString().trim() ?? ''
       : '';
   final receiptSummary = _aiV3ReceiptCompletionSummary(bundle);
   final skipNote = _aiV3ShouldAttachSkipNote(bundle)
-      ? _aiV3PastTenseSkipNote(_aiV3SkipNote(plannerMessage, receiptSummary))
+      ? (skipNoteLocalizer ?? aiV3SkipNoteSentence)(
+          _aiV3SkipCodesFromBundle(bundle),
+        )
       : '';
   if (receiptSummary.isEmpty && skipNote.isEmpty) {
     return plannerMessage.isEmpty ? 'Done.' : plannerMessage;
@@ -236,36 +241,10 @@ String _aiV3ReceiptCompletionSummary(Map<String, dynamic> bundle) {
   return sentences.join(' ');
 }
 
-String _aiV3SkipNote(String plannerMessage, String receiptSummary) {
-  if (plannerMessage.isEmpty) return '';
-  const markers = <String>[
-    'skip',
-    'skipped',
-    'unsupported',
-    'illusion',
-    'binaural',
-    'import',
-    'export',
-    "won't generate",
-    'will not generate',
-    "won't create",
-    'will not create',
-    'generated drum',
-  ];
-  final skipSentences = plannerMessage
-      .replaceAll('’', "'")
-      .split(RegExp(r'(?<=[.!?])\s+'))
-      .map((sentence) => sentence.trim())
-      .where((sentence) => sentence.isNotEmpty)
-      .where((sentence) {
-        final lower = sentence.toLowerCase();
-        return markers.any(lower.contains);
-      })
-      .toList();
-  if (skipSentences.isEmpty) return '';
-  final skip = skipSentences.join(' ');
-  if (receiptSummary.toLowerCase().contains(skip.toLowerCase())) return '';
-  return skip;
+List<AiV3SkipCode> _aiV3SkipCodesFromBundle(Map<String, dynamic> bundle) {
+  final plan = bundle['plan'];
+  if (plan is! Map) return const <AiV3SkipCode>[];
+  return parseAiV3SkipCodes(plan['skipped']);
 }
 
 bool _aiV3ShouldAttachSkipNote(Map<String, dynamic> bundle) {
@@ -303,71 +282,6 @@ Set<String> _aiV3CommandTypesFromBundle(Map<String, dynamic> bundle) {
     if (type.isNotEmpty) types.add(type);
   }
   return types;
-}
-
-String _aiV3PastTenseSkipNote(String skip) {
-  if (skip.isEmpty) return skip;
-  return skip
-      .replaceAll(
-        RegExp(r"\bI['’]ll skip\b", caseSensitive: false),
-        'Mixroom skipped',
-      )
-      .replaceAll(
-        RegExp(r"\bI'm skipping\b", caseSensitive: false),
-        'Mixroom skipped',
-      )
-      .replaceAll(
-        RegExp(r'\bMixroom will skip\b', caseSensitive: false),
-        'Mixroom skipped',
-      )
-      .replaceAll(
-        RegExp(r'\bI will skip\b', caseSensitive: false),
-        'Mixroom skipped',
-      )
-      .replaceAll(
-        RegExp(r'\bwill skip\b', caseSensitive: false),
-        'skipped',
-      )
-      .replaceAll(
-        RegExp(r"\bI won['’]t\b", caseSensitive: false),
-        'Mixroom did not',
-      )
-      .replaceAll(
-        RegExp(r"\bMixroom won['’]t\b", caseSensitive: false),
-        'Mixroom did not',
-      )
-      .replaceAll(
-        RegExp(r'\bwill not generate\b', caseSensitive: false),
-        'did not generate',
-      )
-      .replaceAll(
-        RegExp(r"\bwon['’]t generate\b", caseSensitive: false),
-        'did not generate',
-      )
-      .replaceAll(
-        RegExp(r'\bwill not create\b', caseSensitive: false),
-        'did not create',
-      )
-      .replaceAll(
-        RegExp(r"\bwon['’]t create\b", caseSensitive: false),
-        'did not create',
-      )
-      .replaceAll(
-        RegExp(r'\bwill not add\b', caseSensitive: false),
-        'did not add',
-      )
-      .replaceAll(
-        RegExp(r"\bwon['’]t add\b", caseSensitive: false),
-        'did not add',
-      )
-      .replaceAll(
-        RegExp(r'\bwill not\b', caseSensitive: false),
-        'did not',
-      )
-      .replaceAll(
-        RegExp(r"\bwon['’]t\b", caseSensitive: false),
-        'did not',
-      );
 }
 
 String _aiV3ClarificationMessage(String question, List<String> options) {

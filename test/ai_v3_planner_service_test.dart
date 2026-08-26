@@ -43,6 +43,7 @@ Map<String, dynamic> _responseWithArguments(Object arguments) =>
 Map<String, dynamic> _respondPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'respond',
+  'goal_kind': 'named_edit',
   'user_message': 'The project is at 120 BPM.',
   'commands': const <Object>[],
   'question_options': const <Object>[],
@@ -150,6 +151,7 @@ void main() {
       final rawPlan = <String, dynamic>{
         'schema_version': aiV3PlanVersion,
         'outcome': 'plan',
+        'goal_kind': 'named_edit',
         'user_message': 'Separated the stems and adjusted the generated clip.',
         'commands': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -202,6 +204,7 @@ void main() {
       final rawPlan = <String, dynamic>{
         'schema_version': aiV3PlanVersion,
         'outcome': 'plan',
+        'goal_kind': 'named_edit',
         'user_message': 'Created and transposed the generated MIDI clip.',
         'commands': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -311,6 +314,19 @@ void main() {
         'ai_architecture': 'v3_one_shot_prototype',
       });
       expect(sentBody['store'], isTrue);
+      expect(sentBody.containsKey('instructions'), isFalse);
+      expect(
+        jsonEncode(sentBody),
+        isNot(contains('You are Mixroom')),
+      );
+      expect(
+        jsonEncode(sentBody),
+        isNot(contains('Set goal_kind from ORIGINAL_REQUEST_VERBATIM')),
+      );
+      expect(sentBody['metadata'], <String, dynamic>{
+        'prompt_trace_id': 'trace-proxy',
+        'architecture': 'v3_one_shot_prototype',
+      });
       expect(jsonEncode(sentBody), isNot(contains('sk-')));
       expect(result.requestBody.containsKey('ai_feature'), isFalse);
       expect(result.meta['llm_route'], 'authenticated_proxy');
@@ -390,6 +406,7 @@ void main() {
               jsonEncode(<String, dynamic>{
                 'schema_version': aiV3PlanVersion,
                 'outcome': 'plan',
+                'goal_kind': 'named_edit',
                 'user_message': 'Transpose.',
                 'commands': <Map<String, dynamic>>[
                   <String, dynamic>{
@@ -640,7 +657,7 @@ void main() {
   });
 
   test(
-    'retries once when a production goal collapses to align-tempo',
+    'retries once when a production_goal collapses to align-tempo',
     () async {
       var calls = 0;
       late Map<String, dynamic> firstSent;
@@ -653,7 +670,11 @@ void main() {
         if (calls == 1) {
           firstSent = sent;
           return http.Response(
-            jsonEncode(_responseWithArguments(jsonEncode(_alignOnlyPlan()))),
+            jsonEncode(
+              _responseWithArguments(
+                jsonEncode(_alignOnlyPlan(goalKind: 'production_goal')),
+              ),
+            ),
             200,
           );
         }
@@ -671,7 +692,7 @@ void main() {
 
       final result = await service.plan(
         context: _context(),
-        originalRequest: 'make this a nightcore remix',
+        originalRequest: 'nightcore this',
       );
 
       expect(calls, 2);
@@ -680,6 +701,14 @@ void main() {
         <String>['project.set_tempo', 'clip.adjust_pitch_semitones'],
       );
       expect(result.meta['align_tempo_collapse_retried'], isTrue);
+      expect(
+        firstSent['metadata'],
+        isNot(contains('v3_align_tempo_retry')),
+      );
+      expect(
+        (retrySent['metadata'] as Map)['v3_align_tempo_retry'],
+        '1',
+      );
       expect(
         firstSent['instructions'],
         isNot(contains(aiV3AlignTempoCollapseRetryReminder.trim())),
@@ -693,7 +722,7 @@ void main() {
   );
 
   test(
-    'does not retry make this louder even if the plan is align-only',
+    'does not retry a named_edit align-only plan',
     () async {
       var calls = 0;
       final client = MockClient((_) async {
@@ -711,7 +740,7 @@ void main() {
 
       final result = await service.plan(
         context: _context(),
-        originalRequest: 'make this louder',
+        originalRequest: 'make this a nightcore remix',
       );
 
       expect(calls, 1);
@@ -730,6 +759,7 @@ void main() {
             jsonEncode(<String, dynamic>{
               'schema_version': aiV3PlanVersion,
               'outcome': 'plan',
+              'goal_kind': 'named_edit',
               'user_message': 'Pitched the vocal.',
               'commands': <Map<String, dynamic>>[
                 <String, dynamic>{
@@ -764,9 +794,12 @@ void main() {
   });
 }
 
-Map<String, dynamic> _alignOnlyPlan() => <String, dynamic>{
+Map<String, dynamic> _alignOnlyPlan({
+  String goalKind = 'named_edit',
+}) => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': goalKind,
   'user_message': 'Aligned the clip to the project tempo.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -784,6 +817,7 @@ Map<String, dynamic> _alignOnlyPlan() => <String, dynamic>{
 Map<String, dynamic> _tempoAndPitchPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'plan',
+  'goal_kind': 'named_edit',
   'user_message': 'Sped up the project and pitched the audio.',
   'commands': <Map<String, dynamic>>[
     <String, dynamic>{

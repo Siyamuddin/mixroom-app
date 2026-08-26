@@ -8319,20 +8319,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _playAiV3VerifiedResult() async {
-    if (_v3ExecutionInProgress) return;
-    try {
-      if (_isPlaying) {
-        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-      }
-      await _seekAiV3TransportPaused(0);
-      if (!mounted) return;
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-    } catch (error) {
-      debugPrint('V3 play-after-apply failed: $error');
-    }
-  }
-
   Future<void> _performEditorUndo() async {
     if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
@@ -36190,11 +36176,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                         ],
                                                                       ),
                                                                     )
-                                                                  : _buildAssistantChatBody(
-                                                                      text:
-                                                                          visibleMessageText,
-                                                                      metadata:
-                                                                          metadata,
+                                                                  : Text(
+                                                                      visibleMessageText,
+                                                                      style: const TextStyle(
+                                                                        fontFamily:
+                                                                            'Pretendard',
+                                                                        fontSize:
+                                                                            15,
+                                                                        fontWeight:
+                                                                            FontWeight.w500,
+                                                                        height:
+                                                                            1.2,
+                                                                        color: Colors
+                                                                            .white,
+                                                                      ),
                                                                     ),
                                                             ),
                                                           ),
@@ -64181,101 +64176,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Widget _buildAssistantChatBody({
-    required String text,
-    required Map<String, dynamic>? metadata,
-  }) {
-    final textWidget = Text(
-      text,
-      style: const TextStyle(
-        fontFamily: 'Pretendard',
-        fontSize: 15,
-        fontWeight: FontWeight.w500,
-        height: 1.2,
-        color: Colors.white,
-      ),
-    );
-    if (metadata?['source'] != 'ai_v3_verified_completion') {
-      return textWidget;
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        textWidget,
-        const SizedBox(height: 10),
-        _buildAiV3VerifiedActionChips(),
-      ],
-    );
-  }
-
-  Widget _buildAiV3VerifiedActionChips() {
-    final canUndoAi = _undoManager.lastAction?.description == 'AI changes';
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        _buildAiV3ActionChip(
-          label: L10n.translate(context, 'Play'),
-          icon: Icons.play_arrow_rounded,
-          onPressed: () {
-            unawaited(_playAiV3VerifiedResult());
-          },
-        ),
-        _buildAiV3ActionChip(
-          label: L10n.translate(context, 'Undo'),
-          icon: Icons.undo_rounded,
-          onPressed: canUndoAi
-              ? () {
-                  unawaited(_performEditorUndo());
-                }
-              : null,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAiV3ActionChip({
-    required String label,
-    required IconData icon,
-    required VoidCallback? onPressed,
-  }) {
-    final isEnabled = onPressed != null;
-    return Material(
-      color: Colors.white.withValues(alpha: isEnabled ? 0.12 : 0.05),
-      borderRadius: BorderRadius.circular(999),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onPressed,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 15,
-                color: Colors.white.withValues(alpha: isEnabled ? 0.92 : 0.35),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontFamily: 'Pretendard',
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white.withValues(
-                    alpha: isEnabled ? 0.92 : 0.35,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSystemChatMessage(TextMessage message) {
     final metadata = message.metadata;
     final detailLines = _chatExecutionDetailLines(metadata);
@@ -64469,10 +64369,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   static const int _kChatExecutionDetailCollapseThreshold = 3;
 
+  /// Binds a verified AI completion to its compound undo record.
+  /// Per-bubble Undo must use this id, not the global latest "AI changes".
+  Map<String, dynamic> _aiV3VerifiedUndoMetadata(String? undoRecordId) {
+    final id = undoRecordId?.trim() ?? '';
+    if (id.isEmpty) return const <String, dynamic>{};
+    return <String, dynamic>{'undo_record_id': id};
+  }
+
   void _insertExecutionDetailSystemText({
     required String source,
     required String collapsedTitle,
     required List<String> detailLines,
+    Map<String, dynamic> extraMetadata = const <String, dynamic>{},
   }) {
     final lines = detailLines
         .map(_plainSystemDetailText)
@@ -64483,7 +64392,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (final line in lines) {
         _insertSystemChatText(
           _centeredSystemChatText(line),
-          metadata: <String, dynamic>{'source': source},
+          metadata: <String, dynamic>{'source': source, ...extraMetadata},
         );
       }
       return;
@@ -64499,6 +64408,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'detail_lines': lines,
         'collapsed_title': title,
         'collapsed_by_default': true,
+        ...extraMetadata,
       },
     );
   }
@@ -64808,6 +64718,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  String _localizedAiV3SkipNote(List<AiV3SkipCode> codes) {
+    if (codes.isEmpty) return '';
+    final items = codes
+        .map((code) => L10n.translate(context, code.l10nKey))
+        .join(', ');
+    return L10n.translateWithParams(
+      context,
+      'Mixroom skipped {items}.',
+      <String, String>{'items': items},
+    );
+  }
+
   Future<void> _presentAiV3Handoff(
     Map<String, dynamic> handoff, {
     int? chatFlowId,
@@ -65032,6 +64954,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     try {
       if (chatFlowId != null) _throwIfChatFlowStopped(chatFlowId);
+      String? undoRecordId;
       final transaction =
           await const AiV3LocalTransaction<
                 EditorUndoAction,
@@ -65071,6 +64994,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   await _undoManager.addWithoutExecute(
                     CompoundUndoAction('AI changes', persistentActions),
                   );
+                  undoRecordId = _undoManager.lastUndoRecord?.id;
                 },
               );
       releaseTransactionNoticeCapture();
@@ -65086,6 +65010,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         bundle,
         runtimeAlreadySatisfiedCommandIds,
       );
+      final executionDetails = aiV3VerifiedExecutionDetails(
+        verifiedBundle,
+        executionSummariesByCommandId: localizedExecutionSummaries,
+        actionNotices: verifiedActionNotices,
+        receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
+        alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
+      );
       final conversationMessage = aiV3VerifiedConversationMessage(
         verifiedBundle,
         executionSummariesByCommandId: localizedExecutionSummaries,
@@ -65093,7 +65024,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         receiptLabelLocalizer: _localizedAiV3ReceiptLabel,
         alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
-      final completionMessage = aiV3VerifiedCompletionMessage(verifiedBundle);
+      final completionMessage = aiV3VerifiedCompletionMessage(
+        verifiedBundle,
+        skipNoteLocalizer: _localizedAiV3SkipNote,
+      );
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
         result: <String, dynamic>{
@@ -65116,11 +65050,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         count == 1 ? 'Applied 1 change.' : 'Applied {count} changes.',
         <String, String>{'count': '$count'},
       );
+      final undoMetadata = _aiV3VerifiedUndoMetadata(undoRecordId);
+      _insertExecutionDetailSystemText(
+        source: 'ai_v3_verified_execution',
+        collapsedTitle: L10n.translateWithParams(
+          context,
+          executionDetails.length == 1
+              ? 'Applied 1 verified change'
+              : 'Applied {count} verified changes',
+          <String, String>{'count': '${executionDetails.length}'},
+        ),
+        detailLines: executionDetails,
+        extraMetadata: undoMetadata,
+      );
       _insertAssistantChatText(
         completionMessage,
         modelAuthored: true,
-        metadata: const <String, dynamic>{
+        metadata: <String, dynamic>{
           'source': 'ai_v3_verified_completion',
+          ...undoMetadata,
         },
       );
       debugPrint(
@@ -85702,6 +85650,22 @@ class EditorUndoManager extends ChangeNotifier {
   bool get canRedo => _capturedActions == null && _redo.isNotEmpty;
   bool get isCapturingActions => _capturedActions != null;
   EditorUndoAction? get lastAction => _lastAction;
+  ProjectUndoSnapshotRecord? get lastUndoRecord =>
+      _undo.isEmpty ? null : _undo.last.snapshot;
+
+  /// True only when [recordId] is the current top of the undo stack.
+  /// Older AI completions must not undo a newer or unrelated change.
+  bool isCurrentUndoRecordId(String recordId) {
+    final id = recordId.trim();
+    if (id.isEmpty) return false;
+    return lastUndoRecord?.id == id;
+  }
+
+  /// Undoes only the current top entry, and only if it matches [recordId].
+  Future<EditorUndoAction?> undoCurrentRecordId(String recordId) async {
+    if (!isCurrentUndoRecordId(recordId)) return null;
+    return undo();
+  }
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
       List.unmodifiable(_snapshotRecords(_undo));
   List<ProjectUndoSnapshotRecord> get redoSnapshotRecords =>

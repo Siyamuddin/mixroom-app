@@ -22,8 +22,12 @@ This package is the minimal beta-safe backend for Mixroom chat. Its job is to:
 This is the beta target architecture. The app should send context only; Lambda owns the server prompt, tools, and default model.
 
 The dedicated V3 route accepts the strict one-shot `submit_plan_v3` request,
-pins the configured V3 model and reasoning effort server-side, and can be
-disabled with `AI_V3_ENABLED=false`. Existing clients remain on the V1 route.
+replaces client `instructions` with the server-owned planner and musical-
+dimension compiler (`src/common/ai_v3_planner_contract.py`), pins the
+configured V3 model and reasoning effort server-side, and can be disabled
+with `AI_V3_ENABLED=false`. Existing clients remain on the V1 route.
+The app should send V3 context, tools, and small metadata flags only; do
+not send the planner/compiler system prompt on the authenticated proxy path.
 
 ## AWS services
 

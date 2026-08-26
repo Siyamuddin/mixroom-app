@@ -10,6 +10,9 @@ Map<String, dynamic> _plan(List<Map<String, dynamic>> commands) =>
     <String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': commands.isEmpty ? 'respond' : 'plan',
+      'goal_kind': commands.isEmpty
+          ? AiV3GoalKind.question.wireName
+          : AiV3GoalKind.namedEdit.wireName,
       'user_message': commands.isEmpty ? 'The BPM is 120.' : 'I prepared it.',
       'commands': commands,
       'question_options': const <String>[],
@@ -3835,6 +3838,11 @@ void main() {
       }
 
       inspect(tool['parameters']);
+      final parameters = tool['parameters'] as Map;
+      expect(
+        (parameters['properties'] as Map).keys.toSet(),
+        (parameters['required'] as List).toSet(),
+      );
       final schema = jsonEncode(tool['parameters']);
       for (final command in const <String>[
         'row.set_gain_db',
@@ -3855,6 +3863,118 @@ void main() {
       ]) {
         expect(schema, contains(command));
       }
+      expect(schema, contains('"goal_kind"'));
+      expect(schema, contains('production_goal'));
+      expect(schema, contains('named_edit'));
+      expect(schema, contains('"skipped"'));
+      expect(schema, contains('generated_drums'));
+      expect(schema, contains('binaural_8d'));
+      expect(parameters['required'], contains('skipped'));
+    });
+
+    test('parses goal_kind and rejects missing or unknown values', () {
+      final plan = AiV3Plan.fromJson(
+        _plan(<Map<String, dynamic>>[
+          _command('mute', 'row.set_muted', <String, dynamic>{
+            'row_id': 100,
+            'muted': true,
+          }),
+        ]),
+      );
+      expect(plan.goalKind, AiV3GoalKind.namedEdit);
+      expect(plan.toJson()['goal_kind'], 'named_edit');
+
+      final production = _plan(<Map<String, dynamic>>[
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_id': 100,
+          'muted': true,
+        }),
+      ])..['goal_kind'] = 'production_goal';
+      expect(
+        AiV3Plan.fromJson(production).goalKind,
+        AiV3GoalKind.productionGoal,
+      );
+
+      final missing = _plan(const <Map<String, dynamic>>[])..remove('goal_kind');
+      expect(
+        () => AiV3Plan.fromJson(missing),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_plan_fields_invalid',
+          ),
+        ),
+      );
+      final unknown = _plan(const <Map<String, dynamic>>[])
+        ..['goal_kind'] = 'remix';
+      expect(
+        () => AiV3Plan.fromJson(unknown),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_goal_kind_invalid',
+          ),
+        ),
+      );
+    });
+
+    test('parses optional skipped codes and ignores unknown values', () {
+      final withSkipped = _plan(<Map<String, dynamic>>[
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_id': 100,
+          'muted': true,
+        }),
+      ])..['skipped'] = <Object?>[
+          'import',
+          'drums',
+          'export',
+          'import',
+          3,
+        ];
+      final plan = AiV3Plan.fromJson(withSkipped);
+      expect(
+        plan.skipped.map((code) => code.wireName),
+        <String>['import', 'export'],
+      );
+      expect(plan.toJson()['skipped'], <String>['import', 'export']);
+
+      final omitted = AiV3Plan.fromJson(
+        _plan(<Map<String, dynamic>>[
+          _command('mute', 'row.set_muted', <String, dynamic>{
+            'row_id': 100,
+            'muted': true,
+          }),
+        ]),
+      );
+      expect(omitted.skipped, isEmpty);
+      expect(omitted.toJson().containsKey('skipped'), isFalse);
+
+      final wrongType = _plan(<Map<String, dynamic>>[
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_id': 100,
+          'muted': true,
+        }),
+      ])..['skipped'] = 'import';
+      expect(AiV3Plan.fromJson(wrongType).skipped, isEmpty);
+
+      final extra = _plan(<Map<String, dynamic>>[
+        _command('mute', 'row.set_muted', <String, dynamic>{
+          'row_id': 100,
+          'muted': true,
+        }),
+      ])..['skip_note'] = 'import';
+      expect(
+        () => AiV3Plan.fromJson(extra),
+        throwsA(
+          isA<AiV3ContractException>().having(
+            (error) => error.code,
+            'code',
+            'v3_plan_fields_invalid',
+          ),
+        ),
+      );
     });
 
     test('accepts strict subjective and reference mix goals', () {

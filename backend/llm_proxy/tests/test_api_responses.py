@@ -373,7 +373,7 @@ class ApiResponsesTests(unittest.TestCase):
             {"role": "user", "content": "Make the vocals clearer."},
         )
 
-    def test_v3_endpoint_preserves_typed_planner_contract_and_forces_runtime(
+    def test_v3_endpoint_owns_planner_instructions_and_forces_runtime(
         self,
     ) -> None:
         provider = _FakeProvider(
@@ -464,6 +464,16 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertFalse(provider.request_body["parallel_tool_calls"])
         self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
         self.assertTrue(provider.request_body["store"])
+        instructions = provider.request_body["instructions"]
+        self.assertNotIn("V3 planner instructions", instructions)
+        self.assertIn(
+            "You are Mixroom's sole semantic and musical planner.",
+            instructions,
+        )
+        self.assertIn(
+            "Set goal_kind from ORIGINAL_REQUEST_VERBATIM only",
+            instructions,
+        )
         self.assertEqual(
             provider.request_body["tools"][0]["name"],
             "submit_plan_v3",
@@ -480,6 +490,88 @@ class ApiResponsesTests(unittest.TestCase):
             self.fake_usage_repo.log_calls[-1]["feature"],
             "ai_chat_v3",
         )
+
+    def test_v3_endpoint_applies_server_prompt_when_client_omits_instructions(
+        self,
+    ) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "id": "resp-v3",
+                "model": "gpt-5.6-luna",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(
+                            {
+                                "schema_version": "plan_v3_prototype_1",
+                                "outcome": "respond",
+                                "user_message": "No changes.",
+                                "commands": [],
+                                "question_options": [],
+                            }
+                        ),
+                    }
+                ],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                },
+            }
+        )
+        request_body = {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "ORIGINAL_REQUEST_VERBATIM:\nDo nothing.",
+                        }
+                    ],
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "submit_plan_v3",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "tool_choice": {"type": "function", "name": "submit_plan_v3"},
+            "parallel_tool_calls": False,
+            "store": True,
+            "metadata": {"v3_align_tempo_retry": "1"},
+        }
+        event = _authed_event(
+            json.dumps(request_body),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses,
+            "_load_api_key",
+            return_value="sk-test",
+        ), mock.patch.object(
+            api_responses,
+            "get_provider",
+            return_value=provider,
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        assert provider.request_body is not None
+        instructions = provider.request_body["instructions"]
+        self.assertIn(
+            "You are Mixroom's sole semantic and musical planner.",
+            instructions,
+        )
+        self.assertIn("Keep goal_kind production_goal", instructions)
 
     def test_v3_endpoint_kill_switch_blocks_before_provider_usage(self) -> None:
         event = _authed_event(

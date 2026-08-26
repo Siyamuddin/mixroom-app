@@ -1097,6 +1097,7 @@ void main() {
       const bundle = <String, dynamic>{
         'plan': <String, dynamic>{
           'user_message': 'Sped the track up. True binaural 8D is unsupported.',
+          'skipped': <String>['binaural_8d'],
         },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -1117,8 +1118,9 @@ void main() {
       expect(message, contains('180 BPM'));
       expect(message, contains('3 semitones'));
       expect(message, contains('presence'));
-      expect(message, contains('True binaural 8D is unsupported.'));
+      expect(message, contains('Mixroom skipped true binaural 8D.'));
       expect(message, isNot(contains('Sped the track up.')));
+      expect(message, isNot(contains('unsupported')));
       expect(message.length, lessThanOrEqualTo(aiV3PreferredUserMessageLength));
     });
 
@@ -1137,6 +1139,7 @@ void main() {
           'commands': <Map<String, dynamic>>[
             <String, dynamic>{'type': 'row.adjust_gain_db'},
           ],
+          'skipped': <String>['import', 'export'],
         },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -1151,15 +1154,15 @@ void main() {
       expect(message, isNot(contains('skip')));
     });
 
-    test('verified completion keeps past-tense skips on style plans', () {
+    test('verified completion uses skipped codes on style plans', () {
       const bundle = <String, dynamic>{
         'plan': <String, dynamic>{
-          'user_message':
-              'Sped the track up. Mixroom will skip import/export and generated drums.',
+          'user_message': 'Sped the track up.',
           'commands': <Map<String, dynamic>>[
             <String, dynamic>{'type': 'project.set_tempo'},
             <String, dynamic>{'type': 'mix.apply_goal'},
           ],
+          'skipped': <String>['import', 'export', 'generated_drums'],
         },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -1174,11 +1177,13 @@ void main() {
       };
       final message = aiV3VerifiedCompletionMessage(bundle);
       expect(message, contains('160 BPM'));
-      expect(message, contains('Mixroom skipped'));
-      expect(message, isNot(contains('will skip')));
+      expect(
+        message,
+        contains('Mixroom skipped import, export, and generated drums.'),
+      );
     });
 
-    test('verified completion past-tenses won\'t-generate skip copy', () {
+    test('verified completion ignores skip wording in user_message', () {
       const bundle = <String, dynamic>{
         'plan': <String, dynamic>{
           'user_message':
@@ -1201,8 +1206,9 @@ void main() {
       };
       final message = aiV3VerifiedCompletionMessage(bundle);
       expect(message, contains('132 BPM'));
-      expect(message, contains('did not generate new drum parts'));
+      expect(message, isNot(contains('Mixroom skipped')));
       expect(message, isNot(contains("won't")));
+      expect(message, isNot(contains('drum')));
     });
 
     test('observe line reports command types, BPM, and clip pitches', () {

@@ -203,7 +203,7 @@
     {
       "doc": "docs/engineering/ai_v3_compound_requests.md",
       "owner": "AI Engineering",
-      "update_trigger": "The musical-dimension compiler, align-tempo collapse retry, mix automation targets, mix pan-strip, skip-note policy, or verified chat receipt / Play / Undo behavior changes.",
+      "update_trigger": "The musical-dimension compiler, align-tempo collapse retry, mix automation targets, mix pan-strip, skip-note policy, verified chat receipt / Play / Undo behavior, or llm_proxy V3 prompt ownership changes.",
       "watch_paths": [
         "lib/ai/v3/ai_v3_style_compiler.dart",
         "lib/ai/v3/ai_v3_automation_targets.dart",
@@ -211,6 +211,8 @@
         "lib/ai/v3/ai_v3_planner_request.dart",
         "lib/ai/chat_pipeline.dart",
         "lib/screens/audio_editor.dart",
+        "backend/llm_proxy/src/common/ai_v3_planner_contract.py",
+        "backend/llm_proxy/src/handlers/api_responses.py",
         "test/ai_v3_style_compiler_test.dart",
         "test/ai_v3_automation_targets_test.dart",
         "test/assistant_action_flow_test.dart"

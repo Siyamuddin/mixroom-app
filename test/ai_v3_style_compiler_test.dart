@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
@@ -9,7 +10,13 @@ import 'package:mixroom/ai/v3/ai_v3_style_compiler.dart';
 AiV3Plan _plan({
   required String outcome,
   required List<AiV3Command> commands,
-}) => AiV3Plan(outcome: outcome, userMessage: 'Prepared.', commands: commands);
+  AiV3GoalKind goalKind = AiV3GoalKind.namedEdit,
+}) => AiV3Plan(
+  outcome: outcome,
+  goalKind: goalKind,
+  userMessage: 'Prepared.',
+  commands: commands,
+);
 
 AiV3Command _align() => const AiV3Command(
   commandId: 'align',
@@ -36,7 +43,12 @@ void main() {
       expect(compiler, contains('Questions do not mutate'));
       expect(compiler, contains('Named single edits remain single edits'));
       expect(compiler, contains('squeaky'));
+      expect(compiler, contains('ORIGINAL_REQUEST_VERBATIM only'));
+      expect(compiler, contains('not a request to repeat'));
+      expect(compiler, contains('speeding the'));
+      expect(compiler, contains('vocal-character metaphor alone is not'));
       expect(compiler, contains('Pitch-only metaphors stay moderate'));
+      expect(compiler, isNot(contains('chipmunk')));
       expect(compiler, contains('not a full octave'));
       expect(compiler, contains('even when library assets exist'));
       expect(compiler, contains('mix.apply_goal pan intent'));
@@ -44,7 +56,20 @@ void main() {
         compiler,
         contains('Named single edits, questions, and refusals'),
       );
-      expect(compiler, contains('faster and higher-pitched'));
+      expect(compiler, contains('fill skipped'));
+      expect(compiler, contains('generated_drums'));
+      expect(compiler, contains('leave skipped empty'));
+      expect(
+        compiler,
+        isNot(contains('user_message must name what will change and which')),
+      );
+      expect(compiler, contains('names both speed and pitch'));
+      expect(
+        compiler,
+        contains('Set goal_kind from ORIGINAL_REQUEST_VERBATIM only'),
+      );
+      expect(compiler, contains('production_goal'));
+      expect(compiler, contains('named_edit'));
       expect(compiler, isNot(contains('nightcore')));
       expect(compiler, isNot(contains('hyperpop')));
       expect(compiler, isNot(contains('Recognized style')));
@@ -55,7 +80,7 @@ void main() {
     test('retry reminder has no style names', () {
       expect(
         aiV3AlignTempoCollapseRetryReminder,
-        contains('clip.align_tempo_to_project'),
+        contains('Keep goal_kind production_goal'),
       );
       expect(aiV3AlignTempoCollapseRetryReminder, isNot(contains('nightcore')));
       expect(aiV3AlignTempoCollapseRetryReminder, isNot(contains('8D')));
@@ -153,57 +178,73 @@ void main() {
         contains(aiV3MusicalDimensionCompilerInstructions.trim()),
       );
     });
-  });
 
-  group('looksLikeAiV3ProductionGoal', () {
-    test('matches remix / version / turn into / sound like syntax', () {
-      expect(
-        looksLikeAiV3ProductionGoal('make this a nightcore remix'),
-        isTrue,
+    test('proxy payload omits owned instructions and sends flags', () {
+      final body = buildAiV3PlannerRequestBody(
+        contextData: const <String, dynamic>{},
+        originalRequest: 'make this a nightcore remix',
+        model: 'test-model',
+        reasoningEffort: 'low',
+        includeOwnedInstructions: false,
+        alignTempoCollapseRetry: true,
+        resourceRefsEnabled: true,
       );
-      expect(looksLikeAiV3ProductionGoal('make this a phonk remix'), isTrue);
-      expect(looksLikeAiV3ProductionGoal('turn this into a ballad'), isTrue);
+      expect(body.containsKey('instructions'), isFalse);
+      expect(jsonEncode(body), isNot(contains('You are Mixroom')));
       expect(
-        looksLikeAiV3ProductionGoal('make it sound like a film score'),
-        isTrue,
+        jsonEncode(body),
+        isNot(contains(aiV3MusicalDimensionCompilerInstructions.trim())),
       );
       expect(
-        looksLikeAiV3ProductionGoal('as a vaporwave version please'),
-        isTrue,
+        jsonEncode(body['input']),
+        contains('ORIGINAL_REQUEST_VERBATIM'),
       );
-      expect(looksLikeAiV3ProductionGoal('make this a garage remix'), isTrue);
+      expect((body['metadata'] as Map)['v3_align_tempo_retry'], '1');
+      expect((body['metadata'] as Map)['v3_resource_refs'], '1');
     });
 
-    test('does not match questions or named singles', () {
-      expect(looksLikeAiV3ProductionGoal('what is nightcore?'), isFalse);
-      expect(looksLikeAiV3ProductionGoal("what's nightcore"), isFalse);
-      expect(looksLikeAiV3ProductionGoal('explain nightcore'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('how does nightcore work?'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('make this louder'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('pitch the vocal +3'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('set tempo to 140'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('make this 8d audio'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('chipmunk this'), isFalse);
-      expect(looksLikeAiV3ProductionGoal('orbit in headphones'), isFalse);
+    test('llm_proxy mirrors planner and compiler instructions', () {
+      final serverText = File(
+        'backend/llm_proxy/src/common/ai_v3_planner_contract.py',
+      ).readAsStringSync();
+      expect(
+        serverText,
+        contains(aiV3MusicalDimensionCompilerInstructions.trim()),
+      );
+      expect(
+        serverText,
+        contains(aiV3AlignTempoCollapseRetryReminder.trim()),
+      );
+      expect(
+        serverText,
+        contains("You are Mixroom's sole semantic and musical planner."),
+      );
+      expect(serverText, contains('Never invent a group.'));
+      expect(
+        serverText,
+        contains('Set goal_kind from ORIGINAL_REQUEST_VERBATIM only'),
+      );
     });
   });
 
   group('shouldRetryAiV3AlignTempoCollapse', () {
-    test('retries a goal-shaped align-only plan', () {
+    test('retries a production_goal align-only plan', () {
       expect(
         shouldRetryAiV3AlignTempoCollapse(
-          originalRequest: 'make this a nightcore remix',
-          plan: _plan(outcome: 'plan', commands: <AiV3Command>[_align()]),
+          _plan(
+            outcome: 'plan',
+            goalKind: AiV3GoalKind.productionGoal,
+            commands: <AiV3Command>[_align()],
+          ),
         ),
         isTrue,
       );
     });
 
-    test('does not retry make this louder even if align-only', () {
+    test('does not retry a named_edit align-only plan', () {
       expect(
         shouldRetryAiV3AlignTempoCollapse(
-          originalRequest: 'make this louder',
-          plan: _plan(outcome: 'plan', commands: <AiV3Command>[_align()]),
+          _plan(outcome: 'plan', commands: <AiV3Command>[_align()]),
         ),
         isFalse,
       );
@@ -212,15 +253,17 @@ void main() {
     test('does not retry questions or named pitch edits', () {
       expect(
         shouldRetryAiV3AlignTempoCollapse(
-          originalRequest: 'what is nightcore?',
-          plan: _plan(outcome: 'respond', commands: const <AiV3Command>[]),
+          _plan(
+            outcome: 'respond',
+            goalKind: AiV3GoalKind.question,
+            commands: const <AiV3Command>[],
+          ),
         ),
         isFalse,
       );
       expect(
         shouldRetryAiV3AlignTempoCollapse(
-          originalRequest: 'pitch the vocal +3',
-          plan: _plan(outcome: 'plan', commands: <AiV3Command>[_pitch()]),
+          _plan(outcome: 'plan', commands: <AiV3Command>[_pitch()]),
         ),
         isFalse,
       );
@@ -229,9 +272,9 @@ void main() {
     test('does not retry a multi-family production plan', () {
       expect(
         shouldRetryAiV3AlignTempoCollapse(
-          originalRequest: 'make this a nightcore remix',
-          plan: _plan(
+          _plan(
             outcome: 'plan',
+            goalKind: AiV3GoalKind.productionGoal,
             commands: <AiV3Command>[_align(), _pitch()],
           ),
         ),

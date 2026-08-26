@@ -111,15 +111,13 @@ class AiV3PlannerService implements AiV3Planner {
           commandTypes: commandTypes,
           architecture: architecture,
           resourceRefsEnabled: resourceRefsEnabled,
+          includeOwnedInstructions: !_usesProxy,
         ),
         context: context,
         promptTraceId: promptTraceId,
         elapsedMs: () => stopwatch.elapsedMilliseconds,
       );
-      if (!shouldRetryAiV3AlignTempoCollapse(
-        originalRequest: originalRequest,
-        plan: first.plan,
-      )) {
+      if (!shouldRetryAiV3AlignTempoCollapse(first.plan)) {
         return first;
       }
       try {
@@ -133,7 +131,8 @@ class AiV3PlannerService implements AiV3Planner {
             commandTypes: commandTypes,
             architecture: architecture,
             resourceRefsEnabled: resourceRefsEnabled,
-            extraInstructions: aiV3AlignTempoCollapseRetryReminder,
+            alignTempoCollapseRetry: true,
+            includeOwnedInstructions: !_usesProxy,
           ),
           context: context,
           promptTraceId: promptTraceId,

@@ -3,6 +3,12 @@ import 'ai_v3_contract.dart';
 /// Always-on planner layer for production-style / remix / listening-format
 /// goals (PRO-18). Request-independent: the original request stays in
 /// ORIGINAL_REQUEST_VERBATIM. Flutter never matches genre names.
+///
+/// Production `/v1/llm/v3/responses` owns this text in
+/// `backend/llm_proxy/src/common/ai_v3_planner_contract.py`. Keep the two
+/// copies in lockstep. The app still ships this string for local
+/// direct-OpenAI debug and unit tests; the authenticated proxy path does
+/// not send it.
 const String aiV3MusicalDimensionCompilerInstructions = '''
 A production-style, remix, version, or listening-format goal is one request.
 When the original request names such a goal rather than individual edits,
@@ -45,73 +51,51 @@ musical knowledge, not a catalog of named styles.
 An empty project with no audio is unsupported or a clarification; do not
 invent a song.
 Named single edits remain single edits. Questions do not mutate.
-A request that only asks for a higher, lower, squeaky, or deeper vocal
-or sound is a named pitch edit: clip.adjust_pitch_semitones, or
-midi.transpose for MIDI. Do not add tempo or mix unless the request also
-names a production-style, remix, version, or listening-format goal.
+Set goal_kind from ORIGINAL_REQUEST_VERBATIM only, not from command
+count and not from earlier conversation. Recent conversation is context.
+It is not a request to repeat the previous plan's tempo, pitch, mix, or
+other dimensions.
+Use production_goal for a production-style, remix, version, or
+listening-format result. Use named_edit for a named single DAW action,
+including pitch-only metaphors and an explicit align-to-tempo request.
+Use question when the request does not ask to change the project.
+Use unsupported when Mixroom cannot do the request. A production_goal
+that only emits clip.align_tempo_to_project is still production_goal.
+A request that only asks for a higher, lower, squeaky, helium, cartoon,
+or animal-like vocal or sound is a named pitch edit:
+clip.adjust_pitch_semitones, or midi.transpose for MIDI. That stays
+named_edit even when popular recordings make that sound by speeding the
+tape. Do not add tempo or mix unless THIS original request also names
+speed, a production-style, remix, version, or listening-format goal.
 Pitch-only metaphors stay moderate: a few semitones of lift or drop,
 not a full octave, unless the user names an amount.
 Explicit do-not-change constraints beat an implied dimension (for example
 keep pitch).
 For production-style, remix, version, or listening-format mutating plans,
-user_message must name what will change and which common DAW steps Mixroom
-skipped, such as import, export, generated drums, or true binaural 8D.
-Named single edits, questions, and refusals must not mention skipped
-import, export, drums, or 8D unless the user asked for those.
+fill skipped with the matching codes from import, export, generated_drums,
+and binaural_8d. user_message names only what will change; do not mention
+those limitations there. Named single edits, questions, and refusals must
+leave skipped empty and must not mention import, export, drums, or 8D
+unless the user asked for those.
 
-Method, not a catalog: a request for something faster and higher-pitched
-implies project.set_tempo (preserve_pitch true) plus
-clip.adjust_pitch_semitones plus a bright mix.apply_goal, not
-clip.align_tempo_to_project. A slower, wetter, lower request implies
-slower tempo and/or lower pitch plus a wetter mix.apply_goal. A spatial
-or headphone-orbit request implies pan automation, not tempo, pitch, or
+Method, not a catalog: a request that names both speed and pitch, or a
+production-style goal, implies project.set_tempo (preserve_pitch true)
+plus clip.adjust_pitch_semitones plus a bright mix.apply_goal, not
+clip.align_tempo_to_project. A vocal-character metaphor alone is not
+that method. A slower, wetter, lower request implies slower tempo
+and/or lower pitch plus a wetter mix.apply_goal. A spatial or
+headphone-orbit request implies pan automation, not tempo, pitch, or
 a static pan, unless the user also asked for those.
 ''';
 
 const String aiV3AlignTempoCollapseRetryReminder = '''
-The previous plan collapsed a production goal to
-clip.align_tempo_to_project. Emit every Mixroom-supported implied
-dimension of the original request (tempo, pitch, mix, spatial,
-arrangement as the goal implies). Do not use
+The previous plan collapsed a production_goal to
+clip.align_tempo_to_project. Keep goal_kind production_goal. Emit every
+Mixroom-supported implied dimension of the original request (tempo,
+pitch, mix, spatial, arrangement as the goal implies). Do not use
 clip.align_tempo_to_project as a style substitute. Named single edits
 and questions are unchanged.
 ''';
-
-final RegExp _questionPrefix = RegExp(
-  r"^(what(?:'s|s| is| are)\b|explain\b|how does\b)",
-  caseSensitive: false,
-);
-
-final RegExp _questionPhrase = RegExp(
-  r"\b(?:what(?:'s|s| is)|explain|how does)\b",
-  caseSensitive: false,
-);
-
-final RegExp _mutationIntent = RegExp(
-  r'\b(?:make|turn|convert|apply)\b',
-  caseSensitive: false,
-);
-
-/// Goal syntax only. Does not match genre names or "make this louder".
-final RegExp _productionGoal = RegExp(
-  r'\b(?:make this (?:an? |into )?.{0,40}\b(?:remix|version)\b|'
-  r'turn this into\b|'
-  r'make it sound like\b|'
-  r'as a .{0,40}\b(?:remix|version)\b)',
-  caseSensitive: false,
-);
-
-bool _isNonMutatingQuestion(String normalized) {
-  if (_questionPrefix.hasMatch(normalized)) return true;
-  return _questionPhrase.hasMatch(normalized) &&
-      !_mutationIntent.hasMatch(normalized);
-}
-
-bool looksLikeAiV3ProductionGoal(String originalRequest) {
-  final normalized = originalRequest.trim();
-  if (normalized.isEmpty || _isNonMutatingQuestion(normalized)) return false;
-  return _productionGoal.hasMatch(normalized);
-}
 
 bool isAiV3AlignTempoOnlyPlan(AiV3Plan plan) {
   if (!plan.isMutating) return false;
@@ -120,9 +104,6 @@ bool isAiV3AlignTempoOnlyPlan(AiV3Plan plan) {
   );
 }
 
-bool shouldRetryAiV3AlignTempoCollapse({
-  required String originalRequest,
-  required AiV3Plan plan,
-}) =>
-    looksLikeAiV3ProductionGoal(originalRequest) &&
-    isAiV3AlignTempoOnlyPlan(plan);
+/// Retries from plan data only. Flutter never classifies the user string.
+bool shouldRetryAiV3AlignTempoCollapse(AiV3Plan plan) =>
+    plan.goalKind.isProductionGoal && isAiV3AlignTempoOnlyPlan(plan);

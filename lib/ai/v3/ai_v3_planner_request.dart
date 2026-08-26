@@ -49,6 +49,8 @@ const String aiV3ResourceReferenceInstructions =
     'commands must target that row, emit row.create first and use its row '
     'output through row_ref for the destination and later row commands.';
 
+/// App copy of the one-shot planner prompt. Production proxy overwrites
+/// client `instructions` with the same text in `ai_v3_planner_contract.py`.
 const String aiV3PlannerInstructions =
     '''
 You are Mixroom's sole semantic and musical planner.
@@ -92,10 +94,26 @@ If commands is non-empty, outcome must be plan. If outcome is respond, clarify,
 or unsupported, commands must be empty.
 ''';
 
-/// Builds the exact payload sent to OpenAI by the V3 planner.
+/// Assembles the planner + compiler prompt the app still ships for local
+/// direct-OpenAI debug. Production proxy requests omit this and send flags
+/// only; `backend/llm_proxy` owns the same text.
+String buildAiV3OwnedPlannerInstructions({
+  bool resourceRefsEnabled = false,
+  bool alignTempoCollapseRetry = false,
+}) => <String>[
+  aiV3PlannerInstructions.trim(),
+  aiV3MusicalDimensionCompilerInstructions.trim(),
+  if (alignTempoCollapseRetry) aiV3AlignTempoCollapseRetryReminder.trim(),
+  if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
+].join('\n');
+
+/// Builds the V3 planner payload.
 ///
-/// This is intentionally dependency-light and pure so diagnostic tooling can
-/// measure the production payload without loading Flutter or native audio code.
+/// Set [includeOwnedInstructions] false on the authenticated proxy path so
+/// the client does not send the system prompt. Direct OpenAI debug still
+/// includes it. This is intentionally dependency-light and pure so diagnostic
+/// tooling can measure the production payload without loading Flutter or
+/// native audio code.
 Map<String, dynamic> buildAiV3PlannerRequestBody({
   required Map<String, dynamic> contextData,
   required String originalRequest,
@@ -105,7 +123,8 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
   Set<String> commandTypes = aiV3CommandTypes,
   String architecture = 'v3_one_shot_prototype',
   bool resourceRefsEnabled = false,
-  String extraInstructions = '',
+  bool alignTempoCollapseRetry = false,
+  bool includeOwnedInstructions = true,
 }) {
   final plannerContext = Map<String, dynamic>.from(contextData)
     ..remove('original_request')
@@ -115,12 +134,11 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
   final normalizedTraceId = (promptTraceId ?? '').trim();
   return <String, dynamic>{
     'model': model.trim(),
-    'instructions': <String>[
-      aiV3PlannerInstructions.trim(),
-      aiV3MusicalDimensionCompilerInstructions.trim(),
-      if (extraInstructions.trim().isNotEmpty) extraInstructions.trim(),
-      if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
-    ].join('\n'),
+    if (includeOwnedInstructions)
+      'instructions': buildAiV3OwnedPlannerInstructions(
+        resourceRefsEnabled: resourceRefsEnabled,
+        alignTempoCollapseRetry: alignTempoCollapseRetry,
+      ),
     'input': <Map<String, dynamic>>[
       <String, dynamic>{
         'role': 'user',
@@ -158,15 +176,17 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
     'max_output_tokens': 8192,
     'reasoning': <String, dynamic>{'effort': reasoningEffort},
     'store': true,
-    if (normalizedTraceId.isNotEmpty)
-      'metadata': <String, String>{
+    'metadata': <String, String>{
+      if (normalizedTraceId.isNotEmpty)
         'prompt_trace_id': normalizedTraceId.substring(
           0,
           normalizedTraceId.length > 64 ? 64 : normalizedTraceId.length,
         ),
-        'architecture': architecture,
-        if (resourceRefsEnabled)
-          'surface_revision': aiV3ResourceRefSurfaceRevision,
-      },
+      'architecture': architecture,
+      if (resourceRefsEnabled)
+        'surface_revision': aiV3ResourceRefSurfaceRevision,
+      if (resourceRefsEnabled) 'v3_resource_refs': '1',
+      if (alignTempoCollapseRetry) 'v3_align_tempo_retry': '1',
+    },
   };
 }

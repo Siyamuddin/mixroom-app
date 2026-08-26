@@ -4426,6 +4426,7 @@ AiV3Plan _canonicalizeEmbeddedDestinationRows(AiV3Plan plan) {
 
   return AiV3Plan(
     outcome: plan.outcome,
+    goalKind: plan.goalKind,
     userMessage: plan.userMessage,
     commands: List<AiV3Command>.unmodifiable(
       plan.commands.where(
@@ -4433,6 +4434,7 @@ AiV3Plan _canonicalizeEmbeddedDestinationRows(AiV3Plan plan) {
       ),
     ),
     questionOptions: plan.questionOptions,
+    skipped: plan.skipped,
   );
 }
 
