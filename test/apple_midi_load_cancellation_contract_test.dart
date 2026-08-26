@@ -106,6 +106,31 @@ void main() {
     expect(bridge, contains('JuceEngine::get().loadMidiClip('));
   });
 
+  test('cached SFZ definitions remain immutable across concurrent loads', () {
+    final engineHeader = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.h',
+    ).readAsStringSync();
+
+    expect(
+      engineHeader,
+      isNot(
+        contains(
+          'mutable std::shared_ptr<const DecodedSamplePcm> sample',
+        ),
+      ),
+    );
+    expect(engineHeader, isNot(contains('ensureSampledRegionLoaded(')));
+    expect(engineHeader, contains('prepareSampledDefinitionForNotes('));
+    expect(
+      engineHeader,
+      contains('std::make_shared<SampledDefinition>(*metadata)'),
+    );
+    expect(
+      engineHeader,
+      contains('region.sample = std::move(sample)'),
+    );
+  });
+
   test('native MIDI stall controls compile only in debug configurations', () {
     final plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
