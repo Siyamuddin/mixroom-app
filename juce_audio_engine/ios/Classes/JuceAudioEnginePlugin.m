@@ -30,6 +30,7 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @interface JuceAudioEnginePlugin ()
 @property (nonatomic, copy) FlutterEventSink eventSink;
 @property (nonatomic, copy) FlutterEventSink logSink;
+@property (atomic, assign) BOOL applicationTerminationStarted;
 @property (nonatomic, assign) BOOL audioRouteMonitoringV2;
 @property (atomic, assign) uint64_t audioRouteGenerationV2;
 @property (atomic, assign) uint64_t audioRouteTransitionIdV2;
@@ -218,6 +219,107 @@ static dispatch_queue_t MixroomMidiClipLoadQueue(void) {
     });
     return queue;
 }
+
+static dispatch_queue_t MixroomBuiltInMidiClipPreparationQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attr =
+            dispatch_queue_attr_make_with_qos_class(
+                DISPATCH_QUEUE_CONCURRENT,
+                QOS_CLASS_USER_INITIATED,
+                0
+            );
+        queue = dispatch_queue_create(
+            "com.mixroom.juce_audio_engine.builtin_midi_prepare",
+            attr
+        );
+    });
+    return queue;
+}
+
+#if MIXROOM_ENABLE_TEST_HOOKS
+static NSCondition *MixroomMidiClipLoadTestCondition(void) {
+    static NSCondition *condition;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        condition = [NSCondition new];
+    });
+    return condition;
+}
+
+static int64_t mixroomMidiClipLoadTestRequestId = 0;
+static BOOL mixroomMidiClipLoadTestWaiting = NO;
+static BOOL mixroomMidiClipLoadTestReleased = YES;
+static BOOL mixroomMidiClipLoadTestPreparationOnMainThread = NO;
+
+static BOOL MixroomConfigureMidiClipLoadTestStall(int64_t requestId) {
+    if (requestId <= 0) {
+        return NO;
+    }
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    if (mixroomMidiClipLoadTestWaiting && !mixroomMidiClipLoadTestReleased) {
+        [condition unlock];
+        return NO;
+    }
+    mixroomMidiClipLoadTestRequestId = requestId;
+    mixroomMidiClipLoadTestWaiting = NO;
+    mixroomMidiClipLoadTestReleased = NO;
+    mixroomMidiClipLoadTestPreparationOnMainThread = NO;
+    [condition unlock];
+    return YES;
+}
+
+static void MixroomWaitForMidiClipLoadTestStall(int64_t requestId) {
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    if (requestId != mixroomMidiClipLoadTestRequestId ||
+        mixroomMidiClipLoadTestReleased) {
+        [condition unlock];
+        return;
+    }
+    mixroomMidiClipLoadTestWaiting = YES;
+    mixroomMidiClipLoadTestPreparationOnMainThread = [NSThread isMainThread];
+    [condition broadcast];
+    while (requestId == mixroomMidiClipLoadTestRequestId &&
+           !mixroomMidiClipLoadTestReleased) {
+        [condition wait];
+    }
+    mixroomMidiClipLoadTestWaiting = NO;
+    if (requestId == mixroomMidiClipLoadTestRequestId) {
+        mixroomMidiClipLoadTestRequestId = 0;
+    }
+    [condition broadcast];
+    [condition unlock];
+}
+
+static BOOL MixroomReleaseMidiClipLoadTestStall(int64_t requestId) {
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    const BOOL matches = requestId == mixroomMidiClipLoadTestRequestId;
+    if (matches) {
+        mixroomMidiClipLoadTestReleased = YES;
+        [condition broadcast];
+    }
+    [condition unlock];
+    return matches;
+}
+
+static NSDictionary *MixroomMidiClipLoadTestState(void) {
+    NSCondition *condition = MixroomMidiClipLoadTestCondition();
+    [condition lock];
+    NSDictionary *state = @{
+        @"requestId": @(mixroomMidiClipLoadTestRequestId),
+        @"waiting": @(mixroomMidiClipLoadTestWaiting),
+        @"released": @(mixroomMidiClipLoadTestReleased),
+        @"preparationOnMainThread":
+            @(mixroomMidiClipLoadTestPreparationOnMainThread),
+    };
+    [condition unlock];
+    return state;
+}
+#endif
 
 static dispatch_queue_t MixroomPluginScanQueue(void) {
     static dispatch_queue_t queue;
@@ -6302,6 +6404,28 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     return _sharedInstance;
 }
 
++ (void)shutdownForApplicationTermination {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        JuceAudioEnginePlugin *plugin = [JuceAudioEnginePlugin sharedInstance];
+        plugin.applicationTerminationStarted = YES;
+#if TARGET_OS_OSX
+        plugin.macIntentOperationCancelledV2 = YES;
+        [plugin signalMacIntentRouteConditionV2];
+        [plugin signalMacHardwareSettingsConditionV2];
+#else
+        plugin.iosIntentOperationCancelledV2 = YES;
+        [plugin signalIOSIntentRouteConditionV2];
+#endif
+        [plugin stopAudioRouteMonitoringV2];
+        [JuceBridge shutdownForApplicationTerminationObjC];
+    });
+}
+
++ (void)panicLiveMidiNotesForApplicationDeactivation {
+    [JuceBridge panicLiveMidiNotesForApplicationDeactivationObjC];
+}
+
 - (BOOL)hasActiveLogListener {
     return self.logSink != nil;
 }
@@ -6406,6 +6530,24 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 - (void)handleMethodCall:(FlutterMethodCall*)call
                   result:(FlutterResult)result {
     NSDictionary* args = call.arguments;
+
+    const BOOL terminationDiagnosticCall =
+        [call.method isEqualToString:@"getEngineDiagnostics"];
+#if MIXROOM_ENABLE_TEST_HOOKS
+    const BOOL terminationTestCall =
+        [call.method isEqualToString:@"debugShutdownForApplicationTermination"] ||
+        [call.method isEqualToString:@"debugReleaseMidiClipLoadStall"] ||
+        [call.method isEqualToString:@"debugGetMidiClipLoadStallState"];
+#else
+    const BOOL terminationTestCall = NO;
+#endif
+    if (self.applicationTerminationStarted &&
+        !terminationDiagnosticCall && !terminationTestCall) {
+        result([FlutterError errorWithCode:@"application_terminating"
+                                   message:@"The audio engine is shutting down."
+                                   details:nil]);
+        return;
+    }
 
     if ([call.method isEqualToString:@"initialise"]) {
         [JuceBridge initialiseEngineObjC];
@@ -6710,8 +6852,25 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         double startSec = [args[@"startSec"] doubleValue];
         double lengthSec = [args[@"lengthSec"] doubleValue];
         double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
         FlutterResult loadResult = [result copy];
-        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+        const BOOL builtInInstrument =
+            [JuceBridge isBuiltInMidiInstrumentObjC:instrumentId];
+        dispatch_queue_t loadQueue = builtInInstrument
+            ? MixroomBuiltInMidiClipPreparationQueue()
+            : MixroomMidiClipLoadQueue();
+        dispatch_async(loadQueue, ^{
+#if MIXROOM_ENABLE_TEST_HOOKS
+            if (builtInInstrument) {
+                MixroomWaitForMidiClipLoadTestStall(loadRequestId);
+            }
+#endif
+            if (self.applicationTerminationStarted) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    loadResult(@(NO));
+                });
+                return;
+            }
             BOOL ok = [JuceBridge loadMidiClipObjC:clip
                                              rowId:rowId
                                       instrumentId:instrumentId
@@ -6721,11 +6880,30 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                     sourceTempoBpm:sourceTempoBpm
                                           startSec:startSec
                                          lengthSec:lengthSec
-                                   inFileOffsetSec:inFileOffsetSec];
+                                   inFileOffsetSec:inFileOffsetSec
+                                     loadRequestId:loadRequestId];
             dispatch_async(dispatch_get_main_queue(), ^{
                 loadResult(@(ok));
             });
         });
+    } else if ([call.method isEqualToString:@"cancelMidiClipLoad"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
+        result(@([JuceBridge cancelMidiClipLoadObjC:clip
+                                             requestId:loadRequestId]));
+#if MIXROOM_ENABLE_TEST_HOOKS
+    } else if ([call.method isEqualToString:@"debugConfigureMidiClipLoadStall"]) {
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
+        result(@(MixroomConfigureMidiClipLoadTestStall(loadRequestId)));
+    } else if ([call.method isEqualToString:@"debugGetMidiClipLoadStallState"]) {
+        result(MixroomMidiClipLoadTestState());
+    } else if ([call.method isEqualToString:@"debugReleaseMidiClipLoadStall"]) {
+        int64_t loadRequestId = [args[@"loadRequestId"] longLongValue];
+        result(@(MixroomReleaseMidiClipLoadTestStall(loadRequestId)));
+    } else if ([call.method isEqualToString:@"debugShutdownForApplicationTermination"]) {
+        [JuceAudioEnginePlugin shutdownForApplicationTermination];
+        result(nil);
+#endif
     } else if ([call.method isEqualToString:@"updateMidiClipEvents"]) {
         NSInteger clip = [args[@"clip"] integerValue];
         NSString *instrumentId = [args[@"instrumentId"] ?: @"mixroom.basic_synth" copy];
@@ -7958,6 +8136,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
 
 
 @end
+
+void JuceAudioEnginePluginShutdownForApplicationTermination(void) {
+    [JuceAudioEnginePlugin shutdownForApplicationTermination];
+}
+
+void JuceAudioEnginePluginPanicLiveMidiNotesForApplicationDeactivation(void) {
+    [JuceAudioEnginePlugin panicLiveMidiNotesForApplicationDeactivation];
+}
 
 @interface JucePluginEventStreamHandler ()
 @property (nonatomic, assign) JuceAudioEnginePlugin *plugin;

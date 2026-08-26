@@ -7,6 +7,8 @@
 @interface JuceAudioEnginePlugin : NSObject <FlutterPlugin, FlutterStreamHandler>
 
 + (instancetype)sharedInstance;
++ (void)shutdownForApplicationTermination;
++ (void)panicLiveMidiNotesForApplicationDeactivation;
 - (BOOL)hasActiveLogListener;
 - (void)sendFlutterLog:(NSString *)message;
 

@@ -19,7 +19,9 @@ import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
+import 'package:mixroom/helpers/timed_native_operation.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
 import 'package:mixroom/helpers/automation_target_labels.dart';
@@ -5687,6 +5689,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, DesktopEditorWindowLayout> _desktopWindowLayouts =
       <String, DesktopEditorWindowLayout>{};
   int _lastLiveMidiInputTargetClipId = -2;
+  final MidiPreviewNoteCoordinator _pianoRollPreviewNotes =
+      MidiPreviewNoteCoordinator();
+  bool _closingPianoRollPreview = false;
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
@@ -5710,6 +5715,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<int, int> _midiClipEngineRefreshTokens = <int, int>{};
   final Map<int, Future<void>> _midiClipEngineRefreshChains =
       <int, Future<void>>{};
+  static int _nextMidiClipLoadRequestId = DateTime.now().microsecondsSinceEpoch;
   final Set<int> _deferredHostedInstrumentEngineClipIds = <int>{};
   final Map<int, String> _restoredHostedInstrumentStateByClipId =
       <int, String>{};
@@ -21302,15 +21308,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        final liveReady = await _ensureLiveMidiClipReadyForPreview(clip);
-        if (!liveReady) return;
-        final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
-          noteOn: true,
+        final key = MidiPreviewNoteKey(
+          clipId: clip.engineClipId,
           channel: 1,
-          pitch: pitch,
-          velocity: velocity,
+          pitch: pitch.clamp(0, 127).toInt(),
         );
-        if (sent) return;
+        final result = await _pianoRollPreviewNotes.noteOn(
+          key: key,
+          prepare: () => _ensureLiveMidiClipReadyForPreview(clip),
+          sendNoteOn: () => JuceAudioEngine.sendLiveMidiInputEvent(
+            noteOn: true,
+            channel: key.channel,
+            pitch: key.pitch,
+            velocity: velocity,
+          ),
+          sendNoteOff: () => _sendPianoRollPreviewNoteOff(key),
+        );
+        if (result == MidiPreviewNoteOnResult.delivered ||
+            result == MidiPreviewNoteOnResult.cancelled) {
+          return;
+        }
       }
       await _previewPianoRollNote(pitch, velocity);
       return;
@@ -21358,18 +21375,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
-          clip.engineClipId,
-          clearPendingEvents: false,
+        final key = MidiPreviewNoteKey(
+          clipId: clip.engineClipId,
+          channel: 1,
+          pitch: pitch.clamp(0, 127).toInt(),
         );
-        if (targetReady) {
-          await JuceAudioEngine.sendLiveMidiInputEvent(
-            noteOn: false,
-            channel: 1,
-            pitch: pitch,
-            velocity: 0.0,
-          );
+        if (_closingPianoRollPreview) {
+          return;
         }
+        await _pianoRollPreviewNotes.noteOff(
+          key: key,
+          sendNoteOff: () => _sendPianoRollPreviewNoteOff(key),
+        );
       }
       return;
     }
@@ -21397,6 +21414,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {});
     }
   }
+
+  Future<bool> _sendPianoRollPreviewNoteOff(MidiPreviewNoteKey key) async {
+    final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
+      key.clipId,
+      clearPendingEvents: false,
+    );
+    if (!targetReady) return false;
+    return JuceAudioEngine.sendLiveMidiInputEvent(
+      noteOn: false,
+      channel: key.channel,
+      pitch: key.pitch,
+      velocity: 0.0,
+    );
+  }
+
+  Future<void> _releaseAllPianoRollPreviewNotes() => _pianoRollPreviewNotes
+      .releaseAll(sendNoteOff: _sendPianoRollPreviewNoteOff);
 
   bool _extendMidiClipForBeat(AudioTrack clip, double endBeat) {
     final sourceTempo = _resolvedClipSourceTempoBpm(clip);
@@ -26228,8 +26262,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentId,
       instrumentParams,
     );
-    final loaded = await _runProjectPluginRestoreStep<bool>(
-      'MIDI instrument load $liveInstrumentId clip=$engineClipId',
+    final loadRequestId = ++_nextMidiClipLoadRequestId;
+    final loaded = await runTimedNativeOperation<bool>(
+      'MIDI instrument load $liveInstrumentId '
+      'clip=$engineClipId request=$loadRequestId',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.loadMidiClip(
           engineClipId,
@@ -26242,9 +26278,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           startSec: startSec,
           lengthSec: math.max(0.0, lengthSec),
           inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+          loadRequestId: loadRequestId,
         ),
       ),
       timeout: _kProjectPluginInstanceRestoreTimeout,
+      onTimeout: () {
+        // Cancellation must not extend the user-visible timeout if the native
+        // message thread is the component that is stalled.
+        unawaited(
+          JuceAudioEngine.cancelMidiClipLoad(
+            clipIndex: engineClipId,
+            loadRequestId: loadRequestId,
+          ),
+        );
+      },
     );
     return loaded ?? false;
   }
@@ -26415,7 +26462,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
 
-    final applied = await _runProjectPluginRestoreStep<bool>(
+    final applied = await runTimedNativeOperation<bool>(
       'MIDI instrument state ${clip.instrumentId} clip=${clip.engineClipId}',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.setMidiClipPluginState(
@@ -80242,7 +80289,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _closeMidiClipEditor() {
-    unawaited(_releaseAllDesktopMidiNotes());
+    _closingPianoRollPreview = true;
+    final desktopRelease = _releaseAllDesktopMidiNotes();
+    final pianoRollRelease = _releaseAllPianoRollPreviewNotes();
     setState(() {
       _showPianoRoll = false;
       _pianoRollFullscreen = false;
@@ -80251,9 +80300,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
     _setDawPanelVisible('piano_roll', false);
     _syncMeterPollingForVisibility();
-    if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
-      unawaited(_syncLiveMidiInputTargetClip());
-    }
+    unawaited(() async {
+      try {
+        await Future.wait(<Future<void>>[desktopRelease, pianoRollRelease]);
+        if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
+          await _syncLiveMidiInputTargetClip();
+        }
+      } finally {
+        _closingPianoRollPreview = false;
+      }
+    }());
   }
 
   void _openPitchLabEditor(int clipIndex) {
@@ -92505,32 +92561,6 @@ class _EffectRestoreResult {
 const Duration _kProjectPluginInstanceRestoreTimeout = Duration(seconds: 18);
 const Duration _kProjectPluginStateRestoreTimeout = Duration(seconds: 12);
 
-Future<T?> _runProjectPluginRestoreStep<T>(
-  String label,
-  Future<T> Function() task, {
-  required Duration timeout,
-}) async {
-  final sw = Stopwatch()..start();
-  debugPrint('[PluginRestore] start $label');
-  try {
-    final result = await task().timeout(timeout);
-    debugPrint(
-      '[PluginRestore] done $label in ${sw.elapsedMilliseconds}ms result=$result',
-    );
-    return result;
-  } on TimeoutException {
-    debugPrint(
-      '[PluginRestore] timeout $label after ${sw.elapsedMilliseconds}ms',
-    );
-    return null;
-  } catch (e, st) {
-    debugPrint(
-      '[PluginRestore] failed $label after ${sw.elapsedMilliseconds}ms: $e\n$st',
-    );
-    return null;
-  }
-}
-
 Future<void> _waitUntilAsync(
   Future<bool> Function() predicate, {
   int maxAttempts = 30,
@@ -92668,7 +92698,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
         continue;
       }
       final insertAccepted =
-          await _runProjectPluginRestoreStep<bool>(
+          await runTimedNativeOperation<bool>(
             'Row ${snap.row + 1} FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertTrackEffect(snap.row, fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
@@ -92705,7 +92735,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
       var stateApplied = false;
       if (expectsState) {
         stateApplied =
-            await _runProjectPluginRestoreStep<bool>(
+            await runTimedNativeOperation<bool>(
               'Row ${snap.row + 1} FX state ${_effectSnapshotName(fx)}',
               () => JuceAudioEngine.setTrackEffectState(
                 snap.row,
@@ -92820,7 +92850,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
         continue;
       }
       final insertAccepted =
-          await _runProjectPluginRestoreStep<bool>(
+          await runTimedNativeOperation<bool>(
             'Master FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertMasterEffect(fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
@@ -92857,7 +92887,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
       var stateApplied = false;
       if (expectsState) {
         stateApplied =
-            await _runProjectPluginRestoreStep<bool>(
+            await runTimedNativeOperation<bool>(
               'Master FX state ${_effectSnapshotName(fx)}',
               () => JuceAudioEngine.setMasterEffectState(
                 insertedIndex,

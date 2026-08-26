@@ -61,6 +61,8 @@
 + (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
++ (void)shutdownForApplicationTerminationObjC;
++ (void)panicLiveMidiNotesForApplicationDeactivationObjC;
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath;
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
@@ -151,6 +153,7 @@
 + (void)beginGraphMutationBatchObjC;
 + (void)endGraphMutationBatchObjC;
 + (BOOL)supportsLiveMidiClipPlaybackObjC;
++ (BOOL)isBuiltInMidiInstrumentObjC:(NSString *)instrumentId;
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
             instrumentId:(NSString *)instrumentId
@@ -160,7 +163,10 @@
            sourceTempoBpm:(double)sourceTempoBpm
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
-         inFileOffsetSec:(double)inFileOffsetSec;
+         inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId;
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                 requestId:(int64_t)loadRequestId;
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex
               instrumentId:(NSString *)instrumentId
             instrumentName:(NSString *)instrumentName

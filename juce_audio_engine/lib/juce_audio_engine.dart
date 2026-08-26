@@ -1581,6 +1581,7 @@ class JuceAudioEngine {
     double startSec = 0.0,
     double lengthSec = 0.0,
     double inFileOffsetSec = 0.0,
+    int loadRequestId = 0,
   }) async {
     try {
       final ok = await _ch.invokeMethod<bool>('loadMidiClip', {
@@ -1595,10 +1596,30 @@ class JuceAudioEngine {
         'startSec': startSec,
         'lengthSec': lengthSec,
         'inFileOffsetSec': inFileOffsetSec,
+        'loadRequestId': loadRequestId,
       });
       return ok ?? false;
     } on PlatformException catch (e) {
       _logError('loadMidiClip', e);
+      return false;
+    }
+  }
+
+  static Future<bool> cancelMidiClipLoad({
+    required int clipIndex,
+    required int loadRequestId,
+  }) async {
+    if (clipIndex < 0 || loadRequestId <= 0) return false;
+    try {
+      final ok = await _ch.invokeMethod<bool>('cancelMidiClipLoad', {
+        'clip': clipIndex,
+        'loadRequestId': loadRequestId,
+      });
+      return ok ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      _logError('cancelMidiClipLoad', e);
       return false;
     }
   }

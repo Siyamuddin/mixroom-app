@@ -780,6 +780,12 @@ struct TimelineMidiNote
     double velocity = 0.8;
 };
 
+enum class LiveMidiPanicMode : std::uint8_t
+{
+    liveOnly = 1,
+    full = 3,
+};
+
 class TimelineClipProcessorBase
 {
 public:
@@ -794,6 +800,7 @@ public:
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
     virtual void primeForOfflineRender() = 0;
+    virtual void requestLiveMidiPanic(LiveMidiPanicMode) noexcept {}
 };
 
 inline float mixroomUiGainToLinear(float gainUi)
@@ -1667,13 +1674,10 @@ public:
         next->usesDrumKitSamplePitchMap =
             usesDrumKitSamplePitchMap(instrumentId);
         next->sourceTempoBpm = juce::jlimit(1.0, 400.0, sourceTempoBpm);
-        next->sampledDefinition =
-            resolveSampledDefinition(instrumentId, instrumentName);
-        if (next->sampledDefinition != nullptr)
-            preloadSampledRegionsForNotes(
-                *next->sampledDefinition,
-                next->notes,
-                next->usesDrumKitSamplePitchMap);
+        next->sampledDefinition = prepareSampledDefinitionForNotes(
+            resolveSampledDefinition(instrumentId, instrumentName),
+            next->notes,
+            next->usesDrumKitSamplePitchMap);
         next->sampledAttackOverride =
             params.contains(juce::Identifier("attackMs"));
         next->sampledReleaseOverride =
@@ -1752,6 +1756,13 @@ public:
         event.velocity = juce::jlimit(0.0f, 1.0f, velocity);
         event.preparedSample = preparedSample;
         return enqueueLiveMidiEventLockFree(event);
+    }
+
+    void requestLiveMidiPanic(LiveMidiPanicMode mode) noexcept override
+    {
+        liveMidiPanicRequest.fetch_or(
+            static_cast<std::uint8_t>(mode),
+            std::memory_order_release);
     }
 
     bool prepareLiveMidiSample(int pitch,
@@ -1835,6 +1846,7 @@ public:
         {
         }
 
+        liveMidiPanicRequest.store(0, std::memory_order_relaxed);
         activeLiveNotes.clear();
         activeTimelineNotes.reset();
         cachedStateRaw = nullptr;
@@ -1858,6 +1870,7 @@ public:
     {
         renderGeneration.fetch_add(1, std::memory_order_acq_rel);
         buffer.clear();
+        applyPendingLiveMidiPanic();
 
         if (muted.load(std::memory_order_relaxed))
             return;
@@ -2476,7 +2489,7 @@ private:
 
     struct SampledRegion
     {
-        mutable std::shared_ptr<const DecodedSamplePcm> sample;
+        std::shared_ptr<const DecodedSamplePcm> sample;
         juce::String sampleAssetPath;
         int loKey = 0;
         int hiKey = 127;
@@ -3348,21 +3361,6 @@ private:
         return sampledDefinitionForAsset(assetPath);
     }
 
-    static bool ensureSampledRegionLoaded(const SampledRegion &region)
-    {
-        if (region.sample != nullptr && region.sample->frameCount() >= 2)
-            return true;
-        if (region.sampleAssetPath.trim().isEmpty())
-            return false;
-
-        auto sample = decodedSampleForAsset(region.sampleAssetPath);
-        if (sample == nullptr || sample->frameCount() < 2)
-            return false;
-
-        region.sample = sample;
-        return true;
-    }
-
     static bool isSampledRegionReady(const SampledRegion &region) noexcept
     {
         return region.sample != nullptr && region.sample->frameCount() >= 2;
@@ -3437,12 +3435,13 @@ private:
         return pickBest(false, false);
     }
 
-    static void preloadSampledRegionsForNotes(const SampledDefinition &definition,
-                                              const juce::Array<TimelineMidiNote> &notes,
-                                              bool usesDrumKitPitchMap)
+    static std::unordered_set<size_t> sampledRegionIndicesForNotes(
+        const SampledDefinition &definition,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
     {
-        std::unordered_set<const SampledRegion *> regionsToLoad;
-        regionsToLoad.reserve((size_t)juce::jmax(1, notes.size()));
+        std::unordered_set<size_t> regionIndices;
+        regionIndices.reserve((size_t)juce::jmax(1, notes.size()));
 
         for (int i = 0; i < notes.size(); ++i)
         {
@@ -3460,13 +3459,61 @@ private:
                     midiVelocity,
                     i))
             {
-                regionsToLoad.insert(region);
+                regionIndices.insert(
+                    (size_t)(region - definition.regions.data()));
             }
         }
 
-        for (const auto *region : regionsToLoad)
-            if (region != nullptr)
-                ensureSampledRegionLoaded(*region);
+        return regionIndices;
+    }
+
+    static void preloadSampledRegionsForNotes(
+        const SampledDefinition &definition,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
+    {
+        const auto regionIndices = sampledRegionIndicesForNotes(
+            definition, notes, usesDrumKitPitchMap);
+
+        for (const auto index : regionIndices)
+        {
+            if (index >= definition.regions.size())
+                continue;
+            const auto &region = definition.regions[index];
+            if (region.sampleAssetPath.trim().isNotEmpty())
+                juce::ignoreUnused(
+                    decodedSampleForAsset(region.sampleAssetPath));
+        }
+    }
+
+    static std::shared_ptr<const SampledDefinition>
+    prepareSampledDefinitionForNotes(
+        const std::shared_ptr<const SampledDefinition> &metadata,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
+    {
+        if (metadata == nullptr)
+            return nullptr;
+
+        auto prepared = std::make_shared<SampledDefinition>(*metadata);
+        const auto regionIndices = sampledRegionIndicesForNotes(
+            *metadata, notes, usesDrumKitPitchMap);
+
+        for (const auto index : regionIndices)
+        {
+            if (index >= prepared->regions.size())
+                continue;
+            auto &region = prepared->regions[index];
+            if (region.sampleAssetPath.trim().isEmpty())
+                continue;
+            auto sample = decodedSampleForAsset(region.sampleAssetPath);
+            if (sample != nullptr && sample->frameCount() >= 2)
+                region.sample = std::move(sample);
+        }
+
+        std::shared_ptr<const SampledDefinition> immutable =
+            std::move(prepared);
+        return immutable;
     }
 
     static int sampledRegionFrameLimit(const SampledRegion &region,
@@ -4301,6 +4348,25 @@ private:
                             tempoPlaybackRatio.load(std::memory_order_relaxed));
     }
 
+    void applyPendingLiveMidiPanic() noexcept
+    {
+        const auto request = liveMidiPanicRequest.exchange(
+            0, std::memory_order_acq_rel);
+        if (request == 0)
+            return;
+
+        LiveMidiEvent dropped;
+        while (dequeueLiveMidiEventLockFree(dropped))
+        {
+        }
+        activeLiveNotes.clear();
+
+        const auto fullMask =
+            static_cast<std::uint8_t>(LiveMidiPanicMode::full);
+        if ((request & fullMask) == fullMask)
+            activeTimelineNotes.reset();
+    }
+
     void applyPendingLiveMidiEvents()
     {
         std::size_t pendingCount = 0;
@@ -4557,6 +4623,7 @@ private:
     std::atomic<std::size_t> liveMidiEnqueuePosition{0};
     std::atomic<std::size_t> liveMidiDequeuePosition{0};
     std::vector<ActiveLiveNote> activeLiveNotes;
+    std::atomic<std::uint8_t> liveMidiPanicRequest{0};
     std::atomic<int> liveSamplePrepareSequenceCounter{0};
     std::bitset<kMaxTimelineMidiNotes> activeTimelineNotes;
     std::vector<size_t> blockNoteIndices;
@@ -4598,6 +4665,10 @@ public:
     };
 
     static JuceEngine &get();
+    static bool isBuiltInMidiInstrumentIdentifier(const juce::String &instrumentId);
+
+    struct PreparedMidiClipLoad;
+    using PreparedMidiClipLoadPtr = std::shared_ptr<PreparedMidiClipLoad>;
 
     void initialiseEngine();
     bool initialisePlaybackV2Android();
@@ -4659,7 +4730,23 @@ public:
                       double sourceTempoBpm,
                       double startSec,
                       double lengthSec,
-                      double inFileOffsetSec = 0.0);
+                      double inFileOffsetSec = 0.0,
+                      std::int64_t loadRequestId = 0);
+    PreparedMidiClipLoadPtr prepareBuiltInMidiClipLoad(
+        int clipId,
+        int rowId,
+        const juce::String &instrumentId,
+        const juce::String &instrumentName,
+        const juce::Array<TimelineMidiNote> &notes,
+        const juce::NamedValueSet &params,
+        double sourceTempoBpm,
+        double startSec,
+        double lengthSec,
+        double inFileOffsetSec,
+        std::int64_t loadRequestId);
+    bool installPreparedMidiClipLoad(
+        const PreparedMidiClipLoadPtr &preparedLoad);
+    bool cancelMidiClipLoad(int clipId, std::int64_t loadRequestId);
     bool prepareMidiClipSampleAssets(const juce::String &instrumentId,
                                      const juce::String &instrumentName,
                                      const juce::Array<TimelineMidiNote> &notes);
@@ -4967,6 +5054,11 @@ private:
     void reapplyClipProcessorStateLocked();
     void primeClipProcessorsForOfflineRenderLocked();
     std::shared_ptr<DecodedClipAudioAsset> getOrDecodeClipAudioAsset(const juce::File &file);
+    bool isMidiClipLoadRequestCancelled(int clipId,
+                                        std::int64_t loadRequestId);
+    void requestLiveMidiPanicForClip(int clipId,
+                                     LiveMidiPanicMode mode) noexcept;
+    void requestLiveMidiPanicForAll(LiveMidiPanicMode mode) noexcept;
     void armOutputSafetyForCurrentRoute(bool fadeIn = false) noexcept;
     void ensureBusGraphInitialised(bool commitImmediately = true); // rows + master
     void rewireTrackBusFxChain(
@@ -4995,6 +5087,10 @@ private:
     static const juce::StringArray mixroomPlugins;
 
     bool engineInitialized = false;
+    std::mutex engineLifecycleMutex;
+    std::atomic<std::uint64_t> engineLifecycleGeneration{1};
+    std::mutex midiLoadRequestMutex;
+    std::unordered_map<int, std::int64_t> cancelledMidiLoadRequestThrough;
     bool formatsRegistered = false; // will only be flipped once to true
     bool audioCallbackAttached = false;
     bool v2PlaybackCallbackDetached = false;
@@ -5113,6 +5209,7 @@ private:
         juce::Array<TimelineMidiNote> midiNotes;
         juce::NamedValueSet midiParams;
         double midiSourceTempoBpm = 120.0;
+        std::int64_t midiLoadRequestId = 0;
 
         // nodes/processors
         std::shared_ptr<juce::AudioProcessor> playerProcessor; // live timeline processor, mixed by row input

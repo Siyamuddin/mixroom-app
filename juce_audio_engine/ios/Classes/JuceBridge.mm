@@ -3198,6 +3198,28 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     }
 }
 
++ (void)shutdownForApplicationTerminationObjC
+{
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            JuceEngine::get().shutdownForApplicationTermination();
+        else
+            messageManager->callSync([] {
+                JuceEngine::get().shutdownForApplicationTermination();
+            });
+    }
+    else
+    {
+        JuceEngine::get().shutdownForApplicationTermination();
+    }
+}
+
++ (void)panicLiveMidiNotesForApplicationDeactivationObjC
+{
+    JuceEngine::get().panicLiveMidiNotesForApplicationDeactivation();
+}
+
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
 + (void)loadTrackObjC:(NSInteger)idx path:(NSString *)path
 {
@@ -4619,6 +4641,14 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return (BOOL)supported;
 }
 
++ (BOOL)isBuiltInMidiInstrumentObjC:(NSString *)instrumentId
+{
+    const juce::String iid =
+        instrumentId != nil ? juceStringFromNSString(instrumentId)
+                            : juce::String();
+    return (BOOL)JuceEngine::isBuiltInMidiInstrumentIdentifier(iid);
+}
+
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
             instrumentId:(NSString *)instrumentId
@@ -4629,6 +4659,7 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
          inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId
 {
     const juce::String iid =
         instrumentId != nil ? juceStringFromNSString(instrumentId)
@@ -4638,6 +4669,43 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                               : juce::String();
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
+
+    if (JuceEngine::isBuiltInMidiInstrumentIdentifier(iid))
+    {
+        auto prepared = JuceEngine::get().prepareBuiltInMidiClipLoad(
+            (int)clipIndex,
+            (int)rowId,
+            iid,
+            iname,
+            parsedNotes,
+            parsedParams,
+            sourceTempoBpm,
+            startSec,
+            lengthSec,
+            inFileOffsetSec,
+            (std::int64_t)loadRequestId);
+        if (prepared == nullptr)
+            return NO;
+
+        bool ok = false;
+        auto installPreparedMidiClip = [&]
+        {
+            ok = JuceEngine::get().installPreparedMidiClipLoad(
+                prepared);
+        };
+        if (auto *mm = juce::MessageManager::getInstance())
+        {
+            if (mm->isThisTheMessageThread())
+                installPreparedMidiClip();
+            else
+                mm->callSync(installPreparedMidiClip);
+        }
+        else
+        {
+            installPreparedMidiClip();
+        }
+        return (BOOL)ok;
+    }
 
     if (!JuceEngine::get().prepareMidiClipSampleAssets(iid, iname, parsedNotes))
         return NO;
@@ -4654,7 +4722,8 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                                             sourceTempoBpm,
                                             startSec,
                                             lengthSec,
-                                            inFileOffsetSec);
+                                            inFileOffsetSec,
+                                            (std::int64_t)loadRequestId);
     };
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -4670,6 +4739,14 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     }
 
     return (BOOL)ok;
+}
+
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                     requestId:(int64_t)loadRequestId
+{
+    return (BOOL)JuceEngine::get().cancelMidiClipLoad(
+        (int)clipIndex,
+        (std::int64_t)loadRequestId);
 }
 
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex

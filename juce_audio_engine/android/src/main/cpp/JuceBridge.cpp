@@ -1914,30 +1914,33 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
                                                                  jdouble sourceTempoBpm,
                                                                  jdouble startSec,
                                                                  jdouble lengthSec,
-                                                                 jdouble inFileOffsetSec)
+                                                                 jdouble inFileOffsetSec,
+                                                                 jlong loadRequestId)
 {
     const juce::String id = juceStringFromJString(env, instrumentId);
     const juce::String name = juceStringFromJString(env, instrumentName);
     const auto notes = parseTimelineMidiNotes(env, notesList);
     const auto params = parseNamedValueSet(env, paramsMap);
 
-    if (!JuceEngine::get().prepareMidiClipSampleAssets(id, name, notes))
+    const auto prepared = JuceEngine::get().prepareBuiltInMidiClipLoad(
+        (int)clipIndex,
+        (int)rowId,
+        id,
+        name,
+        notes,
+        params,
+        (double)sourceTempoBpm,
+        (double)startSec,
+        (double)lengthSec,
+        (double)inFileOffsetSec,
+        (std::int64_t)loadRequestId);
+    if (prepared == nullptr)
         return JNI_FALSE;
 
     bool ok = false;
     auto installMidiClip = [&]
     {
-        ok = JuceEngine::get().loadMidiClip(
-            (int)clipIndex,
-            (int)rowId,
-            id,
-            name,
-            notes,
-            params,
-            (double)sourceTempoBpm,
-            (double)startSec,
-            (double)lengthSec,
-            (double)inFileOffsetSec);
+        ok = JuceEngine::get().installPreparedMidiClipLoad(prepared);
     };
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -1953,6 +1956,30 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
     }
 
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_cancelMidiClipLoadJNI(
+    JNIEnv *, jclass, jint clipIndex, jlong loadRequestId)
+{
+    std::atomic<bool> ok{false};
+    auto cancelLoad = [&]
+    {
+        ok = JuceEngine::get().cancelMidiClipLoad(
+            (int)clipIndex, (std::int64_t)loadRequestId);
+    };
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            cancelLoad();
+        else
+            mm->callSync(cancelLoad);
+    }
+    else
+    {
+        cancelLoad();
+    }
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
