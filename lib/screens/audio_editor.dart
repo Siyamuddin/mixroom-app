@@ -4547,6 +4547,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _cloudAutoSyncConflict = false;
   int _cloudAutoSyncFailureCount = 0;
   DateTime? _cloudAutoSyncBackoffUntil;
+  bool _cloudAutoSyncPausedAfterTerminalFailure = false;
+  String _cloudAutoSyncTerminalFailureEnvironment = '';
   bool _requiresProjectNaming = false;
   bool _usingCompatibilityAudio = false;
   Map<String, dynamic> _compatibilityProjectionMetadata =
@@ -4736,10 +4738,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _selectedOneButtonMixProfileId = OneButtonMixProfiles.producerId;
 
   String _localizedOneButtonMixProfile(BuildContext context, String profileId) {
-    return L10n.translate(
-      context,
-      OneButtonMixProfiles.byId(profileId).label,
-    );
+    return L10n.translate(context, OneButtonMixProfiles.byId(profileId).label);
   }
 
   List<int> _exportSampleRatesForFormat(_ExportAudioFormat format) {
@@ -14734,8 +14733,76 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
     if (_cloudAutoSyncConflict) return false;
+    if (_cloudAutoSyncPausedAfterTerminalFailure) return false;
     if (!_cloudAutoSyncTargetIsWritable()) return false;
     return true;
+  }
+
+  /// Re-check only editor state after an upload has crossed an async boundary.
+  ///
+  /// A save-on-exit upload deliberately outlives this screen. Reading Provider
+  /// through [context] after the route is disposed makes a valid background
+  /// upload look ineligible and stops it between revision preflight and the
+  /// actual POST. Account and entitlement eligibility are captured at the
+  /// start of [_runCloudAutoSync]; subsequent checks only guard mutable editor
+  /// conditions that can make packaging unsafe.
+  bool _canContinueCloudAutoSync() {
+    if (_usingCompatibilityAudio) return false;
+    if (!_loadedOnce || _isProjectLoading) return false;
+    if (_isPlaying) return false;
+    if (_isRecording ||
+        _recordStartVisualPending ||
+        _isMidiClipRecording ||
+        _recordTransitionInFlight) {
+      return false;
+    }
+    if (_cloudAutoSyncConflict) return false;
+    if (_cloudAutoSyncPausedAfterTerminalFailure) return false;
+    return true;
+  }
+
+  String _cloudAutoSyncEnvironmentFingerprint() {
+    try {
+      final entitlement = context.read<EntitlementService>();
+      final access = entitlement.cloudProjectsAccess;
+      final storage = access?.storage;
+      final projects =
+          entitlement.effectiveCloudProjects
+              .map(
+                (project) =>
+                    '${project.projectId}:${project.documentRevision}:${project.canWrite}',
+              )
+              .toList(growable: false)
+            ..sort();
+      return <Object?>[
+        entitlement.currentPlanCode,
+        storage?.usedBytes,
+        storage?.limitBytes,
+        storage?.projectCount,
+        storage?.projectLimit,
+        projects.join(','),
+      ].join('|');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  void _resumeCloudAutoSyncIfEnvironmentChanged() {
+    if (!_cloudAutoSyncPausedAfterTerminalFailure) return;
+    final previous = _cloudAutoSyncTerminalFailureEnvironment;
+    final current = _cloudAutoSyncEnvironmentFingerprint();
+    if (previous.isEmpty || current.isEmpty || current == previous) return;
+    _cloudAutoSyncPausedAfterTerminalFailure = false;
+    _cloudAutoSyncTerminalFailureEnvironment = '';
+    _cloudAutoSyncFailureCount = 0;
+    _cloudAutoSyncBackoffUntil = null;
+  }
+
+  void _resumeCloudAutoSyncForExplicitRequest() {
+    _cloudAutoSyncPausedAfterTerminalFailure = false;
+    _cloudAutoSyncTerminalFailureEnvironment = '';
+    _cloudAutoSyncFailureCount = 0;
+    _cloudAutoSyncBackoffUntil = null;
   }
 
   void _scheduleCloudAutoSync({
@@ -14744,6 +14811,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool immediate = false,
   }) {
     _cloudAutoSyncDirty = true;
+    _resumeCloudAutoSyncIfEnvironmentChanged();
     // Saving while transport is running deliberately defers the expensive
     // compatibility snapshot. Keep the dirty bit first so stopping transport
     // can pick that save up instead of silently losing the auto-sync request.
@@ -14767,6 +14835,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _requestCloudAutoSyncNow(String reason) {
     _cloudAutoSyncDirty = true;
+    // Manual saves and explicit compatibility preparation are deliberate
+    // requests, so allow one new attempt after a plan, quota, or permission
+    // failure. Revision conflicts remain blocked by the separate conflict
+    // guard. Ordinary autosaves remain paused until account state changes.
+    _resumeCloudAutoSyncForExplicitRequest();
     if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncTimer?.cancel();
     _cloudAutoSyncTimer = null;
@@ -14819,6 +14892,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         return true;
       }
+
+      // Repair incomplete local links from older downloads before upload.
+      // Without the workspace scope, the API correctly treats the request as
+      // a new personal-cloud write and can reject it against the personal
+      // project limit even though the existing project has workspace quota.
+      _cloudWorkspaceId = remote.workspaceId.trim();
+      _cloudOrganizationId = remote.organizationId.trim();
 
       if (_cloudDocumentRevision != remote.documentRevision) {
         File? downloadedBundle;
@@ -14910,12 +14990,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    final syncActivityId = _cloudProjectId.trim().isNotEmpty
+        ? _cloudProjectId.trim()
+        : _projectId.trim();
+    ProjectManager.beginCloudProjectSync(syncActivityId);
     _cloudAutoSyncInFlight = true;
     _cloudAutoSyncDirty = false;
     Duration? retryDelay;
     try {
       await _projectAutosaveCoordinator.flush();
-      if (!_canAttemptAutoCloudSync()) {
+      if (!_canContinueCloudAutoSync()) {
         _cloudAutoSyncDirty = true;
         return;
       }
@@ -14928,7 +15012,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (!await _hasCurrentCloudRevisionForAutoSync(auth)) return;
-      if (!_canAttemptAutoCloudSync()) {
+      if (!_canContinueCloudAutoSync()) {
         _cloudAutoSyncDirty = true;
         return;
       }
@@ -15008,6 +15092,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _cloudAutoSyncFailureCount = 0;
         _cloudAutoSyncBackoffUntil = null;
         _cloudAutoSyncConflict = false;
+        _cloudAutoSyncPausedAfterTerminalFailure = false;
+        _cloudAutoSyncTerminalFailureEnvironment = '';
 
         final json = await ProjectManager.readProjectJson(_projectDir);
         json['cloudProjectId'] = _cloudProjectId;
@@ -15042,6 +15128,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         retryDelay = _nextCloudAutoSyncBackoff();
         _cloudAutoSyncBackoffUntil = DateTime.now().add(retryDelay);
+      } else {
+        // Quota, plan, permission, and revision failures cannot be repaired by
+        // immediately rebuilding and reposting the same bundle. Keep the
+        // dirty bit, but pause passive retries until account state changes or
+        // the user explicitly requests another cloud save.
+        _cloudAutoSyncPausedAfterTerminalFailure = true;
+        _cloudAutoSyncTerminalFailureEnvironment =
+            _cloudAutoSyncEnvironmentFingerprint();
       }
       debugPrint('Cloud auto sync skipped after $reason: $error');
     } finally {
@@ -15050,7 +15144,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _cloudAutoSyncTimer?.cancel();
         _cloudAutoSyncTimer = Timer(retryDelay, () {
           _cloudAutoSyncTimer = null;
-          unawaited(_runCloudAutoSync(reason: 'retry:$reason'));
+          unawaited(_runCloudAutoSync(reason: 'retry'));
         });
       } else if (_cloudAutoSyncDirty && _canAttemptAutoCloudSync()) {
         // Do not lose an edit made while the preceding upload was in flight.
@@ -15058,9 +15152,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _cloudAutoSyncTimer?.cancel();
         _cloudAutoSyncTimer = Timer(Duration.zero, () {
           _cloudAutoSyncTimer = null;
-          unawaited(_runCloudAutoSync(reason: 'latest:$reason'));
+          unawaited(_runCloudAutoSync(reason: 'pending-edits'));
         });
       }
+      ProjectManager.endCloudProjectSync(syncActivityId);
     }
   }
 
@@ -75258,8 +75353,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       persist: false,
     );
 
-    final selectedProfile =
-        OneButtonMixProfiles.byId(_selectedOneButtonMixProfileId);
+    final selectedProfile = OneButtonMixProfiles.byId(
+      _selectedOneButtonMixProfileId,
+    );
     final prompt = OneButtonMixProfiles.buildPrompt(selectedProfile.id);
     const aiFeature = 'one_button_mix';
     final promptTraceId = const Uuid().v4();

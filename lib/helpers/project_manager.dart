@@ -102,6 +102,10 @@ class ProjectManager {
   static final ValueNotifier<int> projectLibraryRevision = ValueNotifier<int>(
     0,
   );
+  static final ValueNotifier<Set<String>> cloudProjectSyncInFlight =
+      ValueNotifier<Set<String>>(const <String>{});
+  static final Map<String, int> _cloudProjectSyncActivityCounts =
+      <String, int>{};
   static Directory? _rootDirectoryOverrideForTesting;
 
   @visibleForTesting
@@ -114,6 +118,30 @@ class ProjectManager {
 
   static void notifyProjectLibraryChanged() {
     projectLibraryRevision.value += 1;
+  }
+
+  static void beginCloudProjectSync(String projectId) {
+    final normalized = projectId.trim();
+    if (normalized.isEmpty) return;
+    _cloudProjectSyncActivityCounts[normalized] =
+        (_cloudProjectSyncActivityCounts[normalized] ?? 0) + 1;
+    cloudProjectSyncInFlight.value = Set<String>.unmodifiable(
+      _cloudProjectSyncActivityCounts.keys,
+    );
+  }
+
+  static void endCloudProjectSync(String projectId) {
+    final normalized = projectId.trim();
+    if (normalized.isEmpty) return;
+    final remaining = (_cloudProjectSyncActivityCounts[normalized] ?? 0) - 1;
+    if (remaining > 0) {
+      _cloudProjectSyncActivityCounts[normalized] = remaining;
+    } else {
+      _cloudProjectSyncActivityCounts.remove(normalized);
+    }
+    cloudProjectSyncInFlight.value = Set<String>.unmodifiable(
+      _cloudProjectSyncActivityCounts.keys,
+    );
   }
 
   static Future<Directory> _rootDir() async {

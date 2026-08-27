@@ -71,7 +71,7 @@ SPEC CHECKSUMS:
   flutter_secure_storage_macos: 7f45e30f838cf2659862a4e4e3ee1c347c2b3b54
   flutter_webrtc: 718eae22a371cd94e5d56aa4f301443ebc5bb737
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  juce_audio_engine: 574797e70786e7e18bd7ba0fa8d8ed94b6c6cf84
+  juce_audio_engine: 0d65d391b1de2e3be2e255fd4e6fe8e181f00917
   onnxruntime-c: ac65025f01072d25d7d394a2b43ac30d9397b260
   onnxruntime-objc: 5fa03134356d47b642ec85b1023d9907a123d201
   PostHog: 596b48ea0c12550479680d6757da5dc6f8d55401
