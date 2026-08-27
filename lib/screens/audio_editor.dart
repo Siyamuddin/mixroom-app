@@ -202,6 +202,34 @@ const String kUserSampleDropFolderName = 'Mixroom Samples';
 
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   {
+    'id': 'sfz.guitar.steel_acoustic',
+    'name': 'Steel Acoustic Guitar',
+    'category': 'instrument',
+    'pickerCategory': 'Guitars',
+    'sourceProject': 'Discord SFZ GM Bank',
+    'sourceLicense': 'CC0 1.0 Universal',
+    'isSampled': true,
+    'sfzAssetPath':
+        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/SteelAcousticGuitar.sfz',
+    'outputGain': 1.0,
+    'attackMs': 2.0,
+    'releaseMs': 350.0,
+  },
+  {
+    'id': 'sfz.guitar.clean_electric',
+    'name': 'Clean Electric Guitar',
+    'category': 'instrument',
+    'pickerCategory': 'Guitars',
+    'sourceProject': 'FreePats Electric Guitar FSBS Clean',
+    'sourceLicense': 'CC0 1.0 Universal',
+    'isSampled': true,
+    'sfzAssetPath':
+        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/CleanElectricGuitar.sfz',
+    'outputGain': 1.0,
+    'attackMs': 2.0,
+    'releaseMs': 550.0,
+  },
+  {
     'id': 'sfz.vsco.mixroom_acoustic_drum_kit',
     'name': 'Mixroom Acoustic Drum Kit',
     'category': 'instrument',
@@ -8056,6 +8084,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final map = entry.cast<String, dynamic>();
         final presetFile = (map['preset'] as String?)?.trim() ?? '';
         if (presetFile.isEmpty) continue;
+        final entryPack = (map['pack'] as String?)?.trim().isNotEmpty == true
+            ? (map['pack'] as String).trim()
+            : pack ?? '';
         final categoryRaw = (map['category'] as String?) ?? '';
         final pickerCategory = _normalizePickerCategory(categoryRaw);
         final displayName = (map['name'] as String?)?.trim().isNotEmpty == true
@@ -8066,17 +8097,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final defaultReleaseMs = pickerCategory == 'Drums' ? 320.0 : 520.0;
         final explicitId = (map['id'] as String?)?.trim() ?? '';
         final idToken = _sanitizeInstrumentIdToken(
-          '${pack ?? 'sfz'}_${presetFile.replaceAll('.sfz', '')}',
+          '${entryPack.isEmpty ? 'sfz' : entryPack}_${presetFile.replaceAll('.sfz', '')}',
         );
+        final sourceProject =
+            (map['source_project'] as String?)?.trim().isNotEmpty == true
+                ? (map['source_project'] as String).trim()
+                : entryPack.isEmpty
+                    ? 'Bundled SFZ'
+                    : entryPack;
+        final sourceLicense =
+            (map['source_license'] as String?)?.trim().isNotEmpty == true
+                ? (map['source_license'] as String).trim()
+                : 'See bundled LICENSE';
         loaded.add(<String, dynamic>{
           'id': explicitId.isNotEmpty ? explicitId : 'sfz.$idToken',
           'name': displayName,
           'category': 'instrument',
           'pickerCategory': pickerCategory,
-          'sourceProject': pack ?? 'Bundled SFZ',
-          'sourceLicense': 'See bundled LICENSE',
+          'sourceProject': sourceProject,
+          'sourceLicense': sourceLicense,
           'isSampled': true,
-          'sfzAssetPath': 'assets/instruments/${pack ?? ''}/$presetFile',
+          'sfzAssetPath': 'assets/instruments/$entryPack/$presetFile',
           'outputGain':
               ((map['outputGain'] as num?)?.toDouble() ?? defaultOutputGain)
                   .clamp(0.2, 2.0),
@@ -32057,6 +32098,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return const Color(0xFF7CCBFF);
       case 'Keys':
         return const Color(0xFF53A8FF);
+      case 'Guitars':
+        return const Color(0xFF67A6FF);
       case 'Strings':
         return const Color(0xFF67A6FF);
       case 'Woodwinds':
@@ -32090,6 +32133,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return Icons.developer_board_rounded;
       case 'Keys':
         return Icons.piano_outlined;
+      case 'Guitars':
+        return Icons.multitrack_audio_rounded;
       case 'Strings':
         return Icons.multitrack_audio_rounded;
       case 'Woodwinds':

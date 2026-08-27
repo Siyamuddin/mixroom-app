@@ -182,6 +182,10 @@ flutter:
     - assets/demo_projects/
     - assets/magnet-solid-full.svg
     - assets/instruments/
+    - assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/
+    - assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/samples/
+    - assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/
+    - assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/samples/
     - assets/instruments/VSCO-2-CE-1.1.0/
     - assets/instruments/VSCO-2-CE-1.1.0/Brass/Trumpet/stac/
     - assets/instruments/VSCO-2-CE-1.1.0/Brass/Tuba/stac/

@@ -23,6 +23,8 @@ class SubscriptionLimits {
   };
 
   static const Set<String> freeBuiltInInstrumentIds = <String>{
+    'sfz.guitar.steel_acoustic',
+    'sfz.guitar.clean_electric',
     'sfz.vsco.mixroom_acoustic_drum_kit',
     'sfz.vsco.mixroom_dry_drum_kit',
     'sfz.vsco.upright_piano',

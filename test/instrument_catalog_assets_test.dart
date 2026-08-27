@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -146,6 +147,69 @@ int _sfzInt(Map<String, String> region, String key, int fallback) {
   return int.tryParse((region[key] ?? '').trim()) ?? fallback;
 }
 
+List<File> _filesUnder(Directory directory) {
+  return directory
+      .listSync(recursive: true, followLinks: false)
+      .whereType<File>()
+      .toList(growable: false)
+    ..sort((a, b) => a.path.compareTo(b.path));
+}
+
+int _directorySize(Directory directory) => _filesUnder(directory).fold<int>(
+      0,
+      (total, file) => total + file.lengthSync(),
+    );
+
+Digest _aggregateFileDigest(Iterable<File> files) {
+  final bytes = <int>[];
+  for (final file in files) {
+    bytes.addAll(file.readAsBytesSync());
+  }
+  return sha256.convert(bytes);
+}
+
+Future<void> _expectChromaticGuitarMapping({
+  required File sfzFile,
+  required int expectedRegionCount,
+  required int lowPitch,
+  required int highPitch,
+}) async {
+  expect(sfzFile.existsSync(), isTrue, reason: 'Missing ${sfzFile.path}.');
+  final regions = (await _parseSfzRegions(sfzFile))
+      .where((region) => (region['sample'] ?? '').trim().isNotEmpty)
+      .toList(growable: false);
+  expect(regions.length, expectedRegionCount);
+
+  const velocities = <int>[0, 1, 64, 127];
+  for (var pitch = lowPitch; pitch <= highPitch; pitch++) {
+    for (final velocity in velocities) {
+      final matches = regions.where((region) {
+        final loKey = _sfzInt(region, 'lokey', 0);
+        final hiKey = _sfzInt(region, 'hikey', 127);
+        final loVel = _sfzInt(region, 'lovel', 0);
+        final hiVel = _sfzInt(region, 'hivel', 127);
+        return pitch >= loKey &&
+            pitch <= hiKey &&
+            velocity >= loVel &&
+            velocity <= hiVel;
+      }).toList(growable: false);
+      expect(matches.length, 1,
+          reason: 'Expected exactly one region for MIDI $pitch at velocity '
+              '$velocity in ${sfzFile.path}.');
+    }
+  }
+
+  for (final pitch in <int>[lowPitch - 1, highPitch + 1]) {
+    final matches = regions.where((region) {
+      final loKey = _sfzInt(region, 'lokey', 0);
+      final hiKey = _sfzInt(region, 'hikey', 127);
+      return pitch >= loKey && pitch <= hiKey;
+    });
+    expect(matches, isEmpty,
+        reason: 'MIDI $pitch must remain unmapped in ${sfzFile.path}.');
+  }
+}
+
 void main() {
   test('bundled instrument catalog resolves every indexed SFZ preset',
       () async {
@@ -157,7 +221,7 @@ void main() {
 
     final decoded =
         jsonDecode(await indexFile.readAsString()) as Map<String, dynamic>;
-    final pack = (decoded['pack'] as String?)?.trim() ?? '';
+    final defaultPack = (decoded['pack'] as String?)?.trim() ?? '';
     final presets = (decoded['presets'] as List?) ?? const <dynamic>[];
     expect(presets, isNotEmpty, reason: 'Bundled instrument index is empty.');
 
@@ -166,6 +230,10 @@ void main() {
       final presetFile = (entry['preset'] as String?)?.trim() ?? '';
       expect(presetFile, isNotEmpty,
           reason: 'Indexed preset is missing its SFZ filename.');
+      final entryPack = (entry['pack'] as String?)?.trim() ?? '';
+      final pack = entryPack.isEmpty ? defaultPack : entryPack;
+      expect(pack, isNotEmpty,
+          reason: 'Indexed preset is missing a resolvable pack.');
 
       final sfzAssetPath =
           p.posix.join('assets', 'instruments', pack, presetFile);
@@ -255,6 +323,157 @@ void main() {
         );
       }
     }
+  });
+
+  test('bundled guitars retain approved mappings, hashes, and size budgets',
+      () async {
+    final repoRoot = Directory.current;
+    final index = jsonDecode(await File(p.join(
+      repoRoot.path,
+      'assets',
+      'instruments',
+      'index.json',
+    )).readAsString()) as Map<String, dynamic>;
+    final entries = (index['presets'] as List<dynamic>)
+        .cast<Map<String, dynamic>>();
+    final expectedCatalogValues = <String, Map<String, Object>>{
+      'sfz.guitar.steel_acoustic': <String, Object>{
+        'pack': 'Discord-SFZ-GM-Bank-05d5ed8',
+        'name': 'Steel Acoustic Guitar',
+        'source_project': 'Discord SFZ GM Bank',
+        'outputGain': 1.0,
+        'attackMs': 2.0,
+        'releaseMs': 350.0,
+      },
+      'sfz.guitar.clean_electric': <String, Object>{
+        'pack': 'FreePats-EGuitar-FSBS-Clean-2026-08-07',
+        'name': 'Clean Electric Guitar',
+        'source_project': 'FreePats Electric Guitar FSBS Clean',
+        'outputGain': 1.0,
+        'attackMs': 2.0,
+        'releaseMs': 550.0,
+      },
+    };
+    for (final expected in expectedCatalogValues.entries) {
+      final entry = entries.singleWhere((entry) => entry['id'] == expected.key);
+      expect(entry['category'], 'Guitars');
+      expect(entry['source_license'], 'CC0 1.0 Universal');
+      for (final value in expected.value.entries) {
+        expect(entry[value.key], value.value,
+            reason: '${expected.key} ${value.key}.');
+      }
+    }
+
+    final acousticPack = Directory(p.join(repoRoot.path, 'assets',
+        'instruments', 'Discord-SFZ-GM-Bank-05d5ed8'));
+    final electricPack = Directory(p.join(repoRoot.path, 'assets',
+        'instruments', 'FreePats-EGuitar-FSBS-Clean-2026-08-07'));
+
+    await _expectChromaticGuitarMapping(
+      sfzFile: File(p.join(acousticPack.path, 'SteelAcousticGuitar.sfz')),
+      expectedRegionCount: 15,
+      lowPitch: 40,
+      highPitch: 84,
+    );
+    await _expectChromaticGuitarMapping(
+      sfzFile: File(p.join(electricPack.path, 'CleanElectricGuitar.sfz')),
+      expectedRegionCount: 12,
+      lowPitch: 40,
+      highPitch: 88,
+    );
+
+    final acousticAudio = _filesUnder(
+      Directory(p.join(acousticPack.path, 'samples')),
+    ).where((file) => p.extension(file.path).toLowerCase() == '.mp3').toList();
+    final electricAudio = _filesUnder(
+      Directory(p.join(electricPack.path, 'samples')),
+    ).where((file) => p.extension(file.path).toLowerCase() == '.mp3').toList();
+    expect(acousticAudio.length, 15);
+    expect(electricAudio.length, 12);
+    expect(
+      _aggregateFileDigest(acousticAudio).toString(),
+      'a33399e284e875c90b3b13f95bae0b4a13a8a821c4abd3291395ed74566bf6d8',
+      reason: 'Acoustic MP3s must remain byte-identical to the approved bank.',
+    );
+    expect(
+      _aggregateFileDigest(electricAudio).toString(),
+      '3886cc41d36a3fa34134b4cd3d0caf33d544daf417874111cd52f586d7fbf071',
+      reason: 'Electric MP3s must remain byte-identical to the approved bank.',
+    );
+
+    const targetBytes = 4 * 1024 * 1024;
+    const maximumBytes = 5 * 1024 * 1024;
+    const combinedMaximumBytes = 10 * 1024 * 1024;
+    final acousticBytes = _directorySize(acousticPack);
+    final electricBytes = _directorySize(electricPack);
+    expect(acousticBytes, lessThanOrEqualTo(targetBytes));
+    expect(electricBytes, lessThanOrEqualTo(targetBytes));
+    expect(acousticBytes, lessThanOrEqualTo(maximumBytes));
+    expect(electricBytes, lessThanOrEqualTo(maximumBytes));
+    expect(acousticBytes + electricBytes,
+        lessThanOrEqualTo(combinedMaximumBytes));
+
+    for (final pack in <Directory>[acousticPack, electricPack]) {
+      expect(File(p.join(pack.path, 'LICENSE')).existsSync(), isTrue);
+      expect(File(p.join(pack.path, 'NOTICE.md')).existsSync(), isTrue);
+    }
+  });
+
+  test('android guitar asset packs are byte-identical to canonical assets',
+      () async {
+    final repoRoot = Directory.current;
+    const packs = <String>[
+      'Discord-SFZ-GM-Bank-05d5ed8',
+      'FreePats-EGuitar-FSBS-Clean-2026-08-07',
+    ];
+    for (final pack in packs) {
+      final source = Directory(
+          p.join(repoRoot.path, 'assets', 'instruments', pack));
+      final android = Directory(p.join(
+        repoRoot.path,
+        'android',
+        'assetpacks',
+        'instruments',
+        'src',
+        'main',
+        'assets',
+        'assets',
+        'instruments',
+        pack,
+      ));
+      expect(android.existsSync(), isTrue,
+          reason: 'Missing Android guitar pack: $pack.');
+
+      final sourceFiles = _filesUnder(source);
+      final androidFiles = _filesUnder(android);
+      expect(
+        androidFiles.map((file) => p.relative(file.path, from: android.path)),
+        sourceFiles.map((file) => p.relative(file.path, from: source.path)),
+        reason: 'Android guitar pack file list differs for $pack.',
+      );
+      for (var index = 0; index < sourceFiles.length; index++) {
+        expect(androidFiles[index].readAsBytesSync(),
+            sourceFiles[index].readAsBytesSync(),
+            reason: 'Android guitar asset differs: '
+                '${p.relative(sourceFiles[index].path, from: source.path)}.');
+      }
+    }
+
+    final sourceIndex =
+        File(p.join(repoRoot.path, 'assets', 'instruments', 'index.json'));
+    final androidIndex = File(p.join(
+      repoRoot.path,
+      'android',
+      'assetpacks',
+      'instruments',
+      'src',
+      'main',
+      'assets',
+      'assets',
+      'instruments',
+      'index.json',
+    ));
+    expect(androidIndex.readAsBytesSync(), sourceIndex.readAsBytesSync());
   });
 
   test('statically referenced SFZ assets exist on disk', () async {
@@ -401,7 +620,7 @@ void main() {
     }
   });
 
-  test('native sampled resolver does not hardcode bundled SFZ asset paths',
+  test('native sampled resolver does not hardcode guitar SFZ asset paths',
       () async {
     final repoRoot = Directory.current;
     final nativeFiles = <String>[
@@ -417,12 +636,13 @@ void main() {
       final file = File(path);
       expect(file.existsSync(), isTrue, reason: 'Missing source file: $path');
       final text = await file.readAsString();
-      expect(
-        _extractStaticSfzPaths(text),
-        isEmpty,
-        reason: 'Native sampled resolver should use sfz_asset paths, not '
-            'hardcoded bundled SFZ asset constants: $path',
+      final guitarPaths = _extractStaticSfzPaths(text).where(
+        (sfzPath) => sfzPath.contains('Discord-SFZ-GM-Bank') ||
+            sfzPath.contains('FreePats-EGuitar-FSBS-Clean'),
       );
+      expect(guitarPaths, isEmpty,
+          reason: 'Native sampled resolver should load guitars through '
+              'generic sfz_asset paths, not hardcoded constants: $path');
     }
   });
 }

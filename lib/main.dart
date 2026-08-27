@@ -60,6 +60,27 @@ const List<_BundledLicenseNotice> _bundledLicenseNotices =
     licenseAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/LICENSE',
     noticeAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/NOTICE.md',
   ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Steel Acoustic Guitar',
+      'Discord SFZ GM Bank',
+      'Jeff Learman',
+    ],
+    licenseAssetPath:
+        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/LICENSE',
+    noticeAssetPath:
+        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/NOTICE.md',
+  ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Clean Electric Guitar',
+      'FreePats Electric Guitar FSBS Clean',
+    ],
+    licenseAssetPath:
+        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/LICENSE',
+    noticeAssetPath:
+        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/NOTICE.md',
+  ),
 ];
 
 Future<void> _registerBundledThirdPartyLicenses() async {
