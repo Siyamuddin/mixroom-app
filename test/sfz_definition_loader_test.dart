@@ -100,10 +100,10 @@ void main() {
     test('detects the production guitar and piano mappings', () async {
       final loader = SfzDefinitionLoader();
       final acoustic = await loader.load(
-        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/SteelAcousticGuitar.sfz',
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/AcousticGuitar.sfz',
       );
       final electric = await loader.load(
-        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/CleanElectricGuitar.sfz',
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/ElectricGuitar.sfz',
       );
       final piano = await loader.load(
         'assets/instruments/VSCO-2-CE-1.1.0/UprightPiano.sfz',
@@ -117,7 +117,7 @@ void main() {
       expectOnlyRange(
         electric!.playableInputPitches(remapPitch: (pitch) => pitch),
         40,
-        88,
+        86,
       );
       expectOnlyRange(
         piano!.playableInputPitches(remapPitch: (pitch) => pitch),

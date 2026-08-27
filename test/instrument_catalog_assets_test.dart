@@ -184,8 +184,9 @@ Future<void> _expectChromaticGuitarMapping({
   for (var pitch = lowPitch; pitch <= highPitch; pitch++) {
     for (final velocity in velocities) {
       final matches = regions.where((region) {
-        final loKey = _sfzInt(region, 'lokey', 0);
-        final hiKey = _sfzInt(region, 'hikey', 127);
+        final key = int.tryParse((region['key'] ?? '').trim());
+        final loKey = key ?? _sfzInt(region, 'lokey', 0);
+        final hiKey = key ?? _sfzInt(region, 'hikey', 127);
         final loVel = _sfzInt(region, 'lovel', 0);
         final hiVel = _sfzInt(region, 'hivel', 127);
         return pitch >= loKey &&
@@ -193,16 +194,35 @@ Future<void> _expectChromaticGuitarMapping({
             velocity >= loVel &&
             velocity <= hiVel;
       }).toList(growable: false);
-      expect(matches.length, 1,
-          reason: 'Expected exactly one region for MIDI $pitch at velocity '
-              '$velocity in ${sfzFile.path}.');
+      expect(matches, isNotEmpty,
+          reason: 'Expected a region for MIDI $pitch at velocity $velocity '
+              'in ${sfzFile.path}.');
+      final sequenceLengths = matches
+          .map((region) => _sfzInt(region, 'seq_length', 1))
+          .toSet();
+      expect(sequenceLengths.length, 1,
+          reason: 'MIDI $pitch at velocity $velocity mixes sequence lengths '
+              'in ${sfzFile.path}.');
+      final sequenceLength = sequenceLengths.single;
+      expect(matches.length, sequenceLength,
+          reason: 'Expected one region per sequence position for MIDI $pitch '
+              'at velocity $velocity in ${sfzFile.path}.');
+      expect(
+        matches
+            .map((region) => _sfzInt(region, 'seq_position', 1))
+            .toSet(),
+        <int>{for (var position = 1; position <= sequenceLength; position++) position},
+        reason: 'Missing or duplicate sequence position for MIDI $pitch at '
+            'velocity $velocity in ${sfzFile.path}.',
+      );
     }
   }
 
   for (final pitch in <int>[lowPitch - 1, highPitch + 1]) {
     final matches = regions.where((region) {
-      final loKey = _sfzInt(region, 'lokey', 0);
-      final hiKey = _sfzInt(region, 'hikey', 127);
+      final key = int.tryParse((region['key'] ?? '').trim());
+      final loKey = key ?? _sfzInt(region, 'lokey', 0);
+      final hiKey = key ?? _sfzInt(region, 'hikey', 127);
       return pitch >= loKey && pitch <= hiKey;
     });
     expect(matches, isEmpty,
@@ -338,20 +358,20 @@ void main() {
         .cast<Map<String, dynamic>>();
     final expectedCatalogValues = <String, Map<String, Object>>{
       'sfz.guitar.steel_acoustic': <String, Object>{
-        'pack': 'Discord-SFZ-GM-Bank-05d5ed8',
-        'name': 'Steel Acoustic Guitar',
-        'source_project': 'Discord SFZ GM Bank',
+        'pack': 'FreePats-Spanish-Classical-Guitar-2019-06-18',
+        'name': 'Acoustic Guitar',
+        'source_project': 'FreePats Spanish Classical Guitar',
         'outputGain': 1.0,
         'attackMs': 2.0,
         'releaseMs': 350.0,
       },
       'sfz.guitar.clean_electric': <String, Object>{
-        'pack': 'FreePats-EGuitar-FSBS-Clean-2026-08-07',
-        'name': 'Clean Electric Guitar',
-        'source_project': 'FreePats Electric Guitar FSBS Clean',
-        'outputGain': 1.0,
+        'pack': 'Karoryfer-Black-And-Green-Guitars-1.000',
+        'name': 'Electric Guitar',
+        'source_project': 'Karoryfer Black And Green Guitars',
+        'outputGain': 4.0,
         'attackMs': 2.0,
-        'releaseMs': 550.0,
+        'releaseMs': 250.0,
       },
     };
     for (final expected in expectedCatalogValues.entries) {
@@ -365,21 +385,21 @@ void main() {
     }
 
     final acousticPack = Directory(p.join(repoRoot.path, 'assets',
-        'instruments', 'Discord-SFZ-GM-Bank-05d5ed8'));
+        'instruments', 'FreePats-Spanish-Classical-Guitar-2019-06-18'));
     final electricPack = Directory(p.join(repoRoot.path, 'assets',
-        'instruments', 'FreePats-EGuitar-FSBS-Clean-2026-08-07'));
+        'instruments', 'Karoryfer-Black-And-Green-Guitars-1.000'));
 
     await _expectChromaticGuitarMapping(
-      sfzFile: File(p.join(acousticPack.path, 'SteelAcousticGuitar.sfz')),
-      expectedRegionCount: 15,
+      sfzFile: File(p.join(acousticPack.path, 'AcousticGuitar.sfz')),
+      expectedRegionCount: 39,
       lowPitch: 40,
       highPitch: 84,
     );
     await _expectChromaticGuitarMapping(
-      sfzFile: File(p.join(electricPack.path, 'CleanElectricGuitar.sfz')),
-      expectedRegionCount: 12,
+      sfzFile: File(p.join(electricPack.path, 'ElectricGuitar.sfz')),
+      expectedRegionCount: 78,
       lowPitch: 40,
-      highPitch: 88,
+      highPitch: 86,
     );
 
     final acousticAudio = _filesUnder(
@@ -388,16 +408,16 @@ void main() {
     final electricAudio = _filesUnder(
       Directory(p.join(electricPack.path, 'samples')),
     ).where((file) => p.extension(file.path).toLowerCase() == '.mp3').toList();
-    expect(acousticAudio.length, 15);
-    expect(electricAudio.length, 12);
+    expect(acousticAudio.length, 39);
+    expect(electricAudio.length, 78);
     expect(
       _aggregateFileDigest(acousticAudio).toString(),
-      'a33399e284e875c90b3b13f95bae0b4a13a8a821c4abd3291395ed74566bf6d8',
+      '53462f729b184cee20ad1fd5ad62741668e99c38c4c1ca2027c29307bd8ec53a',
       reason: 'Acoustic MP3s must remain byte-identical to the approved bank.',
     );
     expect(
       _aggregateFileDigest(electricAudio).toString(),
-      '3886cc41d36a3fa34134b4cd3d0caf33d544daf417874111cd52f586d7fbf071',
+      '8300f812c229c1c1237117286829b1ea9d256d35fcca5bcb1516f8c77ae82cf4',
       reason: 'Electric MP3s must remain byte-identical to the approved bank.',
     );
 
@@ -423,8 +443,8 @@ void main() {
       () async {
     final repoRoot = Directory.current;
     const packs = <String>[
-      'Discord-SFZ-GM-Bank-05d5ed8',
-      'FreePats-EGuitar-FSBS-Clean-2026-08-07',
+      'FreePats-Spanish-Classical-Guitar-2019-06-18',
+      'Karoryfer-Black-And-Green-Guitars-1.000',
     ];
     for (final pack in packs) {
       final source = Directory(
@@ -637,8 +657,9 @@ void main() {
       expect(file.existsSync(), isTrue, reason: 'Missing source file: $path');
       final text = await file.readAsString();
       final guitarPaths = _extractStaticSfzPaths(text).where(
-        (sfzPath) => sfzPath.contains('Discord-SFZ-GM-Bank') ||
-            sfzPath.contains('FreePats-EGuitar-FSBS-Clean'),
+        (sfzPath) =>
+            sfzPath.contains('FreePats-Spanish-Classical-Guitar') ||
+            sfzPath.contains('Karoryfer-Black-And-Green-Guitars'),
       );
       expect(guitarPaths, isEmpty,
           reason: 'Native sampled resolver should load guitars through '

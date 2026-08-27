@@ -204,31 +204,31 @@ const String kUserSampleDropFolderName = 'Mixroom Samples';
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
   {
     'id': 'sfz.guitar.steel_acoustic',
-    'name': 'Steel Acoustic Guitar',
+    'name': 'Acoustic Guitar',
     'category': 'instrument',
     'pickerCategory': 'Guitars',
-    'sourceProject': 'Discord SFZ GM Bank',
+    'sourceProject': 'FreePats Spanish Classical Guitar',
     'sourceLicense': 'CC0 1.0 Universal',
     'isSampled': true,
     'sfzAssetPath':
-        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/SteelAcousticGuitar.sfz',
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/AcousticGuitar.sfz',
     'outputGain': 1.0,
     'attackMs': 2.0,
     'releaseMs': 350.0,
   },
   {
     'id': 'sfz.guitar.clean_electric',
-    'name': 'Clean Electric Guitar',
+    'name': 'Electric Guitar',
     'category': 'instrument',
     'pickerCategory': 'Guitars',
-    'sourceProject': 'FreePats Electric Guitar FSBS Clean',
+    'sourceProject': 'Karoryfer Black And Green Guitars',
     'sourceLicense': 'CC0 1.0 Universal',
     'isSampled': true,
     'sfzAssetPath':
-        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/CleanElectricGuitar.sfz',
-    'outputGain': 1.0,
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/ElectricGuitar.sfz',
+    'outputGain': 4.0,
     'attackMs': 2.0,
-    'releaseMs': 550.0,
+    'releaseMs': 250.0,
   },
   {
     'id': 'sfz.vsco.mixroom_acoustic_drum_kit',
@@ -31760,7 +31760,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'Keys':
         return Icons.piano_outlined;
       case 'Guitars':
-        return Icons.multitrack_audio_rounded;
+        return CupertinoIcons.guitars;
       case 'Strings':
         return Icons.multitrack_audio_rounded;
       case 'Woodwinds':

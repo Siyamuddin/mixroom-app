@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -4842,6 +4843,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     switch (category) {
       case 'On Device':
         return Icons.developer_board_rounded;
+      case 'Guitars':
+        return CupertinoIcons.guitars;
       case 'Strings':
         return Icons.multitrack_audio_rounded;
       case 'Woodwinds':

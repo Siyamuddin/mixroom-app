@@ -12,7 +12,7 @@ void main() {
       instrumentPickerCategoryForValues(
         declaredCategory: 'instrument',
         instrumentId: 'sfz.guitar.steel_acoustic',
-        instrumentName: 'Steel Acoustic Guitar',
+        instrumentName: 'Acoustic Guitar',
       ),
       'Guitars',
     );

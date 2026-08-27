@@ -62,24 +62,26 @@ const List<_BundledLicenseNotice> _bundledLicenseNotices =
   ),
   _BundledLicenseNotice(
     packages: <String>[
-      'Steel Acoustic Guitar',
-      'Discord SFZ GM Bank',
-      'Jeff Learman',
+      'Acoustic Guitar',
+      'FreePats Spanish Classical Guitar',
+      'Roberto, FreePats',
     ],
     licenseAssetPath:
-        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/LICENSE',
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/LICENSE',
     noticeAssetPath:
-        'assets/instruments/Discord-SFZ-GM-Bank-05d5ed8/NOTICE.md',
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/NOTICE.md',
   ),
   _BundledLicenseNotice(
     packages: <String>[
-      'Clean Electric Guitar',
-      'FreePats Electric Guitar FSBS Clean',
+      'Electric Guitar',
+      'Karoryfer Black And Green Guitars',
+      'Karoryfer Lecolds',
+      'Brian Wood',
     ],
     licenseAssetPath:
-        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/LICENSE',
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/LICENSE',
     noticeAssetPath:
-        'assets/instruments/FreePats-EGuitar-FSBS-Clean-2026-08-07/NOTICE.md',
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/NOTICE.md',
   ),
 ];
 
