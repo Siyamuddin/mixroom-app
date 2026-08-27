@@ -60,6 +60,8 @@ void main() {
       'List<_InputChannelRouteOption> _buildInputChannelRouteOptions',
     );
     expect(v2Selection, contains('coordinator.selectRecordingInput'));
+    expect(v2Selection, contains('[MacV2InputSelection]'));
+    expect(v2Selection, contains('result.diagnosticCode'));
     expect(v2Selection, isNot(contains('selectInputDevice')));
     expect(v2Selection, isNot(contains('prepareRecordingInputs')));
     expect(v2Selection, isNot(contains('requestMicrophone')));

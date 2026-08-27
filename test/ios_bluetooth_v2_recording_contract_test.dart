@@ -252,11 +252,24 @@ void main() {
       );
       final handler = editor.substring(handlerStart, handlerEnd);
       expect(handler, contains('abortRecordingV2(cancelOnly: true)'));
+      expect(handler, contains('AudioRouteCoordinatorStateV2.preparingInput'));
+      expect(handler, isNot(contains('_supportsV2AudioRecording')));
+      expect(handler, isNot(contains('_v2AudioSessionInvalidated')));
+      final recordResolverStart = editor.indexOf(
+        'Future<void> _startRecordingJuce() async {',
+      );
+      final recordResolverEnd = editor.indexOf(
+        'Future<void> _letRecordingVisualStatePaint()',
+        recordResolverStart,
+      );
+      final recordResolver = editor.substring(
+        recordResolverStart,
+        recordResolverEnd,
+      );
       expect(
-        handler,
+        recordResolver,
         contains('_showSmallNotice(_v2AudioSessionInvalidationNotice)'),
       );
-      expect(handler, contains('AudioRouteCoordinatorStateV2.preparingInput'));
       final startFlowStart = editor.indexOf(
         'Future<void> _startAudioRecordingJuce()',
       );

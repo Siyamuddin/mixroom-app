@@ -35,10 +35,12 @@ import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
+import 'package:mixroom/helpers/desktop_midi_key_state.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
 import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:mixroom/helpers/export_progress_ui.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
+import 'package:mixroom/helpers/midi_recording_generation.dart';
 import 'package:mixroom/helpers/project_telemetry_service.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_chat_history.dart';
@@ -100,6 +102,7 @@ import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/helpers/audio_project_persistence.dart';
 import 'package:mixroom/helpers/cloud_project_service.dart';
+import 'package:mixroom/helpers/cloud_auto_sync_follow_up.dart';
 import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/effect_parameter_exposure.dart';
@@ -5570,7 +5573,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int? _midiRecordingClipEngineId;
   int? _midiRecordingClipIndex;
   bool _midiRecordingLiveInputArmed = false;
+  String? _midiClipPendingV2RecoveryId;
   bool _midiInputDrainBusy = false;
+  final MidiRecordingGeneration _midiRecordingGeneration =
+      MidiRecordingGeneration();
   int _nextMidiRecordNoteToken = 0;
   double _lastMidiRecordTransportSec = 0.0;
   bool _midiRecordHasChanges = false;
@@ -8810,6 +8816,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final isKeyUp = event is KeyUpEvent;
     if (!isKeyDown && !isKeyRepeat && !isKeyUp) return false;
 
+    final key = event.logicalKey;
+    final midiPitch = _desktopMidiPitchForKey(key);
+    if (isKeyUp && midiPitch != null) {
+      final action = transitionDesktopMidiKey(
+        heldKeys: _desktopMidiHeldKeys,
+        key: key,
+        isKeyDown: false,
+        isKeyRepeat: false,
+        isKeyUp: true,
+        canStartNote: false,
+      );
+      if (action == DesktopMidiKeyAction.noteOff) {
+        if (mounted && _showPianoRoll) {
+          setState(() {});
+        }
+        unawaited(_dispatchDesktopMidiNoteUp(key));
+        return true;
+      }
+    }
+
     if (_desktopShortcutSettingsOpen) {
       return false;
     }
@@ -8893,28 +8919,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final keyboard = HardwareKeyboard.instance;
-    final key = event.logicalKey;
     if (!keyboard.isMetaPressed &&
         !keyboard.isControlPressed &&
         !keyboard.isAltPressed &&
         _desktopKeyboardMidiCanCapture()) {
-      final midiPitch = _desktopMidiPitchForKey(key);
       if (midiPitch != null) {
         if (isKeyDown || isKeyRepeat) {
-          if (_desktopMidiHeldKeys.add(key)) {
+          final action = transitionDesktopMidiKey(
+            heldKeys: _desktopMidiHeldKeys,
+            key: key,
+            isKeyDown: isKeyDown,
+            isKeyRepeat: isKeyRepeat,
+            isKeyUp: false,
+            canStartNote: true,
+          );
+          if (action == DesktopMidiKeyAction.noteOn) {
             if (mounted && _showPianoRoll) {
               setState(() {});
             }
             unawaited(_dispatchDesktopMidiNoteDown(key));
-          }
-          return true;
-        }
-        if (isKeyUp) {
-          if (_desktopMidiHeldKeys.remove(key)) {
-            if (mounted && _showPianoRoll) {
-              setState(() {});
-            }
-            unawaited(_dispatchDesktopMidiNoteUp(key));
           }
           return true;
         }
@@ -12492,6 +12515,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _recordingRoutePolicyTimer = null;
     _stopAllSecurityScopedAccess();
     _stopMidiDeviceConnectionPolling();
+    _midiRecordingGeneration.invalidate();
     _midiInputPollTimer?.cancel();
     _midiInputPollTimer = null;
     _midiHeldNoteRefreshTimer?.cancel();
@@ -12502,6 +12526,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _midiRecordingClipEngineId = null;
     _midiRecordingClipIndex = null;
     _midiRecordingLiveInputArmed = false;
+    _midiClipPendingV2RecoveryId = null;
     if (_liveMidiEventPlaybackSupported) {
       _lastLiveMidiInputTargetClipId = -1;
       unawaited(
@@ -12591,6 +12616,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (defaultTargetPlatform == TargetPlatform.macOS &&
+        (state == AppLifecycleState.inactive ||
+            _isEditorBackgroundState(state))) {
+      unawaited(_releaseAllDesktopMidiNotes());
+    }
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (state == AppLifecycleState.resumed) {
         debugPrint("App Resumed on Android - Re-initializing.");
@@ -12884,6 +12914,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ? _estimateTransportClockFromSample()
         : _globalAudioClock;
     final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
+    final interruptedMidiHadChanges = _endMidiRecordingForV2SafetyBoundary();
     _v2AudioSessionInvalidationNotice = notice;
     _v2AudioSessionInvalidated = true;
     _v2AudioSessionRecoveryInProgress = true;
@@ -12896,11 +12927,57 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     setState(() {
       _isPlaying = false;
       _isRecording = false;
+      _isMidiClipRecording = false;
       _recordStartVisualPending = false;
       _recordingFilePath = null;
       _syncTransportClock(pausedPosition, playing: false);
     });
+    if (interruptedMidiHadChanges) {
+      _scheduleProjectAutosave();
+    }
     return unpublishedRecordingPath;
+  }
+
+  bool _endMidiRecordingForV2SafetyBoundary() {
+    if (!_isMidiClipRecording) return false;
+
+    unawaited(_releaseAllDesktopMidiNotes());
+    _refreshHeldMidiRecordNotesFromClock(closeHeldNotes: true);
+    final clipIndex = _resolvedMidiRecordingClipIndex();
+    final hadChanges = _midiRecordHasChanges;
+    if (hadChanges && clipIndex >= 0 && clipIndex < _audioTracks.length) {
+      final clip = _audioTracks[clipIndex];
+      if (clip.isMidi) {
+        clip.midiNotes.sort((a, b) {
+          final timeCmp = a.startBeat.compareTo(b.startBeat);
+          if (timeCmp != 0) return timeCmp;
+          return a.pitch.compareTo(b.pitch);
+        });
+        _midiClipPendingV2RecoveryId = clip.clipId;
+      }
+    }
+    _clearMidiRecordingRuntimeState();
+    return hadChanges;
+  }
+
+  Future<void> _restoreInterruptedMidiClipAfterV2Recovery() async {
+    final clipId = _midiClipPendingV2RecoveryId;
+    _midiClipPendingV2RecoveryId = null;
+    if (clipId == null || !mounted) return;
+
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi) return;
+
+    final updatedLive = await _updateMidiClipEventsLive(clip);
+    if (updatedLive) {
+      await _syncClipTimingToEngine(clipIndex);
+      await _syncClipMixToEngine(clip);
+      _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[clip]);
+    } else {
+      await _reloadMidiTrackLive(clip);
+    }
   }
 
   void _trackV2AudioSessionRecovery(Future<void> recovery) {
@@ -12948,6 +13025,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
       if (!mounted) return;
+      await _restoreInterruptedMidiClipAfterV2Recovery();
+      if (!mounted) return;
       final recoveredJuceName =
           recoveryResult.snapshot.juce.outputDeviceName?.trim() ?? '';
       final recoveredEndpointName = recoveryResult.snapshot.outputs.isEmpty
@@ -12974,6 +13053,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _audioRouteCoordinatorV2 = null;
     await coordinator?.dispose();
     await JuceAudioEngine.shutdown();
+    _midiClipPendingV2RecoveryId = null;
     if (unpublishedRecordingPath != null) {
       await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
     }
@@ -14988,6 +15068,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _cloudAutoSyncInFlight = true;
     _cloudAutoSyncDirty = false;
     Duration? retryDelay;
+    var nonRetryableFailure = false;
     try {
       await _projectAutosaveCoordinator.flush();
       if (!_canContinueCloudAutoSync()) {
@@ -15107,12 +15188,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         service.close();
       }
     } catch (error) {
-      _cloudAutoSyncDirty = true;
-      final nonRetryable = _isCloudAutoSyncNonRetryable(error);
+      nonRetryableFailure = _isCloudAutoSyncNonRetryable(error);
       if (error.toString().toLowerCase().contains('revision conflict')) {
         _cloudAutoSyncConflict = true;
       }
-      if (!nonRetryable) {
+      if (!nonRetryableFailure) {
+        _cloudAutoSyncDirty = true;
         _cloudAutoSyncFailureCount = math.min(
           _cloudAutoSyncFailureCount + 1,
           4,
@@ -15131,19 +15212,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Cloud auto sync skipped after $reason: $error');
     } finally {
       _cloudAutoSyncInFlight = false;
-      if (retryDelay != null && _canAttemptAutoCloudSync()) {
+      final followUp = cloudAutoSyncFollowUp(
+        canAttempt: _canAttemptAutoCloudSync(),
+        dirty: _cloudAutoSyncDirty,
+        nonRetryableFailure: nonRetryableFailure,
+        hasRetryDelay: retryDelay != null,
+      );
+      if (followUp == CloudAutoSyncFollowUp.delayed) {
         _cloudAutoSyncTimer?.cancel();
-        _cloudAutoSyncTimer = Timer(retryDelay, () {
+        _cloudAutoSyncTimer = Timer(retryDelay!, () {
           _cloudAutoSyncTimer = null;
-          unawaited(_runCloudAutoSync(reason: 'retry'));
+          unawaited(
+            _runCloudAutoSync(reason: cloudAutoSyncFollowUpReason(followUp)),
+          );
         });
-      } else if (_cloudAutoSyncDirty && _canAttemptAutoCloudSync()) {
+      } else if (followUp == CloudAutoSyncFollowUp.immediate) {
         // Do not lose an edit made while the preceding upload was in flight.
         // The follow-up run re-reads the canonical source before publishing.
         _cloudAutoSyncTimer?.cancel();
         _cloudAutoSyncTimer = Timer(Duration.zero, () {
           _cloudAutoSyncTimer = null;
-          unawaited(_runCloudAutoSync(reason: 'pending-edits'));
+          unawaited(
+            _runCloudAutoSync(reason: cloudAutoSyncFollowUpReason(followUp)),
+          );
         });
       }
       ProjectManager.endCloudProjectSync(syncActivityId);
@@ -21098,7 +21189,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!_audioTracks[armedIndex].isMidi) return null;
       return armedIndex;
     }
-    final activeEngineId = _armedMidiClipOrNull()?.engineClipId;
+    final activeEngineId = resolveArmedMidiClip(
+      tracks: _audioTracks,
+      activeMidiClipEngineId: _activeMidiClipEngineId,
+      primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+      requiredRowIndex: _selectedRow,
+    )?.engineClipId;
     if (activeEngineId == null || activeEngineId < 0) return null;
     final clipIndex = _clipIndexForEngineId(activeEngineId);
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return null;
@@ -21615,6 +21711,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_midiInputDrainBusy) return;
     }
+    final recordingGeneration = _midiRecordingGeneration.current;
     final clipIndex = _resolvedMidiRecordingClipIndex();
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
@@ -21623,6 +21720,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _midiInputDrainBusy = true;
     try {
       final events = await JuceAudioEngine.consumeLiveMidiInputEvents();
+      if (!_isMidiClipRecording ||
+          !_midiRecordingGeneration.isCurrent(recordingGeneration)) {
+        return;
+      }
       bool changed = false;
       double latestTransportSec = _lastMidiRecordTransportSec;
 
@@ -21748,12 +21849,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return targetOk;
   }
 
-  Future<int?> _ensureSelectedInstrumentLaneMidiRecordingClip() async {
-    final row = resolveSelectedInstrumentLaneRecordingRow(
-      rows: _rows,
-      selectedRow: _selectedRow,
-    );
-    if (row == null) return null;
+  Future<({int clipIndex, AddMidiClipAction pendingAction})?>
+  _createSelectedInstrumentLaneMidiRecordingClip(int rowId) async {
+    final row = _rowIndexForId(rowId);
+    if (row < 0 || row >= _rows.length || !_rows[row].isInstrumentLane) {
+      return null;
+    }
 
     final lane = _rows[row];
     final instrumentId = lane.instrumentId.trim();
@@ -21763,55 +21864,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final beforeCount = _audioTracks.length;
-    await _undoManager.execute(
-      AddMidiClipAction(
-        addMidiClip:
-            ({
-              required String instrumentId,
-              required String instrumentName,
-              required Map<String, double> instrumentParams,
-              required List<MidiNote> midiNotes,
-              required int row,
-              required double timeMs,
-              Duration? trimEndRequested,
-            }) => _addMidiTrack(
-              instrumentId: instrumentId,
-              instrumentName: instrumentName,
-              instrumentParams: instrumentParams,
-              midiNotes: midiNotes,
-              row: row,
-              timeMs: timeMs,
-              trimEndRequested: trimEndRequested,
-            ),
-        tracks: _audioTracks,
-        restoreTrack: _addClipFromUndoPayload,
-        instrumentId: instrumentId,
-        instrumentName: lane.instrumentName.isEmpty
-            ? _instrumentNameFromId(instrumentId)
-            : lane.instrumentName,
-        instrumentParams: Map<String, double>.from(lane.instrumentParams),
-        midiNotes: const <MidiNote>[],
-        row: row,
-        timeMs: _globalAudioClock.inMilliseconds.toDouble(),
-        onRemove: _syncRemovedClipFadesAfterUndo,
-      ),
+    final action = AddMidiClipAction(
+      addMidiClip:
+          ({
+            required String instrumentId,
+            required String instrumentName,
+            required Map<String, double> instrumentParams,
+            required List<MidiNote> midiNotes,
+            required int row,
+            required double timeMs,
+            Duration? trimEndRequested,
+          }) => _addMidiTrack(
+            instrumentId: instrumentId,
+            instrumentName: instrumentName,
+            instrumentParams: instrumentParams,
+            midiNotes: midiNotes,
+            row: row,
+            timeMs: timeMs,
+            trimEndRequested: trimEndRequested,
+          ),
+      tracks: _audioTracks,
+      restoreTrack: _addClipFromUndoPayload,
+      instrumentId: instrumentId,
+      instrumentName: lane.instrumentName.isEmpty
+          ? _instrumentNameFromId(instrumentId)
+          : lane.instrumentName,
+      instrumentParams: Map<String, double>.from(lane.instrumentParams),
+      midiNotes: const <MidiNote>[],
+      row: row,
+      timeMs: _globalAudioClock.inMilliseconds.toDouble(),
+      onRemove: _syncRemovedClipFadesAfterUndo,
     );
+    try {
+      await action.redo();
+    } catch (_) {
+      await action.undo();
+      rethrow;
+    }
     if (_audioTracks.length <= beforeCount) return null;
 
     final clipIndex = _audioTracks.length - 1;
     final clip = _audioTracks[clipIndex];
-    if (!clip.isMidi) return null;
-    setState(() {
-      _selectedRow = row;
-      _timelineSelectedClipIndices = <int>[clipIndex];
-      _timelinePrimarySelectedClipIndex = clipIndex;
-      _activeMidiClipEngineId = clip.engineClipId;
-      _activeMidiClipIndex = clipIndex;
-    });
-    if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-      unawaited(_syncLiveMidiInputTargetClip());
+    if (!clip.isMidi) {
+      await action.undo();
+      return null;
     }
-    return clipIndex;
+    return (clipIndex: clipIndex, pendingAction: action);
   }
 
   Future<void> _startMidiClipRecording(int clipIndex) async {
@@ -21820,61 +21918,245 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
 
-    _stopRecordingPeakPolling(clearSamples: true);
-    setState(() {
-      _activeMidiClipEngineId = clip.engineClipId;
-      _activeMidiClipIndex = clipIndex;
-      _selectedRow = clip.rowIndex.clamp(0, math.max(0, _rowCount - 1)).toInt();
-      _recordingFilePath = null;
-      _isRecording = true;
-      _isMidiClipRecording = true;
-      _midiRecordingClipEngineId = clip.engineClipId;
-      _midiRecordingClipIndex = clipIndex;
-      _midiRecordingLiveInputArmed = false;
-    });
+    await _startMidiRecordingTransaction(existingClipId: clip.clipId);
+  }
 
-    if (_loopEnabled) {
-      await _restartAudio(_safeAudioEditorStateSetter);
-    }
+  Future<void> _startSelectedInstrumentLaneMidiRecording(int rowId) async {
+    await _startMidiRecordingTransaction(instrumentLaneRowId: rowId);
+  }
 
-    _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
-    if (!_isPlaying) {
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-    }
-
-    final liveTargetOk = await _armLiveMidiInputTargetForRecording(
-      clip,
-      clipIndex,
-    );
+  void _clearMidiRecordingRuntimeState() {
+    _midiRecordingGeneration.invalidate();
+    _midiInputPollTimer?.cancel();
+    _midiInputPollTimer = null;
+    _midiHeldNoteRefreshTimer?.cancel();
+    _midiHeldNoteRefreshTimer = null;
     _midiHeldNotesByKey.clear();
     _midiRecordNoteWallStartById.clear();
     _suppressedLiveMidiRecordEvents.clear();
-    _nextMidiRecordNoteToken = 0;
-    _lastMidiRecordTransportSec =
-        _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
+    _midiRecordingClipEngineId = null;
+    _midiRecordingClipIndex = null;
+    _midiRecordingLiveInputArmed = false;
+    _isMidiClipRecording = false;
     _midiRecordHasChanges = false;
-    _midiInputPollTimer?.cancel();
-    _midiInputPollTimer = liveTargetOk
-        ? Timer.periodic(const Duration(milliseconds: 40), (_) {
-            unawaited(_drainMidiInputEventsForRecording());
-          })
-        : null;
-    _midiHeldNoteRefreshTimer?.cancel();
-    _midiHeldNoteRefreshTimer = Timer.periodic(
-      const Duration(milliseconds: 33),
-      (_) {
-        _refreshHeldMidiRecordNotesFromClock();
-      },
-    );
+    _lastMidiRecordTransportSec = 0.0;
+  }
 
-    if (mounted && _isMidiClipRecording) {
+  Future<void> _startMidiRecordingTransaction({
+    String? existingClipId,
+    int? instrumentLaneRowId,
+  }) async {
+    if (_recordTransitionInFlight) return;
+    if ((existingClipId == null) == (instrumentLaneRowId == null)) return;
+
+    _recordTransitionInFlight = true;
+    _recordStartCancelRequested = false;
+    final transportWasPlaying = _isPlaying;
+    AddMidiClipAction? pendingAddAction;
+    var pendingAddCommitted = false;
+
+    try {
+      _midiRecordingGeneration.invalidate();
+      await _releaseAllDesktopMidiNotes();
+      if (!mounted) return;
+
+      _stopRecordingPeakPolling(clearSamples: true);
+      _clearMidiRecordingRuntimeState();
       setState(() {
-        _midiRecordingLiveInputArmed = liveTargetOk;
+        _recordingFilePath = null;
+        _isRecording = false;
+        _recordStartVisualPending = true;
       });
+      await _letRecordingVisualStatePaint();
+      if (!mounted || _recordStartCancelRequested) return;
+
+      if (_loopEnabled) {
+        await _restartAudio(_safeAudioEditorStateSetter);
+      }
+      if (!mounted || _recordStartCancelRequested) return;
+
+      if (!_isPlaying) {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      }
+      if (!mounted || !_isPlaying || _recordStartCancelRequested) return;
+
+      int resolvedClipIndex = -1;
+      if (existingClipId != null) {
+        resolvedClipIndex = _clipIndexForPersistentId(existingClipId);
+      } else {
+        final created = await _createSelectedInstrumentLaneMidiRecordingClip(
+          instrumentLaneRowId!,
+        );
+        if (created == null) return;
+        resolvedClipIndex = created.clipIndex;
+        pendingAddAction = created.pendingAction;
+      }
+      if (!mounted || _recordStartCancelRequested) return;
+      if (resolvedClipIndex < 0 || resolvedClipIndex >= _audioTracks.length) {
+        return;
+      }
+
+      var resolvedClip = _audioTracks[resolvedClipIndex];
+      if (!resolvedClip.isMidi) return;
+      final resolvedClipId = resolvedClip.clipId;
+
+      var liveTargetOk = await _armLiveMidiInputTargetForRecording(
+        resolvedClip,
+        resolvedClipIndex,
+      );
+      if (!mounted || _recordStartCancelRequested || !_isPlaying) return;
+      if (liveTargetOk) {
+        try {
+          await JuceAudioEngine.consumeLiveMidiInputEvents();
+        } catch (error, stackTrace) {
+          liveTargetOk = false;
+          debugPrint(
+            'Unable to clear stale MIDI input events before recording: '
+            '$error\n$stackTrace',
+          );
+        }
+      }
+      if (!mounted || _recordStartCancelRequested || !_isPlaying) return;
+
+      resolvedClipIndex = _clipIndexForPersistentId(resolvedClipId);
+      if (resolvedClipIndex < 0 || resolvedClipIndex >= _audioTracks.length) {
+        return;
+      }
+      resolvedClip = _audioTracks[resolvedClipIndex];
+      if (!resolvedClip.isMidi) return;
+
+      _midiHeldNotesByKey.clear();
+      _midiRecordNoteWallStartById.clear();
+      _suppressedLiveMidiRecordEvents.clear();
+      _nextMidiRecordNoteToken = 0;
+      _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      _lastMidiRecordTransportSec = _recordingStartMs / 1000.0;
+      _midiRecordHasChanges = false;
+
+      if (pendingAddAction != null) {
+        await _undoManager.addWithoutExecute(pendingAddAction);
+        pendingAddCommitted = true;
+      }
+
+      setState(() {
+        _activeMidiClipEngineId = resolvedClip.engineClipId;
+        _activeMidiClipIndex = resolvedClipIndex;
+        _selectedRow = resolvedClip.rowIndex
+            .clamp(0, math.max(0, _rowCount - 1))
+            .toInt();
+        _timelineSelectedClipIndices = <int>[resolvedClipIndex];
+        _timelinePrimarySelectedClipIndex = resolvedClipIndex;
+        _recordingFilePath = null;
+        _isRecording = true;
+        _isMidiClipRecording = true;
+        _midiRecordingClipEngineId = resolvedClip.engineClipId;
+        _midiRecordingClipIndex = resolvedClipIndex;
+        _midiRecordingLiveInputArmed = liveTargetOk;
+        _recordStartVisualPending = false;
+      });
+
+      _midiInputPollTimer = liveTargetOk
+          ? Timer.periodic(const Duration(milliseconds: 40), (_) {
+              unawaited(_drainMidiInputEventsForRecording());
+            })
+          : null;
+      _midiHeldNoteRefreshTimer = Timer.periodic(
+        const Duration(milliseconds: 33),
+        (_) {
+          _refreshHeldMidiRecordNotesFromClock();
+        },
+      );
+    } catch (error, stackTrace) {
+      debugPrint('MIDI recording start failed: $error\n$stackTrace');
+      if (mounted && !_recordStartCancelRequested) {
+        _showSmallNotice('MIDI recording could not start. Please try again.');
+      }
+    } finally {
+      if (!_isMidiClipRecording) {
+        final rollbackAction = pendingAddCommitted ? null : pendingAddAction;
+        _clearMidiRecordingRuntimeState();
+
+        if (rollbackAction != null) {
+          try {
+            await rollbackAction.undo();
+          } catch (error, stackTrace) {
+            debugPrint(
+              'MIDI recording clip rollback failed: $error\n$stackTrace',
+            );
+          }
+
+          try {
+            await _syncLiveMidiInputTargetClip();
+          } catch (error, stackTrace) {
+            debugPrint(
+              'MIDI recording target restoration failed: $error\n$stackTrace',
+            );
+          }
+        }
+
+        try {
+          if (!transportWasPlaying && _isPlaying) {
+            await _pausePlayback();
+            if (mounted) {
+              setState(() {
+                _isPlaying = false;
+              });
+            } else {
+              _isPlaying = false;
+            }
+          } else if (transportWasPlaying &&
+              !_isPlaying &&
+              mounted &&
+              !_v2AudioSessionInvalidated &&
+              !_v2AudioSessionRecoveryInProgress) {
+            await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+          }
+        } catch (error, stackTrace) {
+          debugPrint(
+            'MIDI recording transport restoration failed: $error\n$stackTrace',
+          );
+        }
+      }
+
+      if (mounted && _recordStartVisualPending) {
+        setState(() {
+          _recordStartVisualPending = false;
+          if (!_isMidiClipRecording) {
+            _isRecording = false;
+            _recordingFilePath = null;
+          }
+        });
+      }
+      _recordStartCancelRequested = false;
+      _recordTransitionInFlight = false;
     }
   }
 
   Future<void> _stopMidiClipRecording({bool keepPlaying = true}) async {
+    if (_recordTransitionInFlight) return;
+    _recordTransitionInFlight = true;
+    var hadMidiChanges = false;
+    try {
+      hadMidiChanges = await _stopMidiClipRecordingImpl(
+        keepPlaying: keepPlaying,
+      );
+    } finally {
+      _recordTransitionInFlight = false;
+    }
+    if (hadMidiChanges) {
+      _scheduleProjectAutosave();
+    }
+  }
+
+  Future<bool> _stopMidiClipRecordingImpl({bool keepPlaying = true}) async {
+    _midiRecordingGeneration.invalidate();
+    try {
+      await _releaseAllDesktopMidiNotes();
+    } catch (error, stackTrace) {
+      debugPrint(
+        'MIDI recording held-note release failed: $error\n$stackTrace',
+      );
+    }
     _stopRecordingPeakPolling(clearSamples: true);
     _midiInputPollTimer?.cancel();
     _midiInputPollTimer = null;
@@ -21882,13 +22164,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _midiHeldNoteRefreshTimer = null;
 
     _refreshHeldMidiRecordNotesFromClock(closeHeldNotes: true);
-    await _drainMidiInputEventsForRecording(closeHeldNotes: true);
+    try {
+      await _drainMidiInputEventsForRecording(closeHeldNotes: true);
+    } catch (error, stackTrace) {
+      debugPrint('MIDI recording final drain failed: $error\n$stackTrace');
+    }
 
     final clipIndex = _resolvedMidiRecordingClipIndex();
     final hadMidiChanges = _midiRecordHasChanges;
-    if (clipIndex >= 0 && clipIndex < _audioTracks.length) {
-      final clip = _audioTracks[clipIndex];
-      if (clip.isMidi && _midiRecordHasChanges) {
+    final clip = clipIndex >= 0 && clipIndex < _audioTracks.length
+        ? _audioTracks[clipIndex]
+        : null;
+
+    _clearMidiRecordingRuntimeState();
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        _recordingFilePath = null;
+      });
+    } else {
+      _isRecording = false;
+      _recordingFilePath = null;
+    }
+
+    if (clip != null && clip.isMidi && hadMidiChanges) {
+      try {
         clip.midiNotes.sort((a, b) {
           final timeCmp = a.startBeat.compareTo(b.startBeat);
           if (timeCmp != 0) return timeCmp;
@@ -21902,43 +22202,57 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         } else {
           await _reloadMidiTrackLive(clip);
         }
+      } catch (error, stackTrace) {
+        debugPrint('MIDI recording engine sync failed: $error\n$stackTrace');
       }
     }
 
     if (_liveMidiEventPlaybackSupported) {
       final previewClip = _armedMidiClipOrNull()?.engineClipId ?? -1;
-      await _setLiveMidiInputTargetClipIfNeeded(previewClip, force: true);
+      try {
+        await _setLiveMidiInputTargetClipIfNeeded(previewClip, force: true);
+      } catch (error, stackTrace) {
+        debugPrint(
+          'MIDI recording preview target restore failed: $error\n$stackTrace',
+        );
+      }
     }
-
-    _midiHeldNotesByKey.clear();
-    _midiRecordNoteWallStartById.clear();
-    _suppressedLiveMidiRecordEvents.clear();
-    _midiRecordingClipEngineId = null;
-    _midiRecordingClipIndex = null;
-    _midiRecordingLiveInputArmed = false;
-    _isMidiClipRecording = false;
-    _midiRecordHasChanges = false;
-    _lastMidiRecordTransportSec = 0.0;
-
-    setState(() {
-      _isRecording = false;
-      _recordingFilePath = null;
-    });
 
     if (!keepPlaying && _isPlaying) {
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      try {
+        await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
+      } catch (error, stackTrace) {
+        debugPrint('MIDI recording transport stop failed: $error\n$stackTrace');
+      }
     }
-    if (hadMidiChanges) {
-      _scheduleProjectAutosave();
-    }
+    return hadMidiChanges;
   }
 
   Future<void> _startRecordingJuce() async {
+    final midiClipIndex = _activeMidiRecordingClipIndex();
+    if (midiClipIndex != null) {
+      await _startMidiClipRecording(midiClipIndex);
+      return;
+    }
+    final instrumentRow = resolveSelectedInstrumentLaneRecordingRow(
+      rows: _rows,
+      selectedRow: _selectedRow,
+    );
+    if (instrumentRow != null) {
+      await _startSelectedInstrumentLaneMidiRecording(
+        _rows[instrumentRow].rowId,
+      );
+      return;
+    }
     if (_isBluetoothV2Session) {
       if (!_supportsV2AudioRecording) {
         _showSmallNotice(
           'Recording is unavailable for the current audio route.',
         );
+        return;
+      }
+      if (_v2AudioSessionInvalidated) {
+        _showSmallNotice(_v2AudioSessionInvalidationNotice);
         return;
       }
       if (_selectedRow < 0 ||
@@ -21948,13 +22262,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       await _startAudioRecordingJuce();
-      return;
-    }
-    final midiClipIndex =
-        _activeMidiRecordingClipIndex() ??
-        await _ensureSelectedInstrumentLaneMidiRecordingClip();
-    if (midiClipIndex != null) {
-      await _startMidiClipRecording(midiClipIndex);
       return;
     }
     await _startAudioRecordingJuce();
@@ -43106,9 +43413,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     try {
       final result = await coordinator.selectRecordingInput(
         selection == null || selection.isEmpty ? null : selection,
+        retryAfterPlaybackRecovery: true,
       );
       if (!mounted) return;
       if (!result.succeeded) {
+        final snapshot = result.snapshot;
+        debugPrint(
+          '[MacV2InputSelection] code=${result.diagnosticCode} '
+          'generation=${result.generation}/${snapshot.generation} '
+          'intent=${snapshot.intent.name} '
+          'consistency=${snapshot.captureConsistency.name} '
+          'output=${snapshot.juce.outputDeviceName ?? 'missing'} '
+          'rate=${snapshot.juce.sampleRateHz ?? 0} '
+          'buffer=${snapshot.juce.bufferFrames ?? 0}',
+        );
         _showSmallNotice(
           L10n.translate(context, 'Selected input device is not available.'),
         );
@@ -46181,20 +46499,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
-    if (_isBluetoothV2Session) {
-      if (!_supportsV2AudioRecording) {
-        _showSmallNotice(
-          'Recording is unavailable for the current audio route.',
-        );
-        return;
-      }
-      if (_v2AudioSessionInvalidated) {
-        _showSmallNotice(_v2AudioSessionInvalidationNotice);
-        return;
-      }
-    }
     if (_recordStartVisualPending && !_isRecording) {
       _recordStartCancelRequested = true;
+      _midiRecordingGeneration.invalidate();
       if (mounted) {
         setState(() {
           _recordStartVisualPending = false;

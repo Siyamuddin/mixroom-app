@@ -91,6 +91,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final preferredSampleRates = <int?>[];
   final preferredBufferFrames = <int?>[];
   final hardwarePreferenceUpdates = <bool>[];
+  final queuedResults = <Future<AudioRouteTransitionResultV2>>[];
   final appliedIntents = <AudioRouteIntentV2>[];
   final appliedIntentGenerations = <int>[];
   final appliedOperations = <AudioRouteIntentOperationV2>[];
@@ -128,6 +129,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
     preferredSampleRates.add(preferredSampleRateHz);
     this.preferredBufferFrames.add(preferredBufferFrames);
     hardwarePreferenceUpdates.add(updateHardwarePreferences);
+    if (queuedResults.isNotEmpty) return queuedResults.removeAt(0);
     return results[generation] ?? _result(generation);
   }
 
@@ -294,6 +296,175 @@ void main() {
 
     expect(result.succeeded, isTrue);
     expect(adapter.appliedInputNames, <String?>[null]);
+    expect(adapter.inputPreferenceUpdates, <bool>[true]);
+    await coordinator.dispose();
+  });
+
+  test('retries input preference once after proven playback recovery',
+      () async {
+    final adapter = _FakeAdapter();
+    adapter.results[0] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'actual_state_unavailable',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final selection = coordinator.selectRecordingInput(
+      'Mac Microphone',
+      retryAfterPlaybackRecovery: true,
+    );
+    await _flush();
+    adapter.controller.add(
+      _event(1, 'recovered', requiresReconfiguration: true),
+    );
+
+    final result = await selection;
+    expect(result.succeeded, isTrue);
+    expect(adapter.appliedGenerations, <int>[0, 1, 1]);
+    expect(
+      adapter.appliedInputNames,
+      <String?>['Mac Microphone', null, 'Mac Microphone'],
+    );
+    expect(adapter.inputPreferenceUpdates, <bool>[true, false, true]);
+    await coordinator.dispose();
+  });
+
+  test('does not retry input preference when playback recovery fails',
+      () async {
+    final adapter = _FakeAdapter();
+    adapter.results[0] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'actual_state_unavailable',
+      ),
+    );
+    adapter.results[1] = Future.value(
+      _result(
+        1,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'actual_state_unavailable',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final selection = coordinator.selectRecordingInput(
+      'Mac Microphone',
+      retryAfterPlaybackRecovery: true,
+    );
+    await _flush();
+    adapter.controller.add(
+      _event(1, 'failed-recovery', requiresReconfiguration: true),
+    );
+
+    final result = await selection;
+    expect(result.succeeded, isFalse);
+    expect(adapter.appliedGenerations, <int>[0, 1]);
+    expect(adapter.inputPreferenceUpdates, <bool>[true, false]);
+    await coordinator.dispose();
+  });
+
+  test('does not retry input preference without a recovery event', () async {
+    final adapter = _FakeAdapter();
+    adapter.results[0] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'actual_state_unavailable',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      inputSelectionRecoveryDeadline: const Duration(milliseconds: 1),
+    );
+    await coordinator.start();
+
+    final result = await coordinator.selectRecordingInput(
+      'Mac Microphone',
+      retryAfterPlaybackRecovery: true,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(adapter.appliedGenerations, <int>[0]);
+    expect(adapter.inputPreferenceUpdates, <bool>[true]);
+    await coordinator.dispose();
+  });
+
+  test('rejects a retry made stale by another route generation', () async {
+    final adapter = _FakeAdapter();
+    final retryResult = Completer<AudioRouteTransitionResultV2>();
+    adapter.queuedResults.addAll(<Future<AudioRouteTransitionResultV2>>[
+      Future.value(
+        _result(
+          0,
+          status: AudioRouteTransitionStatusV2.failure,
+          code: 'actual_state_unavailable',
+        ),
+      ),
+      Future.value(_result(1)),
+      retryResult.future,
+    ]);
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final selection = coordinator.selectRecordingInput(
+      'Mac Microphone',
+      retryAfterPlaybackRecovery: true,
+    );
+    await _flush();
+    adapter.controller.add(
+      _event(1, 'first-recovery', requiresReconfiguration: true),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    adapter.controller.add(
+      _event(2, 'newer-route', requiresReconfiguration: true),
+    );
+    retryResult.complete(_result(1));
+
+    final result = await selection;
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'stale_generation');
+    expect(adapter.appliedGenerations.take(3), <int>[0, 1, 1]);
+    await coordinator.dispose();
+  });
+
+  test('does not retry a non-recovery input validation failure', () async {
+    final adapter = _FakeAdapter();
+    adapter.results[0] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'input_selection_unavailable',
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.selectRecordingInput(
+      'Missing Microphone',
+      retryAfterPlaybackRecovery: true,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(adapter.appliedGenerations, <int>[0]);
     expect(adapter.inputPreferenceUpdates, <bool>[true]);
     await coordinator.dispose();
   });

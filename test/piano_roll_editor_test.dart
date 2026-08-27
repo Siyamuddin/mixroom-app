@@ -884,6 +884,85 @@ void main() {
         find.byKey(const ValueKey<String>('piano_note_live')), findsOneWidget);
   });
 
+  testWidgets('playhead stays at transport position beyond a clip extension',
+      (tester) async {
+    final clip = await _buildMidiTrack(const <MidiNote>[]);
+    clip.trimEnd = const Duration(seconds: 2);
+
+    Widget editor() => _buildEditor(
+          clip: clip,
+          projectPlayheadMs: 5000,
+          isRecording: true,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        );
+
+    double renderedPlayheadX() {
+      final paints = tester.widgetList<CustomPaint>(find.byType(CustomPaint));
+      final playhead = paints.firstWhere(
+        (paint) =>
+            paint.painter.runtimeType.toString() ==
+            '_PianoRollPlayheadLinePainter',
+      );
+      return ((playhead.painter as dynamic).x as num).toDouble();
+    }
+
+    await tester.pumpWidget(editor());
+    await tester.pump(const Duration(milliseconds: 120));
+    final beforeExtensionX = renderedPlayheadX();
+
+    clip.trimEnd = const Duration(seconds: 8);
+    await tester.pumpWidget(editor());
+    await tester.pump(const Duration(milliseconds: 120));
+    final afterExtensionX = renderedPlayheadX();
+
+    expect(beforeExtensionX, greaterThan(4.0 * 56.0));
+    expect(afterExtensionX, closeTo(beforeExtensionX, 0.01));
+  });
+
+  testWidgets('playing playhead keeps advancing beyond the clip boundary',
+      (tester) async {
+    final clip = await _buildMidiTrack(const <MidiNote>[]);
+    clip.trimEnd = const Duration(seconds: 2);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        projectPlayheadMs: 2500,
+        isPlaying: true,
+        isRecording: true,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    double renderedPlayheadX() {
+      final paints = tester.widgetList<CustomPaint>(find.byType(CustomPaint));
+      final playhead = paints.firstWhere(
+        (paint) =>
+            paint.painter.runtimeType.toString() ==
+            '_PianoRollPlayheadLinePainter',
+      );
+      return ((playhead.painter as dynamic).x as num).toDouble();
+    }
+
+    final beyondBoundaryX = renderedPlayheadX();
+    await tester.pump(const Duration(milliseconds: 250));
+    final advancedX = renderedPlayheadX();
+
+    expect(beyondBoundaryX, greaterThan(4.0 * 56.0));
+    expect(advancedX, greaterThan(beyondBoundaryX + 20.0));
+  });
+
   testWidgets('locked playback advances note positions from the visual clock',
       (tester) async {
     final clip = await _buildMidiTrack(<MidiNote>[
