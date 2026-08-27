@@ -337,6 +337,7 @@ class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
     this.uid = '',
     this.channelCount = 0,
+    this.clockDomain,
     required this.name,
     required this.isBluetoothInput,
     required this.isBuiltIn,
@@ -346,6 +347,7 @@ class AudioInputDeviceInfo {
 
   final String uid;
   final int channelCount;
+  final int? clockDomain;
   final String name;
   final bool isBluetoothInput;
   final bool isBuiltIn;
@@ -356,6 +358,7 @@ class AudioInputDeviceInfo {
     return AudioInputDeviceInfo(
       uid: map['uid']?.toString() ?? '',
       channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+      clockDomain: (map['clockDomain'] as num?)?.toInt(),
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
       isBuiltIn: map['isBuiltIn'] == true,

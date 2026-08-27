@@ -17,6 +17,18 @@ void main() {
     expect(info.channelCount, 8);
   });
 
+  test('input descriptors expose CoreAudio clock identity', () {
+    final info = AudioInputDeviceInfo.fromMap(<String, dynamic>{
+      'name': 'Interface',
+      'clockDomain': 42,
+      'isBluetoothInput': false,
+      'isBuiltIn': false,
+      'isDefault': true,
+      'transport': 'external',
+    });
+
+    expect(info.clockDomain, 42);
+  });
 
   const policy = AudioInputDevicePolicy();
 

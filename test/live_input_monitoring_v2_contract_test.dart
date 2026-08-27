@@ -187,6 +187,7 @@ void main() {
     expect(intent, contains('MixroomMacMonitoringTransportIsAllowed'));
     expect(intent, contains('self.macIntentSourceFingerprintV2'));
     expect(intent, contains('monitoringClockValid'));
+    expect(intent, contains('MixroomMacMonitoringSharesClockDomain'));
     expect(intent, contains('monitoringFacts[@"active"]'));
     expect(intent, contains('monitoringFacts[@"targetRow"]'));
     expect(intent, contains('monitoringFacts[@"channelCount"]'));
@@ -195,6 +196,21 @@ void main() {
     expect(monitoringCommit, greaterThan(bridgePrepare));
   });
 
+  test('macOS monitoring UI requires verified route and clock facts', () {
+    final editor = File(editorPath).readAsStringSync();
+    final refresh = _between(
+      editor,
+      'Future<void> _refreshSystemSelectedRouteInfoV2() async {',
+      'Future<void> _refreshAndroidOutputRouteLabel(',
+    );
+    expect(refresh, contains('Platform.isMacOS'));
+    expect(refresh, contains('advertisedInput.clockDomain'));
+    expect(refresh, contains('_v2MonitoringClockCompatible'));
+    expect(
+      editor,
+      contains('!Platform.isMacOS || _v2MonitoringClockCompatible'),
+    );
+  });
 
   test('first-take channel metadata does not open the input route', () {
     final editor = File(editorPath).readAsStringSync();

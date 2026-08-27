@@ -5834,6 +5834,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool? _liveInputMonitoringEffective;
   bool _v2LiveMonitoringRequested = false;
   bool _v2LiveMonitoringTransitionInFlight = false;
+  bool _v2MonitoringClockCompatible = true;
   int? _v2LiveMonitoringTargetRowId;
   int? _v2LiveMonitoringChannelStart;
   int? _v2LiveMonitoringChannelCount;
@@ -43956,6 +43957,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (outputKind == AudioRouteKind.bluetoothOutput
             ? (advertisedInput == null ? 0 : 1)
             : advertisedInput?.channelCount ?? 0);
+    final monitoringClockCompatible =
+        !Platform.isMacOS ||
+        (advertisedInput != null &&
+            output != null &&
+            ((advertisedInput.uid.isNotEmpty &&
+                    advertisedInput.uid == output.uid) ||
+                (advertisedInput.clockDomain != null &&
+                    advertisedInput.clockDomain! > 0 &&
+                    advertisedInput.clockDomain == output.clockDomain)));
     final inputIsBluetooth = switch (input?.normalizedKind) {
       AudioRouteKindV2.bluetooth ||
       AudioRouteKindV2.bluetoothDuplex ||
@@ -43971,6 +43981,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _setStateAndRefreshProjectSettings(() {
       _audioRouteInfo = info;
       _inputDeviceInfos = advertisedInputs;
+      _v2MonitoringClockCompatible = monitoringClockCompatible;
       if (Platform.isAndroid) {
         _androidOutputRouteName = outputName.isEmpty ? null : outputName;
       }
@@ -45404,7 +45415,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _isBleedRiskRoute() {
-    final selectedInput = (_selectedDevice ?? '').trim();
+    final selectedInput = _isBluetoothV2Session
+        ? _audioRouteInfo.inputDeviceName.trim()
+        : (_selectedDevice ?? '').trim();
     final input =
         (selectedInput.isNotEmpty
                 ? selectedInput
@@ -45429,7 +45442,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildAudioRoutingStatusCard() {
-    final selectedInput = (_selectedDevice ?? '').trim();
+    final selectedInput = _isBluetoothV2Session
+        ? _audioRouteInfo.inputDeviceName.trim()
+        : (_selectedDevice ?? '').trim();
     final input = selectedInput.isEmpty
         ? (_audioRouteInfo.inputDeviceName.trim().isEmpty
               ? L10n.translate(context, 'System default input')
@@ -45639,6 +45654,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _audioRouteInfo.outputRouteKind == AudioRouteKind.wired ||
         _audioRouteInfo.outputRouteKind == AudioRouteKind.usb;
     return outputIsKnownNonBluetooth &&
+        (!Platform.isMacOS || _v2MonitoringClockCompatible) &&
         _isValidRowIndex(_selectedRow) &&
         _rows[_selectedRow].kind == TimelineRowKind.audio &&
         !_v2AudioSessionInvalidated &&

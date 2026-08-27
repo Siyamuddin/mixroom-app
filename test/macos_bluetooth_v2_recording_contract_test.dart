@@ -11,6 +11,22 @@ String _between(String source, String start, String end) {
 }
 
 void main() {
+  test('macOS monitoring requires a proven shared CoreAudio clock', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+
+    expect(plugin, contains('kAudioDevicePropertyClockDomain'));
+    expect(plugin, contains('MixroomMacMonitoringSharesClockDomain'));
+    expect(plugin, contains('@"clockDomain"'));
+    expect(
+      plugin,
+      contains(
+        'MixroomMacMonitoringSharesClockDomain(\n                     settledInput, settledOutput)',
+      ),
+    );
+  });
+
   const pluginPath = 'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m';
   const bridgePath = 'juce_audio_engine/ios/Classes/JuceBridge.mm';
   const enginePath = 'juce_audio_engine/ios/Classes/JuceEngine.cpp';

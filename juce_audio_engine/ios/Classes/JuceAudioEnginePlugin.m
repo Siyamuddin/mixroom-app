@@ -1305,6 +1305,23 @@ static NSString *MixroomRawTransportValue(UInt32 transport) {
     return [NSString stringWithFormat:@"0x%08x", (unsigned int)transport];
 }
 
+static NSNumber *MixroomCoreAudioClockDomain(AudioDeviceID deviceID) {
+    AudioObjectPropertyAddress address = {
+        kAudioDevicePropertyClockDomain,
+        kAudioObjectPropertyScopeGlobal,
+        kMixroomCoreAudioElement,
+    };
+    UInt32 clockDomain = 0;
+    UInt32 size = sizeof(clockDomain);
+    if (!AudioObjectHasProperty(deviceID, &address) ||
+        AudioObjectGetPropertyData(
+            deviceID, &address, 0, NULL, &size, &clockDomain) != noErr ||
+        clockDomain == 0) {
+        return nil;
+    }
+    return @(clockDomain);
+}
+
 static NSArray<NSDictionary<NSString *, id> *> *MixroomCoreAudioDeviceInventory(void) {
     AudioObjectPropertyAddress address = {
         kAudioHardwarePropertyDevices,
@@ -1359,6 +1376,8 @@ static NSArray<NSDictionary<NSString *, id> *> *MixroomCoreAudioDeviceInventory(
                 @"uid": uid ?: @"",
                 @"transport": @(transport),
                 @"rawTransport": MixroomRawTransportValue(transport),
+                @"clockDomain": MixroomCoreAudioClockDomain(deviceID)
+                    ?: [NSNull null],
                 @"inputChannels": MixroomCoreAudioChannelCount(
                     deviceID,
                     kAudioDevicePropertyScopeInput
@@ -1374,6 +1393,29 @@ static NSArray<NSDictionary<NSString *, id> *> *MixroomCoreAudioDeviceInventory(
     }
     free(devices);
     return status == noErr ? inventory : nil;
+}
+
+static BOOL MixroomMacMonitoringSharesClockDomain(
+    NSDictionary<NSString *, id> *input,
+    NSDictionary<NSString *, id> *output
+) {
+    if (input == nil || output == nil) {
+        return NO;
+    }
+    NSNumber *inputDeviceID = input[@"deviceID"];
+    NSNumber *outputDeviceID = output[@"deviceID"];
+    if ([inputDeviceID isKindOfClass:[NSNumber class]] &&
+        [outputDeviceID isKindOfClass:[NSNumber class]] &&
+        inputDeviceID.unsignedIntValue != kAudioObjectUnknown &&
+        inputDeviceID.unsignedIntValue == outputDeviceID.unsignedIntValue) {
+        return YES;
+    }
+    NSNumber *inputClock = input[@"clockDomain"];
+    NSNumber *outputClock = output[@"clockDomain"];
+    return [inputClock isKindOfClass:[NSNumber class]] &&
+        [outputClock isKindOfClass:[NSNumber class]] &&
+        inputClock.unsignedIntValue > 0 &&
+        inputClock.unsignedIntValue == outputClock.unsignedIntValue;
 }
 
 static NSArray<NSDictionary<NSString *, id> *> *MixroomExactDeviceMatches(
@@ -1660,6 +1702,7 @@ static NSDictionary<NSString *, id> *MixroomRouteEndpoint(
         ),
         @"uid": device[@"uid"] ?: @"",
         @"name": device[@"name"] ?: @"",
+        @"clockDomain": device[@"clockDomain"] ?: [NSNull null],
         @"channelCount": device[input ? @"inputChannels" : @"outputChannels"]
             ?: [NSNull null],
     };
@@ -1770,6 +1813,7 @@ MixroomMacV2InputDeviceInfos(void) {
             @"uid": device[@"uid"] ?: @"",
             @"name": name,
             @"channelCount": device[@"inputChannels"] ?: @0,
+            @"clockDomain": device[@"clockDomain"] ?: [NSNull null],
             @"isBluetoothInput": @(MixroomTransportIsBluetooth(transport)),
             @"isBuiltIn": @(MixroomTransportIsBuiltIn(transport)),
             @"isDefault": @([device[@"deviceID"] unsignedIntValue] ==
@@ -3466,6 +3510,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                         [output[@"transport"] unsignedIntValue]))) {
             diagnosticCode = @"monitoring_unavailable";
         } else if (monitoringIntent &&
+                   !MixroomMacMonitoringSharesClockDomain(input, output)) {
+            diagnosticCode = @"monitoring_unavailable";
+        } else if (monitoringIntent &&
                    fabs([input[@"sampleRateHz"] doubleValue] -
                         [output[@"sampleRateHz"] doubleValue]) >= 1.0) {
             diagnosticCode = @"monitoring_unavailable";
@@ -3632,7 +3679,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                   (long)outputCallbackFrames,
                   outputCallbackShapeValid);
             const BOOL monitoringClockValid = !monitoringIntent ||
-                (fabs([inputFacts[@"sampleRateHz"] doubleValue] -
+                (MixroomMacMonitoringSharesClockDomain(
+                     settledInput, settledOutput) &&
+                 fabs([inputFacts[@"sampleRateHz"] doubleValue] -
                       [duplexJuce[@"sampleRateHz"] doubleValue]) < 1.0 &&
                  [inputFacts[@"bufferFrames"] integerValue] > 0 &&
                  [duplexJuce[@"bufferFrames"] integerValue] > 0);
