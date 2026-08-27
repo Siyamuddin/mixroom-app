@@ -139,6 +139,7 @@ import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:juce_audio_engine/recording_channel_selection_v2.dart';
 import 'package:mixroom/helpers/bluetooth_implementation_session_v2.dart';
+import 'package:mixroom/helpers/mac_audio_input_preference.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -9332,6 +9333,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         if (Platform.isMacOS) {
           await _loadMacV2AudioDevices();
+          await _restoreMacV2InputPreferenceOnStartup();
         }
       }
       await _refreshPlatformCapabilities();
@@ -43468,6 +43470,74 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _macInputDeviceUID = selectionUID == null || selectionUID.isEmpty
             ? null
             : selectionUID;
+      });
+      await _persistMacV2InputPreference(selectionUID);
+    } finally {
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(
+          () => _macV2InputSelectionInFlight = false,
+        );
+      }
+    }
+  }
+
+  Future<void> _persistMacV2InputPreference(String? uid) async {
+    try {
+      final saved = await MacAudioInputPreference.saveUID(uid);
+      if (!saved) {
+        debugPrint('[MacV2InputPreference] write_failed');
+      }
+    } catch (error) {
+      debugPrint('[MacV2InputPreference] write_failed error=$error');
+    }
+  }
+
+  Future<void> _restoreMacV2InputPreferenceOnStartup() async {
+    if (!mounted || !Platform.isMacOS || !_isBluetoothV2Session) return;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null ||
+        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+      return;
+    }
+
+    String? savedUID;
+    try {
+      savedUID = await MacAudioInputPreference.loadUID();
+    } catch (error) {
+      debugPrint('[MacV2InputPreference] read_failed error=$error');
+      return;
+    }
+    if (!mounted || savedUID == null) return;
+
+    AudioInputDeviceInfo? savedDevice;
+    for (final device in _macInputDevices) {
+      if (device.uid.trim() == savedUID) {
+        savedDevice = device;
+        break;
+      }
+    }
+    if (savedDevice == null) return;
+
+    _setStateAndRefreshProjectSettings(
+      () => _macV2InputSelectionInFlight = true,
+    );
+    try {
+      final result = await coordinator.selectRecordingInput(
+        savedDevice.name.trim(),
+        inputDeviceUID: savedUID,
+      );
+      if (!mounted || !result.succeeded) {
+        if (!result.succeeded) {
+          debugPrint(
+            '[MacV2InputPreference] restore_failed '
+            'code=${result.diagnosticCode}',
+          );
+        }
+        return;
+      }
+      _setStateAndRefreshProjectSettings(() {
+        _macInputDeviceUID = savedUID;
       });
     } finally {
       if (mounted) {

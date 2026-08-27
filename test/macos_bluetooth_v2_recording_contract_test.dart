@@ -75,6 +75,83 @@ void main() {
     expect(v2Selection, isNot(contains('requestMicrophone')));
   });
 
+  test('macOS V2 restores one soft UID after startup inventory is ready', () {
+    final editor = File(editorPath).readAsStringSync();
+    final startup = _between(
+      editor,
+      'WidgetsBinding.instance.addPostFrameCallback((_) async {',
+      'await _refreshPlatformCapabilities();',
+    );
+    final coordinatorStart = startup.indexOf('await coordinator.start()');
+    final inventoryLoad = startup.indexOf('await _loadMacV2AudioDevices()');
+    final preferenceRestore = startup.indexOf(
+      'await _restoreMacV2InputPreferenceOnStartup()',
+    );
+    expect(coordinatorStart, greaterThanOrEqualTo(0));
+    expect(inventoryLoad, greaterThan(coordinatorStart));
+    expect(preferenceRestore, greaterThan(inventoryLoad));
+
+    final restore = _between(
+      editor,
+      'Future<void> _restoreMacV2InputPreferenceOnStartup() async {',
+      'List<_InputChannelRouteOption> _buildInputChannelRouteOptions',
+    );
+    expect(restore, contains('MacAudioInputPreference.loadUID()'));
+    expect(restore, contains('device.uid.trim() == savedUID'));
+    expect(restore, contains('coordinator.selectRecordingInput'));
+    expect(restore, contains('inputDeviceUID: savedUID'));
+    expect(
+      restore,
+      contains('coordinator.state != AudioRouteCoordinatorStateV2.stable'),
+    );
+    expect(
+      restore,
+      contains('coordinator.intent != AudioRouteIntentV2.playbackOnly'),
+    );
+    expect(restore, isNot(contains('retryAfterPlaybackRecovery')));
+    expect(restore, isNot(contains('MacAudioInputPreference.saveUID')));
+    expect(restore, isNot(contains('_showSmallNotice')));
+    expect(restore, isNot(contains('transitionIntent')));
+    expect(restore, isNot(contains('prepareRecordingInputs')));
+    expect(restore, isNot(contains('startRecording')));
+  });
+
+  test('macOS V2 persists only a successfully committed manual selection', () {
+    final editor = File(editorPath).readAsStringSync();
+    final selection = _between(
+      editor,
+      'Future<void> _selectMacV2InputDevice(AudioInputDeviceInfo? device) async {',
+      'Future<void> _persistMacV2InputPreference(String? uid) async {',
+    );
+    final failure = selection.indexOf('if (!result.succeeded)');
+    final committedState = selection.indexOf('_macInputDeviceUID =');
+    final persistence = selection.indexOf(
+      'await _persistMacV2InputPreference(selectionUID)',
+    );
+    expect(failure, greaterThanOrEqualTo(0));
+    expect(committedState, greaterThan(failure));
+    expect(persistence, greaterThan(committedState));
+
+    final invalidation = _between(
+      editor,
+      "case 'macV2InputPreferenceChanged':",
+      "case 'pluginEditorSpacebar':",
+    );
+    expect(invalidation, contains('_macInputDeviceUID = null'));
+    expect(invalidation, isNot(contains('MacAudioInputPreference.saveUID')));
+  });
+
+  test('macOS V2 refresh never reapplies the saved UID', () {
+    final editor = File(editorPath).readAsStringSync();
+    final refresh = _between(
+      editor,
+      'Future<void> _loadMacV2AudioDevices() async {',
+      'Widget _buildMicrophonePermissionNotice()',
+    );
+    expect(refresh, isNot(contains('_restoreMacV2InputPreferenceOnStartup')));
+    expect(refresh, isNot(contains('MacAudioInputPreference')));
+  });
+
   test('macOS recording owns an independent input and output-only JUCE route', () {
     final plugin = File(pluginPath).readAsStringSync();
     final intent = _between(
