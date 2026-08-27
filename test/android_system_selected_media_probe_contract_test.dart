@@ -28,7 +28,14 @@ void main() {
     expect(plugin, isNot(contains('systemSelectedMediaProbe')));
     expect(
       plugin,
-      contains('prepareSystemSelectedDuplexV2(generation, mode, sourceOutput)'),
+      contains(
+        'prepareSystemSelectedDuplexV2(\n'
+        '          generation,\n'
+        '          mode,\n'
+        '          sourceOutput,\n'
+        '          channelStart,\n'
+        '          channelCount,',
+      ),
     );
     expect(plugin, contains('audioLifecycleExecutorV2.execute'));
     expect(plugin, contains('TimeUnit.SECONDS.toNanos(5)'));
@@ -53,7 +60,12 @@ void main() {
     );
     expect(preparation, contains('AndroidStreamPolicyV2.BLUETOOTH_MEDIA'));
     expect(preparation, contains('AndroidStreamPolicyV2.NORMAL'));
-    expect(preparation, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
+    expect(
+      preparation,
+      contains(
+        'prepareSystemSelectedMediaDuplexV2JNI(channelStart + channelCount)',
+      ),
+    );
     expect(
       preparation,
       contains('waitForV2CallbackReadyJNI(callbackTimeoutMillis)'),
@@ -79,16 +91,25 @@ void main() {
 
   test('native open uses the normal media policy and is capture capable', () {
     expect(bridge, contains('prepareSystemSelectedMediaDuplexV2JNI'));
-    expect(engine, contains('return prepareDefaultDuplexV2Android();'));
+    expect(
+      engine,
+      contains('return prepareDefaultDuplexV2Android(inputChannels);'),
+    );
     final start = engine.indexOf(
-      'bool JuceEngine::prepareDefaultDuplexV2Android()',
+      'bool JuceEngine::prepareDefaultDuplexV2Android(int inputChannels)',
     );
     final end = engine.indexOf(
       'bool JuceEngine::prepareBluetoothDuplexV2Android',
       start,
     );
     final open = engine.substring(start, end);
-    expect(open, contains('deviceManager.initialise(\n        1,\n        2'));
+    expect(
+      open,
+      contains(
+        'deviceManager.initialise(\n        requestedInputs,\n        2',
+      ),
+    );
+    expect(open, contains('requestedInputs != inputChannels'));
     expect(open, contains('liveInputMonitoringEnabled = false'));
     expect(open, contains('androidV2RecordingPrepared = true'));
     expect(open, isNot(contains('androidV2DuplexProbePrepared')));
@@ -163,7 +184,12 @@ void main() {
       expect(
         resolver,
         contains(
-          'prepareSystemSelectedDuplexV2(generation, mode, sourceOutput)',
+          'prepareSystemSelectedDuplexV2(\n'
+          '          generation,\n'
+          '          mode,\n'
+          '          sourceOutput,\n'
+          '          channelStart,\n'
+          '          channelCount,',
         ),
       );
       expect(resolver, contains('prepareBluetoothDuplexV2('));
@@ -185,8 +211,16 @@ void main() {
         validation,
         contains('AndroidSystemSelectedDuplexReadinessV2.validate'),
       );
-      expect(engine, contains('return prepareDefaultDuplexV2Android();'));
-      expect(plugin, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
+      expect(
+        engine,
+        contains('return prepareDefaultDuplexV2Android(inputChannels);'),
+      );
+      expect(
+        plugin,
+        contains(
+          'prepareSystemSelectedMediaDuplexV2JNI(channelStart + channelCount)',
+        ),
+      );
     },
   );
 
