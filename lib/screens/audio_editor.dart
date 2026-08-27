@@ -226,7 +226,7 @@ const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
     'isSampled': true,
     'sfzAssetPath':
         'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/ElectricGuitar.sfz',
-    'outputGain': 4.0,
+    'outputGain': 2.0,
     'attackMs': 2.0,
     'releaseMs': 250.0,
   },
@@ -30687,9 +30687,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final roots = _sampleBrowserRoots.map(p.normalize).toList(growable: false)
       ..sort();
     final cacheKey = jsonEncode(<String, dynamic>{
-      'instrument_ids': catalog
-          .map((spec) => (spec['id'] as String? ?? '').trim())
-          .where((id) => id.isNotEmpty)
+      'instruments': catalog
+          .map(
+            (spec) => <String, String>{
+              'id': (spec['id'] as String? ?? '').trim(),
+              'name': (spec['name'] as String? ?? '').trim(),
+              'category': _instrumentPickerCategory(spec).trim(),
+            },
+          )
+          .where((entry) => entry['id']!.isNotEmpty)
           .toList(growable: false),
       'sample_roots': roots,
     });
@@ -30703,11 +30709,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (final spec in catalog) {
       final instrumentId = (spec['id'] as String? ?? '').trim();
       if (instrumentId.isEmpty) continue;
+      final instrumentName = (spec['name'] as String? ?? '').trim();
       final category = _instrumentPickerCategory(spec).trim();
       final bucket = category.isEmpty ? 'Other' : category;
       instrumentsByCategory
           .putIfAbsent(bucket, () => <String>[])
-          .add(instrumentId);
+          .add(
+            instrumentName.isEmpty
+                ? instrumentId
+                : '$instrumentName<$instrumentId>',
+          );
     }
     lines.add('built_in_instruments:');
     if (instrumentsByCategory.isEmpty) {

@@ -369,7 +369,7 @@ void main() {
         'pack': 'Karoryfer-Black-And-Green-Guitars-1.000',
         'name': 'Electric Guitar',
         'source_project': 'Karoryfer Black And Green Guitars',
-        'outputGain': 4.0,
+        'outputGain': 2.0,
         'attackMs': 2.0,
         'releaseMs': 250.0,
       },

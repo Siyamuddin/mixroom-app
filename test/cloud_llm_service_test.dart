@@ -667,6 +667,65 @@ void main() {
       },
     );
 
+    test('direct AI receives both production guitars and their allowed IDs',
+        () async {
+      final catalog = jsonDecode(
+        File('assets/instruments/index.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
+      final guitars = (catalog['presets'] as List<dynamic>)
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .where((entry) => entry['category'] == 'Guitars')
+          .toList(growable: false);
+      expect(guitars, hasLength(2));
+
+      final ids = guitars
+          .map((entry) => entry['id'].toString())
+          .toList(growable: false);
+      final libraryEntries = guitars
+          .map((entry) => '${entry['name']}<${entry['id']}>')
+          .join(', ');
+      late Map<String, dynamic> requestBody;
+      final client = MockClient((request) async {
+        requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'output': [
+              {
+                'type': 'function_call',
+                'name': 'informational_response',
+                'arguments': {'message': 'Done.', 'cancels_pending': false},
+              },
+            ],
+          }),
+          200,
+        );
+      });
+
+      await CloudLlmService(
+        apiKey: 'sk-test',
+        model: 'gpt-5.4-mini',
+        httpClient: client,
+      ).send(
+        conversation: const [],
+        userText: 'Create an electric guitar MIDI row.',
+        projectSnapshot: 'No occupied tracks.',
+        librarySnapshot:
+            'built_in_instruments:\n- Guitars: [$libraryEntries]',
+        clientContext: <String, dynamic>{
+          'subscription_plan': 'free',
+          'allowed_instrument_ids': ids,
+        },
+      );
+
+      final encoded = jsonEncode(requestBody);
+      for (final guitar in guitars) {
+        expect(encoded, contains(guitar['id']));
+        expect(encoded, contains(guitar['name']));
+      }
+      expect(encoded, contains('CLIENT ENTITLEMENT POLICY'));
+    });
+
     test(
       'retries direct OpenAI by dropping pending mix while retaining library snapshot',
       () async {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
@@ -4881,6 +4882,74 @@ void main() {
   });
 
   group('V3 factual preparation', () {
+    test('production guitars are valid AI instruments for swaps and MIDI', () {
+      final catalog = jsonDecode(
+        File('assets/instruments/index.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
+      final guitarEntries = (catalog['presets'] as List<dynamic>)
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .where((entry) => entry['category'] == 'Guitars')
+          .toList(growable: false);
+      expect(guitarEntries, hasLength(2));
+
+      final guitarIds = guitarEntries
+          .map((entry) => entry['id']?.toString().trim() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList(growable: false);
+      expect(
+        guitarIds,
+        containsAll(<String>[
+          'sfz.guitar.steel_acoustic',
+          'sfz.guitar.clean_electric',
+        ]),
+      );
+
+      final data = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_context().data)) as Map,
+      );
+      data['instruments'] = guitarIds;
+      data['instrument_catalog'] = guitarEntries
+          .map(
+            (entry) => <String, dynamic>{
+              'instrument_id': entry['id'],
+              'name': entry['name'],
+            },
+          )
+          .toList(growable: false);
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'production-guitars',
+        data: data,
+      );
+
+      for (final guitarId in guitarIds) {
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
+            _command('instrument', 'row.set_instrument', <String, dynamic>{
+              'row_id': 200,
+              'instrument_id': guitarId,
+            }),
+            _command('compose', 'midi.create_clip', <String, dynamic>{
+              'destination': <String, dynamic>{'row_id': 200},
+              'start_beat': 0.0,
+              'length_beats': 1.0,
+              'notes': <Map<String, dynamic>>[
+                _note(52, 0.0, 1.0),
+              ],
+            }),
+          ])),
+          context: context,
+        );
+
+        expect(prepared.actions, hasLength(2));
+        expect(prepared.actions.first.type, 'v3_row_set_instrument');
+        expect(prepared.actions.first.data['instrument_id'], guitarId);
+        expect(prepared.actions.last.type, 'midi_compose');
+        expect(prepared.actions.last.data['instrument_id'], guitarId);
+      }
+    });
+
     test('prepares exact row instrument swaps and simulates later commands',
         () {
       final plan = AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
