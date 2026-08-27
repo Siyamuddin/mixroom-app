@@ -82,7 +82,7 @@ void main() {
       expect(
         route,
         contains(
-          'openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1)',
+          'openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1, 1)',
         ),
       );
       expect(route, contains('deviceManager.initialise('));
@@ -90,7 +90,7 @@ void main() {
       expect(
         route,
         contains(
-          'deviceManager.addAudioCallback('
+          'attachAudioCallbackIfAllowed('
           'iosBluetoothDuplexProbeCallback.get())',
         ),
       );
@@ -101,7 +101,7 @@ void main() {
       );
       expect(
         route,
-        contains('deviceManager.addAudioCallback(metronomeCallback.get())'),
+        contains('attachAudioCallbackIfAllowed(metronomeCallback.get())'),
       );
       expect(route, contains('metronomeCallback->waitForFirstValidCallback'));
       expect(route, isNot(contains('startRecordingToWav')));
@@ -323,7 +323,9 @@ void main() {
       'if (isIOSIntentRouteInvalidatedV2())',
     );
     final prepare = hfp.indexOf('prepareLiveClipProcessorsForCurrentDevice()');
-    final attach = hfp.indexOf('deviceManager.addAudioCallback');
+    final attach = hfp.indexOf(
+      'attachAudioCallbackIfAllowed(iosBluetoothDuplexProbeCallback.get())',
+    );
     expect(firstTerminalCheck, greaterThanOrEqualTo(0));
     expect(prepare, -1);
     expect(firstTerminalCheck, lessThan(attach));
