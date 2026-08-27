@@ -22333,6 +22333,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
     }
     if (_isBluetoothV2Session && Platform.isAndroid) {
+      v2IntentOperation =
+          AudioRouteIntentOperationV2.systemSelectedRecording;
       final coordinator = _audioRouteCoordinatorV2;
       if (_v2AudioSessionInvalidated ||
           coordinator == null ||
@@ -22354,19 +22356,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'Recording is unavailable for the current Android audio route.',
         );
         return false;
-      }
-      switch (sourceOutput.normalizedKind) {
-        case AudioRouteKindV2.builtIn:
-          break;
-        case AudioRouteKindV2.bluetoothMedia:
-          v2IntentOperation =
-              AudioRouteIntentOperationV2.systemSelectedRecording;
-          break;
-        default:
-          _showSmallNotice(
-            'Recording is unavailable for the current Android audio route.',
-          );
-          return false;
       }
     }
     if (!await _ensureMicrophonePermissionForRecording()) {

@@ -60,6 +60,104 @@ internal class AndroidRecordingRouteV2Test {
   }
 
   @Test
+  fun systemSelectedDuplexAcceptsFactuallyVerifiedRouteKindsAndPairs() {
+    val pairs = listOf(
+      AudioDeviceInfo.TYPE_BUILTIN_MIC to AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+      AudioDeviceInfo.TYPE_USB_DEVICE to AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+      AudioDeviceInfo.TYPE_BUILTIN_MIC to AudioDeviceInfo.TYPE_USB_DEVICE,
+      AudioDeviceInfo.TYPE_USB_HEADSET to AudioDeviceInfo.TYPE_DOCK,
+      123456 to 123457,
+    )
+    for ((index, pair) in pairs.withIndex()) {
+      val selectedInput = AndroidRouteEndpointV2(
+        100 + index,
+        pair.first,
+        "input-$index",
+        1,
+      )
+      val selectedOutput = AndroidRouteEndpointV2(
+        200 + index,
+        pair.second,
+        "output-$index",
+        2,
+      )
+      val facts = validFacts().copy(
+        sourceOutput = selectedOutput,
+        actualInput = selectedInput,
+        actualOutput = selectedOutput,
+        inputStream = stream(selectedInput.id),
+        outputStream = stream(selectedOutput.id, channelCount = 2).copy(
+          performanceMode = "LowLatency",
+          sharingMode = "Exclusive",
+        ),
+      )
+      assertEquals("ok", AndroidSystemSelectedDuplexReadinessV2.validate(facts))
+    }
+  }
+
+  @Test
+  fun systemSelectedDuplexRejectsUnprovenOrChangedFacts() {
+    val facts = validFacts()
+    assertEquals(
+      "no_output",
+      AndroidSystemSelectedDuplexReadinessV2.validate(
+        facts.copy(sourceOutput = null),
+      ),
+    )
+    assertEquals(
+      "no_input",
+      AndroidSystemSelectedDuplexReadinessV2.validate(
+        facts.copy(actualInput = null),
+      ),
+    )
+    assertEquals(
+      "no_output",
+      AndroidSystemSelectedDuplexReadinessV2.validate(
+        facts.copy(actualOutput = null),
+      ),
+    )
+    assertEquals(
+      "route_unstable",
+      AndroidSystemSelectedDuplexReadinessV2.validate(
+        facts.copy(actualOutput = output.copy(id = 99)),
+      ),
+    )
+
+    val invalid = listOf(
+      facts.copy(ownedByV2 = false),
+      facts.copy(audioMode = AudioManager.MODE_IN_COMMUNICATION),
+      facts.copy(bluetoothCommunicationDeviceSelected = true),
+      facts.copy(bluetoothScoActive = true),
+      facts.copy(deviceOpen = false),
+      facts.copy(callbackAttached = false),
+      facts.copy(activeInputChannels = 0),
+      facts.copy(activeOutputChannels = 0),
+      facts.copy(sampleRateHz = 0.0),
+      facts.copy(bufferFrames = 0),
+      facts.copy(inputStream = stream(input.id).copy(available = false)),
+      facts.copy(inputStream = stream(input.id).copy(routedDeviceId = 99)),
+      facts.copy(inputStream = stream(input.id).copy(running = false)),
+      facts.copy(inputStream = stream(input.id).copy(channelCount = 2)),
+      facts.copy(inputStream = stream(input.id).copy(bufferFrames = 0)),
+      facts.copy(inputStream = stream(input.id).copy(sampleRateHz = 44100)),
+      facts.copy(outputStream = stream(output.id, 2).copy(available = false)),
+      facts.copy(outputStream = stream(output.id, 2).copy(running = false)),
+      facts.copy(outputStream = stream(output.id, 2).copy(routedDeviceId = 99)),
+      facts.copy(outputStream = stream(output.id, 1)),
+      facts.copy(outputStream = stream(output.id, 2).copy(bufferFrames = 0)),
+      facts.copy(outputStream = stream(output.id, 2).copy(streamEpoch = null)),
+    )
+    for (candidate in invalid) {
+      val expected = if (!candidate.ownedByV2) {
+        "implementation_conflict"
+      } else {
+        "actual_state_unavailable"
+      }
+      assertEquals(expected, AndroidSystemSelectedDuplexReadinessV2.validate(candidate))
+    }
+  }
+
+  @Test
   fun nonBuiltInAndChangedRoutesAreRejected() {
     val bluetooth = AndroidRouteEndpointV2(
       13,

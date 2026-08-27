@@ -68,7 +68,7 @@ void main() {
   );
 
   test(
-    'editor chooses built-in or Bluetooth recording before permission and restores on Stop',
+    'editor follows every stable Android route before permission and restores on Stop',
     () {
       final preflightStart = editor.indexOf(
         'Future<bool> _prepareAudioRecordingStartPreflight()',
@@ -82,12 +82,15 @@ void main() {
       final stopEnd = editor.indexOf('\n  Future<', stopStart + 20);
       final stop = editor.substring(stopStart, stopEnd);
 
-      expect(preflight, contains('case AudioRouteKindV2.builtIn:'));
-      expect(preflight, contains('case AudioRouteKindV2.bluetoothMedia:'));
       expect(
         preflight,
         contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
       );
+      expect(
+        preflight,
+        isNot(contains('switch (sourceOutput.normalizedKind)')),
+      );
+      expect(preflight, isNot(contains('case AudioRouteKindV2.')));
       expect(
         preflight.indexOf('getAudioRouteSnapshotV2()'),
         lessThan(

@@ -23,21 +23,19 @@ void main() {
     ).readAsStringSync();
   });
 
-  test('media recording uses the existing serialized lifecycle', () {
+  test('system-selected recording uses the existing serialized lifecycle', () {
     expect(plugin, isNot(contains('SYSTEM_SELECTED_MEDIA_PROBE')));
     expect(plugin, isNot(contains('systemSelectedMediaProbe')));
     expect(
       plugin,
-      contains('prepareSystemSelectedMediaDuplexV2(generation, mode)'),
+      contains('prepareSystemSelectedDuplexV2(generation, mode, sourceOutput)'),
     );
     expect(plugin, contains('audioLifecycleExecutorV2.execute'));
     expect(plugin, contains('TimeUnit.SECONDS.toNanos(5)'));
   });
 
-  test('media recording never selects communication routing', () {
-    final start = plugin.indexOf(
-      'private fun prepareSystemSelectedMediaDuplexV2(',
-    );
+  test('generic recording never selects communication routing', () {
+    final start = plugin.indexOf('private fun prepareSystemSelectedDuplexV2(');
     final end = plugin.indexOf(
       'private fun bluetoothCommunicationCandidatesV2(',
       start,
@@ -47,10 +45,14 @@ void main() {
     expect(preparation, contains('preparePlaybackOnlyModeV2()'));
     expect(
       preparation,
-      contains(
-        'setAndroidStreamPolicyV2(AndroidStreamPolicyV2.BLUETOOTH_MEDIA)',
-      ),
+      contains('currentOutput.fingerprint != sourceOutput.fingerprint'),
     );
+    expect(
+      preparation,
+      contains('sourceOutput.kind == AndroidRouteKindV2.BLUETOOTH_MEDIA'),
+    );
+    expect(preparation, contains('AndroidStreamPolicyV2.BLUETOOTH_MEDIA'));
+    expect(preparation, contains('AndroidStreamPolicyV2.NORMAL'));
     expect(preparation, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
     expect(
       preparation,
@@ -58,7 +60,7 @@ void main() {
     );
     expect(
       preparation,
-      contains('AndroidSystemSelectedMediaDuplexReadinessV2.validate'),
+      contains('AndroidSystemSelectedDuplexReadinessV2.validate'),
     );
     for (final forbidden in <String>[
       'setCommunicationDevice',
@@ -93,15 +95,16 @@ void main() {
     expect(open, isNot(contains('startRecordingToWav')));
   });
 
-  test('readiness preserves exact A2DP and rejects SCO', () {
+  test('readiness preserves exact output without a route-kind allowlist', () {
     expect(
       recordingRoute,
-      contains('object AndroidSystemSelectedMediaDuplexReadinessV2'),
+      contains('object AndroidSystemSelectedDuplexReadinessV2'),
     );
     expect(
       recordingRoute,
-      contains('source.kind != AndroidRouteKindV2.BLUETOOTH_MEDIA'),
+      isNot(contains('source.kind != AndroidRouteKindV2.BLUETOOTH_MEDIA')),
     );
+    expect(recordingRoute, isNot(contains('input.kind !in setOf(')));
     expect(
       recordingRoute,
       contains('output.fingerprint != source.fingerprint'),
@@ -152,10 +155,16 @@ void main() {
         contains('apiLevel >= 29 && communicationCandidateCount == 1'),
       );
       expect(resolver, contains('bluetoothCommunicationCandidatesV2'));
-      expect(resolver, contains('resolveA2dp('));
       expect(
         resolver,
-        contains('prepareSystemSelectedMediaDuplexV2(generation, mode)'),
+        contains('AndroidSystemRecordingRouteResolverV2.resolve('),
+      );
+      expect(resolver, contains('sourceKind = sourceOutput.kind'));
+      expect(
+        resolver,
+        contains(
+          'prepareSystemSelectedDuplexV2(generation, mode, sourceOutput)',
+        ),
       );
       expect(resolver, contains('prepareBluetoothDuplexV2('));
       expect(resolver, contains('communicationCandidates.single()'));
@@ -170,22 +179,19 @@ void main() {
       }
       expect(
         validation,
-        contains('AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA'),
+        contains('AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED'),
       );
       expect(
         validation,
-        contains('AndroidSystemSelectedMediaDuplexReadinessV2.validate'),
+        contains('AndroidSystemSelectedDuplexReadinessV2.validate'),
       );
       expect(engine, contains('return prepareDefaultDuplexV2Android();'));
       expect(plugin, contains('prepareSystemSelectedMediaDuplexV2JNI()'));
     },
   );
 
-  test(
-    'diagnostics identify the media-selection route without schema changes',
-    () {
-      expect(plugin, contains('"androidSystemSelectedMedia"'));
-      expect(plugin, contains('operation.mode.reportsDuplexFacts()'));
-    },
-  );
+  test('diagnostics retain the system-selected route schema', () {
+    expect(plugin, contains('"androidSystemSelectedMedia"'));
+    expect(plugin, contains('operation.mode.reportsDuplexFacts()'));
+  });
 }
