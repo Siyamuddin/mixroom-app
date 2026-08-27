@@ -14772,6 +14772,7 @@ void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
     if (isV2PlaybackSession())
     {
+        liveInputMonitoringActiveV2.store(false, std::memory_order_release);
         liveInputMonitoringEnabled = false;
         return;
     }
@@ -14788,6 +14789,71 @@ void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 bool JuceEngine::isLiveInputMonitoringEnabled() const noexcept
 {
     return liveInputMonitoringEnabled;
+}
+
+bool JuceEngine::setLiveInputMonitorTargetV2(int row,
+                                             int channelStart,
+                                             int channelCount)
+{
+#if JUCE_IOS
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int activeInputs = device == nullptr
+        ? 0
+        : device->getActiveInputChannels().countNumberOfSetBits();
+    if (!isV2PlaybackSession() || !validateRecordingRouteV2() ||
+        row < 0 || row >= (int)rows.size() || channelStart < 0 ||
+        (channelCount != 1 && channelCount != 2) ||
+        channelStart + channelCount > activeInputs)
+        return false;
+
+    liveMonitorTargetRow = row;
+    liveMonitorChannelStart = channelStart;
+    liveMonitorChannelCount = channelCount;
+    liveInputMonitoringEnabled = true;
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    syncLiveInputMonitorRoutingLocked(batchUpdate);
+    if (liveMonitorConnections.size() != channelCount)
+    {
+        liveInputMonitoringEnabled = false;
+        liveMonitorChannelCount = 0;
+        syncLiveInputMonitorRoutingLocked(batchUpdate);
+        commitGraphMutationLocked(false);
+        return false;
+    }
+    commitGraphMutationLocked(false);
+    liveInputMonitoringActiveV2.store(true, std::memory_order_release);
+    return true;
+#else
+    juce::ignoreUnused(row, channelStart, channelCount);
+    return false;
+#endif
+}
+
+void JuceEngine::disableLiveInputMonitoringV2()
+{
+#if JUCE_IOS
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
+    if (!isV2PlaybackSession())
+        return;
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    liveInputMonitoringEnabled = false;
+    liveMonitorChannelCount = 0;
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    syncLiveInputMonitorRoutingLocked(batchUpdate);
+    commitGraphMutationLocked(false);
+#endif
+}
+
+bool JuceEngine::shouldRouteLiveInputToGraphV2() const noexcept
+{
+#if JUCE_IOS
+    return isV2PlaybackSession() &&
+        liveInputMonitoringActiveV2.load(std::memory_order_acquire);
+#else
+    return false;
+#endif
 }
 
 void JuceEngine::clearLiveInputMonitorConnectionsLocked(
@@ -14933,7 +14999,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                           channelStart))
         return false;
 
-    routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
+    if (!v2Recording || !liveInputMonitoringEnabled)
+        routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
@@ -15010,6 +15077,11 @@ RealtimeWavCapture::StopResult JuceEngine::stopRecording()
     logCurrentAudioDeviceState("recording-stopped");
 #endif
     return captureResult;
+}
+
+RealtimeWavCapture::StopResult JuceEngine::finalizeRecordingCaptureV2()
+{
+    return wavCapture.stop();
 }
 
 void JuceEngine::discardRecordingCapture()

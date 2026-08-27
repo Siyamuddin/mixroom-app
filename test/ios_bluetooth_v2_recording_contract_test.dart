@@ -221,7 +221,7 @@ void main() {
     expect(recording, isNot(contains('48000')));
   });
 
-  test('HFP input is captured but never monitored through the graph', () {
+  test('only verified V2 monitoring routes input through the graph', () {
     final callbackStart = File('juce_audio_engine/ios/Classes/JuceEngine.h')
         .readAsStringSync()
         .indexOf(
@@ -232,12 +232,17 @@ void main() {
     ).readAsStringSync();
     final callback = header.substring(callbackStart);
     expect(callback, contains('engine.captureInput(inputChannelData'));
+    expect(callback, contains('engine.shouldRouteLiveInputToGraphV2()'));
     expect(
       callback,
-      contains(
-        'player.audioDeviceIOCallbackWithContext(\n            nullptr,\n            0,',
-      ),
+      contains('routeVerifiedInput ? inputChannelData : nullptr'),
     );
+    expect(
+      callback,
+      contains('routeVerifiedInput ? numInputChannels : 0'),
+    );
+    expect(engine, contains('liveInputMonitoringActiveV2.store(false'));
+    expect(engine, contains('liveInputMonitoringActiveV2.store(true'));
 
     final routeStart = engine.indexOf('void JuceEngine::routeLiveInputToRow');
     final writerStart = engine.indexOf(

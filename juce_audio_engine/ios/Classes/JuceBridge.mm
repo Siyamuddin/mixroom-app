@@ -3158,6 +3158,37 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return JuceEngine::get().validateRecordingRouteV2();
 }
 
++ (BOOL)setLiveInputMonitorTargetV2ObjC:(NSInteger)row
+                           channelStart:(NSInteger)channelStart
+                           channelCount:(NSInteger)channelCount
+{
+    __block BOOL success = NO;
+    void (^apply)(void) = ^{
+        success = JuceEngine::get().setLiveInputMonitorTargetV2(
+            static_cast<int>(row),
+            static_cast<int>(channelStart),
+            static_cast<int>(channelCount));
+    };
+    if ([NSThread isMainThread]) {
+        apply();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), apply);
+    }
+    return success;
+}
+
++ (void)disableLiveInputMonitoringV2ObjC
+{
+    void (^apply)(void) = ^{
+        JuceEngine::get().disableLiveInputMonitoringV2();
+    };
+    if ([NSThread isMainThread]) {
+        apply();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), apply);
+    }
+}
+
 + (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC
 {
     return JuceEngine::get().isBluetoothDuplexProjectCallbackReadyV2();
@@ -5845,6 +5876,21 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 + (NSDictionary<NSString *, id> *)stopRecordingObjC
 {
     const auto result = JuceEngine::get().stopRecording();
+    return @{
+        @"success" : @(result.success),
+        @"diagnosticCode" : [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()] ?: @"writer_finalize_failed",
+        @"attemptedSamples" : @(result.attemptedSamples),
+        @"acceptedSamples" : @(result.acceptedSamples),
+        @"droppedSamples" : @(result.droppedSamples),
+        @"invalidBlockCount" : @(result.invalidBlockCount),
+        @"actualSampleRate" : @(result.actualSampleRate),
+        @"channelCount" : @(result.channelCount),
+    };
+}
+
++ (NSDictionary<NSString *, id> *)finalizeRecordingForMonitoringV2ObjC
+{
+    const auto result = JuceEngine::get().finalizeRecordingCaptureV2();
     return @{
         @"success" : @(result.success),
         @"diagnosticCode" : [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()] ?: @"writer_finalize_failed",

@@ -57,6 +57,10 @@
                                        inputChannels:(NSInteger)inputChannels;
 + (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
 + (BOOL)validateRecordingRouteV2ObjC;
++ (BOOL)setLiveInputMonitorTargetV2ObjC:(NSInteger)row
+                           channelStart:(NSInteger)channelStart
+                           channelCount:(NSInteger)channelCount;
++ (void)disableLiveInputMonitoringV2ObjC;
 + (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC;
 + (void)beginIOSIntentOperationV2ObjC;
 + (void)endIOSIntentOperationV2ObjC;
@@ -385,6 +389,7 @@
 + (NSNumber *)getRecordingPeakObjC;
 
 + (NSDictionary<NSString *, id> *)stopRecordingObjC;
++ (NSDictionary<NSString *, id> *)finalizeRecordingForMonitoringV2ObjC;
 + (void)discardRecordingCaptureObjC;
 + (BOOL)isRecordingObjC;
 

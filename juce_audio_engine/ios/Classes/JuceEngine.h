@@ -6357,6 +6357,11 @@ public:
     int getNumInputChannels() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
+    bool setLiveInputMonitorTargetV2(int row,
+                                     int channelStart,
+                                     int channelCount);
+    void disableLiveInputMonitoringV2();
+    bool shouldRouteLiveInputToGraphV2() const noexcept;
     bool configureAudioDevice(double sampleRate,
                               int bufferSize,
                               int desiredInputChannels,
@@ -6387,6 +6392,7 @@ public:
     juce::NamedValueSet getIndependentInputCaptureFacts() const;
 #endif
     RealtimeWavCapture::StopResult stopRecording();
+    RealtimeWavCapture::StopResult finalizeRecordingCaptureV2();
     void discardRecordingCapture();
     bool isRecording() const;
     void captureInput(const float *const *input,
@@ -7048,6 +7054,7 @@ private:
     std::atomic<bool> audioRouteRefreshPending{false};
     std::atomic<int> ignoredDeviceChangeCallbacks{0};
     bool liveInputMonitoringEnabled = true;
+    std::atomic<bool> liveInputMonitoringActiveV2{false};
     int liveMonitorTargetRow = 0;
     int liveMonitorChannelCount = 0;
     int liveMonitorChannelStart = 0;
@@ -7400,11 +7407,17 @@ public:
         engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
         // ===============================
-        // 3️⃣ RENDER GRAPH (OUTPUT ONLY)
+        // 3️⃣ RENDER GRAPH
         // ===============================
+#if JUCE_IOS
+        const bool routeVerifiedInput =
+            engine.shouldRouteLiveInputToGraphV2();
+#else
+        constexpr bool routeVerifiedInput = false;
+#endif
         player.audioDeviceIOCallbackWithContext(
-            nullptr,
-            0,
+            routeVerifiedInput ? inputChannelData : nullptr,
+            routeVerifiedInput ? numInputChannels : 0,
             outputChannelData,
             numOutputChannels,
             numSamples,

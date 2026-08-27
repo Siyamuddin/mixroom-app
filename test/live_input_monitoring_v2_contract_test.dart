@@ -13,7 +13,7 @@ String _between(String source, String start, String end) {
 void main() {
   const editorPath = 'lib/screens/audio_editor.dart';
 
-  test('V2 monitoring is available only through the Android verified path', () {
+  test('V2 monitoring is available only through verified mobile paths', () {
     final editor = File(editorPath).readAsStringSync();
     final routingSheet = _between(
       editor,
@@ -21,7 +21,7 @@ void main() {
       'Widget _buildAudioRoutingLauncher()',
     );
 
-    expect(routingSheet, contains('_androidV2LiveMonitoringAvailable'));
+    expect(routingSheet, contains('_mobileV2LiveMonitoringAvailable'));
     expect(
       routingSheet,
       contains('final monitoringEnabled = _isBluetoothV2Session'),
@@ -56,16 +56,16 @@ void main() {
       expect(monitoringAction, contains('if (_isBluetoothV2Session)'));
       expect(
         monitoringAction,
-        contains('_setAndroidV2LiveMonitoring(enabled)'),
+        contains('_setMobileV2LiveMonitoring(enabled)'),
       );
     },
   );
 
-  test('Android monitoring is coordinator owned and Bluetooth fail closed', () {
+  test('mobile monitoring is coordinator owned and Bluetooth fail closed', () {
     final editor = File(editorPath).readAsStringSync();
     final action = _between(
       editor,
-      'Future<void> _setAndroidV2LiveMonitoring(bool enabled) async {',
+      'Future<void> _setMobileV2LiveMonitoring(bool enabled) async {',
       'Future<void> _showAudioRoutingSheet() async {',
     );
     expect(action, contains('AudioRouteIntentV2.monitoring'));
@@ -74,6 +74,56 @@ void main() {
     expect(action, contains('AudioRouteKindV2.wired'));
     expect(action, contains('AudioRouteKindV2.external'));
     expect(action, isNot(contains('AudioRouteKindV2.bluetoothMedia')));
+  });
+
+  test('iOS monitoring uses one verified non-Bluetooth duplex lifecycle', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final engine = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.cpp',
+    ).readAsStringSync();
+    final bridge = File(
+      'juce_audio_engine/ios/Classes/JuceBridge.mm',
+    ).readAsStringSync();
+
+    expect(plugin, contains('systemSelectedMonitoring'));
+    expect(plugin, contains('MixroomIOSMonitoringEndpointIsAllowed'));
+    expect(plugin, contains('MixroomIOSSystemSelectedTargetMatchesSource'));
+    expect(plugin, contains('iosIntentOperationTargetFingerprintV2'));
+    expect(plugin, contains('clockAgreement'));
+    expect(plugin, contains('setLiveInputMonitorTargetV2ObjC'));
+    expect(plugin, contains('disableLiveInputMonitoringV2ObjC'));
+    expect(plugin, contains('finalizeRecordingForMonitoringV2ObjC'));
+    expect(
+      plugin,
+      contains('prepareSystemSelectedDuplexSessionV2ObjC'),
+    );
+    expect(
+      plugin,
+      contains('openPreparedSystemSelectedDuplexRouteV2ObjC'),
+    );
+    expect(engine, contains('bool JuceEngine::setLiveInputMonitorTargetV2'));
+    expect(engine, contains('if (!v2Recording || !liveInputMonitoringEnabled)'));
+    expect(bridge, contains('finalizeRecordingCaptureV2'));
+  });
+
+  test('iOS legacy monitoring cannot bypass V2 ownership', () {
+    final engine = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.cpp',
+    ).readAsStringSync();
+    final legacyStart = engine.indexOf(
+      'void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)',
+    );
+    final v2TargetStart = engine.indexOf(
+      'bool JuceEngine::setLiveInputMonitorTargetV2',
+      legacyStart,
+    );
+    final legacy = engine.substring(legacyStart, v2TargetStart);
+
+    expect(legacy, contains('if (isV2PlaybackSession())'));
+    expect(legacy, contains('liveInputMonitoringActiveV2.store(false'));
+    expect(legacy, contains('liveInputMonitoringEnabled = false'));
   });
 
   test('Android recording reuses and returns to the monitoring route', () {
