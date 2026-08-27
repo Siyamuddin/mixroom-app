@@ -6168,7 +6168,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       'B'
     ];
     final clamped = midi.clamp(0, 127);
-    final octave = clamped ~/ 12;
+    final octave = (clamped ~/ 12) - 1;
     return '${names[clamped % 12]}$octave';
   }
 
@@ -7019,7 +7019,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       'A#',
       'B',
     ];
-    final octave = pitch ~/ 12;
+    final octave = (pitch ~/ 12) - 1;
     return '${names[pitch % 12]}$octave';
   }
 
