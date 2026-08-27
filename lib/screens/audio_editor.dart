@@ -5719,7 +5719,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<int, String> _restoredHostedInstrumentStateByClipId =
       <int, String>{};
   Future<bool>? _liveMidiPreviewRoutePrepareFuture;
-  bool _timelineMagnetEnabled = false;
+  bool _timelineMagnetEnabled = true;
   int _timelineQuantizeDivisionsPerBar = 4;
 
   bool _loopEnabled = false;
@@ -39451,7 +39451,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   height: 17,
                   colorFilter: ColorFilter.mode(
                     controls.magnetEnabled
-                        ? const Color(0xFF1194FF)
+                        ? Colors.white.withValues(alpha: 0.90)
                         : Colors.white.withValues(alpha: 0.78),
                     BlendMode.srcIn,
                   ),
@@ -85745,12 +85745,10 @@ class _TabletDesktopTopControlButtonShellState
     final hoverActive = _hovered;
     final pressed = _pressed;
     final fillColor = widget.active
-        ? const Color(0xFFF4F4F4).withValues(alpha: 0.86)
+        ? Colors.white.withValues(alpha: widget.embedded ? 0.09 : 0.08)
         : hoverActive
         ? Colors.white.withValues(alpha: widget.embedded ? 0.07 : 0.06)
         : Colors.transparent;
-    final shadowVisible = widget.active;
-
     return Semantics(
       label: widget.semanticLabel,
       button: true,
@@ -85781,18 +85779,7 @@ class _TabletDesktopTopControlButtonShellState
               decoration: BoxDecoration(
                 color: fillColor,
                 borderRadius: radius,
-                boxShadow: shadowVisible
-                    ? <BoxShadow>[
-                        BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: widget.active ? 0.16 : 0.10,
-                          ),
-                          blurRadius: widget.active ? 10 : 7,
-                          spreadRadius: widget.active ? 1 : 0,
-                          offset: Offset(0, widget.active ? 2 : 1),
-                        ),
-                      ]
-                    : const <BoxShadow>[],
+                boxShadow: const <BoxShadow>[],
               ),
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 100),

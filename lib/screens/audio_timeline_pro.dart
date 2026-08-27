@@ -406,7 +406,7 @@ class TimelineTopControlsState {
   });
 
   static const TimelineTopControlsState initial = TimelineTopControlsState(
-    magnetEnabled: false,
+    magnetEnabled: true,
     quantizeDivisionsPerBar: 4,
     quantizeLabel: '1/4',
     toolLabel: 'Select',
@@ -1691,7 +1691,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double? _cutPreviewRawMs;
   double? _cutPreviewMs;
 
-  bool _magnetEnabled = false;
+  bool _magnetEnabled = true;
   int _quantizeDivisionsPerBar = 4; // default: 1/4 note (legacy behavior)
   int? _highlightedSegmentRow;
   double? _highlightedSegmentStartMs;
@@ -5664,9 +5664,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     widget.registerRowFxRefresher?.call(_refreshRowFx);
     widget.registerRowFxPlaybackRefresher?.call(_refreshRowFxPlayback);
     _syncSelectionFromWidgetConfig();
-    _notifySnapSettingsChanged();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _notifySnapSettingsChanged();
       _emitSelectionChanged();
     });
   }
@@ -12625,12 +12625,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         child: Container(
           decoration: BoxDecoration(
             color: active
-                ? const Color.fromRGBO(244, 244, 244, 0.92)
+                ? const Color.fromRGBO(244, 244, 244, 0.24)
                 : const Color.fromRGBO(31, 37, 45, 0.88),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: active
-                  ? const Color.fromRGBO(43, 53, 63, 0.58)
+                  ? Colors.white.withValues(alpha: 0.18)
                   : Colors.white.withValues(alpha: 0.12),
               width: 1,
             ),
@@ -12641,7 +12641,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             height: size * 0.70,
             colorFilter: ColorFilter.mode(
               active
-                  ? const Color.fromRGBO(35, 45, 54, 0.96)
+                  ? const Color.fromRGBO(244, 244, 244, 0.92)
                   : const Color.fromRGBO(244, 244, 244, 0.94),
               BlendMode.srcIn,
             ),
