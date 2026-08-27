@@ -41,6 +41,14 @@
 + (void)discardMacInputRecordingV2ObjC;
 + (BOOL)isMacInputRecordingV2ObjC;
 + (NSDictionary<NSString *, id> * _Nonnull)getMacInputCaptureFactsV2ObjC;
++ (BOOL)prepareMacIndependentInputMonitoringV2ObjC:(NSInteger)row
+                                      channelCount:(NSInteger)channelCount
+                                   inputSampleRate:(double)inputSampleRate
+                                  outputSampleRate:(double)outputSampleRate
+                                  inputBlockFrames:(NSInteger)inputBlockFrames
+                                 outputBlockFrames:(NSInteger)outputBlockFrames;
++ (void)disableMacIndependentInputMonitoringV2ObjC;
++ (NSDictionary<NSString *, NSNumber *> * _Nonnull)getMacIndependentInputMonitoringFactsV2ObjC;
 #endif
 + (void)beginOutputCallbackProofV2ObjC;
 + (BOOL)waitForOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds;

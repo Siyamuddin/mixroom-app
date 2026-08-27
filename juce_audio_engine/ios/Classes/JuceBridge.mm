@@ -2730,6 +2730,10 @@ private:
         {
             callbackCount.fetch_add(1, std::memory_order_relaxed);
             callbackReady.store(true, std::memory_order_release);
+            JuceEngine::get().publishMacIndependentInputMonitoringV2(
+                captureChannels,
+                activeChannels,
+                static_cast<int>(numberFrames));
             if (captureEnabled.load(std::memory_order_acquire))
                 JuceEngine::get().captureIndependentInput(
                     captureChannels,
@@ -3083,6 +3087,47 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 {
     return namedValueStatsToNSDictionary(
         mixroomMacInputProbeV2().getCaptureFacts());
+}
+
++ (BOOL)prepareMacIndependentInputMonitoringV2ObjC:(NSInteger)row
+                                      channelCount:(NSInteger)channelCount
+                                   inputSampleRate:(double)inputSampleRate
+                                  outputSampleRate:(double)outputSampleRate
+                                  inputBlockFrames:(NSInteger)inputBlockFrames
+                                 outputBlockFrames:(NSInteger)outputBlockFrames
+{
+    __block BOOL success = NO;
+    void (^apply)(void) = ^{
+        success = JuceEngine::get().prepareMacIndependentInputMonitoringV2(
+            static_cast<int>(row),
+            static_cast<int>(channelCount),
+            inputSampleRate,
+            outputSampleRate,
+            static_cast<int>(inputBlockFrames),
+            static_cast<int>(outputBlockFrames));
+    };
+    if ([NSThread isMainThread])
+        apply();
+    else
+        dispatch_sync(dispatch_get_main_queue(), apply);
+    return success;
+}
+
++ (void)disableMacIndependentInputMonitoringV2ObjC
+{
+    void (^apply)(void) = ^{
+        JuceEngine::get().disableMacIndependentInputMonitoringV2();
+    };
+    if ([NSThread isMainThread])
+        apply();
+    else
+        dispatch_sync(dispatch_get_main_queue(), apply);
+}
+
++ (NSDictionary<NSString *, NSNumber *> *)getMacIndependentInputMonitoringFactsV2ObjC
+{
+    return namedValueStatsToNSDictionary(
+        JuceEngine::get().getMacIndependentInputMonitoringFactsV2());
 }
 
 #endif

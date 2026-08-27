@@ -3339,6 +3339,9 @@ void JuceEngine::shutdownEngine()
     requestLiveMidiPanicForAll(LiveMidiPanicMode::full);
 
     wavCapture.stop(true);
+#if JUCE_MAC && !JUCE_IOS
+    macIndependentMonitorBuffer.disableAndClear();
+#endif
 
 #if JUCE_IOS
     detachIOSBluetoothDuplexProbeCallback();
@@ -3381,6 +3384,10 @@ void JuceEngine::shutdownEngine()
     // *** IMPORTANT: clear Node::Ptr handles to old graph nodes ***
     inputNode = nullptr;
     outputNode = nullptr;
+#if JUCE_MAC && !JUCE_IOS
+    macIndependentMonitorSourceNode = nullptr;
+    macIndependentMonitorConnections.clear();
+#endif
     videoAudioNode = nullptr;
     masterGainNode = nullptr;
     masterPanNode = nullptr;
@@ -15058,6 +15065,124 @@ juce::NamedValueSet JuceEngine::getIndependentInputCaptureFacts() const
     facts.set("source", independentInputCaptureMode.load(
         std::memory_order_acquire) ? "independentInput" : "deviceInput");
     return facts;
+}
+
+bool JuceEngine::prepareMacIndependentInputMonitoringV2(
+    int row,
+    int channelCount,
+    double inputSampleRate,
+    double outputSampleRate,
+    int inputBlockFrames,
+    int outputBlockFrames)
+{
+    auto *device = deviceManager.getCurrentAudioDevice();
+    if (!engineInitialized || !isV2PlaybackSession() ||
+        v2PlaybackCallbackDetached || metronomeCallback == nullptr ||
+        macIndependentMonitorBuffer.isActive() ||
+        row < 0 || row >= (int)rows.size() ||
+        (channelCount != 1 && channelCount != 2) ||
+        inputSampleRate <= 1000.0 || outputSampleRate <= 1000.0 ||
+        std::abs(inputSampleRate - outputSampleRate) >= 1.0 ||
+        inputBlockFrames <= 0 ||
+        inputBlockFrames > MacIndependentMonitorBuffer::maxBlockFrames ||
+        outputBlockFrames <= 0 ||
+        outputBlockFrames > MacIndependentMonitorBuffer::maxBlockFrames ||
+        device == nullptr ||
+        device->getActiveInputChannels().countNumberOfSetBits() != 0 ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        std::abs(device->getCurrentSampleRate() - outputSampleRate) >= 1.0 ||
+        device->getCurrentBufferSizeSamples() != outputBlockFrames ||
+        metronomeCallback->getFirstValidCallbackCount() == 0 ||
+        std::abs(metronomeCallback->getFirstValidCallbackSampleRate() -
+                 outputSampleRate) >= 1.0 ||
+        metronomeCallback->getFirstValidCallbackFrames() != outputBlockFrames)
+        return false;
+
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (macIndependentMonitorSourceNode != nullptr ||
+        !macIndependentMonitorBuffer.configure(
+            channelCount,
+            inputSampleRate,
+            outputSampleRate,
+            inputBlockFrames,
+            outputBlockFrames))
+        return false;
+
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    ensureRowBusNodesAttached(row, batchUpdate, true);
+    auto rowInput = rows[(size_t)row].inputNode;
+    if (rowInput == nullptr)
+    {
+        commitGraphMutationLocked(false);
+        return false;
+    }
+
+    auto source = std::make_unique<MacIndependentMonitorSourceProcessor>(
+        macIndependentMonitorBuffer);
+    auto sourceNode = graph.addNode(std::move(source), std::nullopt, batchUpdate);
+    if (sourceNode == nullptr)
+    {
+        commitGraphMutationLocked(false);
+        return false;
+    }
+
+    juce::Array<juce::AudioProcessorGraph::Connection> connections;
+    for (int channel = 0; channel < channelCount; ++channel)
+    {
+        const juce::AudioProcessorGraph::Connection connection{
+            {sourceNode->nodeID, channel},
+            {rowInput->nodeID, channel},
+        };
+        if (graph.addConnection(connection, batchUpdate))
+            connections.add(connection);
+    }
+    if (connections.size() != channelCount)
+    {
+        for (const auto &connection : connections)
+            graph.removeConnection(connection, batchUpdate);
+        graph.removeNode(sourceNode->nodeID, batchUpdate);
+        commitGraphMutationLocked(false);
+        return false;
+    }
+
+    macIndependentMonitorSourceNode = sourceNode;
+    macIndependentMonitorConnections = std::move(connections);
+    commitGraphMutationLocked(false);
+    macIndependentMonitorBuffer.activate();
+    return true;
+}
+
+bool JuceEngine::publishMacIndependentInputMonitoringV2(
+    const float *const *inputs,
+    int numChannels,
+    int numSamples) noexcept
+{
+    return macIndependentMonitorBuffer.push(inputs, numChannels, numSamples);
+}
+
+void JuceEngine::disableMacIndependentInputMonitoringV2()
+{
+    macIndependentMonitorBuffer.disableAndClear();
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (macIndependentMonitorSourceNode == nullptr &&
+        macIndependentMonitorConnections.isEmpty())
+        return;
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    for (const auto &connection : macIndependentMonitorConnections)
+        graph.removeConnection(connection, batchUpdate);
+    macIndependentMonitorConnections.clear();
+    if (macIndependentMonitorSourceNode != nullptr)
+    {
+        graph.removeNode(macIndependentMonitorSourceNode->nodeID, batchUpdate);
+        macIndependentMonitorSourceNode = nullptr;
+    }
+    commitGraphMutationLocked(false);
+}
+
+juce::NamedValueSet
+JuceEngine::getMacIndependentInputMonitoringFactsV2() const
+{
+    return macIndependentMonitorBuffer.getFacts();
 }
 #endif
 
