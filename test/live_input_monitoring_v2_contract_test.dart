@@ -76,6 +76,24 @@ void main() {
     },
   );
 
+  test('monitoring ownership follows stable row identity', () {
+    final editor = File(editorPath).readAsStringSync();
+    expect(editor, contains('int? _v2LiveMonitoringTargetRowId;'));
+    expect(editor, isNot(contains('int? _v2LiveMonitoringTargetRow;')));
+    expect(editor, contains('_rowIndexForId(_v2LiveMonitoringTargetRowId!)'));
+    expect(editor, contains('_v2LiveMonitoringTargetRowId = rowId;'));
+
+    final deletion = _between(
+      editor,
+      'Future<bool> _deleteRowImpl(int row) async {',
+      'Future<void> _deleteRow(int row) async {',
+    );
+    expect(
+      deletion.indexOf('_disableV2MonitoringBeforeRemovingRow'),
+      lessThan(deletion.indexOf('JuceAudioEngine.removeRow')),
+    );
+  });
+
   test('iOS monitoring uses one verified non-Bluetooth duplex lifecycle', () {
     final plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',

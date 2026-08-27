@@ -5834,7 +5834,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool? _liveInputMonitoringEffective;
   bool _v2LiveMonitoringRequested = false;
   bool _v2LiveMonitoringTransitionInFlight = false;
-  int? _v2LiveMonitoringTargetRow;
+  int? _v2LiveMonitoringTargetRowId;
   int? _v2LiveMonitoringChannelStart;
   int? _v2LiveMonitoringChannelCount;
   static const String _kBluetoothMonitorOverridePref =
@@ -22338,8 +22338,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return false;
         }
       } else {
+        final monitoringTargetRow = _v2LiveMonitoringTargetRowId == null
+            ? -1
+            : _rowIndexForId(_v2LiveMonitoringTargetRowId!);
         final targetMatches =
-            _v2LiveMonitoringTargetRow == _selectedRow &&
+            monitoringTargetRow == _selectedRow &&
             _isValidRowIndex(_selectedRow) &&
             _rows[_selectedRow].kind == TimelineRowKind.audio &&
             _v2LiveMonitoringChannelStart ==
@@ -22814,10 +22817,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null || _v2AudioSessionInvalidated) return false;
     if ((Platform.isAndroid || Platform.isIOS) && _v2LiveMonitoringRequested) {
-      final row = _v2LiveMonitoringTargetRow;
+      final rowId = _v2LiveMonitoringTargetRowId;
       final channelStart = _v2LiveMonitoringChannelStart;
       final channelCount = _v2LiveMonitoringChannelCount;
-      if (row != null && channelStart != null && channelCount != null) {
+      final row = rowId == null ? -1 : _rowIndexForId(rowId);
+      if (row >= 0 && channelStart != null && channelCount != null) {
         final result = await coordinator.transitionIntent(
           AudioRouteIntentV2.monitoring,
           operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
@@ -45606,9 +45610,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _clearV2LiveMonitoringState() {
     _v2LiveMonitoringRequested = false;
-    _v2LiveMonitoringTargetRow = null;
+    _v2LiveMonitoringTargetRowId = null;
     _v2LiveMonitoringChannelStart = null;
     _v2LiveMonitoringChannelCount = null;
+  }
+
+  Future<bool> _disableV2MonitoringBeforeRemovingRow(int rowId) async {
+    if (_v2LiveMonitoringTargetRowId != rowId) return true;
+    if (_isRecording || _recordTransitionInFlight) return false;
+    if (!_v2LiveMonitoringActive) {
+      _clearV2LiveMonitoringState();
+      return true;
+    }
+
+    await _setV2LiveMonitoring(false);
+    final coordinator = _audioRouteCoordinatorV2;
+    return !_v2LiveMonitoringRequested &&
+        !_v2LiveMonitoringTransitionInFlight &&
+        !_v2AudioSessionInvalidated &&
+        coordinator?.state == AudioRouteCoordinatorStateV2.stable &&
+        coordinator?.intent == AudioRouteIntentV2.playbackOnly;
   }
 
   Future<void> _setV2LiveMonitoring(bool enabled) async {
@@ -45658,6 +45679,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       final row = _rows[rowIndex];
+      final rowId = row.rowId;
+      if (rowId < 0) {
+        _showSmallNotice('Monitoring is unavailable for the selected row.');
+        return;
+      }
       final selection = RecordingChannelSelectionV2(
         channelStart: row.inputChannelStart,
         channelCount: row.inputChannelCount,
@@ -45704,7 +45730,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
       _v2LiveMonitoringRequested = true;
-      _v2LiveMonitoringTargetRow = rowIndex;
+      _v2LiveMonitoringTargetRowId = rowId;
       _v2LiveMonitoringChannelStart = selection.channelStart;
       _v2LiveMonitoringChannelCount = selection.channelCount;
       await _refreshSystemSelectedRouteInfoV2();
@@ -81422,7 +81448,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       targetRow = fallbackIndex.clamp(0, _rowCount - 1).toInt();
     }
     if (targetRow < 0 || targetRow >= _rowCount) return;
-    await _deleteRowImpl(targetRow);
+    if (!await _deleteRowImpl(targetRow)) {
+      throw StateError('row_delete_failed');
+    }
     if (closesMidiEditor) {
       _closeMidiClipEditor();
     }
@@ -81430,9 +81458,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _deleteRowImpl(int row) async {
     if (row < 0 || row >= _rowCount) return false;
+    final deletingRowId = _rowIdAt(row);
+    if (deletingRowId < 0) return false;
+    if (!await _disableV2MonitoringBeforeRemovingRow(deletingRowId)) {
+      _showSmallNotice(
+        'Stop recording or restore the audio route before deleting this row.',
+      );
+      return false;
+    }
     if (_rowCount == 1) {
       await _clearRowContent(row);
-      final rowId = _rowIdAt(row);
+      final rowId = deletingRowId;
       if (rowId >= 0) {
         await JuceAudioEngine.renameRow(rowId, 'Track 1');
         await JuceAudioEngine.setRowIcon(rowId, 0);
@@ -81452,9 +81488,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       return true;
     }
-    final deletingRowId = _rowIdAt(row);
-    if (deletingRowId < 0) return false;
-
     final removedClips = _clipsForFadeResolution(
       rowIds: <int>{deletingRowId},
     ).toList(growable: false);
@@ -81493,7 +81526,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             targetRow = snapshot.originalIndex.clamp(0, _rowCount - 1);
           }
           if (targetRow < 0 || targetRow >= _rowCount) return;
-          await _deleteRowImpl(targetRow);
+          if (!await _deleteRowImpl(targetRow)) {
+            throw StateError('row_delete_failed');
+          }
           if (snapshot.closesMidiEditor) {
             _closeMidiClipEditor();
           }
