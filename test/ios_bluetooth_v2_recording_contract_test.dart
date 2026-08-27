@@ -2,7 +2,32 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+String _between(String source, String start, String end) {
+  final startIndex = source.indexOf(start);
+  final endIndex = source.indexOf(end, startIndex + start.length);
+  expect(startIndex, greaterThanOrEqualTo(0), reason: 'Missing: $start');
+  expect(endIndex, greaterThan(startIndex), reason: 'Missing: $end');
+  return source.substring(startIndex, endIndex);
+}
+
 void main() {
+  test('iOS advertises passive input capacity without route activation', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final metadata = _between(
+      plugin,
+      'else if ([call.method isEqualToString:@"getInputDeviceInfos"])',
+      'else if ([call.method isEqualToString:@"selectInputDevice"])',
+    );
+
+    expect(metadata, contains('session.availableInputs'));
+    expect(metadata, contains('input.channels.count'));
+    expect(metadata, contains('session.preferredInput'));
+    expect(metadata, isNot(contains('setCategory')));
+    expect(metadata, isNot(contains('setActive')));
+  });
+
   late String plugin;
   late String engine;
   late String editor;
@@ -237,10 +262,7 @@ void main() {
       callback,
       contains('routeVerifiedInput ? inputChannelData : nullptr'),
     );
-    expect(
-      callback,
-      contains('routeVerifiedInput ? numInputChannels : 0'),
-    );
+    expect(callback, contains('routeVerifiedInput ? numInputChannels : 0'));
     expect(engine, contains('liveInputMonitoringActiveV2.store(false'));
     expect(engine, contains('liveInputMonitoringActiveV2.store(true'));
 
@@ -572,10 +594,7 @@ void main() {
         'if (!mounted) {\n        await JuceAudioEngine.stopRecording();',
       ),
     );
-    expect(
-      start,
-      contains('_startRecordingPeakPolling();'),
-    );
+    expect(start, contains('_startRecordingPeakPolling();'));
     expect(
       start,
       contains('if (mounted &&\n          _isBluetoothV2Session &&'),

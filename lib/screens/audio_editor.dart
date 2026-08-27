@@ -9337,6 +9337,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (Platform.isMacOS) {
           await _loadMacV2AudioDevices();
         }
+        await _refreshSystemSelectedRouteInfoV2();
       }
       await _refreshPlatformCapabilities();
       if (!_isBluetoothV2Session) {
@@ -9386,6 +9387,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           setState(() => _isLoadingNextScreen = false);
           return;
         }
+        await _refreshSystemSelectedRouteInfoV2();
         if (_v2HardwareSettingsApplicationPending) {
           _v2HardwareSettingsApplicationPending = false;
           await _applyAudioEngineSettingsToNative(
@@ -43531,6 +43533,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ? null
             : selectionUID;
       });
+      await _refreshSystemSelectedRouteInfoV2();
     } finally {
       if (mounted) {
         _setStateAndRefreshProjectSettings(
@@ -43894,10 +43897,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _refreshSystemSelectedRouteInfoV2() async {
-    if (!_isBluetoothV2Session || (!Platform.isAndroid && !Platform.isIOS)) {
+    if (!_isBluetoothV2Session ||
+        !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       return;
     }
     final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    final advertisedInputs = await JuceAudioEngine.getInputDeviceInfos();
     if (!mounted) return;
 
     final output = snapshot.outputs.length == 1
@@ -43905,8 +43910,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : null;
     final input = snapshot.inputs.length == 1 ? snapshot.inputs.single : null;
     final outputName = (output?.name ?? '').trim();
-    final inputName = (input?.name ?? '').trim();
-    final inputChannelCapacity = input?.channelCount ?? 0;
     final outputKind = switch (output?.normalizedKind) {
       AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
       AudioRouteKindV2.wired => AudioRouteKind.wired,
@@ -43917,6 +43920,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
       _ => AudioRouteKind.unknown,
     };
+    AudioInputDeviceInfo? advertisedInput;
+    if (Platform.isMacOS && _macInputDeviceUID != null) {
+      for (final candidate in advertisedInputs) {
+        if (candidate.uid == _macInputDeviceUID) {
+          advertisedInput = candidate;
+          break;
+        }
+      }
+    }
+    advertisedInput ??= advertisedInputs
+        .where((candidate) => candidate.isDefault)
+        .firstOrNull;
+    if (advertisedInput == null) {
+      final expectedTransport = switch (outputKind) {
+        AudioRouteKind.speaker || AudioRouteKind.earpiece => 'builtIn',
+        AudioRouteKind.wired => 'wired',
+        AudioRouteKind.usb => 'external',
+        AudioRouteKind.bluetoothOutput => 'bluetooth',
+        _ => '',
+      };
+      final matching = advertisedInputs
+          .where((candidate) {
+            if (expectedTransport == 'bluetooth') {
+              return candidate.isBluetoothInput;
+            }
+            return candidate.transport == expectedTransport;
+          })
+          .toList(growable: false);
+      if (matching.length == 1) advertisedInput = matching.single;
+    }
+    final inputName = (input?.name ?? advertisedInput?.name ?? '').trim();
+    final inputChannelCapacity =
+        input?.channelCount ??
+        (outputKind == AudioRouteKind.bluetoothOutput
+            ? (advertisedInput == null ? 0 : 1)
+            : advertisedInput?.channelCount ?? 0);
     final inputIsBluetooth = switch (input?.normalizedKind) {
       AudioRouteKindV2.bluetooth ||
       AudioRouteKindV2.bluetoothDuplex ||
@@ -43931,11 +43970,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     _setStateAndRefreshProjectSettings(() {
       _audioRouteInfo = info;
+      _inputDeviceInfos = advertisedInputs;
       if (Platform.isAndroid) {
         _androidOutputRouteName = outputName.isEmpty ? null : outputName;
       }
       if (inputChannelCapacity > 0) {
         _numInputChannels = inputChannelCapacity;
+        _normalizeInputChannelSelection();
+      } else if (snapshot.intent == AudioRouteIntentV2.playbackOnly) {
+        _numInputChannels = 0;
         _normalizeInputChannelSelection();
       }
     });
@@ -44956,13 +44999,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _selectedChannelCount = option.channelCount;
                   if (_isValidRowIndex(_selectedRow)) {
                     _rows[_selectedRow] = _rows[_selectedRow].copyWith(
-                      inputDeviceName: _selectedDevice ?? '',
+                      inputDeviceName: _isBluetoothV2Session
+                          ? _audioRouteInfo.inputDeviceName
+                          : _selectedDevice ?? '',
                       inputChannelStart: option.channelStart,
                       inputChannelCount: option.channelCount,
                     );
                   }
                 });
-                if (_isValidRowIndex(_selectedRow)) {
+                if (!_isBluetoothV2Session && _isValidRowIndex(_selectedRow)) {
                   unawaited(
                     JuceAudioEngine.setRowMonitorTarget(
                       row: _selectedRow,

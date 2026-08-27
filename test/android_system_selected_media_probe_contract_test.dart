@@ -2,7 +2,34 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+String _between(String source, String start, String end) {
+  final startIndex = source.indexOf(start);
+  final endIndex = source.indexOf(end, startIndex + start.length);
+  expect(startIndex, greaterThanOrEqualTo(0), reason: 'Missing: $start');
+  expect(endIndex, greaterThan(startIndex), reason: 'Missing: $end');
+  return source.substring(startIndex, endIndex);
+}
+
 void main() {
+  test('Android exposes passive input capacity without opening a stream', () {
+    final plugin = File(
+      'juce_audio_engine/android/src/main/kotlin/com/mixroom/juce_audio_engine/JuceAudioEnginePlugin.kt',
+    ).readAsStringSync();
+
+    expect(plugin, contains('private fun inputDeviceInfosV2()'));
+    expect(plugin, contains('GET_DEVICES_INPUTS'));
+    expect(plugin, contains('channelCounts.maxOrNull()'));
+    expect(plugin, contains('val defaultId = matching.singleOrNull()?.id'));
+    expect(plugin, contains('"getInputDeviceInfos"'));
+    final metadata = _between(
+      plugin,
+      'private fun inputDeviceInfosV2()',
+      '@Suppress("DEPRECATION")\n  private fun bluetoothCommunicationDeviceSelectedV2',
+    );
+    expect(metadata, isNot(contains('prepareDefaultDuplexV2Android')));
+    expect(metadata, isNot(contains('prepareRecordingV2JNI')));
+  });
+
   late String plugin;
   late String recordingRoute;
   late String engine;

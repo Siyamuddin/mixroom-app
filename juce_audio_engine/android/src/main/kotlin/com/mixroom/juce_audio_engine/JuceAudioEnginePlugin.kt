@@ -971,6 +971,51 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
   }
 
+  private fun inputDeviceInfosV2(): List<Map<String, Any>> {
+    val audioManager =
+      applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    return try {
+      val devices = audioManager
+        .getDevices(AudioManager.GET_DEVICES_INPUTS)
+        .filter { it.isSource }
+      val outputKind = resolveMediaRouteV2().endpoint?.kind
+      val matching = devices.filter { device ->
+        val kind = classifyAndroidRouteKindV2(device.type)
+        when (outputKind) {
+          AndroidRouteKindV2.BLUETOOTH_MEDIA,
+          AndroidRouteKindV2.BLUETOOTH_DUPLEX ->
+            kind == AndroidRouteKindV2.BLUETOOTH_DUPLEX
+          AndroidRouteKindV2.BLUETOOTH_LE ->
+            kind == AndroidRouteKindV2.BLUETOOTH_LE ||
+              kind == AndroidRouteKindV2.BLUETOOTH_DUPLEX
+          AndroidRouteKindV2.WIRED -> kind == AndroidRouteKindV2.WIRED
+          AndroidRouteKindV2.EXTERNAL -> kind == AndroidRouteKindV2.EXTERNAL
+          AndroidRouteKindV2.BUILT_IN -> kind == AndroidRouteKindV2.BUILT_IN
+          else -> false
+        }
+      }
+      val defaultId = matching.singleOrNull()?.id
+      devices.map { device ->
+        val endpoint = device.toRouteEndpointV2()
+        mapOf(
+          "uid" to device.id.toString(),
+          "name" to device.productName?.toString().orEmpty(),
+          "channelCount" to (endpoint.channelCount ?: 0),
+          "isBluetoothInput" to
+            (endpoint.kind == AndroidRouteKindV2.BLUETOOTH_DUPLEX ||
+              endpoint.kind == AndroidRouteKindV2.BLUETOOTH_LE),
+          "isBuiltIn" to (endpoint.kind == AndroidRouteKindV2.BUILT_IN),
+          "isDefault" to (device.id == defaultId),
+          "transport" to endpoint.kind.wireValue,
+        )
+      }
+    } catch (_: SecurityException) {
+      emptyList()
+    } catch (_: IllegalStateException) {
+      emptyList()
+    }
+  }
+
   @Suppress("DEPRECATION")
   private fun bluetoothCommunicationDeviceSelectedV2(
     audioManager: AudioManager,
@@ -4782,6 +4827,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "getInputDevices" -> {
           result.success(JuceBridge.getInputDevicesJNI())
+        }
+        "getInputDeviceInfos" -> {
+          result.success(inputDeviceInfosV2())
         }
         "selectInputDevice" -> {
           result.success(JuceBridge.selectInputDeviceJNI(args.stringValue("name")))

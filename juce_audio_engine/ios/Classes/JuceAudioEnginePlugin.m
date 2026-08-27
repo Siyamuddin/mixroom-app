@@ -1005,6 +1005,9 @@ static BOOL MixroomAudioDeviceNameLooksBluetooth(NSString *name) {
         [normalized containsString:@"headset"];
 }
 
+static NSNumber *MixroomCoreAudioChannelCount(AudioDeviceID deviceID,
+                                              AudioObjectPropertyScope scope);
+
 static NSArray<NSDictionary<NSString *, id> *> *MixroomMacInputDeviceInfos(void) {
     AudioObjectPropertyAddress address = {
         kAudioHardwarePropertyDevices,
@@ -1050,6 +1053,10 @@ static NSArray<NSDictionary<NSString *, id> *> *MixroomMacInputDeviceInfos(void)
                 MixroomAudioDeviceNameLooksBluetooth(name);
             [infos addObject:@{
                 @"name": name,
+                @"channelCount": MixroomCoreAudioChannelCount(
+                    deviceID,
+                    kAudioDevicePropertyScopeInput
+                ) ?: @0,
                 @"isBluetoothInput": @(isBluetooth),
                 @"isBuiltIn": @(MixroomTransportIsBuiltIn(transport)),
                 @"isDefault": @(deviceID == defaultInput),
@@ -1762,6 +1769,7 @@ MixroomMacV2InputDeviceInfos(void) {
         [infos addObject:@{
             @"uid": device[@"uid"] ?: @"",
             @"name": name,
+            @"channelCount": device[@"inputChannels"] ?: @0,
             @"isBluetoothInput": @(MixroomTransportIsBluetooth(transport)),
             @"isBuiltIn": @(MixroomTransportIsBuiltIn(transport)),
             @"isDefault": @([device[@"deviceID"] unsignedIntValue] ==
@@ -8058,14 +8066,36 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
             ? MixroomMacV2InputDeviceInfos()
             : MixroomMacInputDeviceInfos());
 #else
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        NSArray<AVAudioSessionPortDescription *> *availableInputs =
+            session.availableInputs ?: @[];
+        AVAudioSessionPortDescription *preferredInput = session.preferredInput;
+        AVAudioSessionPortDescription *routedInput =
+            session.currentRoute.inputs.count == 1
+                ? session.currentRoute.inputs.firstObject
+                : nil;
         NSMutableArray *infos = [NSMutableArray array];
-        for (NSString *name in [JuceBridge getInputDevicesObjC]) {
+        for (AVAudioSessionPortDescription *input in availableInputs) {
+            NSString *portType = input.portType ?: @"";
+            const BOOL isDefault =
+                (preferredInput != nil &&
+                 [preferredInput.UID isEqualToString:input.UID]) ||
+                (preferredInput == nil && routedInput != nil &&
+                 [routedInput.UID isEqualToString:input.UID]) ||
+                (preferredInput == nil && routedInput == nil &&
+                 availableInputs.count == 1);
             [infos addObject:@{
-                @"name": name ?: @"",
-                @"isBluetoothInput": @NO,
-                @"isBuiltIn": @NO,
-                @"isDefault": @NO,
-                @"transport": @"unknown",
+                @"uid": input.UID ?: @"",
+                @"name": input.portName ?: @"",
+                @"channelCount": input.channels == nil
+                    ? @0 : @(input.channels.count),
+                @"isBluetoothInput": @(
+                    [portType isEqualToString:AVAudioSessionPortBluetoothHFP] ||
+                    [portType isEqualToString:AVAudioSessionPortBluetoothLE]),
+                @"isBuiltIn": @(
+                    [portType isEqualToString:AVAudioSessionPortBuiltInMic]),
+                @"isDefault": @(isDefault),
+                @"transport": MixroomIOSRouteKind(portType),
             }];
         }
         result(infos);

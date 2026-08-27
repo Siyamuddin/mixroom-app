@@ -3,6 +3,21 @@ import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:mixroom/helpers/audio_input_device_policy.dart';
 
 void main() {
+  test('input descriptors expose advertised capacity', () {
+    final info = AudioInputDeviceInfo.fromMap(<String, dynamic>{
+      'uid': 'input-uid',
+      'name': 'Interface',
+      'channelCount': 8,
+      'isBluetoothInput': false,
+      'isBuiltIn': false,
+      'isDefault': true,
+      'transport': 'external',
+    });
+
+    expect(info.channelCount, 8);
+  });
+
+
   const policy = AudioInputDevicePolicy();
 
   const builtIn = AudioInputDeviceInfo(

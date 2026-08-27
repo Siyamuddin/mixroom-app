@@ -195,6 +195,27 @@ void main() {
     expect(monitoringCommit, greaterThan(bridgePrepare));
   });
 
+
+  test('first-take channel metadata does not open the input route', () {
+    final editor = File(editorPath).readAsStringSync();
+    final refresh = _between(
+      editor,
+      'Future<void> _refreshSystemSelectedRouteInfoV2() async {',
+      'Future<void> _refreshAndroidOutputRouteLabel(',
+    );
+    expect(refresh, contains('JuceAudioEngine.getInputDeviceInfos()'));
+    expect(refresh, contains('advertisedInput?.channelCount'));
+    expect(refresh, isNot(contains('prepareRecordingInputs')));
+    expect(refresh, isNot(contains('transitionIntent')));
+
+    final selector = _between(
+      editor,
+      'Widget _buildInputChannelRouteSelector() {',
+      'Widget _buildDawAudioEngineSettingsControls() {',
+    );
+    expect(selector, contains('if (!_isBluetoothV2Session'));
+  });
+
   test('macOS monitoring cleanup gates the bridge before route teardown', () {
     final plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',

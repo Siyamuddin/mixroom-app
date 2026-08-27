@@ -336,6 +336,7 @@ class AudioRouteInfo {
 class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
     this.uid = '',
+    this.channelCount = 0,
     required this.name,
     required this.isBluetoothInput,
     required this.isBuiltIn,
@@ -344,6 +345,7 @@ class AudioInputDeviceInfo {
   });
 
   final String uid;
+  final int channelCount;
   final String name;
   final bool isBluetoothInput;
   final bool isBuiltIn;
@@ -353,6 +355,7 @@ class AudioInputDeviceInfo {
   factory AudioInputDeviceInfo.fromMap(Map<String, dynamic> map) {
     return AudioInputDeviceInfo(
       uid: map['uid']?.toString() ?? '',
+      channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
       isBuiltIn: map['isBuiltIn'] == true,
