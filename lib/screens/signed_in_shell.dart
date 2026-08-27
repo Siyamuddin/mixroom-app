@@ -2201,6 +2201,8 @@ class _HomeAccountPlansSection extends StatelessWidget {
                 regionCode: regionCode,
                 platformProvider: _provider(regionCode),
                 onOpenAccountPlans: onOpenAccountPlans,
+                scrollbarGutter: 14,
+                railEdgeInset: 6,
               ),
             ],
           ),

@@ -952,6 +952,8 @@ class AccountPlansCarousel extends StatelessWidget {
     required this.regionCode,
     required this.platformProvider,
     required this.onOpenAccountPlans,
+    this.scrollbarGutter = 0,
+    this.railEdgeInset = 6,
   });
 
   final EntitlementService entitlementService;
@@ -960,6 +962,8 @@ class AccountPlansCarousel extends StatelessWidget {
   final String regionCode;
   final BillingProvider platformProvider;
   final VoidCallback onOpenAccountPlans;
+  final double scrollbarGutter;
+  final double railEdgeInset;
 
   @override
   Widget build(BuildContext context) {
@@ -981,6 +985,8 @@ class AccountPlansCarousel extends StatelessWidget {
       onManageSubscription: ({provider, managementChannel}) =>
           onOpenAccountPlans(),
       onSelectProduct: (_) => onOpenAccountPlans(),
+      scrollbarGutter: scrollbarGutter,
+      railEdgeInset: railEdgeInset,
     );
   }
 }
@@ -996,6 +1002,8 @@ class _PlansPanel extends StatefulWidget {
     required this.isBusy,
     required this.onManageSubscription,
     required this.onSelectProduct,
+    this.scrollbarGutter = 0,
+    this.railEdgeInset = 6,
   });
 
   final EntitlementSnapshot entitlement;
@@ -1007,6 +1015,8 @@ class _PlansPanel extends StatefulWidget {
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
   final ValueChanged<BillingProductDefinition> onSelectProduct;
+  final double scrollbarGutter;
+  final double railEdgeInset;
 
   @override
   State<_PlansPanel> createState() => _PlansPanelState();
@@ -1015,6 +1025,8 @@ class _PlansPanel extends StatefulWidget {
 class _PlansPanelState extends State<_PlansPanel> {
   final ScrollController _plansScrollController = ScrollController();
   final FocusNode _plansFocusNode = FocusNode(debugLabel: 'billing_plans');
+  double _currentCardStep = 0;
+  int _currentCardCount = 0;
 
   @override
   void dispose() {
@@ -1078,18 +1090,76 @@ class _PlansPanelState extends State<_PlansPanel> {
                 const cardGap = 10.0;
                 final contentWidth = (constraints.maxWidth - railPadding * 2)
                     .clamp(0.0, double.infinity);
-                final visibleCardCount = contentWidth >= 740
+                final usableContentWidth =
+                    (contentWidth - widget.railEdgeInset * 2).clamp(
+                      0.0,
+                      double.infinity,
+                    );
+                final visibleCardCount = usableContentWidth >= 740
                     ? 3
-                    : contentWidth >= 500
+                    : usableContentWidth >= 500
                     ? 2
                     : 1;
                 final cardWidth = visibleCardCount == 1
-                    ? contentWidth
-                    : ((contentWidth - cardGap * (visibleCardCount - 1)) /
+                    ? usableContentWidth
+                    : ((usableContentWidth - cardGap * (visibleCardCount - 1)) /
                               visibleCardCount)
                           .clamp(224.0, 264.0);
                 final cardStep = cardWidth + cardGap;
-                final scrollbarGutter = visibleCardCount == 1 ? 18.0 : 6.0;
+                final cardCenteringInset = (contentWidth - cardWidth) / 2;
+                final centeredRailInset =
+                    cardCenteringInset > widget.railEdgeInset
+                    ? cardCenteringInset
+                    : widget.railEdgeInset;
+                _currentCardStep = cardStep;
+                _currentCardCount = cards.length;
+                final scrollbarGutter = widget.scrollbarGutter;
+                final plansScrollView = SingleChildScrollView(
+                  controller: _plansScrollController,
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  clipBehavior: Clip.hardEdge,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: centeredRailInset,
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final entry in cards.asMap().entries) ...[
+                          SizedBox(
+                            width: cardWidth,
+                            height: 450,
+                            child: _PlanListRow(
+                              data: entry.value,
+                              planIsCurrent: _isCurrentPlanCard(entry.value),
+                              priceLabel: _priceLabelForCard(
+                                context,
+                                entry.value,
+                              ),
+                              billingCaption: _billingCaptionForCard(
+                                context,
+                                entry.value,
+                              ),
+                              isBusy: widget.isBusy,
+                              productActions: _productActionsForCard(
+                                context,
+                                entry.value,
+                              ),
+                              fallbackAction: _fallbackActionForCard(
+                                context,
+                                entry.value,
+                                _isCurrentPlanCard(entry.value),
+                              ),
+                            ),
+                          ),
+                          if (entry.key != cards.length - 1)
+                            const SizedBox(width: cardGap),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
 
                 return Container(
                   padding: const EdgeInsets.fromLTRB(
@@ -1113,57 +1183,26 @@ class _PlansPanelState extends State<_PlansPanel> {
                       }
                       return false;
                     },
-                    child: Scrollbar(
-                      controller: _plansScrollController,
-                      notificationPredicate: (notification) =>
-                          notification.metrics.axis == Axis.horizontal,
-                      child: SizedBox(
-                        height: 450 + scrollbarGutter,
-                        child: SingleChildScrollView(
-                          controller: _plansScrollController,
-                          scrollDirection: Axis.horizontal,
-                          physics: const BouncingScrollPhysics(),
-                          clipBehavior: Clip.hardEdge,
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    child: scrollbarGutter > 0
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              for (final entry in cards.asMap().entries) ...[
-                                SizedBox(
-                                  width: cardWidth,
-                                  height: 450,
-                                  child: _PlanListRow(
-                                    data: entry.value,
-                                    planIsCurrent: _isCurrentPlanCard(
-                                      entry.value,
-                                    ),
-                                    priceLabel: _priceLabelForCard(
-                                      context,
-                                      entry.value,
-                                    ),
-                                    billingCaption: _billingCaptionForCard(
-                                      context,
-                                      entry.value,
-                                    ),
-                                    isBusy: widget.isBusy,
-                                    productActions: _productActionsForCard(
-                                      context,
-                                      entry.value,
-                                    ),
-                                    fallbackAction: _fallbackActionForCard(
-                                      context,
-                                      entry.value,
-                                      _isCurrentPlanCard(entry.value),
-                                    ),
-                                  ),
-                                ),
-                                if (entry.key != cards.length - 1)
-                                  const SizedBox(width: cardGap),
-                              ],
+                              SizedBox(height: 450, child: plansScrollView),
+                              SizedBox(height: scrollbarGutter),
+                              _PlanRailProgressIndicator(
+                                controller: _plansScrollController,
+                              ),
                             ],
+                          )
+                        : Scrollbar(
+                            controller: _plansScrollController,
+                            notificationPredicate: (notification) =>
+                                notification.metrics.axis == Axis.horizontal,
+                            child: SizedBox(
+                              height: 450,
+                              child: plansScrollView,
+                            ),
                           ),
-                        ),
-                      ),
-                    ),
                   ),
                 );
               },
@@ -1202,20 +1241,16 @@ class _PlansPanelState extends State<_PlansPanel> {
   }
 
   List<double> _planSnapPoints(ScrollPosition position, {double? cardStep}) {
-    final step =
-        cardStep ?? _planCardStepForViewport(position.viewportDimension);
+    final step = cardStep ?? _currentCardStep;
     if (step <= 0) return <double>[position.minScrollExtent];
 
-    final points = <double>[position.minScrollExtent];
-    var next = position.minScrollExtent + step;
-    while (next < position.maxScrollExtent - 0.5) {
-      points.add(next);
-      next += step;
-    }
-    if ((points.last - position.maxScrollExtent).abs() > 0.5) {
-      points.add(position.maxScrollExtent);
-    }
-    return points;
+    return List<double>.generate(
+      _currentCardCount,
+      (index) => (position.minScrollExtent + index * step).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      ),
+    );
   }
 
   int _nearestSnapPointIndex(List<double> points, double pixels) {
@@ -1240,21 +1275,6 @@ class _PlansPanelState extends State<_PlansPanel> {
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
     );
-  }
-
-  double _planCardStepForViewport(double viewportWidth) {
-    const cardGap = 10.0;
-    final visibleCardCount = viewportWidth >= 740
-        ? 3
-        : viewportWidth >= 500
-        ? 2
-        : 1;
-    final cardWidth = visibleCardCount == 1
-        ? viewportWidth
-        : ((viewportWidth - cardGap * (visibleCardCount - 1)) /
-                  visibleCardCount)
-              .clamp(224.0, 264.0);
-    return cardWidth + cardGap;
   }
 
   String? _storePriceForProduct(
@@ -2335,6 +2355,72 @@ String _advancedPromptReadout(
     return _t(context, 'Enhanced reasoning');
   }
   return _t(context, 'Premium reasoning');
+}
+
+class _PlanRailProgressIndicator extends StatelessWidget {
+  const _PlanRailProgressIndicator({required this.controller});
+
+  final ScrollController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 3,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) {
+              if (!controller.hasClients) {
+                return const SizedBox.shrink();
+              }
+              final position = controller.position;
+              final totalExtent =
+                  position.maxScrollExtent + position.viewportDimension;
+              final thumbFraction = totalExtent <= 0
+                  ? 1.0
+                  : (position.viewportDimension / totalExtent).clamp(0.0, 1.0);
+              final thumbWidth = (constraints.maxWidth * thumbFraction).clamp(
+                36.0,
+                constraints.maxWidth,
+              );
+              final travel = constraints.maxWidth - thumbWidth;
+              final progress = position.maxScrollExtent <= 0
+                  ? 0.0
+                  : (position.pixels / position.maxScrollExtent).clamp(
+                      0.0,
+                      1.0,
+                    );
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: travel * progress,
+                    top: 0,
+                    bottom: 0,
+                    width: thumbWidth,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.42),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _PlanListRow extends StatelessWidget {
