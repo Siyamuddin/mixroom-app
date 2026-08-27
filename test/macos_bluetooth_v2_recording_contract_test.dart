@@ -461,9 +461,15 @@ void main() {
       contains('outputSnapshotIsValid(snapshot, restoredOutput ?: candidate)'),
     );
     expect(restore, contains('MixroomMonotonicMilliseconds() + 2000.0'));
-    expect(restore, contains('MixroomOutputFingerprint(candidate)'));
+    expect(restore, contains('MixroomOutputFingerprint(candidatePlan)'));
     expect(restore, contains('currentProfileValid'));
     expect(restore, contains('sourceProfileRestored'));
+    expect(
+      restore,
+      contains(
+        'snapshotValid && currentProfileValid && sourceProfileRestored &&',
+      ),
+    );
     expect(restore, contains('macIntentSourceFingerprintV2'));
     expect(restore, isNot(contains('waitUntilDate')));
     expect(restore, isNot(contains('sleep')));
@@ -490,7 +496,8 @@ void main() {
     );
     final eventEmitter = _between(
       plugin,
-      '- (void)emitMacIntentRouteInvalidationEventV2:(BOOL)recordingWasActive {',
+      '- (void)emitMacIntentRouteInvalidationEventV2:(BOOL)recordingWasActive\n'
+          '                           monitoringWasActive:(BOOL)monitoringWasActive {',
       '- (BOOL)startMacIndependentInputRecordingV2:',
     );
 

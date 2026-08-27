@@ -15101,6 +15101,7 @@ bool JuceEngine::prepareMacIndependentInputMonitoringV2(
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     if (macIndependentMonitorSourceNode != nullptr ||
         !macIndependentMonitorBuffer.configure(
+            row,
             channelCount,
             inputSampleRate,
             outputSampleRate,

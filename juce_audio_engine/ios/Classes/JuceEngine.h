@@ -1697,13 +1697,14 @@ public:
     static constexpr int maxBlockFrames = 8192;
     static constexpr int storageFrames = maxBlockFrames * 8;
 
-    bool configure(int requestedChannels,
+    bool configure(int requestedRow,
+                   int requestedChannels,
                    double inputSampleRate,
                    double outputSampleRate,
                    int inputBlockFrames,
                    int outputBlockFrames) noexcept
     {
-        if (active.load(std::memory_order_acquire) ||
+        if (active.load(std::memory_order_acquire) || requestedRow < 0 ||
             requestedChannels < 1 || requestedChannels > 2 ||
             inputSampleRate <= 1000.0 || outputSampleRate <= 1000.0 ||
             std::abs(inputSampleRate - outputSampleRate) >= 1.0 ||
@@ -1714,6 +1715,7 @@ public:
         generation.fetch_add(1, std::memory_order_acq_rel);
         readPosition.store(0, std::memory_order_relaxed);
         writePosition.store(0, std::memory_order_relaxed);
+        targetRow.store(requestedRow, std::memory_order_relaxed);
         channelCount.store(requestedChannels, std::memory_order_relaxed);
         inputBlockLimit.store(inputBlockFrames, std::memory_order_relaxed);
         outputBlockLimit.store(outputBlockFrames, std::memory_order_relaxed);
@@ -1879,6 +1881,7 @@ public:
         const auto write = writePosition.load(std::memory_order_acquire);
         juce::NamedValueSet facts;
         facts.set("active", isActive());
+        facts.set("targetRow", targetRow.load(std::memory_order_relaxed));
         facts.set("channelCount", channelCount.load(std::memory_order_relaxed));
         facts.set("capacityFrames", capacity.load(std::memory_order_relaxed));
         facts.set("bufferedFrames", (juce::int64)(write >= read ? write - read : 0));
@@ -1897,6 +1900,7 @@ private:
     std::atomic<std::uint64_t> readPosition{0};
     std::atomic<std::uint64_t> writePosition{0};
     std::atomic<int> channelCount{0};
+    std::atomic<int> targetRow{-1};
     std::atomic<int> inputBlockLimit{0};
     std::atomic<int> outputBlockLimit{0};
     std::atomic<int> capacity{0};

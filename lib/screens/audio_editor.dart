@@ -12930,7 +12930,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : _globalAudioClock;
     final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
     final interruptedMidiHadChanges = _endMidiRecordingForV2SafetyBoundary();
-    _clearMobileV2LiveMonitoringState();
+    _clearV2LiveMonitoringState();
     _v2AudioSessionInvalidationNotice = notice;
     _v2AudioSessionInvalidated = true;
     _v2AudioSessionRecoveryInProgress = true;
@@ -22344,29 +22344,37 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
-    if (_mobileV2LiveMonitoringActive) {
-      final targetMatches =
-          _v2LiveMonitoringTargetRow == _selectedRow &&
-          _isValidRowIndex(_selectedRow) &&
-          _rows[_selectedRow].kind == TimelineRowKind.audio &&
-          _v2LiveMonitoringChannelStart ==
-              _rows[_selectedRow].inputChannelStart &&
-          _v2LiveMonitoringChannelCount ==
-              _rows[_selectedRow].inputChannelCount;
-      if (targetMatches) {
-        _preparedRecordingChannelStart = _v2LiveMonitoringChannelStart!;
-        _preparedRecordingChannelCount = _v2LiveMonitoringChannelCount!;
-        return true;
-      }
-      await _setMobileV2LiveMonitoring(false);
-      if (_audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
-        return false;
+    if (_v2LiveMonitoringActive) {
+      if (Platform.isMacOS) {
+        await _setV2LiveMonitoring(false);
+        if (_audioRouteCoordinatorV2?.intent !=
+            AudioRouteIntentV2.playbackOnly) {
+          return false;
+        }
+      } else {
+        final targetMatches =
+            _v2LiveMonitoringTargetRow == _selectedRow &&
+            _isValidRowIndex(_selectedRow) &&
+            _rows[_selectedRow].kind == TimelineRowKind.audio &&
+            _v2LiveMonitoringChannelStart ==
+                _rows[_selectedRow].inputChannelStart &&
+            _v2LiveMonitoringChannelCount ==
+                _rows[_selectedRow].inputChannelCount;
+        if (targetMatches) {
+          _preparedRecordingChannelStart = _v2LiveMonitoringChannelStart!;
+          _preparedRecordingChannelCount = _v2LiveMonitoringChannelCount!;
+          return true;
+        }
+        await _setV2LiveMonitoring(false);
+        if (_audioRouteCoordinatorV2?.intent !=
+            AudioRouteIntentV2.playbackOnly) {
+          return false;
+        }
       }
     }
     var v2IntentOperation = AudioRouteIntentOperationV2.standard;
     if (_isBluetoothV2Session && Platform.isMacOS) {
-      v2IntentOperation =
-          AudioRouteIntentOperationV2.systemSelectedRecording;
+      v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
     }
     if (_isBluetoothV2Session && Platform.isAndroid) {
       v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
@@ -22791,7 +22799,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           !_isRecording &&
           !_v2AudioSessionInvalidated &&
           _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly &&
-          !_mobileV2LiveMonitoringActive) {
+          !_v2LiveMonitoringActive) {
         await _restoreV2PlaybackOnlyAfterRecording();
       }
       if (!_isRecording) {
@@ -22819,8 +22827,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _restoreV2RouteAfterAudioRecording() async {
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null || _v2AudioSessionInvalidated) return false;
-    if ((Platform.isAndroid || Platform.isIOS) &&
-        _v2LiveMonitoringRequested) {
+    if ((Platform.isAndroid || Platform.isIOS) && _v2LiveMonitoringRequested) {
       final row = _v2LiveMonitoringTargetRow;
       final channelStart = _v2LiveMonitoringChannelStart;
       final channelCount = _v2LiveMonitoringChannelCount;
@@ -22837,7 +22844,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return true;
         }
       }
-      _clearMobileV2LiveMonitoringState();
+      _clearV2LiveMonitoringState();
     }
     return _restoreV2PlaybackOnlyAfterRecording();
   }
@@ -45018,7 +45025,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
             )
             .toList(),
-        onChanged: _isRecording || _mobileV2LiveMonitoringActive
+        onChanged: _isRecording || _v2LiveMonitoringActive
             ? null
             : (option) {
                 if (option == null) return;
@@ -45620,8 +45627,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _setRoutingSheetMonitoring(bool enabled) async {
     if (_isBluetoothV2Session) {
-      if (Platform.isAndroid || Platform.isIOS) {
-        await _setMobileV2LiveMonitoring(enabled);
+      if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
+        await _setV2LiveMonitoring(enabled);
       } else {
         _showSmallNotice(
           'Monitoring is unavailable for the current audio route.',
@@ -45638,20 +45645,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mounted) setState(() {});
   }
 
-  bool get _mobileV2LiveMonitoringActive =>
+  bool get _v2LiveMonitoringActive =>
       _isBluetoothV2Session &&
-      (Platform.isAndroid || Platform.isIOS) &&
+      (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) &&
       _v2LiveMonitoringRequested &&
       (_audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.monitoring ||
           _audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.recording);
 
-  bool get _mobileV2LiveMonitoringAvailable {
+  bool get _v2LiveMonitoringAvailable {
     if (!_isBluetoothV2Session ||
-        !(Platform.isAndroid || Platform.isIOS)) {
+        !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       return false;
     }
     final coordinator = _audioRouteCoordinatorV2;
-    if (_mobileV2LiveMonitoringActive) {
+    if (_v2LiveMonitoringActive) {
       return !_isRecording &&
           !_recordStartVisualPending &&
           !_recordTransitionInFlight &&
@@ -45679,22 +45686,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             coordinator.intent == AudioRouteIntentV2.monitoring);
   }
 
-  void _clearMobileV2LiveMonitoringState() {
+  void _clearV2LiveMonitoringState() {
     _v2LiveMonitoringRequested = false;
     _v2LiveMonitoringTargetRow = null;
     _v2LiveMonitoringChannelStart = null;
     _v2LiveMonitoringChannelCount = null;
   }
 
-  Future<void> _setMobileV2LiveMonitoring(bool enabled) async {
+  Future<void> _setV2LiveMonitoring(bool enabled) async {
     if (_v2LiveMonitoringTransitionInFlight) return;
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null ||
         !_isBluetoothV2Session ||
-        !(Platform.isAndroid || Platform.isIOS)) {
+        !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       return;
     }
-    if (enabled && !_mobileV2LiveMonitoringAvailable) {
+    if (enabled && !_v2LiveMonitoringAvailable) {
       _showSmallNotice(
         'Monitoring is unavailable for the current audio route.',
       );
@@ -45704,14 +45711,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mounted) setState(() {});
     try {
       if (!enabled) {
-        if (!_mobileV2LiveMonitoringActive) {
-          _clearMobileV2LiveMonitoringState();
+        if (!_v2LiveMonitoringActive) {
+          _clearV2LiveMonitoringState();
           return;
         }
         final result = await coordinator.transitionIntent(
           AudioRouteIntentV2.playbackOnly,
         );
-        _clearMobileV2LiveMonitoringState();
+        _clearV2LiveMonitoringState();
         if (!result.succeeded) {
           await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
           _v2AudioSessionInvalidated = true;
@@ -45763,7 +45770,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (!result.succeeded ||
           result.snapshot.intent != AudioRouteIntentV2.monitoring) {
-        _clearMobileV2LiveMonitoringState();
+        _clearV2LiveMonitoringState();
         if (coordinator.state == AudioRouteCoordinatorStateV2.failed) {
           await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
           _v2AudioSessionInvalidated = true;
@@ -45810,9 +45817,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
             final monitoringAvailable =
-                !_isBluetoothV2Session || _mobileV2LiveMonitoringAvailable;
+                !_isBluetoothV2Session || _v2LiveMonitoringAvailable;
             final monitoringEnabled = _isBluetoothV2Session
-                ? _mobileV2LiveMonitoringActive
+                ? _v2LiveMonitoringActive
                 : monitoringAvailable &&
                       (_liveInputMonitoringEffective ??
                           _shouldEnableLiveInputMonitoring(_audioRouteInfo));
