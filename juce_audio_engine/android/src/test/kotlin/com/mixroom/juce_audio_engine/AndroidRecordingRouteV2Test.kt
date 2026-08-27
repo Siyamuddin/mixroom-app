@@ -121,6 +121,59 @@ internal class AndroidRecordingRouteV2Test {
   }
 
   @Test
+  fun monitoringAcceptsOnlyVerifiedKnownNonBluetoothPairs() {
+    val pairs = listOf(
+      AudioDeviceInfo.TYPE_BUILTIN_MIC to AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+      AudioDeviceInfo.TYPE_BUILTIN_MIC to AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+      AudioDeviceInfo.TYPE_USB_DEVICE to AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+      AudioDeviceInfo.TYPE_BUILTIN_MIC to AudioDeviceInfo.TYPE_USB_DEVICE,
+    )
+    for ((index, pair) in pairs.withIndex()) {
+      val selectedInput = AndroidRouteEndpointV2(300 + index, pair.first, "monitor-in", 2)
+      val selectedOutput = AndroidRouteEndpointV2(400 + index, pair.second, "monitor-out", 2)
+      val facts = validFacts().copy(
+        sourceOutput = selectedOutput,
+        actualInput = selectedInput,
+        actualOutput = selectedOutput,
+        requiredInputChannels = 2,
+        activeInputChannels = 2,
+        inputStream = stream(selectedInput.id, channelCount = 2),
+        outputStream = stream(selectedOutput.id, channelCount = 2),
+      )
+      assertEquals("ok", AndroidMonitoringReadinessV2.validate(facts))
+    }
+  }
+
+  @Test
+  fun monitoringRejectsBluetoothUnknownAndUnprovenRoutes() {
+    val rejectedTypes = listOf(
+      AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+      AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+      AudioDeviceInfo.TYPE_BLE_HEADSET,
+      123456,
+    )
+    for ((index, type) in rejectedTypes.withIndex()) {
+      val endpoint = AndroidRouteEndpointV2(500 + index, type, "rejected", 1)
+      val facts = validFacts().copy(
+        sourceOutput = endpoint,
+        actualOutput = endpoint,
+        outputStream = stream(endpoint.id, channelCount = 2),
+      )
+      assertEquals("monitoring_unavailable", AndroidMonitoringReadinessV2.validate(facts))
+    }
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidMonitoringReadinessV2.validate(validFacts().copy(callbackAttached = false)),
+    )
+    assertEquals(
+      "route_unstable",
+      AndroidMonitoringReadinessV2.validate(
+        validFacts().copy(actualOutput = output.copy(id = 999)),
+      ),
+    )
+  }
+
+  @Test
   fun systemSelectedDuplexRejectsUnprovenOrChangedFacts() {
     val facts = validFacts()
     assertEquals(

@@ -4973,6 +4973,7 @@ public:
     int getActiveOutputChannelCount() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
+    bool setLiveInputMonitorTargetV2(int row, int channelStart, int channelCount);
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);

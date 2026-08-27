@@ -279,9 +279,15 @@ object JuceBridge {
     @JvmStatic external fun getCurrentDeviceNameJNI(): String
     @JvmStatic external fun getCurrentOutputDeviceNameJNI(): String
     @JvmStatic external fun setLiveInputMonitoringEnabledJNI(enabled: Boolean)
+    @JvmStatic external fun setLiveInputMonitorTargetV2JNI(
+        row: Int,
+        channelStart: Int,
+        channelCount: Int,
+    ): Boolean
     @JvmStatic external fun startRecordingJNI(path: String, channelStart: Int, channelCount: Int): Boolean
     @JvmStatic external fun stopRecordingJNI(): HashMap<String, Any>
     @JvmStatic external fun stopRecordingWithoutPlaybackRestoreJNI(): HashMap<String, Any>
+    @JvmStatic external fun stopRecordingForMonitoringV2JNI(): HashMap<String, Any>
     @JvmStatic external fun isRecordingJNI(): Boolean
 
     // Meters and analysis

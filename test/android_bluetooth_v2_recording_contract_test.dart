@@ -114,7 +114,7 @@ void main() {
         contains('recordingChannelCount: _selectedChannelCount'),
       );
       expect(stop, contains('await JuceAudioEngine.stopRecording()'));
-      expect(stop, contains('_restoreV2PlaybackOnlyAfterRecording()'));
+      expect(stop, contains('_restoreV2RouteAfterAudioRecording()'));
     },
   );
 

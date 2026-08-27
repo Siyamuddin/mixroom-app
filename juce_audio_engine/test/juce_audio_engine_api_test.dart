@@ -713,6 +713,31 @@ void main() {
     );
   });
 
+  test('Android monitoring carries its target through the V2 intent contract',
+      () async {
+    await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.monitoring,
+      generation: 11,
+      operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+      recordingChannelStart: 1,
+      recordingChannelCount: 2,
+      monitoringTargetRow: 3,
+      platformOverride: TargetPlatform.android,
+    );
+
+    expect(
+      Map<String, dynamic>.from(calls.single.arguments as Map),
+      <String, dynamic>{
+        'generation': 11,
+        'intent': 'monitoring',
+        'intentOperation': 'systemSelectedMonitoring',
+        'recordingChannelStart': 1,
+        'recordingChannelCount': 2,
+        'monitoringTargetRow': 3,
+      },
+    );
+  });
+
   test('iOS preparation cancellation uses the existing abort contract',
       () async {
     await JuceAudioEngine.abortRecordingV2(

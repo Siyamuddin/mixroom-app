@@ -26,6 +26,26 @@ internal enum class AndroidRecordingRouteAdapterV2 {
   SYSTEM_SELECTED,
 }
 
+internal object AndroidMonitoringReadinessV2 {
+  fun validate(facts: AndroidRecordingFactsV2): String {
+    val genericReadiness = AndroidSystemSelectedDuplexReadinessV2.validate(facts)
+    if (genericReadiness != "ok") return genericReadiness
+    val allowedKinds = setOf(
+      AndroidRouteKindV2.BUILT_IN,
+      AndroidRouteKindV2.WIRED,
+      AndroidRouteKindV2.EXTERNAL,
+    )
+    if (
+      facts.sourceOutput?.kind !in allowedKinds ||
+      facts.actualInput?.kind !in allowedKinds ||
+      facts.actualOutput?.kind !in allowedKinds
+    ) {
+      return "monitoring_unavailable"
+    }
+    return "ok"
+  }
+}
+
 /** Selects one system-owned recording adapter before any route mutation occurs. */
 internal object AndroidSystemRecordingRouteResolverV2 {
   fun resolve(

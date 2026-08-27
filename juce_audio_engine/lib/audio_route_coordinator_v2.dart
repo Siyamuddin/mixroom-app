@@ -23,7 +23,8 @@ abstract interface class AudioRouteAdapterV2 {
       {AudioRouteIntentOperationV2 operation =
           AudioRouteIntentOperationV2.standard,
       int? recordingChannelStart,
-      int? recordingChannelCount});
+      int? recordingChannelCount,
+      int? monitoringTargetRow});
 
   Future<void> stopMonitoring();
 }
@@ -262,7 +263,8 @@ class AudioRouteCoordinatorV2 {
       {AudioRouteIntentOperationV2 operation =
           AudioRouteIntentOperationV2.standard,
       int? recordingChannelStart,
-      int? recordingChannelCount}) async {
+      int? recordingChannelCount,
+      int? monitoringTargetRow}) async {
     if (_disposed || !_started || _shutdownCancellation) {
       return _localFailure(intent, 'coordinator_disposed');
     }
@@ -289,6 +291,7 @@ class AudioRouteCoordinatorV2 {
         operation: operation,
         recordingChannelStart: recordingChannelStart,
         recordingChannelCount: recordingChannelCount,
+        monitoringTargetRow: monitoringTargetRow,
       );
     } catch (_) {
       result = _localFailure(intent, 'actual_state_unavailable');

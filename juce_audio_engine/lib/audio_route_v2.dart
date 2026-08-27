@@ -33,6 +33,7 @@ enum AudioRouteIntentV2 {
 enum AudioRouteIntentOperationV2 {
   standard,
   systemSelectedRecording,
+  systemSelectedMonitoring,
 }
 
 enum AudioRouteCoordinatorStateV2 {

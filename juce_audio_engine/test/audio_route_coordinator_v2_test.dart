@@ -107,6 +107,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final appliedOperations = <AudioRouteIntentOperationV2>[];
   final appliedRecordingChannelStarts = <int?>[];
   final appliedRecordingChannelCounts = <int?>[];
+  final appliedMonitoringTargetRows = <int?>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
   final intentResults =
       <AudioRouteIntentV2, Future<AudioRouteTransitionResultV2>>{};
@@ -153,12 +154,14 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
       {AudioRouteIntentOperationV2 operation =
           AudioRouteIntentOperationV2.standard,
       int? recordingChannelStart,
-      int? recordingChannelCount}) async {
+      int? recordingChannelCount,
+      int? monitoringTargetRow}) async {
     appliedIntents.add(intent);
     appliedIntentGenerations.add(generation);
     appliedOperations.add(operation);
     appliedRecordingChannelStarts.add(recordingChannelStart);
     appliedRecordingChannelCounts.add(recordingChannelCount);
+    appliedMonitoringTargetRows.add(monitoringTargetRow);
     return intentResultsByGeneration[generation] ??
         intentResults[intent] ??
         _result(generation);
@@ -1204,6 +1207,32 @@ void main() {
     ]);
     expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('forwards the Android monitoring operation and target unchanged',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    await coordinator.transitionIntent(
+      AudioRouteIntentV2.monitoring,
+      operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+      recordingChannelStart: 2,
+      recordingChannelCount: 2,
+      monitoringTargetRow: 4,
+    );
+
+    expect(adapter.appliedOperations, <AudioRouteIntentOperationV2>[
+      AudioRouteIntentOperationV2.systemSelectedMonitoring,
+    ]);
+    expect(adapter.appliedRecordingChannelStarts, <int?>[2]);
+    expect(adapter.appliedRecordingChannelCounts, <int?>[2]);
+    expect(adapter.appliedMonitoringTargetRows, <int?>[4]);
     await coordinator.dispose();
   });
 

@@ -95,13 +95,15 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
       {AudioRouteIntentOperationV2 operation =
           AudioRouteIntentOperationV2.standard,
       int? recordingChannelStart,
-      int? recordingChannelCount}) {
+      int? recordingChannelCount,
+      int? monitoringTargetRow}) {
     return JuceAudioEngine.setAudioRouteIntentV2(
       intent,
       generation: generation,
       operation: operation,
       recordingChannelStart: recordingChannelStart,
       recordingChannelCount: recordingChannelCount,
+      monitoringTargetRow: monitoringTargetRow,
       platformOverride: platformOverride,
     );
   }
@@ -588,6 +590,7 @@ class JuceAudioEngine {
         AudioRouteIntentOperationV2.standard,
     int? recordingChannelStart,
     int? recordingChannelCount,
+    int? monitoringTargetRow,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -612,6 +615,8 @@ class JuceAudioEngine {
             'recordingChannelStart': recordingChannelStart,
           if (recordingChannelCount != null)
             'recordingChannelCount': recordingChannelCount,
+          if (monitoringTargetRow != null)
+            'monitoringTargetRow': monitoringTargetRow,
         },
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);
@@ -722,8 +727,8 @@ class JuceAudioEngine {
     final current = await getAudioRouteSnapshotV2();
     final expectedInputChannels =
         startup.intent == AudioRouteIntentV2.playbackOnly
-        ? 0
-        : startup.juce.activeInputChannels ?? 0;
+            ? 0
+            : startup.juce.activeInputChannels ?? 0;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||

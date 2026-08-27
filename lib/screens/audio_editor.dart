@@ -5834,6 +5834,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       AudioInputDevicePolicy();
   Timer? _recordingRoutePolicyTimer;
   bool? _liveInputMonitoringEffective;
+  bool _v2LiveMonitoringRequested = false;
+  bool _v2LiveMonitoringTransitionInFlight = false;
+  int? _v2LiveMonitoringTargetRow;
+  int? _v2LiveMonitoringChannelStart;
+  int? _v2LiveMonitoringChannelCount;
   static const String _kBluetoothMonitorOverridePref =
       'audio_editor.bluetooth_monitor_override';
   static const String _kAllowedBluetoothMicKeysPref =
@@ -12700,8 +12705,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _androidV2ForegroundRecoveryPending = true;
     if (_v2AudioSessionInvalidated) return;
     _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
+    final recordingWasActive = _isRecording || _recordStartVisualPending;
     final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
-      notice: 'Recording stopped because Mixroom went to the background.',
+      notice: recordingWasActive
+          ? 'Recording stopped because Mixroom went to the background.'
+          : 'Monitoring stopped because Mixroom went to the background.',
     );
     final cleanup = _cleanupV2InterruptedAudio(
       unpublishedRecordingPath: unpublishedRecordingPath,
@@ -12888,7 +12896,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final recordingWasActive =
         _isRecording ||
         _recordStartVisualPending ||
-        _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly;
+        _audioRouteCoordinatorV2?.intent ==
+            AudioRouteIntentV2.preparingRecording ||
+        _audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.recording;
     final pendingNotice = interruption
         ? (recordingWasActive
               ? 'Audio was interrupted. Recording stopped.'
@@ -12920,6 +12930,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : _globalAudioClock;
     final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
     final interruptedMidiHadChanges = _endMidiRecordingForV2SafetyBoundary();
+    _clearAndroidV2LiveMonitoringState();
     _v2AudioSessionInvalidationNotice = notice;
     _v2AudioSessionInvalidated = true;
     _v2AudioSessionRecoveryInProgress = true;
@@ -22333,6 +22344,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    if (_androidV2LiveMonitoringActive) {
+      final targetMatches =
+          _v2LiveMonitoringTargetRow == _selectedRow &&
+          _isValidRowIndex(_selectedRow) &&
+          _rows[_selectedRow].kind == TimelineRowKind.audio &&
+          _v2LiveMonitoringChannelStart ==
+              _rows[_selectedRow].inputChannelStart &&
+          _v2LiveMonitoringChannelCount ==
+              _rows[_selectedRow].inputChannelCount;
+      if (targetMatches) {
+        _preparedRecordingChannelStart = _v2LiveMonitoringChannelStart!;
+        _preparedRecordingChannelCount = _v2LiveMonitoringChannelCount!;
+        return true;
+      }
+      await _setAndroidV2LiveMonitoring(false);
+      if (_audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
+        return false;
+      }
+    }
     var v2IntentOperation = AudioRouteIntentOperationV2.standard;
     if (_isBluetoothV2Session && Platform.isMacOS) {
       v2IntentOperation =
@@ -22644,7 +22674,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!ok) {
         await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         if (_isBluetoothV2Session && _supportsV2AudioRecording) {
-          await _restoreV2PlaybackOnlyAfterRecording();
+          await _restoreV2RouteAfterAudioRecording();
         }
         _liveInputMonitoringEffective = null;
         if (mounted) {
@@ -22666,7 +22696,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (recordingResult == null || !recordingResult.succeeded) {
           await JuceAudioEngine.stopRecording();
           await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
-          await _restoreV2PlaybackOnlyAfterRecording();
+          await _restoreV2RouteAfterAudioRecording();
           if (mounted) {
             _showSmallNotice('Failed to verify the recording input.');
           }
@@ -22677,6 +22707,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
         await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
+        if (_isBluetoothV2Session && _supportsV2AudioRecording) {
+          await _restoreV2RouteAfterAudioRecording();
+        }
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -22699,7 +22732,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await JuceAudioEngine.stopRecording();
         await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         if (_isBluetoothV2Session && _supportsV2AudioRecording) {
-          await _restoreV2PlaybackOnlyAfterRecording();
+          await _restoreV2RouteAfterAudioRecording();
         }
         if (mounted) {
           _showSmallNotice(
@@ -22711,6 +22744,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
         await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
+        if (_isBluetoothV2Session && _supportsV2AudioRecording) {
+          await _restoreV2RouteAfterAudioRecording();
+        }
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -22754,7 +22790,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _supportsV2AudioRecording &&
           !_isRecording &&
           !_v2AudioSessionInvalidated &&
-          _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
+          _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly &&
+          !_androidV2LiveMonitoringActive) {
         await _restoreV2PlaybackOnlyAfterRecording();
       }
       if (!_isRecording) {
@@ -22777,6 +22814,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
     return true;
+  }
+
+  Future<bool> _restoreV2RouteAfterAudioRecording() async {
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null || _v2AudioSessionInvalidated) return false;
+    if (Platform.isAndroid && _v2LiveMonitoringRequested) {
+      final row = _v2LiveMonitoringTargetRow;
+      final channelStart = _v2LiveMonitoringChannelStart;
+      final channelCount = _v2LiveMonitoringChannelCount;
+      if (row != null && channelStart != null && channelCount != null) {
+        final result = await coordinator.transitionIntent(
+          AudioRouteIntentV2.monitoring,
+          operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+          recordingChannelStart: channelStart,
+          recordingChannelCount: channelCount,
+          monitoringTargetRow: row,
+        );
+        if (result.succeeded) {
+          JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+          return true;
+        }
+      }
+      _clearAndroidV2LiveMonitoringState();
+    }
+    return _restoreV2PlaybackOnlyAfterRecording();
   }
 
   Future<bool> _ensureMicrophonePermissionForRecording() async {
@@ -22947,7 +23009,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         captureResult = await JuceAudioEngine.stopRecording();
       }
       if (_isBluetoothV2Session && _supportsV2AudioRecording) {
-        final restored = await _restoreV2PlaybackOnlyAfterRecording();
+        final restored = await _restoreV2RouteAfterAudioRecording();
         if (!restored) {
           _v2AudioSessionInvalidated = true;
           if (mounted) {
@@ -44955,7 +45017,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ),
             )
             .toList(),
-        onChanged: _isRecording
+        onChanged: _isRecording || _androidV2LiveMonitoringActive
             ? null
             : (option) {
                 if (option == null) return;
@@ -45557,9 +45619,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _setRoutingSheetMonitoring(bool enabled) async {
     if (_isBluetoothV2Session) {
-      _showSmallNotice(
-        'Monitoring is unavailable for the current audio route.',
-      );
+      if (Platform.isAndroid) {
+        await _setAndroidV2LiveMonitoring(enabled);
+      } else {
+        _showSmallNotice(
+          'Monitoring is unavailable for the current audio route.',
+        );
+      }
       return;
     }
     if (_audioRouteInfo.isBluetoothOutput) {
@@ -45569,6 +45635,152 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _liveInputMonitoringEffective = enabled;
     await JuceAudioEngine.setLiveInputMonitoringEnabled(enabled);
     if (mounted) setState(() {});
+  }
+
+  bool get _androidV2LiveMonitoringActive =>
+      _isBluetoothV2Session &&
+      Platform.isAndroid &&
+      _v2LiveMonitoringRequested &&
+      (_audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.monitoring ||
+          _audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.recording);
+
+  bool get _androidV2LiveMonitoringAvailable {
+    if (!_isBluetoothV2Session || !Platform.isAndroid) return false;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (_androidV2LiveMonitoringActive) {
+      return !_isRecording &&
+          !_recordStartVisualPending &&
+          !_recordTransitionInFlight &&
+          !_v2LiveMonitoringTransitionInFlight &&
+          !_v2AudioSessionInvalidated &&
+          coordinator?.state == AudioRouteCoordinatorStateV2.stable;
+    }
+    final outputIsKnownNonBluetooth =
+        _audioRouteInfo.outputRouteKind == AudioRouteKind.speaker ||
+        _audioRouteInfo.outputRouteKind == AudioRouteKind.earpiece ||
+        _audioRouteInfo.outputRouteKind == AudioRouteKind.wired ||
+        _audioRouteInfo.outputRouteKind == AudioRouteKind.usb;
+    return outputIsKnownNonBluetooth &&
+        _isValidRowIndex(_selectedRow) &&
+        _rows[_selectedRow].kind == TimelineRowKind.audio &&
+        !_v2AudioSessionInvalidated &&
+        !_v2AudioSessionRecoveryInProgress &&
+        !_isRecording &&
+        !_recordStartVisualPending &&
+        !_recordTransitionInFlight &&
+        !_v2LiveMonitoringTransitionInFlight &&
+        coordinator != null &&
+        coordinator.state == AudioRouteCoordinatorStateV2.stable &&
+        (coordinator.intent == AudioRouteIntentV2.playbackOnly ||
+            coordinator.intent == AudioRouteIntentV2.monitoring);
+  }
+
+  void _clearAndroidV2LiveMonitoringState() {
+    _v2LiveMonitoringRequested = false;
+    _v2LiveMonitoringTargetRow = null;
+    _v2LiveMonitoringChannelStart = null;
+    _v2LiveMonitoringChannelCount = null;
+  }
+
+  Future<void> _setAndroidV2LiveMonitoring(bool enabled) async {
+    if (_v2LiveMonitoringTransitionInFlight) return;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null || !_isBluetoothV2Session || !Platform.isAndroid) {
+      return;
+    }
+    if (enabled && !_androidV2LiveMonitoringAvailable) {
+      _showSmallNotice(
+        'Monitoring is unavailable for the current audio route.',
+      );
+      return;
+    }
+    _v2LiveMonitoringTransitionInFlight = true;
+    if (mounted) setState(() {});
+    try {
+      if (!enabled) {
+        if (!_androidV2LiveMonitoringActive) {
+          _clearAndroidV2LiveMonitoringState();
+          return;
+        }
+        final result = await coordinator.transitionIntent(
+          AudioRouteIntentV2.playbackOnly,
+        );
+        _clearAndroidV2LiveMonitoringState();
+        if (!result.succeeded) {
+          await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+          _v2AudioSessionInvalidated = true;
+          _showSmallNotice(
+            'Audio output could not be restored. Reopen the audio editor.',
+          );
+          return;
+        }
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+        await _refreshSystemSelectedRouteInfoV2();
+        return;
+      }
+
+      if (!await _ensureMicrophonePermissionForRecording() || !mounted) return;
+      final rowIndex = _selectedRow;
+      if (!_isValidRowIndex(rowIndex) ||
+          _rows[rowIndex].kind != TimelineRowKind.audio) {
+        _showSmallNotice('Select an audio row to monitor.');
+        return;
+      }
+      final row = _rows[rowIndex];
+      final selection = RecordingChannelSelectionV2(
+        channelStart: row.inputChannelStart,
+        channelCount: row.inputChannelCount,
+      ).normalizeForCapacity(_effectiveInputChannelCountForSettings());
+      final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
+      final output = source.outputs.length == 1 ? source.outputs.single : null;
+      final outputAllowed =
+          output != null &&
+          (output.normalizedKind == AudioRouteKindV2.builtIn ||
+              output.normalizedKind == AudioRouteKindV2.wired ||
+              output.normalizedKind == AudioRouteKindV2.external);
+      if (!outputAllowed ||
+          source.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
+          source.intent != AudioRouteIntentV2.playbackOnly ||
+          source.inputs.isNotEmpty ||
+          source.juce.activeInputChannels != 0) {
+        _showSmallNotice(
+          'Monitoring is unavailable for the current audio route.',
+        );
+        return;
+      }
+      final result = await coordinator.transitionIntent(
+        AudioRouteIntentV2.monitoring,
+        operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+        recordingChannelStart: selection.channelStart,
+        recordingChannelCount: selection.channelCount,
+        monitoringTargetRow: rowIndex,
+      );
+      if (!result.succeeded ||
+          result.snapshot.intent != AudioRouteIntentV2.monitoring) {
+        _clearAndroidV2LiveMonitoringState();
+        if (coordinator.state == AudioRouteCoordinatorStateV2.failed) {
+          await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+          _v2AudioSessionInvalidated = true;
+          _showSmallNotice(
+            'Audio output could not be restored. Reopen the audio editor.',
+          );
+        } else {
+          _showSmallNotice(
+            'Monitoring is unavailable for the current audio route.',
+          );
+        }
+        return;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+      _v2LiveMonitoringRequested = true;
+      _v2LiveMonitoringTargetRow = rowIndex;
+      _v2LiveMonitoringChannelStart = selection.channelStart;
+      _v2LiveMonitoringChannelCount = selection.channelCount;
+      await _refreshSystemSelectedRouteInfoV2();
+    } finally {
+      _v2LiveMonitoringTransitionInFlight = false;
+      if (mounted) setState(() {});
+    }
   }
 
   Future<void> _showAudioRoutingSheet() async {
@@ -45591,11 +45803,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
-            final monitoringAvailable = !_isBluetoothV2Session;
-            final monitoringEnabled =
-                monitoringAvailable &&
-                (_liveInputMonitoringEffective ??
-                    _shouldEnableLiveInputMonitoring(_audioRouteInfo));
+            final monitoringAvailable =
+                !_isBluetoothV2Session || _androidV2LiveMonitoringAvailable;
+            final monitoringEnabled = _isBluetoothV2Session
+                ? _androidV2LiveMonitoringActive
+                : monitoringAvailable &&
+                      (_liveInputMonitoringEffective ??
+                          _shouldEnableLiveInputMonitoring(_audioRouteInfo));
             final monitoringSubtitle = !monitoringAvailable
                 ? L10n.translate(
                     context,

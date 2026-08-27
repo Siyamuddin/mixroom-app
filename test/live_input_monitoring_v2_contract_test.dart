@@ -13,7 +13,7 @@ String _between(String source, String start, String end) {
 void main() {
   const editorPath = 'lib/screens/audio_editor.dart';
 
-  test('V2 monitoring UI is truthfully unavailable without native support', () {
+  test('V2 monitoring is available only through the Android verified path', () {
     final editor = File(editorPath).readAsStringSync();
     final routingSheet = _between(
       editor,
@@ -21,16 +21,10 @@ void main() {
       'Widget _buildAudioRoutingLauncher()',
     );
 
+    expect(routingSheet, contains('_androidV2LiveMonitoringAvailable'));
     expect(
       routingSheet,
-      contains('final monitoringAvailable = !_isBluetoothV2Session;'),
-    );
-    expect(
-      routingSheet,
-      contains(
-        'final monitoringEnabled =\n'
-        '                monitoringAvailable &&',
-      ),
+      contains('final monitoringEnabled = _isBluetoothV2Session'),
     );
     expect(routingSheet, contains('onChanged: monitoringAvailable'));
     expect(
@@ -60,6 +54,44 @@ void main() {
         contains('JuceAudioEngine.setLiveInputMonitoringEnabled(enabled)'),
       );
       expect(monitoringAction, contains('if (_isBluetoothV2Session)'));
+      expect(
+        monitoringAction,
+        contains('_setAndroidV2LiveMonitoring(enabled)'),
+      );
     },
   );
+
+  test('Android monitoring is coordinator owned and Bluetooth fail closed', () {
+    final editor = File(editorPath).readAsStringSync();
+    final action = _between(
+      editor,
+      'Future<void> _setAndroidV2LiveMonitoring(bool enabled) async {',
+      'Future<void> _showAudioRoutingSheet() async {',
+    );
+    expect(action, contains('AudioRouteIntentV2.monitoring'));
+    expect(action, contains('systemSelectedMonitoring'));
+    expect(action, contains('AudioRouteKindV2.builtIn'));
+    expect(action, contains('AudioRouteKindV2.wired'));
+    expect(action, contains('AudioRouteKindV2.external'));
+    expect(action, isNot(contains('AudioRouteKindV2.bluetoothMedia')));
+  });
+
+  test('Android recording reuses and returns to the monitoring route', () {
+    final editor = File(editorPath).readAsStringSync();
+    final plugin = File(
+      'juce_audio_engine/android/src/main/kotlin/com/mixroom/juce_audio_engine/JuceAudioEnginePlugin.kt',
+    ).readAsStringSync();
+    final engine = File(
+      'juce_audio_engine/android/src/main/cpp/JuceEngine.cpp',
+    ).readAsStringSync();
+
+    expect(editor, contains('_restoreV2RouteAfterAudioRecording()'));
+    expect(editor, contains('AudioRouteIntentV2.monitoring'));
+    expect(plugin, contains('stopRecordingForMonitoringV2JNI()'));
+    expect(plugin, contains('verifyMonitoringIntentV2(generation)'));
+    expect(
+      engine,
+      contains('if (!v2Recording || !liveInputMonitoringEnabled)'),
+    );
+  });
 }

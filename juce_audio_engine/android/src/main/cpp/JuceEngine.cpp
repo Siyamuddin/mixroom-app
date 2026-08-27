@@ -10684,6 +10684,32 @@ bool JuceEngine::isLiveInputMonitoringEnabled() const noexcept
     return liveInputMonitoringEnabled;
 }
 
+bool JuceEngine::setLiveInputMonitorTargetV2(int row,
+                                             int channelStart,
+                                             int channelCount)
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int activeInputs = device == nullptr
+        ? 0
+        : device->getActiveInputChannels().countNumberOfSetBits();
+    if (!androidV2RecordingPrepared || row < 0 || row >= (int)rows.size() ||
+        channelStart < 0 || (channelCount != 1 && channelCount != 2) ||
+        channelStart + channelCount > activeInputs)
+        return false;
+
+    liveMonitorTargetRow = row;
+    liveMonitorChannelStart = channelStart;
+    liveMonitorChannelCount = channelCount;
+    if (liveInputMonitoringEnabled)
+    {
+        constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+        syncLiveInputMonitorRoutingLocked(batchUpdate);
+        commitGraphMutationLocked(false);
+    }
+    return true;
+}
+
 void JuceEngine::clearLiveInputMonitorConnectionsLocked(
     juce::AudioProcessorGraph::UpdateKind updateKind)
 {
@@ -10825,7 +10851,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                           channelStart))
         return failAndRestorePlaybackMode();
 
-    routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
+    if (!v2Recording || !liveInputMonitoringEnabled)
+        routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
