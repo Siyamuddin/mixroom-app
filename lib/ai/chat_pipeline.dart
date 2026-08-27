@@ -247,42 +247,8 @@ List<AiV3SkipCode> _aiV3SkipCodesFromBundle(Map<String, dynamic> bundle) {
   return parseAiV3SkipCodes(plan['skipped']);
 }
 
-bool _aiV3ShouldAttachSkipNote(Map<String, dynamic> bundle) {
-  final types = _aiV3CommandTypesFromBundle(bundle);
-  if (types.isEmpty) return false;
-  if (types.length >= 2) return true;
-  const productionTypes = <String>{
-    'mix.apply_goal',
-    'automation.set_points',
-    'sample.place',
-    'row.create',
-  };
-  return productionTypes.contains(types.single);
-}
-
-Set<String> _aiV3CommandTypesFromBundle(Map<String, dynamic> bundle) {
-  final types = <String>{};
-  final plan = bundle['plan'];
-  if (plan is Map) {
-    final commands = plan['commands'];
-    if (commands is List) {
-      for (final raw in commands) {
-        if (raw is! Map) continue;
-        final type = raw['type']?.toString().trim() ?? '';
-        if (type.isNotEmpty) types.add(type);
-      }
-    }
-  }
-  if (types.isNotEmpty) return types;
-  final receipts = bundle['receipts'];
-  if (receipts is! List) return types;
-  for (final raw in receipts) {
-    if (raw is! Map) continue;
-    final type = raw['type']?.toString().trim() ?? '';
-    if (type.isNotEmpty) types.add(type);
-  }
-  return types;
-}
+bool _aiV3ShouldAttachSkipNote(Map<String, dynamic> bundle) =>
+    _aiV3SkipCodesFromBundle(bundle).isNotEmpty;
 
 String _aiV3ClarificationMessage(String question, List<String> options) {
   if (options.isEmpty) return question;

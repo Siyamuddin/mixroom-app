@@ -3869,6 +3869,12 @@ void main() {
       expect(schema, contains('"skipped"'));
       expect(schema, contains('generated_drums'));
       expect(schema, contains('binaural_8d'));
+      expect(schema, contains('only when THIS request asked'));
+      expect(schema, contains('empty of sample.place'));
+      expect(
+        schema,
+        isNot(contains('on production-style mutating plans')),
+      );
       expect(parameters['required'], contains('skipped'));
     });
 

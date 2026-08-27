@@ -50,14 +50,25 @@ void main() {
       expect(compiler, isNot(contains('chipmunk')));
       expect(compiler, contains('not a full octave'));
       expect(compiler, contains('even when library assets exist'));
+      expect(compiler, contains('sample.place as a substitute'));
+      expect(compiler, contains('specific library item'));
+      expect(compiler, contains('Explicit MIDI'));
+      expect(
+        compiler,
+        isNot(
+          contains('explicitly asks to add those parts and a real asset_id'),
+        ),
+      );
       expect(compiler, contains('mix.apply_goal pan intent'));
       expect(
         compiler,
         contains('Named single edits, questions, and refusals'),
       );
-      expect(compiler, contains('fill skipped'));
+      expect(compiler, contains('THIS original request asked'));
       expect(compiler, contains('generated_drums'));
+      expect(compiler, contains('must not share a plan with'));
       expect(compiler, contains('leave skipped empty'));
+      expect(compiler, isNot(contains('fill skipped')));
       expect(
         compiler,
         isNot(contains('user_message must name what will change and which')),

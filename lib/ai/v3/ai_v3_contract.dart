@@ -65,8 +65,9 @@ extension AiV3GoalKindX on AiV3GoalKind {
 
 const int aiV3MaxSkippedCodes = 4;
 
-/// Product limits Mixroom will not fake. Planner emits these codes;
-/// Flutter localizes them. Unknown values are dropped, never fail apply.
+/// Product limits Mixroom will not fake. Planner emits a code only when
+/// this original request asked for that limit; Flutter localizes them.
+/// Unknown values are dropped, never fail apply.
 enum AiV3SkipCode {
   import,
   export,
@@ -2153,13 +2154,13 @@ Map<String, dynamic> _aiV3PlanSchema(
           'type': 'string',
           'minLength': 1,
           'description':
-              'Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. Put skipped import, export, generated drums, and true binaural 8D in skipped, not in this text. This text is held until exact execution and readback succeed. Keep other responses under $aiV3PreferredUserMessageLength characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language.',
+              'Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. If this original request asked for import, export, generated drums, or true binaural 8D and Mixroom will not do it, put that in skipped, not in this text. This text is held until exact execution and readback succeed. Keep other responses under $aiV3PreferredUserMessageLength characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language.',
         },
         'skipped': <String, dynamic>{
           'type': 'array',
           'maxItems': aiV3MaxSkippedCodes,
           'description':
-              'Closed codes for Mixroom product limits that this plan did not fake. Use import, export, generated_drums, and binaural_8d on production-style mutating plans. Leave empty for named singles, questions, and refusals. Do not invent other codes.',
+              'Closed codes for Mixroom product limits that this original request asked for and this plan did not fake. Use import, export, generated_drums, or binaural_8d only when THIS request asked for that capability. generated_drums means Mixroom will not create drum or generated audio parts: commands must stay empty of sample.place. Leave empty otherwise. Do not invent other codes.',
           'items': <String, dynamic>{
             'type': 'string',
             'enum': AiV3SkipCode.wireNames,

@@ -2,7 +2,7 @@
 
 Owner: AI Engineering  
 Status: In review  
-Last reviewed: 2026-08-26  
+Last reviewed: 2026-08-28  
 PDF: [ai_v3_compound_requests.pdf](ai_v3_compound_requests.pdf)  
 Tickets: [PRO-16](https://linear.app/mixroom/issue/PRO-16/ai-generalized-compound-requests)
 (parent), [PRO-18](https://linear.app/mixroom/issue/PRO-18/generalized-compound-requests-basic-architecture)
@@ -43,8 +43,8 @@ names.
 | Pan / gain automation | `mix:pan` / `mix:gain` often missing from context | Every audio row always exposes `volume`, `mix:gain`, `mix:pan` |
 | Static pan vs sweep | Orbit could also emit mix-widen / static pan | If the plan writes `automation.set_points` on `mix:pan`, pan intents are stripped from `mix.apply_goal` |
 | Pitch-only metaphors (“chipmunk”, “squeaky”) | Could pull a full nightcore stack, including after a remix turn in the same chat | Named pitch edit only. Classify from ORIGINAL_REQUEST_VERBATIM; do not repeat the previous plan's tempo/mix. Tape-speed folklore does not add tempo unless this request names speed or a remix/version goal. Defaults stay a few semitones, not an octave, unless the user names an amount |
-| Implied vs explicit arrangement | Style goals could place library drums if assets existed | Style goals must not add parts. “Add a bassline” may create MIDI |
-| Skip copy on named singles | Import/export/drums lecture on “make this louder” | Skip notes only on multi-command or production-shaped plans (`mix.apply_goal`, pan automation, `sample.place`, `row.create`) |
+| Implied vs explicit arrangement | Style goals could place library drums if assets existed; explicit “add drums” still placed a pack loop | Style goals must not add parts. Asking Mixroom to create drums / a beat / generated audio parts → empty commands + `generated_drums`, never `sample.place` as a substitute. `sample.place` only when this request names a specific library item already in context. “Add a bassline” may create MIDI |
+| Skip copy on named singles | Import/export/drums lecture on “make this louder” | Attach a skip note only when `skipped` is non-empty (this request asked and Mixroom refused). Named singles with empty `skipped` stay silent. |
 | Skip codes | English scrape of `user_message` (`skip`, `won't generate`, …) | Closed `skipped` codes on PlanV3 (`import`, `export`, `generated_drums`, `binaural_8d`). App localizes. Missing/unknown codes are dropped |
 | Chat receipt | System bullet list plus assistant sentence; mix listed every EQ/compressor knob | Same chat chrome as before: system execution list plus assistant sentence. Mix stays an intent line. No Play/Undo chips. The floating “Applied N changes” toast is **kept**. Verified applies store `undo_record_id` on the chat message; per-bubble Undo must undo that record only when it is still the current stack top |
 | Stale selection | Invalid primary clip could fail snapshot building | Invalid primary clip / clip indices are dropped instead of failing the plan |
@@ -78,7 +78,7 @@ Live runs used macOS Mixroom with
 | `make this a nightcore remix` | Tempo-align only, or stacked extra pitch | **150 BPM, +3 pitch, brighter EQ**, one row. No import/drums/export |
 | `make this a garage remix` | Invented library drums; future-tense skip copy | **132 BPM + compressor/EQ**, no drums. Skip codes, not English scrape |
 | `add a bassline` | Inconsistent | **MIDI row + 32-note clip** (explicit arrangement) |
-| `add nightcore drums` | Placed library loops | Still out of product: Mixroom does not invent drum parts. Must say so |
+| `add nightcore drums` | Placed library loops, or timed out at 25s | Out of product: empty commands + `skipped: generated_drums`. Compiler now forbids `sample.place` as a substitute. Re-test live after hot restart |
 | `what is nightcore?` | Should not mutate | Unchanged: question, no edits |
 
 Unsupported on purpose (say so, do not fake it): import, export, generated
@@ -136,7 +136,8 @@ proxy and direct-OpenAI payloads both send the compiler in `instructions`;
 align-collapse retries only `production_goal` align-only plans, not
 `named_edit`; pan targets always
 present; mix pan stripped when a sweep exists; skip notes omitted on named
-singles; skip notes come from `skipped` codes; mix execution details
+singles; skip notes come from `skipped` codes; generated-drum asks must not
+use `sample.place` as a substitute; mix execution details
 collapse to intent; verified AI undo is bound to that apply’s record id.
 
 ## Manual integration checklist
@@ -149,9 +150,11 @@ Replay on macOS with a project that already has audio:
 4. `make this a nightcore remix` — faster + higher + brighter; no new drums.
 5. `make this a garage remix` — groove/mix; no invented drums; skip codes.
 6. `add a bassline` — may create MIDI.
-7. `what is nightcore?` — no mutation.
-8. Cmd+Z after two AI applies — undoes only the latest apply, not the older bubble.
-9. Per-bubble Undo, if re-added, must use that message’s `undo_record_id` and stay disabled when a newer change is on top.
+7. `add nightcore drums` — no new row; skip note for generated drums; fast.
+8. Named pack item already in context — may `sample.place`.
+9. `what is nightcore?` — no mutation.
+10. Cmd+Z after two AI applies — undoes only the latest apply, not the older bubble.
+11. Per-bubble Undo, if re-added, must use that message’s `undo_record_id` and stay disabled when a newer change is on top.
 
 ## Out of scope
 

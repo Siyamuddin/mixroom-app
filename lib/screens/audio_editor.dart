@@ -48530,12 +48530,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rawParameters is! Map) {
       throw StateError('v3_effect_configuration_invalid');
     }
-    await _applyEffectEditAction(<String, dynamic>{
-      'operation': 'add',
-      'effect_name': effectId,
-      'force_individual_row': true,
-      'target': <String, dynamic>{...target, 'scope': 'row', 'row_index': row},
-    });
+    if (!_canUseEffectForCurrentPlan(effectId)) {
+      throw StateError('v3_effect_plan_unavailable');
+    }
+    // Use the prepared catalog id. The legacy effect_edit helper fuzzy-matches
+    // names and returns on insert failure, which let V3 start a transaction
+    // and then fail while setting parameters.
+    void onChange() {
+      _refreshAudioEditorView();
+      _refreshRowFx(row);
+      unawaited(_refreshAutomationTargetsForRow(row));
+    }
+
+    var nativeEffectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+      row,
+      forceIndividualRow: true,
+    );
+    if (!nativeEffectIds.contains(effectId)) {
+      await _undoManager.execute(
+        InsertEffectAction(
+          row: row,
+          pathOrName: effectId,
+          forceIndividualRow: true,
+          onChange: onChange,
+        ),
+      );
+      nativeEffectIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+        row,
+        forceIndividualRow: true,
+      );
+      if (!nativeEffectIds.contains(effectId)) {
+        throw StateError('v3_effect_insert_failed');
+      }
+    }
     final parameters = Map<String, dynamic>.from(rawParameters);
     final presenceExpectation = <String, dynamic>{
       'kind': 'effect',

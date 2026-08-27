@@ -1139,7 +1139,6 @@ void main() {
           'commands': <Map<String, dynamic>>[
             <String, dynamic>{'type': 'row.adjust_gain_db'},
           ],
-          'skipped': <String>['import', 'export'],
         },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -1154,7 +1153,7 @@ void main() {
       expect(message, isNot(contains('skip')));
     });
 
-    test('verified completion uses skipped codes on style plans', () {
+    test('verified completion has no skip lecture when skipped is empty', () {
       const bundle = <String, dynamic>{
         'plan': <String, dynamic>{
           'user_message': 'Sped the track up.',
@@ -1162,7 +1161,6 @@ void main() {
             <String, dynamic>{'type': 'project.set_tempo'},
             <String, dynamic>{'type': 'mix.apply_goal'},
           ],
-          'skipped': <String>['import', 'export', 'generated_drums'],
         },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
@@ -1177,9 +1175,21 @@ void main() {
       };
       final message = aiV3VerifiedCompletionMessage(bundle);
       expect(message, contains('160 BPM'));
+      expect(message, isNot(contains('Mixroom skipped')));
+      expect(message, isNot(contains('import')));
+      expect(message, isNot(contains('generated drums')));
+    });
+
+    test('verified completion shows asked-for skip even without commands', () {
+      const bundle = <String, dynamic>{
+        'plan': <String, dynamic>{
+          'user_message': 'Mixroom cannot add drum parts.',
+          'skipped': <String>['generated_drums'],
+        },
+      };
       expect(
-        message,
-        contains('Mixroom skipped import, export, and generated drums.'),
+        aiV3VerifiedCompletionMessage(bundle),
+        'Mixroom skipped generated drums.',
       );
     });
 
