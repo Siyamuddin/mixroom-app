@@ -4812,6 +4812,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     switch (category) {
       case 'On Device':
         return const Color(0xFF7CCBFF);
+      case 'Guitars':
+        return const Color(0xFF67A6FF);
       case 'Strings':
         return const Color(0xFF6AA9FF);
       case 'Woodwinds':

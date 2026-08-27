@@ -682,8 +682,16 @@ void main() {
       final ids = guitars
           .map((entry) => entry['id'].toString())
           .toList(growable: false);
+      const playableRanges = <String, String>{
+        'sfz.guitar.steel_acoustic': '40-84',
+        'sfz.guitar.clean_electric': '40-86',
+      };
       final libraryEntries = guitars
-          .map((entry) => '${entry['name']}<${entry['id']}>')
+          .map(
+            (entry) =>
+                '${entry['name']}<${entry['id']}>'
+                '{playable_midi=${playableRanges[entry['id']]}}',
+          )
           .join(', ');
       late Map<String, dynamic> requestBody;
       final client = MockClient((request) async {
@@ -722,6 +730,7 @@ void main() {
       for (final guitar in guitars) {
         expect(encoded, contains(guitar['id']));
         expect(encoded, contains(guitar['name']));
+        expect(encoded, contains(playableRanges[guitar['id']]));
       }
       expect(encoded, contains('CLIENT ENTITLEMENT POLICY'));
     });

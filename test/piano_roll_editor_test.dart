@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -96,6 +97,46 @@ MidiNote _noteById(List<MidiNote> notes, String id) {
 }
 
 void main() {
+  testWidgets(
+    'guitar instrument panel uses the shared guitar visual treatment',
+    (tester) async {
+      final clip = await _buildMidiTrack(
+        const <MidiNote>[],
+        instrumentId: 'sfz.guitar.steel_acoustic',
+        instrumentName: 'Acoustic Guitar',
+      );
+      await tester.pumpWidget(
+        _buildEditor(
+          clip: clip,
+          onCommit:
+              ({
+                required notes,
+                required instrumentParams,
+                required instrumentId,
+                required instrumentName,
+              }) async {},
+          availableInstruments: const <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'sfz.guitar.steel_acoustic',
+              'name': 'Acoustic Guitar',
+              'pickerCategory': 'Guitars',
+              'isSampled': true,
+            },
+          ],
+        ),
+      );
+
+      await tester.tap(find.text('Instrument').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Guitars'), findsWidgets);
+      final guitarIcon = tester.widget<Icon>(
+        find.byIcon(CupertinoIcons.guitars).first,
+      );
+      expect(guitarIcon.color, const Color(0xFF67A6FF));
+    },
+  );
+
   testWidgets('piano roll exposes every MIDI pitch from 0 through 127',
       (tester) async {
     final clip = await _buildMidiTrack(<MidiNote>[]);

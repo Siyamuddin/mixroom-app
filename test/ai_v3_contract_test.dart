@@ -6,6 +6,8 @@ import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/ai/v3/ai_v3_resources.dart';
+import 'package:mixroom/helpers/midi_pitch_ranges.dart';
+import 'package:mixroom/helpers/sfz_definition_loader.dart';
 
 Map<String, dynamic> _plan(List<Map<String, dynamic>> commands) =>
     <String, dynamic>{
@@ -4882,7 +4884,7 @@ void main() {
   });
 
   group('V3 factual preparation', () {
-    test('production guitars are valid AI instruments for swaps and MIDI', () {
+    test('production guitars are range-aware AI instruments', () async {
       final catalog = jsonDecode(
         File('assets/instruments/index.json').readAsStringSync(),
       ) as Map<String, dynamic>;
@@ -4909,27 +4911,51 @@ void main() {
         jsonDecode(jsonEncode(_context().data)) as Map,
       );
       data['instruments'] = guitarIds;
-      data['instrument_catalog'] = guitarEntries
-          .map(
-            (entry) => <String, dynamic>{
-              'instrument_id': entry['id'],
-              'name': entry['name'],
-            },
-          )
-          .toList(growable: false);
-      final context = AiV3CoreContext(
-        profile: AiV3ContextProfile.essential,
-        stateDigest: 'production-guitars',
-        data: data,
-      );
+      final loader = SfzDefinitionLoader();
+      final rangesById = <String, List<Map<String, int>>>{};
+      for (final entry in guitarEntries) {
+        final sfzPath =
+            'assets/instruments/${entry['pack']}/${entry['preset']}';
+        final definition = await loader.load(sfzPath);
+        expect(definition, isNotNull, reason: sfzPath);
+        rangesById[entry['id'].toString()] = compactMidiPitchRanges(
+          definition!.playableInputPitches(remapPitch: (pitch) => pitch),
+        );
+      }
+      expect(rangesById['sfz.guitar.steel_acoustic'], <Map<String, int>>[
+        <String, int>{'low': 40, 'high': 84},
+      ]);
+      expect(rangesById['sfz.guitar.clean_electric'], <Map<String, int>>[
+        <String, int>{'low': 40, 'high': 86},
+      ]);
 
       for (final guitarId in guitarIds) {
+        final guitarData = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(data)) as Map,
+        );
+        guitarData['instrument_catalog'] = guitarEntries
+            .map(
+              (entry) => <String, dynamic>{
+                'instrument_id': entry['id'],
+                'name': entry['name'],
+                'playable_pitch_ranges': rangesById[entry['id']],
+              },
+            )
+            .toList(growable: false);
+        final rows = (guitarData['rows'] as List).whereType<Map>().toList();
+        rows.singleWhere((row) => row['row_id'] == 200)['instrument_id'] =
+            guitarId;
+        final clips = (guitarData['clips'] as List).whereType<Map>().toList();
+        clips.singleWhere(
+          (clip) => clip['clip_id'] == 'midi-clip',
+        )['instrument_id'] = guitarId;
+        final context = AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'production-$guitarId',
+          data: guitarData,
+        );
         final prepared = const AiV3CommandPreparer().prepare(
           plan: AiV3Plan.fromJson(_plan(<Map<String, dynamic>>[
-            _command('instrument', 'row.set_instrument', <String, dynamic>{
-              'row_id': 200,
-              'instrument_id': guitarId,
-            }),
             _command('compose', 'midi.create_clip', <String, dynamic>{
               'destination': <String, dynamic>{'row_id': 200},
               'start_beat': 0.0,
@@ -4942,11 +4968,49 @@ void main() {
           context: context,
         );
 
-        expect(prepared.actions, hasLength(2));
-        expect(prepared.actions.first.type, 'v3_row_set_instrument');
-        expect(prepared.actions.first.data['instrument_id'], guitarId);
-        expect(prepared.actions.last.type, 'midi_compose');
-        expect(prepared.actions.last.data['instrument_id'], guitarId);
+        expect(prepared.actions, hasLength(1));
+        expect(prepared.actions.single.type, 'midi_compose');
+        expect(prepared.actions.single.data['instrument_id'], guitarId);
+
+        final unavailablePitch = rangesById[guitarId]!.first['low']! - 1;
+        for (final commandType in <String>[
+          'midi.create_clip',
+          'midi.replace_notes',
+          'midi.append_notes',
+        ]) {
+          final arguments = commandType == 'midi.create_clip'
+              ? <String, dynamic>{
+                  'destination': <String, dynamic>{'row_id': 200},
+                  'start_beat': 0.0,
+                  'length_beats': 1.0,
+                  'notes': <Map<String, dynamic>>[
+                    _note(unavailablePitch, 0.0, 1.0),
+                  ],
+                }
+              : <String, dynamic>{
+                  'clip_id': 'midi-clip',
+                  'notes': <Map<String, dynamic>>[
+                    _note(unavailablePitch, 0.0, 1.0),
+                  ],
+                };
+          expect(
+            () => const AiV3CommandPreparer().prepare(
+              plan: AiV3Plan.fromJson(
+                _plan(<Map<String, dynamic>>[
+                  _command('invalid', commandType, arguments),
+                ]),
+              ),
+              context: context,
+            ),
+            throwsA(
+              isA<AiV3PreparationException>().having(
+                (error) => error.code,
+                'code',
+                'v3_midi_instrument_pitch_unavailable',
+              ),
+            ),
+          );
+        }
       }
     });
 

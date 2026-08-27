@@ -19,6 +19,7 @@ import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/midi_pitch_ranges.dart';
 import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
 import 'package:mixroom/helpers/sfz_definition_loader.dart';
@@ -5983,6 +5984,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<String, String> _aiLibrarySamplePathIndex = <String, String>{};
   final Map<String, List<String>> _aiLibraryRolePathIndex =
       <String, List<String>>{};
+  final Map<String, List<Map<String, int>>>
+  _aiPlayablePitchRangesByInstrumentId =
+      <String, List<Map<String, int>>>{};
   late final ja.AudioPlayer _samplePreviewPlayer;
   StreamSubscription<ja.PlayerState>? _samplePreviewStateSub;
   String? _auditioningSamplePath;
@@ -30522,6 +30526,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _aiLibrarySnapshotCacheKey = null;
     _aiLibrarySamplePathIndex.clear();
     _aiLibraryRolePathIndex.clear();
+    _aiPlayablePitchRangesByInstrumentId.clear();
   }
 
   Future<List<String>> _collectAiLibraryAudioEntriesForRoot(
@@ -30704,6 +30709,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _aiLibrarySnapshotCache;
     }
 
+    final pitchRangeEntries = await Future.wait(
+      catalog.map((spec) async {
+        final instrumentId = (spec['id'] as String? ?? '').trim();
+        if (instrumentId.isEmpty) {
+          return null;
+        }
+        final playable = await _playableMidiPitchesForInstrument(
+          instrumentId,
+          _instrumentParamsFromSpec(spec),
+        );
+        return MapEntry<String, List<Map<String, int>>>(
+          instrumentId,
+          compactMidiPitchRanges(playable),
+        );
+      }),
+    );
+    _aiPlayablePitchRangesByInstrumentId
+      ..clear()
+      ..addEntries(
+        pitchRangeEntries
+            .whereType<MapEntry<String, List<Map<String, int>>>>(),
+      );
+
     final lines = <String>[];
     final instrumentsByCategory = <String, List<String>>{};
     for (final spec in catalog) {
@@ -30712,13 +30740,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final instrumentName = (spec['name'] as String? ?? '').trim();
       final category = _instrumentPickerCategory(spec).trim();
       final bucket = category.isEmpty ? 'Other' : category;
+      final playableRangeText = formatMidiPitchRanges(
+        _aiPlayablePitchRangesByInstrumentId[instrumentId] ??
+            const <Map<String, int>>[],
+      );
+      final catalogEntry = instrumentName.isEmpty
+          ? instrumentId
+          : '$instrumentName<$instrumentId>';
       instrumentsByCategory
           .putIfAbsent(bucket, () => <String>[])
-          .add(
-            instrumentName.isEmpty
-                ? instrumentId
-                : '$instrumentName<$instrumentId>',
-          );
+          .add('$catalogEntry{playable_midi=$playableRangeText}');
     }
     lines.add('built_in_instruments:');
     if (instrumentsByCategory.isEmpty) {
@@ -30945,6 +30976,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (spec) => <String, dynamic>{
                 'instrument_id': (spec['id'] as String? ?? '').trim(),
                 'name': (spec['name'] as String? ?? '').trim(),
+                'playable_pitch_ranges':
+                    _aiPlayablePitchRangesByInstrumentId[
+                      (spec['id'] as String? ?? '').trim()
+                    ] ??
+                    const <Map<String, int>>[],
               },
             )
             .where(
@@ -61155,6 +61191,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return kPreferredPianoInstrumentId;
   }
 
+  Future<bool> _validateAiGeneratedMidiPitches({
+    required Map<String, dynamic> actionData,
+    required String instrumentId,
+    required Map<String, double> instrumentParams,
+    required Iterable<MidiNote> notes,
+  }) async {
+    final playable = await _playableMidiPitchesForInstrument(
+      instrumentId,
+      instrumentParams,
+    );
+    final unavailable = notes
+        .map((note) => note.pitch)
+        .where((pitch) => !playable.contains(pitch))
+        .toSet()
+        .toList(growable: false)
+      ..sort();
+    if (unavailable.isEmpty) return true;
+
+    final instrumentName = _instrumentNameFromId(instrumentId);
+    final playableText = formatMidiPitchRanges(
+      compactMidiPitchRanges(playable),
+    );
+    final commandId = actionData['command_id']?.toString().trim() ?? '';
+    if (commandId.isNotEmpty || actionData['resource_consumer_type'] != null) {
+      throw StateError(
+        'v3_midi_instrument_pitch_unavailable:$instrumentId:'
+        '${unavailable.join(',')}',
+      );
+    }
+    _insertAssistantChatText(
+      "I didn't change the project because $instrumentName cannot play "
+      'MIDI ${unavailable.join(', ')}. Its playable MIDI pitches are '
+      '$playableText.',
+    );
+    return false;
+  }
+
   bool _shouldCreateFreshMidiClip(
     Map<String, dynamic> data,
     Map<String, dynamic> target,
@@ -61901,6 +61974,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _instrumentNameFromId(instrumentId))
               .toString()
               .trim();
+      final instrumentParams = _instrumentParamsFromSpec(
+        _instrumentSpecById(instrumentId),
+      );
+      if (!await _validateAiGeneratedMidiPitches(
+        actionData: data,
+        instrumentId: instrumentId,
+        instrumentParams: instrumentParams,
+        notes: notes,
+      )) {
+        return;
+      }
       final startMs =
           _toActionDouble(data['start_ms'] ?? target['start_ms']) ??
           _globalAudioClock.inMilliseconds.toDouble();
@@ -61929,9 +62013,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         restoreTrack: _addClipFromUndoPayload,
         instrumentId: instrumentId,
         instrumentName: instrumentName.isEmpty ? instrumentId : instrumentName,
-        instrumentParams: _instrumentParamsFromSpec(
-          _instrumentSpecById(instrumentId),
-        ),
+        instrumentParams: instrumentParams,
         midiNotes: notes,
         row: row,
         timeMs: math.max(0.0, startMs),
@@ -61959,6 +62041,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) {
       _insertAssistantChatText('The selected clip is not a MIDI clip.');
+      return;
+    }
+    if (!await _validateAiGeneratedMidiPitches(
+      actionData: data,
+      instrumentId: clip.instrumentId,
+      instrumentParams: clip.instrumentParams,
+      notes: notes,
+    )) {
       return;
     }
 
@@ -62203,6 +62293,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _instrumentNameFromId(instrumentId))
             .toString()
             .trim();
+    final instrumentParams = _instrumentParamsFromSpec(
+      _instrumentSpecById(instrumentId),
+    );
+    if (!await _validateAiGeneratedMidiPitches(
+      actionData: data,
+      instrumentId: instrumentId,
+      instrumentParams: instrumentParams,
+      notes: notes,
+    )) {
+      return;
+    }
     final clipLabel = (data['label']?.toString().trim().isNotEmpty ?? false)
         ? data['label'].toString().trim()
         : sourceClip.label.trim().isEmpty
@@ -62236,9 +62337,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }) => _addMidiTrack(
             instrumentId: instrumentId,
             instrumentName: instrumentName,
-            instrumentParams: _instrumentParamsFromSpec(
-              _instrumentSpecById(instrumentId),
-            ),
+            instrumentParams: instrumentParams,
             midiNotes: midiNotes,
             row: row,
             timeMs: timeMs,
@@ -62251,9 +62350,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentName: instrumentName.isEmpty
           ? _instrumentNameFromId(instrumentId)
           : instrumentName,
-      instrumentParams: _instrumentParamsFromSpec(
-        _instrumentSpecById(instrumentId),
-      ),
+      instrumentParams: instrumentParams,
       midiNotes: notes,
       row: targetRow,
       timeMs: startMs,

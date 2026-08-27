@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/screens/audio_editor.dart';
 import 'package:path/path.dart' as p;
 
 Map<String, String> _parseSfzOpcodes(String lineRaw) {
@@ -382,6 +383,25 @@ void main() {
         expect(entry[value.key], value.value,
             reason: '${expected.key} ${value.key}.');
       }
+      final fallback = kBundledSfzFallbackCatalog.singleWhere(
+        (candidate) => candidate['id'] == expected.key,
+      );
+      expect(fallback['name'], entry['name']);
+      expect(fallback['pickerCategory'], entry['category']);
+      expect(fallback['sourceProject'], entry['source_project']);
+      expect(fallback['sourceLicense'], entry['source_license']);
+      expect(fallback['outputGain'], entry['outputGain']);
+      expect(fallback['attackMs'], entry['attackMs']);
+      expect(fallback['releaseMs'], entry['releaseMs']);
+      expect(
+        fallback['sfzAssetPath'],
+        p.posix.join(
+          'assets',
+          'instruments',
+          entry['pack'] as String,
+          entry['preset'] as String,
+        ),
+      );
     }
 
     final acousticPack = Directory(p.join(repoRoot.path, 'assets',
@@ -433,9 +453,30 @@ void main() {
     expect(acousticBytes + electricBytes,
         lessThanOrEqualTo(combinedMaximumBytes));
 
+    final expectedPresetByPack = <String, String>{
+      acousticPack.path: 'AcousticGuitar.sfz',
+      electricPack.path: 'ElectricGuitar.sfz',
+    };
     for (final pack in <Directory>[acousticPack, electricPack]) {
       expect(File(p.join(pack.path, 'LICENSE')).existsSync(), isTrue);
       expect(File(p.join(pack.path, 'NOTICE.md')).existsSync(), isTrue);
+      expect(
+        pack
+            .listSync(followLinks: false)
+            .whereType<File>()
+            .map((file) => p.basename(file.path))
+            .toSet(),
+        <String>{'LICENSE', 'NOTICE.md', expectedPresetByPack[pack.path]!},
+        reason: 'Guitar pack contains non-production top-level files.',
+      );
+      expect(
+        pack
+            .listSync(followLinks: false)
+            .whereType<Directory>()
+            .map((directory) => p.basename(directory.path))
+            .toSet(),
+        <String>{'samples'},
+      );
     }
   });
 
@@ -495,6 +536,52 @@ void main() {
     ));
     expect(androidIndex.readAsBytesSync(), sourceIndex.readAsBytesSync());
   });
+
+  test(
+    'guitars are registered for Flutter, licenses, and Android install-time delivery',
+    () async {
+      final repoRoot = Directory.current;
+      final pubspec = await File(
+        p.join(repoRoot.path, 'pubspec.yaml'),
+      ).readAsString();
+      final mainSource = await File(
+        p.join(repoRoot.path, 'lib', 'main.dart'),
+      ).readAsString();
+      final androidApp = await File(
+        p.join(repoRoot.path, 'android', 'app', 'build.gradle.kts'),
+      ).readAsString();
+      final androidPack = await File(
+        p.join(
+          repoRoot.path,
+          'android',
+          'assetpacks',
+          'instruments',
+          'build.gradle.kts',
+        ),
+      ).readAsString();
+
+      for (final pack in <String>[
+        'FreePats-Spanish-Classical-Guitar-2019-06-18',
+        'Karoryfer-Black-And-Green-Guitars-1.000',
+      ]) {
+        expect(pubspec, contains('assets/instruments/$pack/'));
+        expect(pubspec, contains('assets/instruments/$pack/samples/'));
+        expect(mainSource, contains('assets/instruments/$pack/LICENSE'));
+        expect(mainSource, contains('assets/instruments/$pack/NOTICE.md'));
+      }
+      expect(androidApp, contains(':assetpacks:instruments'));
+      expect(
+        androidApp,
+        contains('delete(File(outDir, "assets/instruments"))'),
+      );
+      expect(
+        androidApp,
+        contains('delete(File(outDir, "flutter_assets/assets/instruments"))'),
+      );
+      expect(androidPack, contains('deliveryType.set("install-time")'));
+      expect(androidPack, contains('from("../../../assets/instruments")'));
+    },
+  );
 
   test('statically referenced SFZ assets exist on disk', () async {
     final repoRoot = Directory.current;
