@@ -54,14 +54,22 @@ void main() {
       selector.indexOf('if (_isBluetoothV2Session && Platform.isMacOS)'),
       lessThan(selector.indexOf('JuceAudioEngine.selectInputDevice(name)')),
     );
+    expect(selector, contains('devicesByUID'));
+    expect(selector, contains('displayLabelsByUid'));
+    expect(selector, contains('_macInputDeviceUID'));
     final v2Selection = _between(
       editor,
-      'Future<void> _selectMacV2InputDevice(String? name) async {',
+      'Future<void> _selectMacV2InputDevice(AudioInputDeviceInfo? device) async {',
       'List<_InputChannelRouteOption> _buildInputChannelRouteOptions',
     );
     expect(v2Selection, contains('coordinator.selectRecordingInput'));
+    expect(v2Selection, contains('inputDeviceUID:'));
     expect(v2Selection, contains('[MacV2InputSelection]'));
     expect(v2Selection, contains('result.diagnosticCode'));
+    expect(
+      v2Selection.indexOf('if (!result.succeeded)'),
+      lessThan(v2Selection.indexOf('_macInputDeviceUID =')),
+    );
     expect(v2Selection, isNot(contains('selectInputDevice')));
     expect(v2Selection, isNot(contains('prepareRecordingInputs')));
     expect(v2Selection, isNot(contains('requestMicrophone')));
@@ -863,20 +871,31 @@ void main() {
     expect(selection, isNot(contains('requestMicrophone')));
   });
 
-  test(
-    'UID foundation retains the current duplicate-name visibility policy',
-    () {
-      final plugin = File(pluginPath).readAsStringSync();
-      final enumeration = _between(
-        plugin,
-        'MixroomMacV2InputDeviceInfos(void) {',
-        '- (NSDictionary<NSString *, id> *)currentMacPlaybackOutputV2:',
-      );
+  test('UID enumeration retains duplicate names and exact identity', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final enumeration = _between(
+      plugin,
+      'MixroomMacV2InputDeviceInfos(void) {',
+      '- (NSDictionary<NSString *, id> *)currentMacPlaybackOutputV2:',
+    );
 
-      expect(enumeration, contains('@"uid": device[@"uid"] ?: @""'));
-      expect(enumeration, contains('MixroomInputNameIsUnique'));
-    },
-  );
+    expect(enumeration, contains('@"uid": device[@"uid"] ?: @""'));
+    expect(enumeration, isNot(contains('MixroomInputNameIsUnique')));
+    expect(plugin, isNot(contains('static BOOL MixroomInputNameIsUnique(')));
+  });
+
+  test('macOS V2 refresh preserves and deduplicates inputs by UID', () {
+    final editor = File(editorPath).readAsStringSync();
+    final refresh = _between(
+      editor,
+      'Future<void> _loadMacV2AudioDevices() async {',
+      'Widget _buildMicrophonePermissionNotice()',
+    );
+
+    expect(refresh, contains('inputDevicesByUID.putIfAbsent(uid'));
+    expect(refresh, contains('containsKey(_macInputDeviceUID)'));
+    expect(refresh, isNot(contains('inputDevices.contains(name)')));
+  });
 
   test(
     'input enumeration rejects unavailable CoreAudio facts without messaging NSNull',

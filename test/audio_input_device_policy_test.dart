@@ -96,4 +96,84 @@ void main() {
 
     expect(fallback, isNull);
   });
+
+  test(
+    'keeps unique labels and distinguishes duplicate names by stable UID',
+    () {
+      const duplicateB = AudioInputDeviceInfo(
+        uid: 'input-b',
+        name: 'Studio Interface',
+        isBluetoothInput: false,
+        isBuiltIn: false,
+        isDefault: false,
+        transport: 'usb',
+      );
+      const duplicateA = AudioInputDeviceInfo(
+        uid: 'input-a',
+        name: 'Studio Interface',
+        isBluetoothInput: false,
+        isBuiltIn: false,
+        isDefault: false,
+        transport: 'usb',
+      );
+      const unique = AudioInputDeviceInfo(
+        uid: 'built-in-input',
+        name: 'MacBook Microphone',
+        isBluetoothInput: false,
+        isBuiltIn: true,
+        isDefault: true,
+        transport: 'builtIn',
+      );
+
+      final labels = policy.displayLabelsByUid(const [
+        duplicateB,
+        unique,
+        duplicateA,
+      ]);
+
+      expect(labels['built-in-input'], 'MacBook Microphone');
+      expect(labels['input-a'], 'Studio Interface · USB 1');
+      expect(labels['input-b'], 'Studio Interface · USB 2');
+      expect(labels.values.where((label) => label.contains('input-')), isEmpty);
+    },
+  );
+
+  test(
+    'duplicate labels retain distinct transports and ignore invalid IDs',
+    () {
+      const aggregate = AudioInputDeviceInfo(
+        uid: 'device-a',
+        name: 'Shared Name',
+        isBluetoothInput: false,
+        isBuiltIn: false,
+        isDefault: false,
+        transport: 'aggregate',
+      );
+      const virtualDevice = AudioInputDeviceInfo(
+        uid: 'device-b',
+        name: 'Shared Name',
+        isBluetoothInput: false,
+        isBuiltIn: false,
+        isDefault: false,
+        transport: 'virtual',
+      );
+      const missingUid = AudioInputDeviceInfo(
+        name: 'Shared Name',
+        isBluetoothInput: false,
+        isBuiltIn: false,
+        isDefault: false,
+        transport: 'usb',
+      );
+
+      final labels = policy.displayLabelsByUid(const [
+        virtualDevice,
+        missingUid,
+        aggregate,
+      ]);
+
+      expect(labels, hasLength(2));
+      expect(labels['device-a'], 'Shared Name · Aggregate 1');
+      expect(labels['device-b'], 'Shared Name · Virtual 2');
+    },
+  );
 }

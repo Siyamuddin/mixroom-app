@@ -5779,8 +5779,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   MediaDeviceInfo? _selectedOutput;
   final List<TrackGroup> _trackGroups = <TrackGroup>[];
   String? _androidOutputRouteName;
-  List<String> _macInputDevices = const <String>[];
-  String? _macInputDeviceName;
+  List<AudioInputDeviceInfo> _macInputDevices = const <AudioInputDeviceInfo>[];
+  String? _macInputDeviceUID;
   List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
   bool _macV2InputSelectionInFlight = false;
@@ -43427,19 +43427,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _ensurePlaybackRouteReady(reason: 'selectMacOutputDevice');
   }
 
-  Future<void> _selectMacV2InputDevice(String? name) async {
+  Future<void> _selectMacV2InputDevice(AudioInputDeviceInfo? device) async {
     final coordinator = _audioRouteCoordinatorV2;
     if (!_macV2InputSelectionEnabled || coordinator == null) {
       _showSmallNotice('Audio input selection is not ready yet.');
       return;
     }
-    final selection = name?.trim();
+    final selectionName = device?.name.trim();
+    final selectionUID = device?.uid.trim();
     _setStateAndRefreshProjectSettings(
       () => _macV2InputSelectionInFlight = true,
     );
     try {
       final result = await coordinator.selectRecordingInput(
-        selection == null || selection.isEmpty ? null : selection,
+        selectionName == null || selectionName.isEmpty ? null : selectionName,
+        inputDeviceUID: selectionUID == null || selectionUID.isEmpty
+            ? null
+            : selectionUID,
         retryAfterPlaybackRecovery: true,
       );
       if (!mounted) return;
@@ -43461,9 +43465,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       _setStateAndRefreshProjectSettings(() {
-        _macInputDeviceName = selection == null || selection.isEmpty
+        _macInputDeviceUID = selectionUID == null || selectionUID.isEmpty
             ? null
-            : selection;
+            : selectionUID;
       });
     } finally {
       if (mounted) {
@@ -44475,13 +44479,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!Platform.isMacOS || !_isBluetoothV2Session || _loadingDevices) return;
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
     try {
-      final inputDevices = <String>[];
+      final inputDevicesByUID = <String, AudioInputDeviceInfo>{};
       for (final info in await JuceAudioEngine.getInputDeviceInfos()) {
+        final uid = info.uid.trim();
         final name = info.name.trim();
-        if (name.isNotEmpty && !inputDevices.contains(name)) {
-          inputDevices.add(name);
-        }
+        if (uid.isEmpty || name.isEmpty) continue;
+        inputDevicesByUID.putIfAbsent(uid, () => info);
       }
+      final inputDevices = inputDevicesByUID.values.toList(growable: false);
       final outputDevices = <String>[];
       for (final rawName in await JuceAudioEngine.getOutputDevices()) {
         final name = rawName.trim();
@@ -44494,9 +44499,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!mounted) return;
       _setStateAndRefreshProjectSettings(() {
         _macInputDevices = inputDevices;
-        if (_macInputDeviceName != null &&
-            !inputDevices.contains(_macInputDeviceName)) {
-          _macInputDeviceName = null;
+        if (_macInputDeviceUID != null &&
+            !inputDevicesByUID.containsKey(_macInputDeviceUID)) {
+          _macInputDeviceUID = null;
         }
         _macOutputDevices = outputDevices;
         _macOutputDeviceName = currentOutput.isEmpty
@@ -44648,14 +44653,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_isBluetoothV2Session && Platform.isMacOS) {
       const systemDefaultValue = '';
       final selectionEnabled = _macV2InputSelectionEnabled;
-      final selectedName = _macInputDeviceName?.trim();
+      final devicesByUID = <String, AudioInputDeviceInfo>{
+        for (final device in _macInputDevices) device.uid.trim(): device,
+      };
+      final labelsByUID = _audioInputDevicePolicy.displayLabelsByUid(
+        _macInputDevices,
+      );
+      final selectedUID = _macInputDeviceUID?.trim();
       final selectedValue =
-          selectedName != null &&
-              selectedName.isNotEmpty &&
-              _macInputDevices.contains(selectedName)
-          ? selectedName
+          selectedUID != null && devicesByUID.containsKey(selectedUID)
+          ? selectedUID
           : systemDefaultValue;
-      final values = <String>[systemDefaultValue, ..._macInputDevices];
+      final values = <String>[systemDefaultValue, ...devicesByUID.keys];
+      String labelFor(String value) => value.isEmpty
+          ? L10n.translate(context, 'System Default')
+          : labelsByUID[value] ?? devicesByUID[value]?.name ?? '';
       return Semantics(
         identifier: 'daw.input_device',
         label: L10n.translate(context, 'Input Device'),
@@ -44670,9 +44682,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 (value) => Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    value.isEmpty
-                        ? L10n.translate(context, 'System Default')
-                        : value,
+                    labelFor(value),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white),
@@ -44695,9 +44705,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 (value) => DropdownMenuItem<String>(
                   value: value,
                   child: Text(
-                    value.isEmpty
-                        ? L10n.translate(context, 'System Default')
-                        : value,
+                    labelFor(value),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white),
@@ -44708,7 +44716,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           onChanged: selectionEnabled
               ? (value) => unawaited(
                   _selectMacV2InputDevice(
-                    value == null || value.isEmpty ? null : value,
+                    value == null || value.isEmpty ? null : devicesByUID[value],
                   ),
                 )
               : null,
@@ -59715,7 +59723,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       case 'macV2InputPreferenceChanged':
         if (Platform.isMacOS && _isBluetoothV2Session && mounted) {
           _setStateAndRefreshProjectSettings(() {
-            _macInputDeviceName = null;
+            _macInputDeviceUID = null;
           });
           unawaited(_loadMacV2AudioDevices());
         }

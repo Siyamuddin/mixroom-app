@@ -1466,16 +1466,6 @@ static BOOL MixroomOutputNameIsUnique(
     return MixroomExactDeviceMatches(inventory, target[@"name"], NO).count == 1;
 }
 
-static BOOL MixroomInputNameIsUnique(
-    NSArray<NSDictionary<NSString *, id> *> *inventory,
-    NSDictionary<NSString *, id> *target
-) {
-    if (target == nil || [target[@"name"] length] == 0) {
-        return NO;
-    }
-    return MixroomExactDeviceMatches(inventory, target[@"name"], YES).count == 1;
-}
-
 static BOOL MixroomOutputSupportsV2Recording(
     NSArray<NSDictionary<NSString *, id> *> *inventory,
     NSDictionary<NSString *, id> *output
@@ -1738,8 +1728,7 @@ MixroomMacV2InputDeviceInfos(void) {
     NSMutableArray<NSDictionary<NSString *, id> *> *infos =
         [NSMutableArray array];
     for (NSDictionary<NSString *, id> *device in inventory) {
-        if (!MixroomMacInputIsUsable(inventory, device) ||
-            !MixroomInputNameIsUnique(inventory, device)) {
+        if (!MixroomMacInputIsUsable(inventory, device)) {
             continue;
         }
         NSString *name = [device[@"name"]
