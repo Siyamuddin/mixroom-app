@@ -943,6 +943,48 @@ String _paymentMethodLabel(BillingPaymentMethodDisplay method) {
   return expiry.trim();
 }
 
+class AccountPlansCarousel extends StatelessWidget {
+  const AccountPlansCarousel({
+    super.key,
+    required this.entitlementService,
+    required this.iapService,
+    required this.platformKey,
+    required this.regionCode,
+    required this.platformProvider,
+    required this.onOpenAccountPlans,
+  });
+
+  final EntitlementService entitlementService;
+  final IapService iapService;
+  final String platformKey;
+  final String regionCode;
+  final BillingProvider platformProvider;
+  final VoidCallback onOpenAccountPlans;
+
+  @override
+  Widget build(BuildContext context) {
+    final entitlement =
+        entitlementService.entitlement ?? EntitlementSnapshot.free(userId: '');
+    final catalog = entitlementService.billingCatalog;
+    final products = _visibleBillingProducts(catalog, platformKey);
+    final busy =
+        entitlementService.isAccountSurfaceLoading ||
+        iapService.isPurchaseInProgress;
+    return _PlansPanel(
+      entitlement: entitlement,
+      catalog: catalog,
+      products: products,
+      platformProvider: platformProvider,
+      regionCode: regionCode,
+      iapService: iapService,
+      isBusy: busy,
+      onManageSubscription: ({provider, managementChannel}) =>
+          onOpenAccountPlans(),
+      onSelectProduct: (_) => onOpenAccountPlans(),
+    );
+  }
+}
+
 class _PlansPanel extends StatefulWidget {
   const _PlansPanel({
     required this.entitlement,
@@ -1047,6 +1089,7 @@ class _PlansPanelState extends State<_PlansPanel> {
                               visibleCardCount)
                           .clamp(224.0, 264.0);
                 final cardStep = cardWidth + cardGap;
+                final scrollbarGutter = visibleCardCount == 1 ? 18.0 : 6.0;
 
                 return Container(
                   padding: const EdgeInsets.fromLTRB(
@@ -1074,47 +1117,50 @@ class _PlansPanelState extends State<_PlansPanel> {
                       controller: _plansScrollController,
                       notificationPredicate: (notification) =>
                           notification.metrics.axis == Axis.horizontal,
-                      child: SingleChildScrollView(
-                        controller: _plansScrollController,
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        clipBehavior: Clip.hardEdge,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final entry in cards.asMap().entries) ...[
-                              SizedBox(
-                                width: cardWidth,
-                                height: 450,
-                                child: _PlanListRow(
-                                  data: entry.value,
-                                  planIsCurrent: _isCurrentPlanCard(
-                                    entry.value,
-                                  ),
-                                  priceLabel: _priceLabelForCard(
-                                    context,
-                                    entry.value,
-                                  ),
-                                  billingCaption: _billingCaptionForCard(
-                                    context,
-                                    entry.value,
-                                  ),
-                                  isBusy: widget.isBusy,
-                                  productActions: _productActionsForCard(
-                                    context,
-                                    entry.value,
-                                  ),
-                                  fallbackAction: _fallbackActionForCard(
-                                    context,
-                                    entry.value,
-                                    _isCurrentPlanCard(entry.value),
+                      child: SizedBox(
+                        height: 450 + scrollbarGutter,
+                        child: SingleChildScrollView(
+                          controller: _plansScrollController,
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          clipBehavior: Clip.hardEdge,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (final entry in cards.asMap().entries) ...[
+                                SizedBox(
+                                  width: cardWidth,
+                                  height: 450,
+                                  child: _PlanListRow(
+                                    data: entry.value,
+                                    planIsCurrent: _isCurrentPlanCard(
+                                      entry.value,
+                                    ),
+                                    priceLabel: _priceLabelForCard(
+                                      context,
+                                      entry.value,
+                                    ),
+                                    billingCaption: _billingCaptionForCard(
+                                      context,
+                                      entry.value,
+                                    ),
+                                    isBusy: widget.isBusy,
+                                    productActions: _productActionsForCard(
+                                      context,
+                                      entry.value,
+                                    ),
+                                    fallbackAction: _fallbackActionForCard(
+                                      context,
+                                      entry.value,
+                                      _isCurrentPlanCard(entry.value),
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (entry.key != cards.length - 1)
-                                const SizedBox(width: cardGap),
+                                if (entry.key != cards.length - 1)
+                                  const SizedBox(width: cardGap),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
                       ),
                     ),
