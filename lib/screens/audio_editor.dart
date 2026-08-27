@@ -21,6 +21,7 @@ import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
 import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
+import 'package:mixroom/helpers/sfz_definition_loader.dart';
 import 'package:mixroom/helpers/timed_native_operation.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
@@ -546,72 +547,6 @@ const Set<String> kBlockedInstrumentNameFragments = <String>{
 };
 
 const String kPitchLabToolInstrumentId = 'mixroom.vocal_pitch_lab';
-
-class _SfzRegion {
-  const _SfzRegion({
-    required this.sampleAssetPath,
-    required this.loKey,
-    required this.hiKey,
-    required this.keyCenter,
-    required this.loVel,
-    required this.hiVel,
-    required this.gainLinear,
-    required this.attackSec,
-    required this.releaseSec,
-    required this.pitchKeytrack,
-    required this.pitchOffsetSemitones,
-    required this.sampleStartFrame,
-    required this.sampleEndFrameExclusive,
-    required this.oneShot,
-    required this.seqLength,
-    required this.seqPosition,
-    required this.loRand,
-    required this.hiRand,
-  });
-
-  final String sampleAssetPath;
-  final int loKey;
-  final int hiKey;
-  final int keyCenter;
-  final int loVel;
-  final int hiVel;
-  final double gainLinear;
-  final double attackSec;
-  final double releaseSec;
-  final double pitchKeytrack;
-  final double pitchOffsetSemitones;
-  final int sampleStartFrame;
-  final int sampleEndFrameExclusive;
-  final bool oneShot;
-  final int seqLength;
-  final int seqPosition;
-  final double loRand;
-  final double hiRand;
-}
-
-class _SfzDefinition {
-  const _SfzDefinition({
-    required this.sfzAssetPath,
-    required this.regions,
-    required this.defaultAttackSec,
-    required this.defaultReleaseSec,
-  });
-
-  final String sfzAssetPath;
-  final List<_SfzRegion> regions;
-  final double defaultAttackSec;
-  final double defaultReleaseSec;
-}
-
-class _SfzParsedLine {
-  const _SfzParsedLine({
-    this.blockTag,
-    this.opcodes = const <String, String>{},
-  });
-
-  final String? blockTag;
-  final Map<String, String> opcodes;
-}
 
 class _DecodedStereoPcm {
   const _DecodedStereoPcm({
@@ -6068,8 +6003,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<String> _desktopPluginSearchPaths = <String>[];
   int? _desktopLastPluginRescanAtMs;
   final List<_ProjectLoadIssue> _projectLoadIssues = <_ProjectLoadIssue>[];
-  final Map<String, _SfzDefinition> _sfzDefinitionCache =
-      <String, _SfzDefinition>{};
+  final SfzDefinitionLoader _sfzDefinitionLoader = SfzDefinitionLoader();
+  static final Set<int> _allMidiPitches = Set<int>.unmodifiable(
+    <int>{for (var pitch = 0; pitch <= 127; pitch++) pitch},
+  );
+  final Set<String> _sfzRangeDetectionFailuresLogged = <String>{};
   final LinkedHashMap<String, _DecodedStereoPcm> _sfzSampleCache =
       LinkedHashMap<String, _DecodedStereoPcm>();
   static const int _kMaxSfzSampleCacheEntries = 10;
@@ -12564,7 +12502,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _deferredHostedInstrumentEngineClipIds.clear();
     _restoredHostedInstrumentStateByClipId.clear();
     _hostedPluginRestoreEntries.clear();
-    _sfzDefinitionCache.clear();
+    _sfzDefinitionLoader.clear();
     _sfzSampleCache.clear();
 
     _stopMeterPolling(decayToZero: false);
@@ -24708,178 +24646,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return File(path);
   }
 
-  Map<String, String> _parseSfzOpcodes(String line) {
-    final out = <String, String>{};
-    final trimmed = line.split('//').first.trim();
-    if (trimmed.isEmpty) return out;
-    final matches = RegExp(
-      r'([A-Za-z_][A-Za-z0-9_]*)=',
-    ).allMatches(trimmed).toList();
-    if (matches.isEmpty) return out;
-    for (int i = 0; i < matches.length; i++) {
-      final m = matches[i];
-      final key = (m.group(1) ?? '').trim().toLowerCase();
-      final valueStart = m.end;
-      final valueEnd = i + 1 < matches.length
-          ? matches[i + 1].start
-          : trimmed.length;
-      final value = trimmed.substring(valueStart, valueEnd).trim();
-      if (key.isEmpty || value.isEmpty) continue;
-      out[key] = value;
-    }
-    return out;
-  }
-
-  String _stripSfzQuotes(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.length >= 2 &&
-        ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-            (trimmed.startsWith('\'') && trimmed.endsWith('\'')))) {
-      return trimmed.substring(1, trimmed.length - 1).trim();
-    }
-    return trimmed;
-  }
-
-  double? _parseSfzNumberOrNote(String raw) {
-    final token = _stripSfzQuotes(raw);
-    final numeric = double.tryParse(token);
-    if (numeric != null) return numeric;
-
-    final match = RegExp(r'^([A-Ga-g])([#b]?)(-?\d+)$').firstMatch(token);
-    if (match == null) return null;
-    final step = (match.group(1) ?? '').toUpperCase();
-    final accidental = match.group(2) ?? '';
-    final octave = int.tryParse(match.group(3) ?? '');
-    if (octave == null) return null;
-
-    const semitones = <String, int>{
-      'C': 0,
-      'D': 2,
-      'E': 4,
-      'F': 5,
-      'G': 7,
-      'A': 9,
-      'B': 11,
-    };
-    var semitone = semitones[step];
-    if (semitone == null) return null;
-    if (accidental == '#') semitone += 1;
-    if (accidental == 'b') semitone -= 1;
-
-    final midi = ((octave + 1) * 12) + semitone;
-    return midi.toDouble();
-  }
-
-  _SfzParsedLine _parseSfzLine(String rawLine) {
-    final line = rawLine.split('//').first.trim();
-    if (line.isEmpty) return const _SfzParsedLine();
-
-    String? blockTag;
-    var remainder = line;
-    final tagMatch = RegExp(r'^<\s*([A-Za-z0-9_]+)\s*>').firstMatch(line);
-    if (tagMatch != null) {
-      blockTag = (tagMatch.group(1) ?? '').trim().toLowerCase();
-      remainder = line.substring(tagMatch.end).trim();
-    }
-    final opcodes = remainder.isEmpty
-        ? const <String, String>{}
-        : _parseSfzOpcodes(remainder);
-    return _SfzParsedLine(blockTag: blockTag, opcodes: opcodes);
-  }
-
-  Future<List<String>> _loadSfzExpandedLines(
-    String sfzAssetPath, {
-    Set<String>? includeStack,
-    Map<String, String>? defines,
-  }) async {
-    final normalizedPath = p.normalize(sfzAssetPath);
-    final stack = includeStack ?? <String>{};
-    if (stack.contains(normalizedPath)) return const <String>[];
-    stack.add(normalizedPath);
-
-    try {
-      final text = File(normalizedPath).existsSync()
-          ? await File(normalizedPath).readAsString()
-          : await rootBundle.loadString(p.posix.normalize(normalizedPath));
-      final dir = File(normalizedPath).existsSync()
-          ? p.dirname(normalizedPath)
-          : p.posix.dirname(normalizedPath);
-      final macroMap = defines ?? <String, String>{};
-      final out = <String>[];
-
-      for (final rawLine in const LineSplitter().convert(text)) {
-        final line = rawLine.split('//').first.trim();
-        if (line.isEmpty) continue;
-
-        final includeMatch = RegExp(
-          r'''^#include\s+["']([^"']+)["']''',
-          caseSensitive: false,
-        ).firstMatch(line);
-        if (includeMatch != null) {
-          final includeRaw = _stripSfzQuotes(
-            (includeMatch.group(1) ?? '').trim(),
-          );
-          if (includeRaw.isNotEmpty) {
-            final includePath = File(normalizedPath).existsSync()
-                ? p.normalize(p.join(dir, includeRaw.replaceAll('\\', '/')))
-                : p.posix.normalize(
-                    p.posix.join(dir, includeRaw.replaceAll('\\', '/')),
-                  );
-            final includeLines = await _loadSfzExpandedLines(
-              includePath,
-              includeStack: stack,
-              defines: macroMap,
-            );
-            out.addAll(includeLines);
-          }
-          continue;
-        }
-
-        final defineMatch = RegExp(
-          r'^#define\s+\$?([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$',
-        ).firstMatch(line);
-        if (defineMatch != null) {
-          final key = (defineMatch.group(1) ?? '').trim();
-          final value = (defineMatch.group(2) ?? '').trim();
-          if (key.isNotEmpty && value.isNotEmpty) {
-            macroMap[key] = value;
-          }
-          continue;
-        }
-
-        var expandedLine = rawLine;
-        if (macroMap.isNotEmpty) {
-          for (final entry in macroMap.entries) {
-            expandedLine = expandedLine.replaceAll(
-              '\$${entry.key}',
-              entry.value,
-            );
-          }
-        }
-        out.add(expandedLine);
-      }
-      return out;
-    } catch (_) {
-      return const <String>[];
-    } finally {
-      stack.remove(normalizedPath);
-    }
-  }
-
-  String _resolveSfzSampleAssetPath({
-    required String sfzAssetPath,
-    required String defaultPathRaw,
-    required String samplePathRaw,
-  }) {
-    final sfzDir = p.posix.dirname(sfzAssetPath);
-    final defaultPath = _stripSfzQuotes(defaultPathRaw).replaceAll('\\', '/');
-    final samplePath = _stripSfzQuotes(samplePathRaw).replaceAll('\\', '/');
-    if (samplePath.startsWith('assets/')) {
-      return p.posix.normalize(samplePath);
-    }
-    return p.posix.normalize(p.posix.join(sfzDir, defaultPath, samplePath));
-  }
-
   String? _sampledAliasAssetPathForInstrumentId(String instrumentId) {
     switch (instrumentId.trim().toLowerCase()) {
       case 'mixroom.drum_808_starter':
@@ -24939,203 +24705,63 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  double _readSfzNumeric(
-    Map<String, String> values,
-    String key,
-    double fallback,
-  ) {
-    final raw = values[key];
-    if (raw == null) return fallback;
-    return _parseSfzNumberOrNote(raw) ?? fallback;
-  }
-
-  Future<_SfzDefinition?> _sfzDefinitionForInstrument(
+  Future<SfzDefinition?> _sfzDefinitionForInstrument(
     String instrumentId,
   ) async {
     final spec = _instrumentSpecById(instrumentId);
-    if (!_isSampledInstrumentSpec(spec)) return null;
-    final sfzAssetPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
+    final aliasPath = _sampledAliasAssetPathForInstrumentId(instrumentId);
+    if (!_isSampledInstrumentSpec(spec) && aliasPath == null) return null;
+    final sfzAssetPath = aliasPath ??
+        ((spec['sfzAssetPath'] as String?)?.trim() ?? '');
     if (sfzAssetPath.isEmpty) return null;
-
-    final cached = _sfzDefinitionCache[sfzAssetPath];
-    if (cached != null) return cached;
-
-    try {
-      final sfzLines = await _loadSfzExpandedLines(sfzAssetPath);
-      if (sfzLines.isEmpty) return null;
-      final control = <String, String>{};
-      final global = <String, String>{};
-      final master = <String, String>{};
-      final group = <String, String>{};
-      Map<String, String>? region;
-      String currentBlock = '';
-
-      final regions = <Map<String, String>>[];
-      for (final rawLine in sfzLines) {
-        final parsed = _parseSfzLine(rawLine);
-        final tag = parsed.blockTag;
-        if (tag != null && tag.isNotEmpty) {
-          currentBlock = tag;
-          if (tag == 'group') {
-            group.clear();
-          } else if (tag == 'master') {
-            master.clear();
-          } else if (tag == 'region') {
-            region = <String, String>{}
-              ..addAll(control)
-              ..addAll(global)
-              ..addAll(master)
-              ..addAll(group);
-            regions.add(region);
-          }
-        }
-
-        final opcodes = parsed.opcodes;
-        if (opcodes.isEmpty) continue;
-        switch (currentBlock) {
-          case 'control':
-            control.addAll(opcodes);
-            break;
-          case 'global':
-            global.addAll(opcodes);
-            break;
-          case 'master':
-            master.addAll(opcodes);
-            break;
-          case 'group':
-            group.addAll(opcodes);
-            break;
-          case 'region':
-            region ??= <String, String>{}
-              ..addAll(control)
-              ..addAll(global)
-              ..addAll(master)
-              ..addAll(group);
-            region.addAll(opcodes);
-            break;
-          default:
-            break;
-        }
-      }
-
-      final defaultPathRaw = control['default_path'] ?? '';
-      final globalAttackSec = _readSfzNumeric(global, 'ampeg_attack', 0.005);
-      final globalReleaseSec = _readSfzNumeric(global, 'ampeg_release', 0.35);
-      final globalVol = _readSfzNumeric(global, 'volume', 0.0);
-
-      final parsedRegions = <_SfzRegion>[];
-      for (final r in regions) {
-        final sampleRaw = r['sample'] ?? '';
-        if (sampleRaw.isEmpty) continue;
-        final sampleAssetPath = _resolveSfzSampleAssetPath(
-          sfzAssetPath: sfzAssetPath,
-          defaultPathRaw: r['default_path'] ?? defaultPathRaw,
-          samplePathRaw: sampleRaw,
-        );
-        final loKey = _readSfzNumeric(r, 'lokey', 0).round().clamp(0, 127);
-        final hiKey = _readSfzNumeric(r, 'hikey', 127).round().clamp(0, 127);
-        final keyCenter = _readSfzNumeric(
-          r,
-          'pitch_keycenter',
-          _readSfzNumeric(r, 'key', ((loKey + hiKey) / 2.0).roundToDouble()),
-        ).round().clamp(0, 127);
-        final loVel = _readSfzNumeric(r, 'lovel', 0).round().clamp(0, 127);
-        final hiVel = _readSfzNumeric(r, 'hivel', 127).round().clamp(0, 127);
-        final regionVolDb = _readSfzNumeric(r, 'volume', globalVol);
-        final gainLinear = math
-            .pow(10.0, (regionVolDb.clamp(-24.0, 12.0)) / 20.0)
-            .toDouble();
-        final attackSec = _readSfzNumeric(
-          r,
-          'ampeg_attack',
-          globalAttackSec,
-        ).clamp(0.0, 4.0).toDouble();
-        final releaseSec = _readSfzNumeric(
-          r,
-          'ampeg_release',
-          globalReleaseSec,
-        ).clamp(0.02, 12.0).toDouble();
-        final pitchKeytrack = _readSfzNumeric(
-          r,
-          'pitch_keytrack',
-          100.0,
-        ).clamp(-1200.0, 1200.0).toDouble();
-        final pitchOffsetSemitones =
-            (_readSfzNumeric(r, 'transpose', 0.0) +
-                    (_readSfzNumeric(r, 'tune', 0.0) / 100.0))
-                .clamp(-48.0, 48.0)
-                .toDouble();
-        final sampleStartFrame = math.max(
-          0,
-          _readSfzNumeric(r, 'offset', 0.0).round(),
-        );
-        final sampleEndFrameExclusive = math.max(
-          0,
-          _readSfzNumeric(r, 'end', -1.0).round() + 1,
-        );
-        final loopMode = (r['loop_mode'] ?? '').trim().toLowerCase();
-        final oneShot = loopMode == 'one_shot';
-        final seqLength = math.max(
-          1,
-          _readSfzNumeric(r, 'seq_length', 1.0).round(),
-        );
-        final rawSeqPosition = _readSfzNumeric(r, 'seq_position', 1.0).round();
-        final seqPosition = rawSeqPosition.clamp(1, seqLength);
-        final loRand = _readSfzNumeric(
-          r,
-          'lorand',
-          0.0,
-        ).clamp(0.0, 1.0).toDouble();
-        final hiRand = _readSfzNumeric(
-          r,
-          'hirand',
-          1.0,
-        ).clamp(loRand, 1.0).toDouble();
-        parsedRegions.add(
-          _SfzRegion(
-            sampleAssetPath: sampleAssetPath,
-            loKey: loKey,
-            hiKey: hiKey,
-            keyCenter: keyCenter,
-            loVel: loVel,
-            hiVel: hiVel,
-            gainLinear: gainLinear,
-            attackSec: attackSec,
-            releaseSec: releaseSec,
-            pitchKeytrack: pitchKeytrack,
-            pitchOffsetSemitones: pitchOffsetSemitones,
-            sampleStartFrame: sampleStartFrame,
-            sampleEndFrameExclusive: sampleEndFrameExclusive,
-            oneShot: oneShot,
-            seqLength: seqLength,
-            seqPosition: seqPosition,
-            loRand: loRand,
-            hiRand: hiRand,
-          ),
-        );
-      }
-
-      if (parsedRegions.isEmpty) return null;
-      final definition = _SfzDefinition(
-        sfzAssetPath: sfzAssetPath,
-        regions: parsedRegions,
-        defaultAttackSec: globalAttackSec.clamp(0.0, 4.0),
-        defaultReleaseSec: globalReleaseSec.clamp(0.02, 12.0),
-      );
-      _sfzDefinitionCache[sfzAssetPath] = definition;
-      return definition;
-    } catch (_) {
-      return null;
-    }
+    return _sfzDefinitionLoader.load(sfzAssetPath);
   }
 
-  _SfzRegion? _pickSfzRegion(
-    _SfzDefinition definition,
+  Future<Set<int>> _playableMidiPitchesForInstrument(
+    String instrumentId,
+    Map<String, double> params,
+  ) async {
+    final spec = _findInstrumentSpecById(instrumentId);
+    if (spec != null && _isExternalPluginInstrumentSpec(spec)) {
+      return _allMidiPitches;
+    }
+    final aliasPath = _sampledAliasAssetPathForInstrumentId(instrumentId);
+    final sampled = aliasPath != null ||
+        (spec != null && _isSampledInstrumentSpec(spec));
+    if (!sampled) return _allMidiPitches;
+
+    final definition = await _sfzDefinitionForInstrument(instrumentId);
+    if (definition == null) {
+      final failureKey = aliasPath ??
+          (spec?['sfzAssetPath'] as String?)?.trim() ??
+          instrumentId.trim();
+      if (_sfzRangeDetectionFailuresLogged.add(failureKey)) {
+        debugPrint(
+          '[PianoRollRange] Unable to parse $failureKey; enabling MIDI 0-127.',
+        );
+      }
+      return _allMidiPitches;
+    }
+
+    final sampleLowKey =
+        (params['sampleLowKey'] ?? 0.0).round().clamp(0, 127);
+    final sampleHighKey = (params['sampleHighKey'] ?? 127.0)
+        .round()
+        .clamp(sampleLowKey, 127);
+    return definition.playableInputPitches(
+      remapPitch: (pitch) => _remapSampledMidiPitch(instrumentId, pitch),
+      sampleLowKey: sampleLowKey,
+      sampleHighKey: sampleHighKey,
+    );
+  }
+
+  SfzRegion? _pickSfzRegion(
+    SfzDefinition definition,
     int pitch,
     int velocity, {
     int sequenceStep = 0,
   }) {
-    double random01For(_SfzRegion region) {
+    double random01For(SfzRegion region) {
       var seed = 0x45d9f3b;
       seed ^= pitch * 1009;
       seed ^= velocity * 9176;
@@ -25371,7 +24997,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   double _sfzPlaybackRate({
     required _DecodedStereoPcm sample,
-    required _SfzRegion region,
+    required SfzRegion region,
     required int notePitch,
     required double outputSampleRate,
   }) {
@@ -25382,7 +25008,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (sample.sampleRate / outputSampleRate);
   }
 
-  int _sfzRegionFrameLimit(_SfzRegion region, _DecodedStereoPcm sample) {
+  int _sfzRegionFrameLimit(SfzRegion region, _DecodedStereoPcm sample) {
     final requestedEnd = region.sampleEndFrameExclusive > 0
         ? region.sampleEndFrameExclusive
         : sample.frameCount;
@@ -40470,6 +40096,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     onPreviewNote: _previewPianoRollNote,
                     onKeyboardNoteDown: _handlePianoRollKeyboardNoteDown,
                     onKeyboardNoteUp: _handlePianoRollKeyboardNoteUp,
+                    resolvePlayablePitches:
+                        _playableMidiPitchesForInstrument,
                     highlightedPitches: _desktopMidiHeldPitchesForPianoRoll(
                       clip,
                     ),
@@ -84542,6 +84170,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _handlePianoRollKeyboardNoteDown,
                                           onKeyboardNoteUp:
                                               _handlePianoRollKeyboardNoteUp,
+                                          resolvePlayablePitches:
+                                              _playableMidiPitchesForInstrument,
                                           highlightedPitches:
                                               _desktopMidiHeldPitchesForPianoRoll(
                                                 clip,

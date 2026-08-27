@@ -32,6 +32,10 @@ typedef PianoKeyUpCallback = Future<void> Function(
   AudioTrack clip,
   int pitch,
 );
+typedef PlayableMidiPitchesResolver = Future<Set<int>> Function(
+  String instrumentId,
+  Map<String, double> instrumentParams,
+);
 
 const Color _kPianoShellText = Color(0xFFF4F4F4);
 const Color _kPianoShellMutedText = Color(0xB8F4F4F4);
@@ -120,6 +124,7 @@ class PianoRollEditor extends StatefulWidget {
     this.onPreviewNote,
     this.onKeyboardNoteDown,
     this.onKeyboardNoteUp,
+    this.resolvePlayablePitches,
     this.highlightedPitches = const <int>{},
     this.onOpenCurrentInstrumentUi,
     this.canReplaceSamplerSource = false,
@@ -144,6 +149,7 @@ class PianoRollEditor extends StatefulWidget {
   final Future<void> Function(int pitch, double velocity)? onPreviewNote;
   final PianoKeyDownCallback? onKeyboardNoteDown;
   final PianoKeyUpCallback? onKeyboardNoteUp;
+  final PlayableMidiPitchesResolver? resolvePlayablePitches;
   final Set<int> highlightedPitches;
   final Future<bool> Function()? onOpenCurrentInstrumentUi;
   final bool canReplaceSamplerSource;
@@ -158,6 +164,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const String _preferredPianoInstrumentId = 'sfz.vsco.upright_piano';
   static const int _absoluteMinPitch = 0;
   static const int _absoluteMaxPitch = 127;
+  static final Set<int> _allMidiPitches = Set<int>.unmodifiable(
+    <int>{for (var pitch = 0; pitch <= 127; pitch++) pitch},
+  );
   static const Duration _gestureTapBlockDuration = Duration(milliseconds: 150);
   static const double _minRowHeight = 14.0;
   static const double _maxRowHeight = 40.0;
@@ -218,6 +227,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   final Map<int, int> _pressedPreviewCounts = <int, int>{};
   final Set<int> _pressedKeyboardPitches = <int>{};
   final Map<int, int> _pianoKeyPitchByPointer = <int, int>{};
+  Set<int> _playablePitches = _allMidiPitches;
+  int _playablePitchesRequestToken = 0;
   bool _pinchZoomActive = false;
   bool _lockGridScroll = false;
   bool _followPlayhead = false;
@@ -297,6 +308,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     );
     _playheadVisualTicker = createTicker(_tickVisualPlayhead);
     _loadFromClip(resetPitchRange: true);
+    _refreshPlayablePitches();
     _syncVisualPlayheadSample(snap: true);
     _gridVerticalController.addListener(_syncKeysWithGridScroll);
     _sequencerHorizontalController.addListener(_extendSequencerWhenNeeded);
@@ -330,6 +342,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         _releaseAllPianoKeys();
       }
       _loadFromClip(resetPitchRange: clipIdentityChanged);
+      _refreshPlayablePitches();
       if (clipIdentityChanged) {
         _clearSelection();
         _scheduleInitialNoteViewportSync();
@@ -345,6 +358,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           _velocityPanelOpen = false;
         }
       }
+    }
+    if (oldWidget.resolvePlayablePitches != widget.resolvePlayablePitches &&
+        !clipIdentityChanged &&
+        !clipContentChanged) {
+      _refreshPlayablePitches();
     }
     final playheadDeltaMs =
         (oldWidget.projectPlayheadMs - widget.projectPlayheadMs).abs();
@@ -372,6 +390,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   @override
   void dispose() {
+    _playablePitchesRequestToken++;
     _releaseAllPianoKeys();
     _commitDebounce?.cancel();
     _activeGridPointers.clear();
@@ -407,6 +426,44 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     for (final pitch in keyboardPitches) {
       unawaited(recordCallback(widget.clip, pitch));
     }
+  }
+
+  bool _isPitchPlayable(int pitch) => _playablePitches.contains(pitch);
+
+  void _refreshPlayablePitches() {
+    final requestToken = ++_playablePitchesRequestToken;
+    final resolver = widget.resolvePlayablePitches;
+    if (resolver == null) {
+      if (!identical(_playablePitches, _allMidiPitches)) {
+        setState(() => _playablePitches = _allMidiPitches);
+      }
+      return;
+    }
+    final instrumentId = _instrumentId;
+    final params = Map<String, double>.from(_params);
+    unawaited(() async {
+      Set<int> resolved;
+      try {
+        resolved = await resolver(instrumentId, params);
+      } catch (_) {
+        resolved = _allMidiPitches;
+      }
+      if (!mounted || requestToken != _playablePitchesRequestToken) return;
+      final normalized = Set<int>.unmodifiable(
+        resolved.where((pitch) => pitch >= 0 && pitch <= 127),
+      );
+      final unavailableHeld = _pressedKeyboardPitches
+          .where((pitch) => !normalized.contains(pitch))
+          .toList(growable: false);
+      _pianoKeyPitchByPointer.removeWhere(
+        (_, pitch) => !normalized.contains(pitch),
+      );
+      for (final pitch in unavailableHeld) {
+        _releasePianoKey(pitch, keyboardSource: true);
+      }
+      if (!mounted || requestToken != _playablePitchesRequestToken) return;
+      setState(() => _playablePitches = normalized);
+    }());
   }
 
   void _loadFromClip({required bool resetPitchRange}) {
@@ -761,6 +818,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       }
       _refreshSamplerWaveformFuture();
     });
+    _refreshPlayablePitches();
     _queueCommit(immediate: true);
   }
 
@@ -1883,6 +1941,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _handlePianoKeyPointerDown(PointerDownEvent event, int pitch) {
     if ((event.buttons & kPrimaryButton) == 0) return;
+    if (!_isPitchPlayable(pitch)) return;
     final previousPitch = _pianoKeyPitchByPointer[event.pointer];
     if (previousPitch != null) {
       _releasePianoKey(previousPitch, keyboardSource: true);
@@ -1920,6 +1979,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _releasePianoKey(previousPitch, keyboardSource: true);
     }
     if (nextPitch == null) return;
+    if (!_isPitchPlayable(nextPitch)) return;
     if (_pressedKeyboardPitches.contains(nextPitch)) {
       _releasePianoKey(nextPitch, keyboardSource: true);
     }
@@ -5306,6 +5366,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
     void setParam(String key, double value) {
       setState(() => _params[key] = value);
+      if (key == 'sampleLowKey' || key == 'sampleHighKey') {
+        _refreshPlayablePitches();
+      }
       _queueCommit();
     }
 
@@ -6330,6 +6393,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 children: List<Widget>.generate(_pitchCount, (i) {
                   final pitch = maxPitch - i;
                   final isBlack = _isBlackKey(pitch);
+                  final isPlayable = _isPitchPlayable(pitch);
                   final noteName = _noteNameForPitch(pitch);
                   final isPressed = _isPreviewPitchActive(pitch) ||
                       playbackPitches.contains(pitch);
@@ -6425,6 +6489,18 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                               ),
                             ),
                           ),
+                        if (!isPlayable)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: Container(
+                                key: ValueKey<String>(
+                                  'piano_key_disabled_$pitch',
+                                ),
+                                color: const Color(0xFF8C949B)
+                                    .withValues(alpha: 0.58),
+                              ),
+                            ),
+                          ),
                         Positioned(
                           left: isBlack ? 9 : 7,
                           right: 4,
@@ -6437,9 +6513,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                               maxLines: 1,
                               overflow: TextOverflow.clip,
                               style: TextStyle(
-                                color: isBlack
-                                    ? Colors.white.withValues(alpha: 0.84)
-                                    : const Color(0xFF535B64),
+                                color: !isPlayable
+                                    ? const Color(0xFF6E747A)
+                                    : isBlack
+                                        ? Colors.white.withValues(alpha: 0.84)
+                                        : const Color(0xFF535B64),
                                 fontSize: showLabel ? 10.2 : 0.1,
                                 fontWeight: FontWeight.w700,
                                 fontFamily: 'Pretendard',
@@ -6552,6 +6630,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                                         .quantizeDivisionsPerBar,
                                                     magnetEnabled:
                                                         widget.magnetEnabled,
+                                                    playablePitches:
+                                                        _playablePitches,
                                                   ),
                                                 ),
                                               ),
@@ -7428,6 +7508,7 @@ class _PianoGridPainter extends CustomPainter {
     required this.beatUnit,
     required this.quantizeDivisionsPerBar,
     required this.magnetEnabled,
+    required this.playablePitches,
   });
 
   final double rowHeight;
@@ -7440,6 +7521,7 @@ class _PianoGridPainter extends CustomPainter {
   final int beatUnit;
   final int quantizeDivisionsPerBar;
   final bool magnetEnabled;
+  final Set<int> playablePitches;
 
   static bool _isBlackPitch(int pitch) {
     const black = <int>{1, 3, 6, 8, 10};
@@ -7455,6 +7537,8 @@ class _PianoGridPainter extends CustomPainter {
       ..color = const Color(0xFF585F66).withValues(alpha: 0.32);
     final blackRowFill = Paint()
       ..color = const Color(0xFF454C53).withValues(alpha: 0.82);
+    final unavailableRowFill = Paint()
+      ..color = const Color(0xFF252A2F).withValues(alpha: 0.62);
     final majorPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.14)
       ..strokeWidth = 1.5;
@@ -7475,6 +7559,12 @@ class _PianoGridPainter extends CustomPainter {
       } else {
         canvas.drawRect(
             Rect.fromLTWH(0, y, size.width, rowHeight), whiteRowFill);
+      }
+      if (!playablePitches.contains(pitch)) {
+        canvas.drawRect(
+          Rect.fromLTWH(0, y, size.width, rowHeight),
+          unavailableRowFill,
+        );
       }
       canvas.drawLine(Offset(0, y), Offset(size.width, y), rowPaint);
     }
@@ -7536,7 +7626,8 @@ class _PianoGridPainter extends CustomPainter {
         beatsPerBar != oldDelegate.beatsPerBar ||
         beatUnit != oldDelegate.beatUnit ||
         quantizeDivisionsPerBar != oldDelegate.quantizeDivisionsPerBar ||
-        magnetEnabled != oldDelegate.magnetEnabled;
+        magnetEnabled != oldDelegate.magnetEnabled ||
+        !setEquals(playablePitches, oldDelegate.playablePitches);
   }
 }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -37,6 +38,9 @@ Widget _buildEditor({
   Future<void> Function(int pitch, double velocity)? onPreviewNote,
   PianoKeyDownCallback? onKeyboardNoteDown,
   PianoKeyUpCallback? onKeyboardNoteUp,
+  PlayableMidiPitchesResolver? resolvePlayablePitches,
+  List<Map<String, dynamic>> availableInstruments =
+      const <Map<String, dynamic>>[],
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -46,7 +50,7 @@ Widget _buildEditor({
           height: 620,
           child: PianoRollEditor(
             clip: clip,
-            availableInstruments: const <Map<String, dynamic>>[],
+            availableInstruments: availableInstruments,
             bpm: 120,
             beatsPerBar: 4,
             projectPlayheadMs: projectPlayheadMs,
@@ -62,6 +66,7 @@ Widget _buildEditor({
             onPreviewNote: onPreviewNote,
             onKeyboardNoteDown: onKeyboardNoteDown,
             onKeyboardNoteUp: onKeyboardNoteUp,
+            resolvePlayablePitches: resolvePlayablePitches,
           ),
         ),
       ),
@@ -1087,6 +1092,166 @@ void main() {
       find.byKey(const ValueKey<String>('piano_key_tail_active_top_82')),
       findsNothing,
     );
+  });
+
+  testWidgets('range-aware keys dim, skip audition, and preserve MIDI notes',
+      (tester) async {
+    final pressed = <int>[];
+    final released = <int>[];
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'preserved',
+        pitch: 82,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        resolvePlayablePitches: (_, __) async => <int>{81, 83},
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+        onKeyboardNoteDown: (
+          AudioTrack clip,
+          int pitch,
+          double velocity, {
+          double? startBeat,
+        }) async {
+          pressed.add(pitch);
+        },
+        onKeyboardNoteUp: (clip, pitch) async => released.add(pitch),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 80));
+
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_82')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_83')),
+        findsNothing);
+    expect(find.byKey(const ValueKey<String>('piano_note_preserved')),
+        findsOneWidget);
+
+    final unavailable = await tester.startGesture(
+      tester.getRect(find.byKey(const ValueKey<String>('piano_key_82'))).center,
+    );
+    await unavailable.up();
+    await tester.pump();
+    expect(pressed, isEmpty);
+    expect(released, isEmpty);
+
+    final glide = await tester.startGesture(
+      tester.getRect(find.byKey(const ValueKey<String>('piano_key_83'))).center,
+      kind: PointerDeviceKind.mouse,
+    );
+    await glide.moveTo(
+      tester.getRect(find.byKey(const ValueKey<String>('piano_key_82'))).center,
+    );
+    await tester.pump();
+    await glide.moveTo(
+      tester.getRect(find.byKey(const ValueKey<String>('piano_key_81'))).center,
+    );
+    await tester.pump();
+    await glide.up();
+    await tester.pump();
+
+    expect(pressed, <int>[83, 81]);
+    expect(released, <int>[83, 81]);
+  });
+
+  testWidgets('stale range results cannot replace the current instrument',
+      (tester) async {
+    final first = Completer<Set<int>>();
+    final second = Completer<Set<int>>();
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'preserved_note',
+        pitch: 83,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ], instrumentId: 'instrument.first');
+
+    Future<Set<int>> resolver(
+      String instrumentId,
+      Map<String, double> _,
+    ) {
+      return instrumentId == 'instrument.first' ? first.future : second.future;
+    }
+
+    Widget editor() => _buildEditor(
+          clip: clip,
+          resolvePlayablePitches: resolver,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        );
+
+    await tester.pumpWidget(editor());
+    await tester.pump();
+    clip.instrumentId = 'instrument.second';
+    clip.instrumentName = 'Second';
+    await tester.pumpWidget(editor());
+    await tester.pump();
+
+    second.complete(<int>{82});
+    await tester.pump();
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_83')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('piano_note_preserved_note')),
+        findsOneWidget);
+
+    first.complete(<int>{83});
+    await tester.pump();
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_83')),
+        findsOneWidget);
+  });
+
+  testWidgets('unrestricted and failed resolvers leave every key enabled',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'visible_note',
+        pitch: 83,
+        startBeat: 0,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ], instrumentId: 'mixroom.basic_synth');
+    final allPitches = <int>{for (var pitch = 0; pitch <= 127; pitch++) pitch};
+
+    Future<void> pump(PlayableMidiPitchesResolver resolver) async {
+      await tester.pumpWidget(
+        _buildEditor(
+          clip: clip,
+          resolvePlayablePitches: resolver,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey<String>('piano_key_disabled_0')),
+          findsNothing);
+      expect(find.byKey(const ValueKey<String>('piano_key_disabled_127')),
+          findsNothing);
+    }
+
+    await pump((_, __) async => allPitches);
+    await pump((_, __) => Future<Set<int>>.error('broken'));
   });
 
   testWidgets('sequencer tab opens and commits step edits', (tester) async {
