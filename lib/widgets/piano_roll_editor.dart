@@ -336,13 +336,21 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     }
     final clipIdentityChanged =
         oldWidget.clip.engineClipId != widget.clip.engineClipId;
+    final playablePitchInputsChanged = clipIdentityChanged ||
+        _syncedInstrumentId != widget.clip.instrumentId ||
+        _instrumentParamsDiffer(
+          _syncedClipParams,
+          widget.clip.instrumentParams,
+        );
     final clipContentChanged = _clipDataDiffersFromSyncedClip(widget.clip);
     if (clipIdentityChanged || clipContentChanged) {
       if (clipIdentityChanged) {
         _releaseAllPianoKeys();
       }
       _loadFromClip(resetPitchRange: clipIdentityChanged);
-      _refreshPlayablePitches();
+      if (playablePitchInputsChanged) {
+        _refreshPlayablePitches();
+      }
       if (clipIdentityChanged) {
         _clearSelection();
         _scheduleInitialNoteViewportSync();
@@ -433,10 +441,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   void _refreshPlayablePitches() {
     final requestToken = ++_playablePitchesRequestToken;
     final resolver = widget.resolvePlayablePitches;
+    if (!identical(_playablePitches, _allMidiPitches)) {
+      setState(() => _playablePitches = _allMidiPitches);
+    }
     if (resolver == null) {
-      if (!identical(_playablePitches, _allMidiPitches)) {
-        setState(() => _playablePitches = _allMidiPitches);
-      }
       return;
     }
     final instrumentId = _instrumentId;

@@ -1217,6 +1217,53 @@ void main() {
         findsOneWidget);
   });
 
+  testWidgets('instrument range detection fails open while loading',
+      (tester) async {
+    final loadingRange = Completer<Set<int>>();
+    final clip = await _buildMidiTrack(<MidiNote>[],
+        instrumentId: 'instrument.restricted');
+
+    Future<Set<int>> resolver(
+      String instrumentId,
+      Map<String, double> _,
+    ) {
+      if (instrumentId == 'instrument.restricted') {
+        return Future<Set<int>>.value(<int>{83});
+      }
+      return loadingRange.future;
+    }
+
+    Widget editor() => _buildEditor(
+          clip: clip,
+          resolvePlayablePitches: resolver,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        );
+
+    await tester.pumpWidget(editor());
+    await tester.pump();
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_82')),
+        findsOneWidget);
+
+    clip.instrumentId = 'instrument.loading';
+    clip.instrumentName = 'Loading';
+    await tester.pumpWidget(editor());
+    await tester.pump();
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_82')),
+        findsNothing);
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_83')),
+        findsNothing);
+
+    loadingRange.complete(<int>{82});
+    await tester.pump();
+    expect(find.byKey(const ValueKey<String>('piano_key_disabled_83')),
+        findsOneWidget);
+  });
+
   testWidgets('unrestricted and failed resolvers leave every key enabled',
       (tester) async {
     final clip = await _buildMidiTrack(<MidiNote>[
