@@ -1212,6 +1212,10 @@ class _RailLinkRow extends StatelessWidget {
   }
 }
 
+String _homeCopy(BuildContext context, String english, String korean) {
+  return L10n.getDeviceLocale(context).languageCode == 'ko' ? korean : english;
+}
+
 class _HomeTab extends StatefulWidget {
   const _HomeTab({
     required this.scrollToTopSignal,
@@ -1343,6 +1347,7 @@ class _HomeTabState extends State<_HomeTab> {
                         onOpenAccountPlans: widget.onOpenAccountPlans,
                       ),
                     ),
+                    _HomeFaqSection(horizontalPadding: sidePadding),
                     _HomeFeedbackSection(
                       horizontalPadding: sidePadding,
                       bottomPadding: bottomPadding,
@@ -1480,10 +1485,14 @@ class _HomeHero extends StatelessWidget {
                         child: child,
                       ),
                     ),
-                    child: const Column(
+                    child: Column(
                       children: [
                         Text(
-                          'Made anywhere. Heard everywhere.',
+                          _homeCopy(
+                            context,
+                            'Made anywhere. Heard everywhere.',
+                            '나의 음악을 세상과 연결하다',
+                          ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontFamily: 'Pretendard',
@@ -1494,11 +1503,15 @@ class _HomeHero extends StatelessWidget {
                             letterSpacing: -0.8,
                           ),
                         ),
-                        SizedBox(height: 14),
+                        const SizedBox(height: 14),
                         SizedBox(
                           width: 660,
                           child: Text(
-                            'Mixroom is a cross-platform DAW that moves seamlessly from mobile to desktop. Create together in the cloud, with your AI Co-producer always within reach.',
+                            _homeCopy(
+                              context,
+                              'Mixroom is a cross-platform DAW that moves seamlessly from mobile to desktop. Bring everyone into one cloud project to collaborate and share ideas. And whenever you need a hand, your AI Co-producer is right there.',
+                              'Mixroom은 모바일부터 데스크탑까지 하나로 이어지는 DAW입니다. 클라우드 프로젝트에서 작업하고 피드백을 나눠보세요. 도움이 필요한 순간에는 AI Co-producer를 활용할 수 있습니다.',
+                            ),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontFamily: 'Pretendard',
@@ -1634,23 +1647,38 @@ class _HomeIntroSection extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          const Text(
-            'Next-gen musicians.\nMeet your next-gen DAW.',
+          Text(
+            _homeCopy(
+              context,
+              'Next-gen musicians.\nMeet your next-gen DAW.',
+              '차세대 창작자에게 적합한\n차세대 DAW',
+            ),
             textAlign: TextAlign.center,
             style: _HomeType.sectionTitle,
           ),
           const SizedBox(height: 14),
-          const Text(
-            "First-timer or pro, there's room for your sound.",
+          Text(
+            _homeCopy(
+              context,
+              "First-timer or pro, there's room for your sound.",
+              '음악을 처음 시작하는 사람부터 전문가까지 당신이 누구든 음악이 되도록.',
+            ),
             textAlign: TextAlign.center,
             style: _HomeType.body,
           ),
           const SizedBox(height: 72),
           _HomeMediaPanel(
             imagePath: 'assets/app_shell/home_work.webp',
-            title: 'A workspace that works your way.',
-            body:
-                'Make music without being tied to a time, place, or device. Cross-device tools and cloud projects keep everyone in one seamless flow.',
+            title: _homeCopy(
+              context,
+              'A workspace that works your way.',
+              '작업 환경에 맞춘 작업 환경',
+            ),
+            body: _homeCopy(
+              context,
+              'Make music without being tied to a time, place, or device. With cross-device MIDI and cloud-based projects, everyone behind the music can work together in one seamless flow.',
+              '전문적으로 음악을 만드는 데 시간과 장소의 제약이 사라집니다. 기기를 가리지 않는 MIDI 작업 환경과 클라우드 기반 프로젝트로 음악을 만드는 사람이라면 누구든 함께 할 수 있어요.',
+            ),
             maxWidth: wide ? 960 : 620,
           ),
         ],
@@ -1670,23 +1698,44 @@ class _HomeDeviceSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sections = [
-      const _HomeDeviceData(
+      _HomeDeviceData(
         image: 'assets/app_shell/home_mobile.webp',
-        title: 'Your ideas move fast.\nNow your studio does too.',
-        body:
-            'Stay in the flow and keep making music wherever inspiration finds you.',
+        title: _homeCopy(
+          context,
+          'Your ideas move fast.\nNow your studio does too.',
+          '아이디어 떠오를때 바로',
+        ),
+        body: _homeCopy(
+          context,
+          'With Mixroom on mobile, stay in the flow and keep making music wherever you go.',
+          '언제 어디서나 이동중에도 창작에 집중할 수 있습니다.',
+        ),
       ),
-      const _HomeDeviceData(
+      _HomeDeviceData(
         image: 'assets/app_shell/home_tablet.webp',
-        title: 'Create and edit.\nRight at your fingertips.',
-        body:
-            'A spacious display and intuitive touch controls balance portability with real production power.',
+        title: _homeCopy(
+          context,
+          'Create and edit.\nRight at your fingertips.',
+          '창작과 편집,\n가장 자연스럽게.',
+        ),
+        body: _homeCopy(
+          context,
+          'A spacious display meets intuitive touch controls, striking the perfect balance between portability and productivity.',
+          '넓은 화면과 터치 인터페이스를 동시에 활용해 휴대성과 작업 효율의 균형을 갖췄습니다.',
+        ),
       ),
-      const _HomeDeviceData(
+      _HomeDeviceData(
         image: 'assets/app_shell/home_desktop.webp',
-        title: 'Everything you expect.\nSmarter where it counts.',
-        body:
-            'Keep your familiar plugins, MIDI, and hardware workflow. Add intelligence without giving up control.',
+        title: _homeCopy(
+          context,
+          'Everything you expect.\nSmarter where it counts.',
+          '당연한건 당연하게',
+        ),
+        body: _homeCopy(
+          context,
+          'Keep the VST plug-ins and workflow you already know. Mixroom adds a smarter way to work, with MIDI and external hardware support built right in.',
+          '기존에 사용하던 VST 플러그인과 작업 환경을 그대로 이어가세요. 더 스마트한 작업이 더해집니다. MIDI, 외장 하드웨어 연결은 기본이죠.',
+        ),
       ),
     ];
     return Padding(
@@ -1798,8 +1847,16 @@ class _HomeCollaborationSection extends StatelessWidget {
       ),
       child: _HomeMediaPanel(
         imagePath: 'assets/app_shell/home_share.webp',
-        title: 'Share every living track.\nGive feedback. Create together.',
-        body: 'Bring everyone into the process, from first idea to final mix.',
+        title: _homeCopy(
+          context,
+          'Share every living track.\nGive feedback. Create together.',
+          '모든 트랙이 살아있는 그대로\n공유하고, 피드백하고, 함께 만드세요',
+        ),
+        body: _homeCopy(
+          context,
+          'Bring everyone into the process, from first idea to final mix.',
+          '음악이 완성되는 모든 과정에 함께할 수 있도록.',
+        ),
         maxWidth: 980,
       ),
     );
@@ -1829,16 +1886,24 @@ class _HomeAiSection extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Text(
-            'Focus on the music.\nMeet your conversational AI Co-producer.',
+          Text(
+            _homeCopy(
+              context,
+              'Focus on the music.\nMeet your conversational AI Co-producer.',
+              '작업에 집중하세요\n스마트한 대화형 AI Co-producer',
+            ),
             textAlign: TextAlign.center,
             style: _HomeType.sectionTitle,
           ),
           const SizedBox(height: 18),
-          const SizedBox(
+          SizedBox(
             width: 680,
             child: Text(
-              'Ask for an edit, analyze a song, or get guidance in the moment. You decide the direction. Mixroom handles the execution.',
+              _homeCopy(
+                context,
+                'Ask for an edit, analyze a song, or get guidance in the moment. You decide the direction. Mixroom handles the execution.',
+                '음악과 관련한 모든 타임라인에 든든한 AI 어시스턴트가 Mixroom에 있습니다. 필요한 순간 채팅 한번에 바로 도움받을 수 있도록 눈에 보이는 곳에서 대기 중이랍니다.',
+              ),
               textAlign: TextAlign.center,
               style: _HomeType.body,
             ),
@@ -1861,27 +1926,34 @@ class _HomeAiSection extends StatelessWidget {
                   ),
                 ],
               ),
-              child: const Column(
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Align(
                     alignment: Alignment.centerRight,
                     child: _HomeChatBubble(
-                      text: 'Make this transition feel more natural.',
+                      text: _homeCopy(
+                        context,
+                        'Make this transition feel more natural.',
+                        '이 전환이 더 자연스럽게 들리게 해줘.',
+                      ),
                       user: true,
                     ),
                   ),
-                  SizedBox(height: 14),
+                  const SizedBox(height: 14),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: _HomeChatBubble(
-                      text:
-                          'I can smooth the automation and preserve the energy of the chorus.',
+                      text: _homeCopy(
+                        context,
+                        'I can smooth the automation and preserve the energy of the chorus.',
+                        '오토메이션을 부드럽게 다듬으면서 후렴의 에너지는 그대로 유지할게요.',
+                      ),
                       user: false,
                     ),
                   ),
-                  SizedBox(height: 24),
-                  _HomePromptBar(),
+                  const SizedBox(height: 24),
+                  const _HomePromptBar(),
                 ],
               ),
             ),
@@ -1934,7 +2006,11 @@ class _HomePromptBar extends StatelessWidget {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Tell Mixroom what you want to hear…',
+              _homeCopy(
+                context,
+                'Tell Mixroom what you want to hear…',
+                'Mixroom에 원하는 사운드를 이야기해보세요…',
+              ),
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontFamily: 'Pretendard',
@@ -2060,16 +2136,24 @@ class _HomeProductMotionSectionState extends State<_HomeProductMotionSection> {
       ),
       child: Column(
         children: [
-          const Text(
-            'Sound production, without the barrier.',
+          Text(
+            _homeCopy(
+              context,
+              'Sound production, without the barrier.',
+              '사운드 제작의 장벽을 허물다.',
+            ),
             textAlign: TextAlign.center,
             style: _HomeType.sectionTitle,
           ),
           const SizedBox(height: 16),
-          const SizedBox(
+          SizedBox(
             width: 700,
             child: Text(
-              'Move from a rough idea to a finished mix with a workflow trained around how producers actually work.',
+              _homeCopy(
+                context,
+                'Move from a rough idea to a finished mix with a workflow trained around how producers actually work.',
+                '실제 프로듀서의 노하우로 훈련된 AI Co-Producer와 함께 믹싱부터 마스터링까지, 음악을 완성해보세요. 마음에 들 때까지 모든 작업 과정을 안정적으로 진행할 수 있습니다.',
+              ),
               textAlign: TextAlign.center,
               style: _HomeType.body,
             ),
@@ -2182,15 +2266,26 @@ class _HomeAccountPlansSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('PRICING', style: _HomeType.kicker),
+              Text(
+                _homeCopy(context, 'PRICING', 'PRICING'),
+                style: _HomeType.kicker,
+              ),
               const SizedBox(height: 12),
-              const Text(
-                'Find the room your music needs.',
+              Text(
+                _homeCopy(
+                  context,
+                  'Find the room your music needs.',
+                  '음악에 맞는 플랜을 선택하세요.',
+                ),
                 style: _HomeType.sectionTitle,
               ),
               const SizedBox(height: 10),
-              const Text(
-                'The same plans, pricing, and benefits available from your Account.',
+              Text(
+                _homeCopy(
+                  context,
+                  'Mixroom offers four standard subscription tiers, plus a custom Enterprise option, all designed to enhance the music creation and sharing experience.',
+                  'Mixroom은 음악 제작과 공유하는 경험을 한 차원 끌어올리는 4가지 표준 구독 플랜과 맞춤형 Enterprise 옵션을 제공합니다.',
+                ),
                 style: _HomeType.body,
               ),
               const SizedBox(height: 40),
@@ -2210,6 +2305,295 @@ class _HomeAccountPlansSection extends StatelessWidget {
       ),
     );
   }
+}
+
+class _HomeFaqSection extends StatefulWidget {
+  const _HomeFaqSection({required this.horizontalPadding});
+
+  final double horizontalPadding;
+
+  @override
+  State<_HomeFaqSection> createState() => _HomeFaqSectionState();
+}
+
+class _HomeFaqSectionState extends State<_HomeFaqSection> {
+  int? _expandedIndex;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <_HomeFaqData>[
+      _HomeFaqData(
+        question: _homeCopy(context, 'What is a DAW?', 'DAW가 뭔가요?'),
+        answer: _homeCopy(
+          context,
+          'DAW stands for **Digital Audio Workstation**, the software used to create, record, edit, and produce music.',
+          'DAW는 **Digital Audio Workstation**의 약자로, 음악을 만들고 녹음하고 편집하고 프로듀싱하는 데 사용하는 소프트웨어입니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(context, 'What is Mixroom?', 'Mixroom은 무엇인가요?'),
+        answer: _homeCopy(
+          context,
+          'Mixroom is a **next-generation DAW with a built-in AI co-producer.** You tell it where you want the music to go, and it helps execute that direction. It works with you as a production partner, not a music generator.',
+          'Mixroom은 **AI 코프로듀서가 내장된 차세대 DAW**입니다. 음악의 방향을 정하면 Mixroom이 그 방향대로 실행을 도와줍니다. 창작자의 역할을 대체하지 않고, 음악 생성기가 아닌 프로덕션 파트너로 함께합니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'How is this different from AI music generators?',
+          'AI 음악 생성기와 어떻게 다른가요?',
+        ),
+        answer: _homeCopy(
+          context,
+          'Mixroom **does not generate music**. It helps you finish *your* music. You bring the idea, the taste, and the direction. Mixroom helps execute it.',
+          'Mixroom은 **음악을 생성하지 않습니다.** 완성된 결과물을 대신 만드는 것이 아니라, 직접 만든 음악을 완성하도록 돕습니다. 아이디어와 취향, 방향성은 창작자가 정하고 Mixroom은 실행을 돕습니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'Can I use Mixroom without music theory or production experience?',
+          '음악 이론이나 프로듀싱 경험 없이 사용할 수 있나요?',
+        ),
+        answer: _homeCopy(
+          context,
+          "**Yes.** You don't need music theory or technical production knowledge. If you can describe a mood, a feeling, or the kind of sound you want, that's enough.",
+          '**네.** 음악 이론, 기술적 프로덕션 지식, 플러그인이나 믹싱 도구에 대한 깊은 이해 없이도 시작할 수 있습니다. 분위기, 감정, 원하는 소리의 종류를 설명할 수 있다면 그것으로 충분합니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'Will AI make changes on its own?',
+          'AI가 마음대로 변경하거나 이해할 수 없는 작업을 하나요?',
+        ),
+        answer: _homeCopy(
+          context,
+          '**No.** Mixroom is not a black box. You give direction, it applies the change, and you review it. You can keep it, adjust it yourself, or undo it.',
+          '**아닙니다.** Mixroom은 블랙박스가 아닙니다. 방향을 정하면 Mixroom이 변경을 적용하고 결과를 직접 검토할 수 있습니다. 그대로 유지하거나, 직접 조정하거나, 되돌릴 수 있습니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'Will everything sound the same?',
+          'AI가 개입하면 결과물이 비슷해지지 않나요?',
+        ),
+        answer: _homeCopy(
+          context,
+          '**No.** Mixroom responds to *your intent*. The outcome depends on your decisions, your taste, and your direction. Same tool, completely different results.',
+          '**아닙니다.** 생성형 AI는 패턴 기반 출력이라 결과물이 비슷해지는 경향이 있습니다. Mixroom은 창작자의 의도에 반응하며, 결과물은 각자의 결정과 취향, 방향에 따라 달라집니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'Will I lose the feeling of making it myself?',
+          '직접 만든다는 감각을 잃지 않을까요?',
+        ),
+        answer: _homeCopy(
+          context,
+          '**No.** Mixroom does not take over the creative role. It removes repetitive work so you can focus on decisions that actually shape the music.',
+          '**아닙니다.** Mixroom은 창작의 주도권을 가져가지 않습니다. 반복 작업을 제거하고 기술적 부담을 낮추어, 음악을 실제로 빚는 결정에 더 집중하도록 돕습니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'Who owns the copyright?',
+          '저작권은 누구에게 있나요?',
+        ),
+        answer: _homeCopy(
+          context,
+          'You do. **100%.** Mixroom does not generate results by recombining outside material or claim authorship over the output.',
+          '창작자에게 **100%** 있습니다. Mixroom은 직접 만든 음악 위에서 비파괴 편집 방식으로 작동합니다. 외부 자료를 재조합해 결과물을 생성하지 않으며, 결과물에 대한 저작권을 주장하지 않습니다.',
+        ),
+      ),
+      _HomeFaqData(
+        question: _homeCopy(
+          context,
+          'Is Mixroom mobile-only?',
+          'Mixroom은 모바일 전용인가요? 데스크탑 버전이 나오나요?',
+        ),
+        answer: _homeCopy(
+          context,
+          'Mixroom is a cross-platform DAW that runs on mobile, tablet, and desktop. With cloud sync, pick up your work anywhere on whichever device fits the moment.',
+          'Mixroom은 모바일, 태블릿, 데스크톱에서 모두 사용할 수 있는 크로스 플랫폼 DAW입니다. 클라우드 연동을 통해 언제 어디서든 상황에 맞는 기기로 작업을 이어가세요.',
+        ),
+      ),
+    ];
+
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF070B1C),
+      padding: EdgeInsets.fromLTRB(
+        widget.horizontalPadding,
+        18,
+        widget.horizontalPadding,
+        72,
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 880),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(_homeCopy(context, 'FAQ', 'FAQ'), style: _HomeType.kicker),
+              const SizedBox(height: 12),
+              Text(
+                _homeCopy(context, 'Frequently asked questions', '자주 묻는 질문'),
+                style: _HomeType.sectionTitle,
+              ),
+              const SizedBox(height: 34),
+              for (final entry in items.asMap().entries)
+                _HomeFaqRow(
+                  data: entry.value,
+                  expanded: _expandedIndex == entry.key,
+                  onTap: () => setState(() {
+                    _expandedIndex = _expandedIndex == entry.key
+                        ? null
+                        : entry.key;
+                  }),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeFaqData {
+  const _HomeFaqData({required this.question, required this.answer});
+
+  final String question;
+  final String answer;
+}
+
+class _HomeFaqRow extends StatelessWidget {
+  const _HomeFaqRow({
+    required this.data,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final _HomeFaqData data;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const answerStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      color: Color(0xB8FFFFFF),
+      fontSize: 14,
+      fontWeight: FontWeight.w400,
+      height: 1.7,
+    );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
+        ),
+      ),
+      child: Column(
+        children: [
+          Semantics(
+            button: true,
+            expanded: expanded,
+            child: InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 22),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        data.question,
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    AnimatedRotation(
+                      turns: expanded ? 0.125 : 0,
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      child: Icon(
+                        Icons.add_rounded,
+                        color: Colors.white.withValues(alpha: 0.72),
+                        size: 23,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          ClipRect(
+            child: AnimatedSize(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: expanded
+                  ? Padding(
+                      padding: const EdgeInsets.only(right: 52, bottom: 24),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text.rich(
+                          TextSpan(
+                            children: _homeFaqTextSpans(
+                              data.answer,
+                              answerStyle,
+                            ),
+                          ),
+                        ),
+                      ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+List<InlineSpan> _homeFaqTextSpans(String source, TextStyle baseStyle) {
+  final matches = RegExp(r'(\*\*.*?\*\*|\*.*?\*)').allMatches(source);
+  final spans = <InlineSpan>[];
+  var cursor = 0;
+  for (final match in matches) {
+    if (match.start > cursor) {
+      spans.add(
+        TextSpan(text: source.substring(cursor, match.start), style: baseStyle),
+      );
+    }
+    final token = match.group(0)!;
+    final bold = token.startsWith('**');
+    spans.add(
+      TextSpan(
+        text: token.substring(bold ? 2 : 1, token.length - (bold ? 2 : 1)),
+        style: baseStyle.copyWith(
+          color: bold ? const Color(0xFFF4F4F4) : null,
+          fontWeight: bold ? FontWeight.w700 : null,
+          fontStyle: bold ? null : FontStyle.italic,
+        ),
+      ),
+    );
+    cursor = match.end;
+  }
+  if (cursor < source.length) {
+    spans.add(TextSpan(text: source.substring(cursor), style: baseStyle));
+  }
+  return spans;
 }
 
 // TODO: Remove after downstream snapshots migrate to AccountPlansCarousel.
@@ -2681,10 +3065,17 @@ class _HomeFeedbackSection extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text('Built with you.', style: _HomeType.sectionTitle),
+              Text(
+                _homeCopy(context, 'Built with you.', '함께 만들어가는 Mixroom.'),
+                style: _HomeType.sectionTitle,
+              ),
               const SizedBox(height: 12),
-              const Text(
-                'Your feedback shapes what Mixroom becomes next.',
+              Text(
+                _homeCopy(
+                  context,
+                  'Your feedback shapes what Mixroom becomes next.',
+                  '여러분의 피드백이 Mixroom의 다음 모습을 만듭니다.',
+                ),
                 textAlign: TextAlign.center,
                 style: _HomeType.body,
               ),

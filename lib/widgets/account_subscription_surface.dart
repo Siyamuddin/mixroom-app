@@ -1027,6 +1027,7 @@ class _PlansPanelState extends State<_PlansPanel> {
   final FocusNode _plansFocusNode = FocusNode(debugLabel: 'billing_plans');
   double _currentCardStep = 0;
   int _currentCardCount = 0;
+  bool _centerCards = false;
 
   @override
   void dispose() {
@@ -1107,12 +1108,15 @@ class _PlansPanelState extends State<_PlansPanel> {
                           .clamp(224.0, 264.0);
                 final cardStep = cardWidth + cardGap;
                 final cardCenteringInset = (contentWidth - cardWidth) / 2;
-                final centeredRailInset =
-                    cardCenteringInset > widget.railEdgeInset
-                    ? cardCenteringInset
+                final centerCards = visibleCardCount == 1;
+                final railInset = centerCards
+                    ? (cardCenteringInset > widget.railEdgeInset
+                          ? cardCenteringInset
+                          : widget.railEdgeInset)
                     : widget.railEdgeInset;
                 _currentCardStep = cardStep;
                 _currentCardCount = cards.length;
+                _centerCards = centerCards;
                 final scrollbarGutter = widget.scrollbarGutter;
                 final plansScrollView = SingleChildScrollView(
                   controller: _plansScrollController,
@@ -1120,9 +1124,7 @@ class _PlansPanelState extends State<_PlansPanel> {
                   physics: const BouncingScrollPhysics(),
                   clipBehavior: Clip.hardEdge,
                   child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: centeredRailInset,
-                    ),
+                    padding: EdgeInsets.symmetric(horizontal: railInset),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1244,13 +1246,26 @@ class _PlansPanelState extends State<_PlansPanel> {
     final step = cardStep ?? _currentCardStep;
     if (step <= 0) return <double>[position.minScrollExtent];
 
-    return List<double>.generate(
-      _currentCardCount,
-      (index) => (position.minScrollExtent + index * step).clamp(
-        position.minScrollExtent,
-        position.maxScrollExtent,
-      ),
-    );
+    if (_centerCards) {
+      return List<double>.generate(
+        _currentCardCount,
+        (index) => (position.minScrollExtent + index * step).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    }
+
+    final points = <double>[position.minScrollExtent];
+    var next = position.minScrollExtent + step;
+    while (next < position.maxScrollExtent - 0.5) {
+      points.add(next);
+      next += step;
+    }
+    if ((points.last - position.maxScrollExtent).abs() > 0.5) {
+      points.add(position.maxScrollExtent);
+    }
+    return points;
   }
 
   int _nearestSnapPointIndex(List<double> points, double pixels) {
