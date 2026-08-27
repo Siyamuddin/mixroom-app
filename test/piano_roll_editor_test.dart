@@ -91,6 +91,32 @@ MidiNote _noteById(List<MidiNote> notes, String id) {
 }
 
 void main() {
+  testWidgets('piano roll exposes every MIDI pitch from 0 through 127',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    for (var pitch = 0; pitch <= 127; pitch++) {
+      expect(
+        find.byKey(ValueKey<String>('piano_key_$pitch')),
+        findsOneWidget,
+        reason: 'MIDI pitch $pitch should have its own piano-roll row',
+      );
+    }
+  });
+
   testWidgets('dragging a selected note moves the full multi-selection',
       (tester) async {
     List<MidiNote>? committedNotes;
@@ -353,9 +379,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
 
     final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
-    final gridTopLeft = tester.getTopLeft(
-        find.byKey(const ValueKey<String>('piano_roll_grid_canvas')));
-    final pinchCenter = gridTopLeft + const Offset(260, 160);
+    final editorTopLeft = tester.getTopLeft(find.byType(PianoRollEditor));
+    final pinchCenter = editorTopLeft + const Offset(600, 360);
     final initialWidth = tester.getSize(noteFinder).width;
 
     final first = await tester.startGesture(
@@ -415,9 +440,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
 
     final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
-    final gridTopLeft = tester.getTopLeft(
-        find.byKey(const ValueKey<String>('piano_roll_grid_canvas')));
-    final pinchCenter = gridTopLeft + const Offset(260, 160);
+    final editorTopLeft = tester.getTopLeft(find.byType(PianoRollEditor));
+    final pinchCenter = editorTopLeft + const Offset(600, 360);
     final initialWidth = tester.getSize(noteFinder).width;
 
     final first = await tester.startGesture(
@@ -479,7 +503,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 120));
 
-    final keyCenter = tester.getCenter(find.text('C6'));
+    final keyCenter = tester.getCenter(find.text('C4'));
     final first = await tester.startGesture(
       keyCenter,
       pointer: 31,
@@ -497,7 +521,7 @@ void main() {
     await second.up();
     await tester.pump(const Duration(milliseconds: 120));
 
-    expect(events.take(3), <String>['down:84', 'up:84', 'down:84']);
+    expect(events.take(3), <String>['down:60', 'up:60', 'down:60']);
     expect(startBeats, isNotEmpty);
     expect(startBeats.first, isNotNull);
     expect(startBeats.first!.isFinite, isTrue);
@@ -534,18 +558,18 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
 
     final gesture = await tester.startGesture(
-      tester.getCenter(find.text('C6')),
+      tester.getCenter(find.text('C4')),
       pointer: 41,
       kind: PointerDeviceKind.mouse,
       buttons: kPrimaryButton,
     );
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(find.text('C5')));
+    await gesture.moveTo(tester.getCenter(find.text('C3')));
     await tester.pump();
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 120));
 
-    expect(events, <String>['down:84', 'up:84', 'down:72', 'up:72']);
+    expect(events, <String>['down:60', 'up:60', 'down:48', 'up:48']);
     expect(shortPreviewCount, 0);
   });
 

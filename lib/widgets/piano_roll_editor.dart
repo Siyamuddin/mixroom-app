@@ -156,9 +156,6 @@ class PianoRollEditor extends StatefulWidget {
 class _PianoRollEditorState extends State<PianoRollEditor>
     with TickerProviderStateMixin {
   static const String _preferredPianoInstrumentId = 'sfz.vsco.upright_piano';
-  static const int _defaultMinPitch = 36;
-  static const int _defaultMaxPitch = 84;
-  static const int _pitchHeadroom = 12;
   static const int _absoluteMinPitch = 0;
   static const int _absoluteMaxPitch = 127;
   static const Duration _gestureTapBlockDuration = Duration(milliseconds: 150);
@@ -862,28 +859,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   double get _msPerBeat => 60000.0 / widget.bpm.clamp(1.0, 400.0);
 
-  ({int min, int max}) _pitchRangeForNotes(List<MidiNote> notes) {
-    if (notes.isEmpty) {
-      return (min: _defaultMinPitch, max: _defaultMaxPitch);
-    }
-
-    var minNotePitch = notes.first.pitch;
-    var maxNotePitch = notes.first.pitch;
-    for (final note in notes.skip(1)) {
-      minNotePitch = math.min(minNotePitch, note.pitch);
-      maxNotePitch = math.max(maxNotePitch, note.pitch);
-    }
-
-    final minPitch = math.max(
-      _absoluteMinPitch,
-      math.min(_defaultMinPitch, minNotePitch - _pitchHeadroom),
-    );
-    final maxPitch = math.min(
-      _absoluteMaxPitch,
-      math.max(_defaultMaxPitch, maxNotePitch + _pitchHeadroom),
-    );
-    return (min: minPitch, max: maxPitch);
-  }
+  ({int min, int max}) _pitchRangeForNotes(List<MidiNote> _) =>
+      (min: _absoluteMinPitch, max: _absoluteMaxPitch);
 
   ({int min, int max}) get _visiblePitchRange => _pinnedPitchRange;
 
@@ -1450,7 +1427,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   void _scheduleInitialNoteViewportSync() {
-    if (_notes.isEmpty) return;
     _initialNoteViewportSyncAttempts = 0;
     if (_initialNoteViewportSyncPending) return;
     _initialNoteViewportSyncPending = true;
@@ -1464,15 +1440,12 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _initialNoteViewportSyncPending = false;
       return;
     }
-    if (_notes.isEmpty) {
-      _initialNoteViewportSyncPending = false;
-      return;
-    }
     final verticalReady = _gridVerticalController.hasClients &&
         _keysVerticalController.hasClients &&
         _gridVerticalController.position.viewportDimension > 0.0;
-    final horizontalReady = _horizontalController.hasClients &&
-        _horizontalController.position.viewportDimension > 0.0;
+    final horizontalReady = _notes.isEmpty ||
+        (_horizontalController.hasClients &&
+            _horizontalController.position.viewportDimension > 0.0);
     if (!verticalReady || !horizontalReady) {
       if (_initialNoteViewportSyncAttempts++ < 8) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1550,8 +1523,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   void _centerInitialNoteViewport() {
     if (!_gridVerticalController.hasClients ||
         !_keysVerticalController.hasClients ||
-        !_horizontalController.hasClients ||
-        _notes.isEmpty) {
+        (_notes.isNotEmpty && !_horizontalController.hasClients)) {
       return;
     }
     final pitchStats = _notePitchStats();
@@ -1560,10 +1532,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final targetV = (targetRow * _rowHeight) - (verticalViewport * 0.5);
     _jumpBothVerticalControllers(targetV);
 
-    final horizontalViewport = _horizontalController.position.viewportDimension;
-    final targetH =
-        _xForBeat(_clampedClipPlayheadBeat) - (horizontalViewport * 0.5);
-    _jumpHorizontalTo(targetH);
+    if (_notes.isNotEmpty) {
+      final horizontalViewport =
+          _horizontalController.position.viewportDimension;
+      final targetH =
+          _xForBeat(_clampedClipPlayheadBeat) - (horizontalViewport * 0.5);
+      _jumpHorizontalTo(targetH);
+    }
   }
 
   bool _handleFollowModeScrollNotification(ScrollNotification notification) {
