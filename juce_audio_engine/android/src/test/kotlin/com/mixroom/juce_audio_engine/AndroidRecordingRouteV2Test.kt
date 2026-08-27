@@ -60,6 +60,31 @@ internal class AndroidRecordingRouteV2Test {
   }
 
   @Test
+  fun systemSelectedDuplexAcceptsCallbackProvenMultichannelCapacity() {
+    val fourChannelInput = input.copy(channelCount = 4)
+    val facts = validFacts().copy(
+      actualInput = fourChannelInput,
+      requiredInputChannels = 4,
+      activeInputChannels = 4,
+      inputStream = stream(fourChannelInput.id, channelCount = 4),
+    )
+
+    assertEquals("ok", AndroidSystemSelectedDuplexReadinessV2.validate(facts))
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidSystemSelectedDuplexReadinessV2.validate(
+        facts.copy(activeInputChannels = 2),
+      ),
+    )
+    assertEquals(
+      "actual_state_unavailable",
+      AndroidSystemSelectedDuplexReadinessV2.validate(
+        facts.copy(inputStream = stream(fourChannelInput.id, channelCount = 2)),
+      ),
+    )
+  }
+
+  @Test
   fun systemSelectedDuplexAcceptsFactuallyVerifiedRouteKindsAndPairs() {
     val pairs = listOf(
       AudioDeviceInfo.TYPE_BUILTIN_MIC to AudioDeviceInfo.TYPE_WIRED_HEADPHONES,

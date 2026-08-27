@@ -51,13 +51,15 @@ void main() {
     expect('dispatch_after'.allMatches(intent), hasLength(1));
   });
 
-  test('iOS V2 native writer requires an already prepared mono route', () {
-    final openStart = engine.indexOf('bool JuceEngine::openRecordingInputV2');
-    final quiesceStart = engine.indexOf(
-      'bool JuceEngine::quiescePlaybackRouteV2',
+  test('iOS V2 native writer captures the callback-proven selected range', () {
+    final openStart = engine.indexOf(
+      'bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(',
+    );
+    final validateStart = engine.indexOf(
+      'bool JuceEngine::validateRecordingRouteV2',
       openStart,
     );
-    final open = engine.substring(openStart, quiesceStart);
+    final open = engine.substring(openStart, validateStart);
     final writerStart = engine.indexOf('bool JuceEngine::startRecordingToWav');
     final writerEnd = engine.indexOf(
       'RealtimeWavCapture::StopResult JuceEngine::stopRecording()',
@@ -66,16 +68,27 @@ void main() {
     final writer = engine.substring(writerStart, writerEnd);
 
     expect(open, contains('const auto error = deviceManager.initialise('));
-    expect(open, contains('bluetoothHfp ? 1 : 2'));
-    expect(open, contains('desiredInputOpenChannels.store(1'));
+    expect(open, contains('inputChannels,'));
+    expect(open, contains('desiredInputOpenChannels.store(inputChannels'));
     expect(writer, contains('validateRecordingRouteV2()'));
-    expect(writer, contains('channelStart != 0'));
-    expect(writer, contains('channelCount != 1'));
+    expect(writer, contains('channelStart < 0'));
+    expect(writer, contains('channelCount != 1 && channelCount != 2'));
+    expect(
+      writer,
+      contains(
+        'requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed)',
+      ),
+    );
     final v2GuardStart = writer.indexOf('if (v2Recording)');
     final v2GuardEnd = writer.indexOf('else\n#endif', v2GuardStart);
     expect(
       writer.substring(v2GuardStart, v2GuardEnd),
       isNot(contains('applyPreferredAudioDeviceSetup(requiredInputs')),
+    );
+    expect(plugin, contains('session.maximumInputNumberOfChannels'));
+    expect(
+      plugin,
+      contains('MixroomIOSRouteIsBluetoothHFPDuplex(session.currentRoute)'),
     );
   });
 

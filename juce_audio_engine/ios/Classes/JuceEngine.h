@@ -6007,7 +6007,8 @@ public:
     bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
     bool prepareSystemSelectedDuplexSessionV2();
     bool openPreparedSystemSelectedDuplexRouteV2(int timeoutMilliseconds,
-                                                  int outputChannels);
+                                                 int outputChannels,
+                                                 int inputChannels);
     bool reconfigureBluetoothDuplexRouteV2();
     bool validateRecordingRouteV2() const;
     bool isBluetoothDuplexProjectCallbackReadyV2() const noexcept;
@@ -6378,8 +6379,11 @@ public:
                              int channelCount);
 #if JUCE_MAC && !JUCE_IOS
     bool startIndependentInputRecordingToWav(const juce::File &file,
-                                             double inputSampleRate);
-    void captureIndependentInput(const float *input, int numSamples) noexcept;
+                                             double inputSampleRate,
+                                             int channelCount);
+    void captureIndependentInput(const float *const *inputs,
+                                 int numChannels,
+                                 int numSamples) noexcept;
     juce::NamedValueSet getIndependentInputCaptureFacts() const;
 #endif
     RealtimeWavCapture::StopResult stopRecording();

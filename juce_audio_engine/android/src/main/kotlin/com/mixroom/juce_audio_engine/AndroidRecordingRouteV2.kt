@@ -161,6 +161,7 @@ internal data class AndroidRecordingFactsV2(
   val bufferFrames: Int,
   val inputStream: AndroidOboeOutputFactsV2,
   val outputStream: AndroidOboeOutputFactsV2,
+  val requiredInputChannels: Int = 1,
 )
 
 internal object AndroidRecordingReadinessV2 {
@@ -191,7 +192,8 @@ internal object AndroidRecordingReadinessV2 {
     if (
       !facts.deviceOpen ||
       !facts.callbackAttached ||
-      facts.activeInputChannels != 1 ||
+      facts.requiredInputChannels !in 1..32 ||
+      facts.activeInputChannels != facts.requiredInputChannels ||
       facts.activeOutputChannels <= 0 ||
       facts.sampleRateHz <= 0.0 ||
       facts.bufferFrames <= 0
@@ -205,7 +207,7 @@ internal object AndroidRecordingReadinessV2 {
       !inputStream.available ||
       !inputStream.running ||
       inputStream.routedDeviceId != input.id ||
-      inputStream.channelCount != 1 ||
+      inputStream.channelCount != facts.requiredInputChannels ||
       (inputStream.sampleRateHz ?: 0) <= 0 ||
       (inputStream.bufferFrames ?: 0) <= 0 ||
       !outputStream.available ||
@@ -248,7 +250,8 @@ internal object AndroidSystemSelectedDuplexReadinessV2 {
     if (
       !facts.deviceOpen ||
       !facts.callbackAttached ||
-      facts.activeInputChannels != 1 ||
+      facts.requiredInputChannels !in 1..32 ||
+      facts.activeInputChannels != facts.requiredInputChannels ||
       facts.activeOutputChannels <= 0 ||
       facts.sampleRateHz <= 0.0 ||
       facts.bufferFrames <= 0
@@ -265,7 +268,7 @@ internal object AndroidSystemSelectedDuplexReadinessV2 {
       !inputStream.available ||
       !inputStream.running ||
       inputStream.routedDeviceId != input.id ||
-      inputStream.channelCount != 1 ||
+      inputStream.channelCount != facts.requiredInputChannels ||
       (inputStream.sampleRateHz ?: 0) <= 0 ||
       (inputStream.bufferFrames ?: 0) <= 0 ||
       !outputStream.available ||

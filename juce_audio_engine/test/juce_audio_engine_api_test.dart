@@ -677,6 +677,8 @@ void main() {
       AudioRouteIntentV2.preparingRecording,
       generation: 10,
       operation: AudioRouteIntentOperationV2.systemSelectedRecording,
+      recordingChannelStart: 2,
+      recordingChannelCount: 2,
       platformOverride: TargetPlatform.iOS,
     );
 
@@ -687,6 +689,8 @@ void main() {
         'generation': 10,
         'intent': 'preparingRecording',
         'intentOperation': 'systemSelectedRecording',
+        'recordingChannelStart': 2,
+        'recordingChannelCount': 2,
       },
     );
   });
@@ -745,6 +749,51 @@ void main() {
 
     expect(ready, isTrue);
     expect(calls.single.method, 'getAudioRouteSnapshotV2');
+  });
+
+  test('iOS V2 readiness accepts its verified stereo recording route',
+      () async {
+    final stereo = _v2Snapshot(sessionInputChannels: 2);
+    stereo['intent'] = 'recording';
+    stereo['inputs'] = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'direction': 'input',
+        'nativePortType': 'USBAudio',
+        'normalizedKind': 'external',
+        'uid': 'usb-input',
+        'name': 'USB Input',
+        'channelCount': 2,
+      },
+    ];
+    final session = stereo['session']! as Map<String, dynamic>;
+    session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+    final juce = stereo['juce']! as Map<String, dynamic>;
+    juce['activeInputChannels'] = 2;
+
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(
+      AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
+        'status': 'success',
+        'generation': 0,
+        'transitionId': 2,
+        'diagnosticCode': 'ok',
+        'elapsedMs': 1,
+        'transportWasPlaying': false,
+        'snapshot': stereo,
+      }),
+    );
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      return stereo;
+    });
+
+    expect(
+      await JuceAudioEngine.validatePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      ),
+      isTrue,
+    );
   });
 
   test('iOS V2 readiness accepts only its exact verified HFP recording route',

@@ -1302,20 +1302,22 @@ bool JuceEngine::reconfigurePlaybackV2Android()
 #endif
 }
 
-bool JuceEngine::prepareRecordingV2Android()
+bool JuceEngine::prepareRecordingV2Android(int inputChannels)
 {
-    return prepareDefaultDuplexV2Android();
+    return prepareDefaultDuplexV2Android(inputChannels);
 }
 
-bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android()
+bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android(int inputChannels)
 {
-    return prepareDefaultDuplexV2Android();
+    return prepareDefaultDuplexV2Android(inputChannels);
 }
 
-bool JuceEngine::prepareDefaultDuplexV2Android()
+bool JuceEngine::prepareDefaultDuplexV2Android(int inputChannels)
 {
 #if JUCE_ANDROID
-    if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
+    const int requestedInputs = juce::jlimit(1, 32, inputChannels);
+    if (requestedInputs != inputChannels || !engineInitialized ||
+        metronomeCallback == nullptr || wavCapture.isActive())
         return false;
 
     pause();
@@ -1331,13 +1333,13 @@ bool JuceEngine::prepareDefaultDuplexV2Android()
 
     deviceManager.closeAudioDevice();
     const juce::String initError = deviceManager.initialise(
-        1,
+        requestedInputs,
         2,
         nullptr,
         true);
     auto *device = deviceManager.getCurrentAudioDevice();
     const bool valid = initError.isEmpty() && device != nullptr && device->isOpen() &&
-        device->getActiveInputChannels().countNumberOfSetBits() == 1 &&
+        device->getActiveInputChannels().countNumberOfSetBits() == requestedInputs &&
         device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
         device->getCurrentSampleRate() > 1000.0 &&
         device->getCurrentBufferSizeSamples() > 0;
@@ -1349,7 +1351,7 @@ bool JuceEngine::prepareDefaultDuplexV2Android()
         return false;
     }
 
-    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    desiredInputOpenChannels.store(requestedInputs, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     liveInputMonitoringEnabled = false;
     hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
@@ -1363,6 +1365,7 @@ bool JuceEngine::prepareDefaultDuplexV2Android()
     logCurrentAudioDeviceState("android-v2-recording-prepared");
     return true;
 #else
+    juce::ignoreUnused(inputChannels);
     return false;
 #endif
 }
@@ -5828,8 +5831,8 @@ bool JuceEngine::playPlaybackV2Android()
     const bool verifiedRecordingInputActive =
         wavCapture.isActive() &&
         androidV2RecordingPrepared &&
-        desiredInputOpenChannels.load(std::memory_order_relaxed) == 1 &&
-        activeInputChannels == 1;
+        desiredInputOpenChannels.load(std::memory_order_relaxed) > 0 &&
+        activeInputChannels == desiredInputOpenChannels.load(std::memory_order_relaxed);
     if (!engineInitialized || !audioCallbackAttached ||
         metronomeCallback == nullptr || device == nullptr || !device->isOpen() ||
         device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
@@ -10770,7 +10773,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     const int requiredInputs = juce::jmax(1, channelStart + channelCount);
     if (v2Recording)
     {
-        if (channelStart != 0 || channelCount != 1)
+        if (channelStart < 0 || (channelCount != 1 && channelCount != 2) ||
+            requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed))
             return false;
     }
     else if (!applyPreferredAudioDeviceSetup(requiredInputs, false, "startRecording"))

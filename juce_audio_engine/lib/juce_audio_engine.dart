@@ -91,11 +91,15 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
       {AudioRouteIntentOperationV2 operation =
-          AudioRouteIntentOperationV2.standard}) {
+          AudioRouteIntentOperationV2.standard,
+      int? recordingChannelStart,
+      int? recordingChannelCount}) {
     return JuceAudioEngine.setAudioRouteIntentV2(
       intent,
       generation: generation,
       operation: operation,
+      recordingChannelStart: recordingChannelStart,
+      recordingChannelCount: recordingChannelCount,
       platformOverride: platformOverride,
     );
   }
@@ -571,6 +575,8 @@ class JuceAudioEngine {
     required int generation,
     AudioRouteIntentOperationV2 operation =
         AudioRouteIntentOperationV2.standard,
+    int? recordingChannelStart,
+    int? recordingChannelCount,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -591,6 +597,10 @@ class JuceAudioEngine {
           'intent': intent.name,
           if (operation != AudioRouteIntentOperationV2.standard)
             'intentOperation': operation.name,
+          if (recordingChannelStart != null)
+            'recordingChannelStart': recordingChannelStart,
+          if (recordingChannelCount != null)
+            'recordingChannelCount': recordingChannelCount,
         },
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);
@@ -700,7 +710,9 @@ class JuceAudioEngine {
     if (startup == null || startup.outputs.length != 1) return false;
     final current = await getAudioRouteSnapshotV2();
     final expectedInputChannels =
-        startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
+        startup.intent == AudioRouteIntentV2.playbackOnly
+        ? 0
+        : startup.juce.activeInputChannels ?? 0;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
@@ -722,7 +734,7 @@ class JuceAudioEngine {
       return false;
     }
     if ((platform == TargetPlatform.macOS || platform == TargetPlatform.iOS) &&
-        expectedInputChannels == 1) {
+        expectedInputChannels > 0) {
       if (startup.inputs.length != 1 ||
           current.intent == AudioRouteIntentV2.playbackOnly ||
           current.inputs.length != 1 ||

@@ -137,6 +137,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:juce_audio_engine/audio_route_coordinator_v2.dart';
 import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
+import 'package:juce_audio_engine/recording_channel_selection_v2.dart';
 import 'package:mixroom/helpers/bluetooth_implementation_session_v2.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
@@ -5803,6 +5804,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _numInputChannels = 0;
   int _selectedChannelStart = 0;
   int _selectedChannelCount = 1;
+  int _preparedRecordingChannelStart = 0;
+  int _preparedRecordingChannelCount = 1;
   static const List<int> _dawSampleRateOptions = [44100, 48000, 88200, 96000];
   static const List<int> _dawBufferSizeOptions = [64, 128, 256, 512, 1024];
   int _preferredDawSampleRate = 44100;
@@ -22330,11 +22333,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _prepareAudioRecordingStartPreflight() async {
     var v2IntentOperation = AudioRouteIntentOperationV2.standard;
     if (_isBluetoothV2Session && Platform.isMacOS) {
-      v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
-    }
-    if (_isBluetoothV2Session && Platform.isAndroid) {
       v2IntentOperation =
           AudioRouteIntentOperationV2.systemSelectedRecording;
+    }
+    if (_isBluetoothV2Session && Platform.isAndroid) {
+      v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
       final coordinator = _audioRouteCoordinatorV2;
       if (_v2AudioSessionInvalidated ||
           coordinator == null ||
@@ -22387,11 +22390,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _syncTransportClock(_globalAudioClock, playing: false);
         });
       }
+      if (_numInputChannels > 0) {
+        final normalized = RecordingChannelSelectionV2(
+          channelStart: _selectedChannelStart,
+          channelCount: _selectedChannelCount,
+        ).normalizeForCapacity(_numInputChannels);
+        _selectedChannelStart = normalized.channelStart;
+        _selectedChannelCount = normalized.channelCount;
+      }
       final result = await coordinator.transitionIntent(
         AudioRouteIntentV2.preparingRecording,
         operation: Platform.isIOS || Platform.isMacOS
             ? AudioRouteIntentOperationV2.systemSelectedRecording
             : v2IntentOperation,
+        recordingChannelStart: _selectedChannelStart,
+        recordingChannelCount: _selectedChannelCount,
       );
       if (_recordStartCancelRequested) return false;
       if (!result.succeeded) {
@@ -22418,8 +22431,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return false;
       }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
-      _selectedChannelStart = 0;
-      _selectedChannelCount = 1;
       final verifiedInput = result.snapshot.inputs.length == 1
           ? result.snapshot.inputs.single
           : null;
@@ -22429,6 +22440,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final usingBluetoothDuplex =
           verifiedInput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex &&
           verifiedOutput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex;
+      final activeInputChannels = result.snapshot.juce.activeInputChannels ?? 0;
+      final advertisedInputChannels = verifiedInput?.channelCount ?? 0;
+      final availableInputChannels = math.max(
+        activeInputChannels,
+        advertisedInputChannels,
+      );
+      if (activeInputChannels <= 0 && availableInputChannels <= 0) return false;
+      final preparedSelection = RecordingChannelSelectionV2(
+        channelStart: _selectedChannelStart,
+        channelCount: _selectedChannelCount,
+      ).normalizeForCapacity(availableInputChannels);
+      _preparedRecordingChannelStart = preparedSelection.channelStart;
+      _preparedRecordingChannelCount = preparedSelection.channelCount;
+      _setStateAndRefreshProjectSettings(() {
+        _numInputChannels = availableInputChannels;
+        _selectedChannelStart = preparedSelection.channelStart;
+        _selectedChannelCount = preparedSelection.channelCount;
+        if (_isValidRowIndex(_selectedRow)) {
+          _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+            inputChannelStart: preparedSelection.channelStart,
+            inputChannelCount: preparedSelection.channelCount,
+          );
+        }
+      });
       if (usingBluetoothDuplex && !_bluetoothRecordingQualityNoticeShown) {
         _bluetoothRecordingQualityNoticeShown = true;
         _showSmallNotice(
@@ -22596,8 +22631,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       // 5) Arm the native recorder.
       final ok = await JuceAudioEngine.startRecording(
         filePath,
-        _isBluetoothV2Session ? 0 : _selectedChannelStart,
-        _isBluetoothV2Session ? 1 : _selectedChannelCount,
+        _isBluetoothV2Session
+            ? _preparedRecordingChannelStart
+            : _selectedChannelStart,
+        _isBluetoothV2Session
+            ? _preparedRecordingChannelCount
+            : _selectedChannelCount,
       );
 
       if (!ok) {
@@ -41019,8 +41058,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               const SizedBox(height: 10),
                               if (showInlineAudioRouting) ...[
                                 _buildInputSelector(),
-                                if (!_isBluetoothV2Session &&
-                                    _shouldShowInputChannelRouteSelector()) ...[
+                                if (_shouldShowInputChannelRouteSelector()) ...[
                                   const SizedBox(height: 9),
                                   _buildInputChannelRouteSelector(),
                                 ],
@@ -43516,8 +43554,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _shouldShowInputChannelRouteSelector() {
-    return _inputDevices.isNotEmpty &&
-        _effectiveInputChannelCountForSettings() > 0;
+    return _effectiveInputChannelCountForSettings() > 1;
   }
 
   bool _recordingInputsPreparedFor({
@@ -43803,6 +43840,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final input = snapshot.inputs.length == 1 ? snapshot.inputs.single : null;
     final outputName = (output?.name ?? '').trim();
     final inputName = (input?.name ?? '').trim();
+    final inputChannelCapacity = input?.channelCount ?? 0;
     final outputKind = switch (output?.normalizedKind) {
       AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
       AudioRouteKindV2.wired => AudioRouteKind.wired,
@@ -43829,6 +43867,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _audioRouteInfo = info;
       if (Platform.isAndroid) {
         _androidOutputRouteName = outputName.isEmpty ? null : outputName;
+      }
+      if (inputChannelCapacity > 0) {
+        _numInputChannels = inputChannelCapacity;
+        _normalizeInputChannelSelection();
       }
     });
   }
@@ -45527,8 +45569,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         _buildInputMeterStrip(),
                         const SizedBox(height: 10),
                         _buildInputSelector(),
-                        if (!_isBluetoothV2Session &&
-                            _shouldShowInputChannelRouteSelector()) ...[
+                        if (_shouldShowInputChannelRouteSelector()) ...[
                           const SizedBox(height: 9),
                           _buildInputChannelRouteSelector(),
                         ],

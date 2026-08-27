@@ -105,9 +105,15 @@ void main() {
 
     expect(adapter, contains('kAudioUnitSubType_HALOutput'));
     expect(adapter, contains('kAudioOutputUnitProperty_CurrentDevice'));
+    expect(adapter, contains('kAudioOutputUnitProperty_ChannelMap'));
     expect(adapter, contains('kAudioUnitScope_Input'));
     expect(adapter, contains('kAudioUnitScope_Output'));
-    expect(adapter, contains('scratch.assign(capacityFrames, 0.0f)'));
+    expect(
+      adapter,
+      contains(
+        'scratch[static_cast<size_t>(channel)].assign(capacityFrames, 0.0f)',
+      ),
+    );
     expect(adapter, contains('AudioUnitRender(unit'));
     expect(adapter, contains('numberFrames > capacityFrames'));
     expect(adapter, contains('callbackReady.store(true'));
@@ -144,7 +150,7 @@ void main() {
     expect(start, isNot(contains('reconfigureRecordingRouteV2ObjC')));
     expect(
       externalCapture,
-      contains('wavCapture.start(file, inputSampleRate, 1, 0)'),
+      contains('wavCapture.start(file, inputSampleRate, channelCount, 0)'),
     );
     expect(externalCapture, contains('independentInputCaptureMode.store(true'));
     expect(
@@ -159,7 +165,14 @@ void main() {
       externalCapture,
       contains('getActiveInputChannels().countNumberOfSetBits() != 0'),
     );
-    expect(bridge, contains('scratch.data(), static_cast<int>(numberFrames)'));
+    expect(
+      bridge,
+      contains(
+        'captureChannels,\n'
+        '                    activeChannels,\n'
+        '                    static_cast<int>(numberFrames)',
+      ),
+    );
     expect(bridge, isNot(contains('AudioHardwareCreateAggregateDevice')));
   });
 
@@ -956,7 +969,9 @@ void main() {
     );
     final recordingAdmission = _between(
       plugin,
-      '- (BOOL)startMacIndependentInputRecordingV2:(NSString *)path {',
+      '- (BOOL)startMacIndependentInputRecordingV2:(NSString *)path\n'
+          '                                channelStart:(NSInteger)channelStart\n'
+          '                                channelCount:(NSInteger)channelCount {',
       '#else\n- (void)signalIOSIntentRouteConditionV2',
     );
     final observer = _between(

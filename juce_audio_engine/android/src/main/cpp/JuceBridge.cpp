@@ -1356,27 +1356,27 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_reconfigurePlaybackV2JNI(JNIEnv 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass, jint inputChannels)
 {
     bool success = false;
     if (auto *mm = juce::MessageManager::getInstance())
-        mm->callSync([&success]
-                     { success = JuceEngine::get().prepareRecordingV2Android(); });
+        mm->callSync([&success, inputChannels]
+                     { success = JuceEngine::get().prepareRecordingV2Android((int)inputChannels); });
     else
-        success = JuceEngine::get().prepareRecordingV2Android();
+        success = JuceEngine::get().prepareRecordingV2Android((int)inputChannels);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(
-    JNIEnv *, jclass)
+    JNIEnv *, jclass, jint inputChannels)
 {
     bool success = false;
     if (auto *mm = juce::MessageManager::getInstance())
-        mm->callSync([&success]
-                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(); });
+        mm->callSync([&success, inputChannels]
+                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android((int)inputChannels); });
     else
-        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android();
+        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android((int)inputChannels);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 

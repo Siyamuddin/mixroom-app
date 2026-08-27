@@ -95,6 +95,8 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final appliedIntents = <AudioRouteIntentV2>[];
   final appliedIntentGenerations = <int>[];
   final appliedOperations = <AudioRouteIntentOperationV2>[];
+  final appliedRecordingChannelStarts = <int?>[];
+  final appliedRecordingChannelCounts = <int?>[];
   final results = <int, Future<AudioRouteTransitionResultV2>>{};
   final intentResults =
       <AudioRouteIntentV2, Future<AudioRouteTransitionResultV2>>{};
@@ -137,10 +139,14 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
       {AudioRouteIntentOperationV2 operation =
-          AudioRouteIntentOperationV2.standard}) async {
+          AudioRouteIntentOperationV2.standard,
+      int? recordingChannelStart,
+      int? recordingChannelCount}) async {
     appliedIntents.add(intent);
     appliedIntentGenerations.add(generation);
     appliedOperations.add(operation);
+    appliedRecordingChannelStarts.add(recordingChannelStart);
+    appliedRecordingChannelCounts.add(recordingChannelCount);
     return intentResultsByGeneration[generation] ??
         intentResults[intent] ??
         _result(generation);
@@ -1152,6 +1158,8 @@ void main() {
     final result = await coordinator.transitionIntent(
       AudioRouteIntentV2.preparingRecording,
       operation: AudioRouteIntentOperationV2.systemSelectedRecording,
+      recordingChannelStart: 2,
+      recordingChannelCount: 2,
     );
 
     expect(result.succeeded, isTrue);
@@ -1161,6 +1169,8 @@ void main() {
         AudioRouteIntentOperationV2.systemSelectedRecording,
       ],
     );
+    expect(adapter.appliedRecordingChannelStarts, <int?>[2]);
+    expect(adapter.appliedRecordingChannelCounts, <int?>[2]);
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
     expect(coordinator.intent, AudioRouteIntentV2.preparingRecording);
     await coordinator.dispose();

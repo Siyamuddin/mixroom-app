@@ -3065,7 +3065,7 @@ bool JuceEngine::prepareBluetoothDuplexSessionV2()
 bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
 {
 #if JUCE_IOS
-    return openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1);
+    return openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1, 1);
 #else
     juce::ignoreUnused(timeoutMilliseconds);
     return false;
@@ -3089,11 +3089,13 @@ bool JuceEngine::prepareSystemSelectedDuplexSessionV2()
 
 bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     int timeoutMilliseconds,
-    int outputChannels)
+    int outputChannels,
+    int inputChannels)
 {
 #if JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession() ||
-        isIOSIntentRouteInvalidatedV2() || timeoutMilliseconds <= 0)
+        isIOSIntentRouteInvalidatedV2() || timeoutMilliseconds <= 0 ||
+        inputChannels < 1 || inputChannels > 32)
         return false;
 
     const auto startedAtMs = juce::Time::getMillisecondCounterHiRes();
@@ -3107,7 +3109,7 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     };
 
     const auto error = deviceManager.initialise(
-        1,
+        inputChannels,
         juce::jlimit(1, 2, outputChannels),
         nullptr,
         true);
@@ -3116,11 +3118,11 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
         deviceManager.closeAudioDevice();
         return false;
     }
-    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    desiredInputOpenChannels.store(inputChannels, std::memory_order_relaxed);
     liveInputMonitoringEnabled = false;
     auto *device = deviceManager.getCurrentAudioDevice();
     if (device == nullptr ||
-        device->getActiveInputChannels().countNumberOfSetBits() != 1 ||
+        device->getActiveInputChannels().countNumberOfSetBits() != inputChannels ||
         device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
         device->getCurrentSampleRate() <= 1000.0 ||
         device->getCurrentBufferSizeSamples() <= 0)
@@ -3185,7 +3187,7 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     logCurrentAudioDeviceState("v2-system-selected-duplex-probe");
     return true;
 #else
-    juce::ignoreUnused(timeoutMilliseconds, outputChannels);
+    juce::ignoreUnused(timeoutMilliseconds, outputChannels, inputChannels);
     return false;
 #endif
 }
@@ -3225,7 +3227,9 @@ bool JuceEngine::validateRecordingRouteV2() const
         return false;
     auto *device = deviceManager.getCurrentAudioDevice();
     return device != nullptr &&
-        device->getActiveInputChannels().countNumberOfSetBits() == 1 &&
+        desiredInputOpenChannels.load(std::memory_order_relaxed) > 0 &&
+        device->getActiveInputChannels().countNumberOfSetBits() ==
+            desiredInputOpenChannels.load(std::memory_order_relaxed) &&
         device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
         device->getCurrentSampleRate() > 1000.0 &&
         device->getCurrentBufferSizeSamples() > 0;
@@ -8458,8 +8462,8 @@ bool JuceEngine::play()
             dev != nullptr ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
         const bool verifiedRecordingInputActive =
             wavCapture.isActive() &&
-            desiredInputOpenChannels.load(std::memory_order_relaxed) == 1 &&
-            activeInputChannels == 1;
+            desiredInputOpenChannels.load(std::memory_order_relaxed) > 0 &&
+            activeInputChannels == desiredInputOpenChannels.load(std::memory_order_relaxed);
         const bool invalidV2Route = v2PlaybackCallbackDetached ||
             missingOutputRoute ||
             (activeInputChannels != 0 && !verifiedRecordingInputActive);
@@ -14865,7 +14869,10 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (v2Recording)
     {
-        if (!validateRecordingRouteV2() || channelStart != 0 || channelCount != 1)
+        const int requiredInputs = channelStart + channelCount;
+        if (!validateRecordingRouteV2() || channelStart < 0 ||
+            (channelCount != 1 && channelCount != 2) ||
+            requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed))
             return false;
     }
     else
@@ -14934,10 +14941,12 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
 #if JUCE_MAC && !JUCE_IOS
 bool JuceEngine::startIndependentInputRecordingToWav(
     const juce::File &file,
-    double inputSampleRate)
+    double inputSampleRate,
+    int channelCount)
 {
     if (wavCapture.isActive() || !engineInitialized ||
-        !isV2PlaybackSession() || inputSampleRate <= 1000.0)
+        !isV2PlaybackSession() || inputSampleRate <= 1000.0 ||
+        (channelCount != 1 && channelCount != 2))
         return false;
 
     auto *device = deviceManager.getCurrentAudioDevice();
@@ -14950,7 +14959,7 @@ bool JuceEngine::startIndependentInputRecordingToWav(
         return false;
 
     independentInputCaptureMode.store(true, std::memory_order_release);
-    if (!wavCapture.start(file, inputSampleRate, 1, 0))
+    if (!wavCapture.start(file, inputSampleRate, channelCount, 0))
     {
         independentInputCaptureMode.store(false, std::memory_order_release);
         return false;
@@ -14960,13 +14969,13 @@ bool JuceEngine::startIndependentInputRecordingToWav(
     return true;
 }
 
-void JuceEngine::captureIndependentInput(const float *input,
+void JuceEngine::captureIndependentInput(const float *const *inputs,
+                                         int numChannels,
                                          int numSamples) noexcept
 {
     if (!independentInputCaptureMode.load(std::memory_order_acquire))
         return;
-    const float *channels[] = {input};
-    wavCapture.capture(channels, input != nullptr ? 1 : 0, numSamples, 0);
+    wavCapture.capture(inputs, inputs != nullptr ? numChannels : 0, numSamples, 0);
 }
 
 juce::NamedValueSet JuceEngine::getIndependentInputCaptureFacts() const
