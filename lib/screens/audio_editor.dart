@@ -102,7 +102,6 @@ import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/helpers/audio_project_persistence.dart';
 import 'package:mixroom/helpers/cloud_project_service.dart';
-import 'package:mixroom/helpers/cloud_auto_sync_follow_up.dart';
 import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/effect_parameter_exposure.dart';
@@ -139,7 +138,6 @@ import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 import 'package:juce_audio_engine/recording_channel_selection_v2.dart';
 import 'package:mixroom/helpers/bluetooth_implementation_session_v2.dart';
-import 'package:mixroom/helpers/mac_audio_input_preference.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -9338,7 +9336,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         if (Platform.isMacOS) {
           await _loadMacV2AudioDevices();
-          await _restoreMacV2InputPreferenceOnStartup();
         }
       }
       await _refreshPlatformCapabilities();
@@ -15084,7 +15081,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _cloudAutoSyncInFlight = true;
     _cloudAutoSyncDirty = false;
     Duration? retryDelay;
-    var nonRetryableFailure = false;
     try {
       await _projectAutosaveCoordinator.flush();
       if (!_canContinueCloudAutoSync()) {
@@ -15204,12 +15200,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         service.close();
       }
     } catch (error) {
-      nonRetryableFailure = _isCloudAutoSyncNonRetryable(error);
+      _cloudAutoSyncDirty = true;
+      final nonRetryable = _isCloudAutoSyncNonRetryable(error);
       if (error.toString().toLowerCase().contains('revision conflict')) {
         _cloudAutoSyncConflict = true;
       }
-      if (!nonRetryableFailure) {
-        _cloudAutoSyncDirty = true;
+      if (!nonRetryable) {
         _cloudAutoSyncFailureCount = math.min(
           _cloudAutoSyncFailureCount + 1,
           4,
@@ -15228,29 +15224,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Cloud auto sync skipped after $reason: $error');
     } finally {
       _cloudAutoSyncInFlight = false;
-      final followUp = cloudAutoSyncFollowUp(
-        canAttempt: _canAttemptAutoCloudSync(),
-        dirty: _cloudAutoSyncDirty,
-        nonRetryableFailure: nonRetryableFailure,
-        hasRetryDelay: retryDelay != null,
-      );
-      if (followUp == CloudAutoSyncFollowUp.delayed) {
+      if (retryDelay != null && _canAttemptAutoCloudSync()) {
         _cloudAutoSyncTimer?.cancel();
-        _cloudAutoSyncTimer = Timer(retryDelay!, () {
+        _cloudAutoSyncTimer = Timer(retryDelay, () {
           _cloudAutoSyncTimer = null;
-          unawaited(
-            _runCloudAutoSync(reason: cloudAutoSyncFollowUpReason(followUp)),
-          );
+          unawaited(_runCloudAutoSync(reason: 'retry:$reason'));
         });
-      } else if (followUp == CloudAutoSyncFollowUp.immediate) {
+      } else if (_cloudAutoSyncDirty && _canAttemptAutoCloudSync()) {
         // Do not lose an edit made while the preceding upload was in flight.
         // The follow-up run re-reads the canonical source before publishing.
         _cloudAutoSyncTimer?.cancel();
         _cloudAutoSyncTimer = Timer(Duration.zero, () {
           _cloudAutoSyncTimer = null;
-          unawaited(
-            _runCloudAutoSync(reason: cloudAutoSyncFollowUpReason(followUp)),
-          );
+          unawaited(_runCloudAutoSync(reason: 'latest:$reason'));
         });
       }
       ProjectManager.endCloudProjectSync(syncActivityId);
@@ -43540,74 +43526,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _macInputDeviceUID = selectionUID == null || selectionUID.isEmpty
             ? null
             : selectionUID;
-      });
-      await _persistMacV2InputPreference(selectionUID);
-    } finally {
-      if (mounted) {
-        _setStateAndRefreshProjectSettings(
-          () => _macV2InputSelectionInFlight = false,
-        );
-      }
-    }
-  }
-
-  Future<void> _persistMacV2InputPreference(String? uid) async {
-    try {
-      final saved = await MacAudioInputPreference.saveUID(uid);
-      if (!saved) {
-        debugPrint('[MacV2InputPreference] write_failed');
-      }
-    } catch (error) {
-      debugPrint('[MacV2InputPreference] write_failed error=$error');
-    }
-  }
-
-  Future<void> _restoreMacV2InputPreferenceOnStartup() async {
-    if (!mounted || !Platform.isMacOS || !_isBluetoothV2Session) return;
-    final coordinator = _audioRouteCoordinatorV2;
-    if (coordinator == null ||
-        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
-        coordinator.intent != AudioRouteIntentV2.playbackOnly) {
-      return;
-    }
-
-    String? savedUID;
-    try {
-      savedUID = await MacAudioInputPreference.loadUID();
-    } catch (error) {
-      debugPrint('[MacV2InputPreference] read_failed error=$error');
-      return;
-    }
-    if (!mounted || savedUID == null) return;
-
-    AudioInputDeviceInfo? savedDevice;
-    for (final device in _macInputDevices) {
-      if (device.uid.trim() == savedUID) {
-        savedDevice = device;
-        break;
-      }
-    }
-    if (savedDevice == null) return;
-
-    _setStateAndRefreshProjectSettings(
-      () => _macV2InputSelectionInFlight = true,
-    );
-    try {
-      final result = await coordinator.selectRecordingInput(
-        savedDevice.name.trim(),
-        inputDeviceUID: savedUID,
-      );
-      if (!mounted || !result.succeeded) {
-        if (!result.succeeded) {
-          debugPrint(
-            '[MacV2InputPreference] restore_failed '
-            'code=${result.diagnosticCode}',
-          );
-        }
-        return;
-      }
-      _setStateAndRefreshProjectSettings(() {
-        _macInputDeviceUID = savedUID;
       });
     } finally {
       if (mounted) {
