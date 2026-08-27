@@ -9,6 +9,11 @@ AudioRouteSnapshotV2 _snapshot({
   int? transitionId,
   bool coordinatorManaged = true,
   bool interruptionWasSuspended = false,
+  AudioRouteIntentV2 intent = AudioRouteIntentV2.playbackOnly,
+  bool deviceOpen = true,
+  bool audioCallbackAttached = true,
+  int activeInputChannels = 0,
+  int activeOutputChannels = 2,
 }) {
   return AudioRouteSnapshotV2.fromMap(<String, dynamic>{
     'capturedAtUtc': '2026-08-08T12:00:00.000Z',
@@ -16,6 +21,7 @@ AudioRouteSnapshotV2 _snapshot({
     'generation': generation,
     'transitionId': transitionId,
     'coordinatorManaged': coordinatorManaged,
+    'intent': intent.name,
     'interruption': <String, dynamic>{
       'phase': interruptionWasSuspended ? 'ended' : 'idle',
       'wasSuspended': interruptionWasSuspended,
@@ -34,11 +40,12 @@ AudioRouteSnapshotV2 _snapshot({
       },
     ],
     'juce': <String, dynamic>{
-      'deviceOpen': true,
+      'deviceOpen': deviceOpen,
+      'audioCallbackAttached': audioCallbackAttached,
       'sampleRateHz': 44100.0,
       'bufferFrames': 512,
-      'activeInputChannels': 0,
-      'activeOutputChannels': 2,
+      'activeInputChannels': activeInputChannels,
+      'activeOutputChannels': activeOutputChannels,
     },
   });
 }
@@ -67,6 +74,7 @@ AudioRouteTransitionResultV2 _result(
   int generation, {
   AudioRouteTransitionStatusV2 status = AudioRouteTransitionStatusV2.success,
   String code = 'ok',
+  AudioRouteSnapshotV2? snapshot,
 }) {
   return AudioRouteTransitionResultV2(
     status: status,
@@ -75,10 +83,11 @@ AudioRouteTransitionResultV2 _result(
     diagnosticCode: code,
     elapsedMs: 12,
     transportWasPlaying: true,
-    snapshot: _snapshot(
-      generation: generation,
-      transitionId: generation + 100,
-    ),
+    snapshot: snapshot ??
+        _snapshot(
+          generation: generation,
+          transitionId: generation + 100,
+        ),
   );
 }
 
@@ -1153,6 +1162,222 @@ void main() {
     ]);
     expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
     expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('serializes monitoring ownership through recording and playback',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    expect(
+      (await coordinator.transitionIntent(AudioRouteIntentV2.monitoring))
+          .succeeded,
+      isTrue,
+    );
+    expect(coordinator.intent, AudioRouteIntentV2.monitoring);
+    expect(
+      (await coordinator.transitionIntent(AudioRouteIntentV2.recording))
+          .succeeded,
+      isTrue,
+    );
+    expect(
+      (await coordinator.transitionIntent(AudioRouteIntentV2.monitoring))
+          .succeeded,
+      isTrue,
+    );
+    expect(
+      (await coordinator.transitionIntent(AudioRouteIntentV2.playbackOnly))
+          .succeeded,
+      isTrue,
+    );
+
+    expect(adapter.appliedIntents, <AudioRouteIntentV2>[
+      AudioRouteIntentV2.monitoring,
+      AudioRouteIntentV2.recording,
+      AudioRouteIntentV2.monitoring,
+      AudioRouteIntentV2.playbackOnly,
+    ]);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('monitoring ownership blocks device and hardware changes', () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.monitoring);
+
+    final output = await coordinator.selectPlaybackOutput('Mac Speakers');
+    final input = await coordinator.selectRecordingInput('Mac Microphone');
+    final hardware = await coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: 48000,
+      preferredBufferFrames: 256,
+    );
+
+    for (final result in <AudioRouteTransitionResultV2>[
+      output,
+      input,
+      hardware,
+    ]) {
+      expect(result.succeeded, isFalse);
+      expect(result.diagnosticCode, 'route_unstable');
+    }
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(coordinator.intent, AudioRouteIntentV2.monitoring);
+    await coordinator.dispose();
+  });
+
+  test('route change invalidates monitoring exactly once', () async {
+    final adapter = _FakeAdapter();
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.monitoring);
+
+    adapter.controller.add(_event(1, 'changed-during-monitoring'));
+    await _flush();
+
+    expect(invalidated, hasLength(1));
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
+    await coordinator.dispose();
+  });
+
+  test('interruption invalidates monitoring exactly once', () async {
+    final adapter = _FakeAdapter();
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+    await coordinator.transitionIntent(AudioRouteIntentV2.monitoring);
+
+    adapter.controller.add(
+      _event(1, 'interrupted', cause: 'audioInterruptionBegan'),
+    );
+    await _flush();
+    adapter.controller.add(
+      _event(2, 'interrupted-again', cause: 'audioInterruptionBegan'),
+    );
+    await _flush();
+
+    expect(invalidated, hasLength(1));
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.reconfiguring);
+    await coordinator.dispose();
+  });
+
+  test('stale monitoring cannot commit or overlap another transition',
+      () async {
+    final adapter = _FakeAdapter();
+    final monitoring = Completer<AudioRouteTransitionResultV2>();
+    adapter.intentResults[AudioRouteIntentV2.monitoring] = monitoring.future;
+    final invalidated = <AudioRouteChangeEventV2>[];
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+      onIntentInvalidated: invalidated.add,
+    );
+    await coordinator.start();
+
+    final transition =
+        coordinator.transitionIntent(AudioRouteIntentV2.monitoring);
+    await _flush();
+    final overlap = await coordinator.transitionIntent(
+      AudioRouteIntentV2.playbackOnly,
+    );
+    expect(overlap.succeeded, isFalse);
+    expect(overlap.diagnosticCode, 'route_unstable');
+
+    adapter.controller.add(_event(1, 'changed-during-monitoring-start'));
+    await _flush();
+    monitoring.complete(_result(0));
+    final result = await transition;
+
+    expect(result.succeeded, isFalse);
+    expect(result.diagnosticCode, 'stale_generation');
+    expect(invalidated, hasLength(1));
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
+    await coordinator.dispose();
+  });
+
+  test('failed monitoring accepts callback-proven playback cleanup', () async {
+    final adapter = _FakeAdapter();
+    adapter.intentResults[AudioRouteIntentV2.monitoring] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'monitoring_unavailable',
+        snapshot: _snapshot(
+          generation: 0,
+          intent: AudioRouteIntentV2.playbackOnly,
+          audioCallbackAttached: true,
+          activeInputChannels: 0,
+          activeOutputChannels: 2,
+        ),
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.monitoring,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    await coordinator.dispose();
+  });
+
+  test('failed monitoring rejects unproven playback cleanup', () async {
+    final adapter = _FakeAdapter();
+    adapter.intentResults[AudioRouteIntentV2.monitoring] = Future.value(
+      _result(
+        0,
+        status: AudioRouteTransitionStatusV2.failure,
+        code: 'monitoring_unavailable',
+        snapshot: _snapshot(
+          generation: 0,
+          intent: AudioRouteIntentV2.playbackOnly,
+          audioCallbackAttached: false,
+          activeInputChannels: 0,
+          activeOutputChannels: 2,
+        ),
+      ),
+    );
+    final coordinator = AudioRouteCoordinatorV2(
+      adapter: adapter,
+      settlingDelay: Duration.zero,
+    );
+    await coordinator.start();
+
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.monitoring,
+    );
+
+    expect(result.succeeded, isFalse);
+    expect(coordinator.intent, AudioRouteIntentV2.playbackOnly);
+    expect(coordinator.state, AudioRouteCoordinatorStateV2.failed);
     await coordinator.dispose();
   });
 

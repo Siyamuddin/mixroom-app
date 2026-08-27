@@ -308,16 +308,26 @@ class AudioRouteCoordinatorV2 {
       if (_disposed) {
         return _localFailure(intent, 'coordinator_disposed');
       }
-      final restoredPlaybackAfterPreparation =
+      final restoredPlaybackAfterRecordingPreparation =
           intent == AudioRouteIntentV2.preparingRecording &&
               result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
               result.snapshot.juce.deviceOpen == true &&
               result.snapshot.juce.activeInputChannels == 0 &&
               (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
+      final restoredPlaybackAfterMonitoring =
+          intent == AudioRouteIntentV2.monitoring &&
+              result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
+              result.snapshot.juce.deviceOpen == true &&
+              result.snapshot.juce.audioCallbackAttached == true &&
+              result.snapshot.juce.activeInputChannels == 0 &&
+              (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
+      final restoredPlaybackAfterInputPreparation =
+          restoredPlaybackAfterRecordingPreparation ||
+              restoredPlaybackAfterMonitoring;
       final stale = result.generation != generation ||
           _latestGeneration != generation ||
           (result.diagnosticCode == 'stale_generation' &&
-              !restoredPlaybackAfterPreparation);
+              !restoredPlaybackAfterInputPreparation);
       if (stale) {
         _setState(AudioRouteCoordinatorStateV2.failed);
         return result.diagnosticCode == 'stale_generation'
@@ -327,7 +337,7 @@ class AudioRouteCoordinatorV2 {
       if (result.succeeded) {
         _intent = intent;
         _setState(AudioRouteCoordinatorStateV2.stable);
-      } else if (restoredPlaybackAfterPreparation) {
+      } else if (restoredPlaybackAfterInputPreparation) {
         _intent = AudioRouteIntentV2.playbackOnly;
         _setState(AudioRouteCoordinatorStateV2.stable);
       } else {

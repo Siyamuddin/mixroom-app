@@ -45591,9 +45591,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
+            final monitoringAvailable = !_isBluetoothV2Session;
             final monitoringEnabled =
-                _liveInputMonitoringEffective ??
-                _shouldEnableLiveInputMonitoring(_audioRouteInfo);
+                monitoringAvailable &&
+                (_liveInputMonitoringEffective ??
+                    _shouldEnableLiveInputMonitoring(_audioRouteInfo));
+            final monitoringSubtitle = !monitoringAvailable
+                ? L10n.translate(
+                    context,
+                    'Monitoring is unavailable for the current audio route.',
+                  )
+                : monitoringEnabled
+                ? L10n.translate(
+                    context,
+                    'Live mic monitoring is enabled for the current route.',
+                  )
+                : L10n.translate(
+                    context,
+                    'Live mic monitoring is off for the current route.',
+                  );
             return Padding(
               padding: EdgeInsets.only(
                 left: 12,
@@ -45663,26 +45679,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             style: const TextStyle(color: Colors.white),
                           ),
                           subtitle: Text(
-                            monitoringEnabled
-                                ? L10n.translate(
-                                    context,
-                                    'Live mic monitoring is enabled for the current route.',
-                                  )
-                                : L10n.translate(
-                                    context,
-                                    'Live mic monitoring is off for the current route.',
-                                  ),
+                            monitoringSubtitle,
                             style: const TextStyle(color: Colors.white60),
                           ),
-                          onChanged: (value) {
-                            unawaited(
-                              _setRoutingSheetMonitoring(value).whenComplete(
-                                () {
-                                  setSheetState(() {});
-                                },
-                              ),
-                            );
-                          },
+                          onChanged: monitoringAvailable
+                              ? (value) {
+                                  unawaited(
+                                    _setRoutingSheetMonitoring(
+                                      value,
+                                    ).whenComplete(() {
+                                      setSheetState(() {});
+                                    }),
+                                  );
+                                }
+                              : null,
                         ),
                         if (_supportsNativeBluetoothMonitorPolicy()) ...[
                           const SizedBox(height: 4),

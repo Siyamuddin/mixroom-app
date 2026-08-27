@@ -21,6 +21,7 @@ enum AudioRouteCaptureConsistencyV2 {
 
 enum AudioRouteIntentV2 {
   playbackOnly,
+  monitoring,
   preparingRecording,
   recording,
 }
