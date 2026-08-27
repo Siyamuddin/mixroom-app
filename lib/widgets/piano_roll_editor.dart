@@ -6097,7 +6097,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       'B'
     ];
     final clamped = midi.clamp(0, 127);
-    final octave = (clamped ~/ 12) - 1;
+    final octave = clamped ~/ 12;
     return '${names[clamped % 12]}$octave';
   }
 
@@ -6333,7 +6333,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                   final noteName = _noteNameForPitch(pitch);
                   final isPressed = _isPreviewPitchActive(pitch) ||
                       playbackPitches.contains(pitch);
-                  final showLabel = pitch % 12 == 0 || isPressed;
+                  final showLabel = pitch % 12 == 0 ||
+                      pitch == _absoluteMaxPitch ||
+                      isPressed;
                   final blackTop = isPressed
                       ? const Color(0xFF737D86)
                       : const Color(0xFF525A62);
@@ -6929,7 +6931,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       'A#',
       'B',
     ];
-    final octave = (pitch ~/ 12) - 1;
+    final octave = pitch ~/ 12;
     return '${names[pitch % 12]}$octave';
   }
 

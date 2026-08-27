@@ -115,6 +115,8 @@ void main() {
         reason: 'MIDI pitch $pitch should have its own piano-roll row',
       );
     }
+    expect(find.text('C0'), findsOneWidget);
+    expect(find.text('G10'), findsOneWidget);
   });
 
   testWidgets('dragging a selected note moves the full multi-selection',
@@ -503,7 +505,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 120));
 
-    final keyCenter = tester.getCenter(find.text('C4'));
+    final keyCenter = tester.getCenter(find.text('C5'));
     final first = await tester.startGesture(
       keyCenter,
       pointer: 31,
@@ -558,13 +560,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 120));
 
     final gesture = await tester.startGesture(
-      tester.getCenter(find.text('C4')),
+      tester.getCenter(find.text('C5')),
       pointer: 41,
       kind: PointerDeviceKind.mouse,
       buttons: kPrimaryButton,
     );
     await tester.pump();
-    await gesture.moveTo(tester.getCenter(find.text('C3')));
+    await gesture.moveTo(tester.getCenter(find.text('C4')));
     await tester.pump();
     await gesture.up();
     await tester.pump(const Duration(milliseconds: 120));
@@ -609,7 +611,7 @@ void main() {
       await tester.sendKeyDownEvent(modifierKey);
       await tester.sendEventToBinding(
         PointerScrollEvent(
-          position: tester.getCenter(find.text('C6')),
+          position: tester.getCenter(find.text('C7')),
           scrollDelta: const Offset(0, -120),
         ),
       );
@@ -949,7 +951,7 @@ void main() {
       find.byKey(const ValueKey<String>('piano_key_active_overlay_83')),
       findsOneWidget,
     );
-    expect(find.text('B5'), findsOneWidget);
+    expect(find.text('B6'), findsOneWidget);
   });
 
   testWidgets('black key playback highlight matches the black key cutout',
