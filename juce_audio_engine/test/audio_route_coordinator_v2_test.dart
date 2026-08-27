@@ -87,6 +87,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
   final appliedGenerations = <int>[];
   final appliedOutputNames = <String?>[];
   final appliedInputNames = <String?>[];
+  final appliedInputUIDs = <String?>[];
   final inputPreferenceUpdates = <bool>[];
   final preferredSampleRates = <int?>[];
   final preferredBufferFrames = <int?>[];
@@ -119,6 +120,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -127,6 +129,7 @@ class _FakeAdapter implements AudioRouteAdapterV2 {
     appliedGenerations.add(generation);
     appliedOutputNames.add(outputDeviceName);
     appliedInputNames.add(inputDeviceName);
+    appliedInputUIDs.add(inputDeviceUID);
     inputPreferenceUpdates.add(updateInputPreference);
     preferredSampleRates.add(preferredSampleRateHz);
     this.preferredBufferFrames.add(preferredBufferFrames);
@@ -281,6 +284,7 @@ void main() {
 
     expect(result.succeeded, isTrue);
     expect(adapter.appliedInputNames, <String?>['Mac Microphone']);
+    expect(adapter.appliedInputUIDs, <String?>[null]);
     expect(adapter.inputPreferenceUpdates, <bool>[true]);
     expect(adapter.appliedOutputNames, <String?>[null]);
     expect(states, isEmpty);
@@ -302,6 +306,7 @@ void main() {
 
     expect(result.succeeded, isTrue);
     expect(adapter.appliedInputNames, <String?>[null]);
+    expect(adapter.appliedInputUIDs, <String?>[null]);
     expect(adapter.inputPreferenceUpdates, <bool>[true]);
     await coordinator.dispose();
   });
@@ -324,6 +329,7 @@ void main() {
 
     final selection = coordinator.selectRecordingInput(
       'Mac Microphone',
+      inputDeviceUID: 'coreaudio-input-42',
       retryAfterPlaybackRecovery: true,
     );
     await _flush();
@@ -337,6 +343,10 @@ void main() {
     expect(
       adapter.appliedInputNames,
       <String?>['Mac Microphone', null, 'Mac Microphone'],
+    );
+    expect(
+      adapter.appliedInputUIDs,
+      <String?>['coreaudio-input-42', null, 'coreaudio-input-42'],
     );
     expect(adapter.inputPreferenceUpdates, <bool>[true, false, true]);
     await coordinator.dispose();

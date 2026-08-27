@@ -70,6 +70,7 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -79,6 +80,7 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
       generation,
       outputDeviceName: outputDeviceName,
       inputDeviceName: inputDeviceName,
+      inputDeviceUID: inputDeviceUID,
       updateInputPreference: updateInputPreference,
       preferredSampleRateHz: preferredSampleRateHz,
       preferredBufferFrames: preferredBufferFrames,
@@ -331,6 +333,7 @@ class AudioRouteInfo {
 
 class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
+    this.uid = '',
     required this.name,
     required this.isBluetoothInput,
     required this.isBuiltIn,
@@ -338,6 +341,7 @@ class AudioInputDeviceInfo {
     required this.transport,
   });
 
+  final String uid;
   final String name;
   final bool isBluetoothInput;
   final bool isBuiltIn;
@@ -346,6 +350,7 @@ class AudioInputDeviceInfo {
 
   factory AudioInputDeviceInfo.fromMap(Map<String, dynamic> map) {
     return AudioInputDeviceInfo(
+      uid: map['uid']?.toString() ?? '',
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
       isBuiltIn: map['isBuiltIn'] == true,
@@ -519,6 +524,7 @@ class JuceAudioEngine {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -533,6 +539,10 @@ class JuceAudioEngine {
       return _unavailableRouteTransitionV2(generation);
     }
     try {
+      final normalizedInputName = inputDeviceName?.trim() ?? '';
+      final normalizedInputUID = inputDeviceUID?.trim() ?? '';
+      final followsSystemInput =
+          normalizedInputName.isEmpty && normalizedInputUID.isEmpty;
       final arguments = <String, Object>{
         'generation': generation,
         'intent': 'playbackOnly',
@@ -542,10 +552,11 @@ class JuceAudioEngine {
         if (outputDeviceName?.trim().isNotEmpty == true)
           'outputDeviceName': outputDeviceName!.trim(),
         if (updateInputPreference) 'updateInputPreference': true,
-        if (updateInputPreference)
-          'followSystemInput': inputDeviceName?.trim().isNotEmpty != true,
-        if (updateInputPreference && inputDeviceName?.trim().isNotEmpty == true)
-          'inputDeviceName': inputDeviceName!.trim(),
+        if (updateInputPreference) 'followSystemInput': followsSystemInput,
+        if (updateInputPreference && normalizedInputName.isNotEmpty)
+          'inputDeviceName': normalizedInputName,
+        if (updateInputPreference && normalizedInputUID.isNotEmpty)
+          'inputDeviceUID': normalizedInputUID,
         if (updateHardwarePreferences) 'updateHardwarePreferences': true,
         if (updateHardwarePreferences && preferredSampleRateHz != null)
           'preferredSampleRateHz': preferredSampleRateHz,

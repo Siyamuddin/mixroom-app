@@ -11,6 +11,7 @@ abstract interface class AudioRouteAdapterV2 {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -406,6 +407,7 @@ class AudioRouteCoordinatorV2 {
   /// follow the system default input.
   Future<AudioRouteTransitionResultV2> selectRecordingInput(
     String? inputDeviceName, {
+    String? inputDeviceUID,
     bool retryAfterPlaybackRecovery = false,
   }) async {
     if (_disposed || !_started || _shutdownCancellation) {
@@ -425,10 +427,15 @@ class AudioRouteCoordinatorV2 {
 
     final generation = _latestGeneration;
     final selection = inputDeviceName?.trim();
+    final selectionUID = inputDeviceUID?.trim();
     final recoveryWaiter =
         retryAfterPlaybackRecovery ? _PlaybackRecoveryWaiter(generation) : null;
     _inputSelectionRecoveryWaiter = recoveryWaiter;
-    var result = await _applyRecordingInputPreference(generation, selection);
+    var result = await _applyRecordingInputPreference(
+      generation,
+      selection,
+      selectionUID,
+    );
 
     try {
       if (_disposed) return result;
@@ -471,6 +478,7 @@ class AudioRouteCoordinatorV2 {
       result = await _applyRecordingInputPreference(
         recovery.generation,
         selection,
+        selectionUID,
       );
       if (result.generation != recovery.generation ||
           result.diagnosticCode == 'stale_generation' ||
@@ -493,12 +501,14 @@ class AudioRouteCoordinatorV2 {
   Future<AudioRouteTransitionResultV2> _applyRecordingInputPreference(
     int generation,
     String? inputDeviceName,
+    String? inputDeviceUID,
   ) async {
     _applyInFlight = true;
     try {
       return await _adapter.applyPlaybackRoute(
         generation,
         inputDeviceName: inputDeviceName,
+        inputDeviceUID: inputDeviceUID,
         updateInputPreference: true,
       );
     } catch (_) {

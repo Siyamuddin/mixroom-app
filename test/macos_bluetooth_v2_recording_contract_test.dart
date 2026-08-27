@@ -828,7 +828,7 @@ void main() {
     },
   );
 
-  test('explicit input selection validates identity without audio mutation', () {
+  test('explicit input selection prefers UID without audio mutation', () {
     final plugin = File(pluginPath).readAsStringSync();
     final apply = _between(
       plugin,
@@ -841,6 +841,13 @@ void main() {
       'const BOOL explicitSelection = requestedName.length > 0;',
     );
 
+    expect(apply, contains('args[@"inputDeviceUID"]'));
+    expect(selection, contains('const BOOL explicitInputUID'));
+    expect(
+      selection,
+      contains('MixroomInputForUID(inventory, requestedInputUID)'),
+    );
+    expect(selection, contains('!explicitInputUID && explicitInputName'));
     expect(
       selection,
       contains('MixroomExactDeviceMatches(inventory, requestedInputName, YES)'),
@@ -855,6 +862,21 @@ void main() {
     expect(selection, isNot(contains('selectInputDeviceObjC')));
     expect(selection, isNot(contains('requestMicrophone')));
   });
+
+  test(
+    'UID foundation retains the current duplicate-name visibility policy',
+    () {
+      final plugin = File(pluginPath).readAsStringSync();
+      final enumeration = _between(
+        plugin,
+        'MixroomMacV2InputDeviceInfos(void) {',
+        '- (NSDictionary<NSString *, id> *)currentMacPlaybackOutputV2:',
+      );
+
+      expect(enumeration, contains('@"uid": device[@"uid"] ?: @""'));
+      expect(enumeration, contains('MixroomInputNameIsUnique'));
+    },
+  );
 
   test(
     'input enumeration rejects unavailable CoreAudio facts without messaging NSNull',

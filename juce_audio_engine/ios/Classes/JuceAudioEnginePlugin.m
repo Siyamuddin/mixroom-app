@@ -1750,6 +1750,7 @@ MixroomMacV2InputDeviceInfos(void) {
         }
         const UInt32 transport = [device[@"transport"] unsignedIntValue];
         [infos addObject:@{
+            @"uid": device[@"uid"] ?: @"",
             @"name": name,
             @"isBluetoothInput": @(MixroomTransportIsBluetooth(transport)),
             @"isBuiltIn": @(MixroomTransportIsBuiltIn(transport)),
@@ -5929,6 +5930,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 stringByTrimmingCharactersInSet:
                     [NSCharacterSet whitespaceAndNewlineCharacterSet]]
             : @"";
+    NSString *requestedInputUID =
+        [args[@"inputDeviceUID"] isKindOfClass:[NSString class]]
+            ? [args[@"inputDeviceUID"]
+                stringByTrimmingCharactersInSet:
+                    [NSCharacterSet whitespaceAndNewlineCharacterSet]]
+            : @"";
     NSString *requestedName =
         [args[@"outputDeviceName"] isKindOfClass:[NSString class]]
             ? [args[@"outputDeviceName"]
@@ -5947,11 +5954,16 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         NSDictionary *policyOutput = [self currentMacPlaybackOutputV2:inventory];
         NSDictionary *actualOutput = outputs.count == 1
             ? outputs.firstObject : nil;
-        NSArray *inputMatches = requestedInputName.length > 0
+        const BOOL explicitInputUID = requestedInputUID.length > 0;
+        const BOOL explicitInputName = requestedInputName.length > 0;
+        const BOOL explicitInputSelection =
+            explicitInputUID || explicitInputName;
+        NSArray *inputMatches = !explicitInputUID && explicitInputName
             ? MixroomExactDeviceMatches(inventory, requestedInputName, YES)
             : @[];
-        NSDictionary *selectedInput = inputMatches.count == 1
-            ? inputMatches.firstObject : nil;
+        NSDictionary *selectedInput = explicitInputUID
+            ? MixroomInputForUID(inventory, requestedInputUID)
+            : (inputMatches.count == 1 ? inputMatches.firstObject : nil);
         NSString *diagnosticCode = @"ok";
         if (generation != self.audioRouteGenerationV2) {
             diagnosticCode = @"stale_generation";
@@ -5962,10 +5974,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             self.macIntentOperationActiveV2 ||
             self.macIntentRecoveryPendingV2) {
             diagnosticCode = @"route_unstable";
-        } else if (followSystemInput == (requestedInputName.length > 0)) {
+        } else if (followSystemInput == explicitInputSelection) {
             diagnosticCode = @"input_selection_unavailable";
         } else if (!followSystemInput &&
-                   (inputMatches.count != 1 ||
+                   ((!explicitInputUID && inputMatches.count != 1) ||
                     !MixroomMacInputIsUsable(inventory, selectedInput))) {
             diagnosticCode = @"input_selection_unavailable";
         } else if (policyOutput == nil || actualOutput == nil ||

@@ -200,6 +200,7 @@ void main() {
         case 'getInputDeviceInfos':
           return <Map<String, dynamic>>[
             <String, dynamic>{
+              'uid': 'macbook-microphone-uid',
               'name': 'MacBook Pro Microphone',
               'isBluetoothInput': false,
               'isBuiltIn': true,
@@ -612,6 +613,22 @@ void main() {
     expect(arguments['desiredInputChannels'], 0);
   });
 
+  test('macOS V2 input UID is authoritative without requiring a name',
+      () async {
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      17,
+      inputDeviceUID: 'coreaudio-input-42',
+      updateInputPreference: true,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
+    expect(arguments, isNot(contains('inputDeviceName')));
+    expect(arguments['inputDeviceUID'], 'coreaudio-input-42');
+    expect(arguments['followSystemInput'], isFalse);
+  });
+
   test('macOS V2 system-default input clears the explicit preference',
       () async {
     final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
@@ -623,6 +640,7 @@ void main() {
     expect(result.succeeded, isTrue);
     final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
     expect(arguments, isNot(contains('inputDeviceName')));
+    expect(arguments, isNot(contains('inputDeviceUID')));
     expect(arguments['updateInputPreference'], isTrue);
     expect(arguments['followSystemInput'], isTrue);
   });
@@ -1131,11 +1149,13 @@ void main() {
 
     expect(infos, hasLength(2));
     expect(infos.first.name, 'MacBook Pro Microphone');
+    expect(infos.first.uid, 'macbook-microphone-uid');
     expect(infos.first.isBluetoothInput, isFalse);
     expect(infos.first.isBuiltIn, isTrue);
     expect(infos.first.isDefault, isTrue);
     expect(infos.first.transport, 'builtIn');
     expect(infos.last.name, 'AirPods Pro');
+    expect(infos.last.uid, isEmpty);
     expect(infos.last.isBluetoothInput, isTrue);
     expect(infos.last.transport, 'bluetooth');
     expect(calls.single.method, 'getInputDeviceInfos');
