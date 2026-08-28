@@ -597,9 +597,10 @@ class AudioRouteCoordinatorV2 {
   }
 
   /// Serializes a playback-only recovery behind an intent transition that was
-  /// invalidated by a native route event. A native stale-generation preflight
-  /// may be superseded once when its immutable snapshot proves that the route
-  /// generation advanced before any device mutation began.
+  /// invalidated by a native route event. A native stale-generation result may
+  /// be superseded once when its immutable snapshot proves that the native
+  /// route generation advanced during the owned recovery. Native recovery is
+  /// responsible for quiescing any incomplete route before returning stale.
   Future<AudioRouteTransitionResultV2>
       recoverPlaybackAfterIntentInvalidation() async {
     final existing = _invalidationRecovery;
@@ -654,9 +655,9 @@ class AudioRouteCoordinatorV2 {
               _pending == null;
       if (!canSupersedeNativeStalePreflight) return result;
 
-      // The rejected native preflight did not mutate the route. Promote only
-      // the authoritative generation exposed by native/event facts, then
-      // replace that stale request once within the same invalidation episode.
+      // Promote only the authoritative generation exposed by native/event
+      // facts, then replace that stale request once within the same
+      // invalidation episode. All other stale transitions remain rejected.
       _latestGeneration = authoritativeGeneration;
       result = await transitionIntent(AudioRouteIntentV2.playbackOnly);
       return result;

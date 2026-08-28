@@ -266,6 +266,21 @@ void main() {
     expect(engine, contains('liveInputMonitoringActiveV2.store(false'));
     expect(engine, contains('liveInputMonitoringActiveV2.store(true'));
 
+    final playStart = engine.indexOf('bool JuceEngine::play()');
+    final pauseStart = engine.indexOf('void JuceEngine::pause()', playStart);
+    expect(playStart, greaterThanOrEqualTo(0));
+    expect(pauseStart, greaterThan(playStart));
+    final play = engine.substring(playStart, pauseStart);
+    expect(play, contains('verifiedPreparedInputShape'));
+    expect(
+      play,
+      contains('wavCapture.isActive() || shouldRouteLiveInputToGraphV2()'),
+    );
+    expect(
+      play,
+      contains('activeInputChannels != 0 && !verifiedOwnedInputActive'),
+    );
+
     final routeStart = engine.indexOf('void JuceEngine::routeLiveInputToRow');
     final writerStart = engine.indexOf(
       'bool JuceEngine::startRecordingToWav',
@@ -506,6 +521,22 @@ void main() {
     expect(startup, contains('final latestShutdown ='));
     expect(startup, contains('identical(latestShutdown, priorShutdown)'));
 
+    final iosCoordinatorStart = editor.indexOf(
+      'if (_isBluetoothV2Session && Platform.isIOS)',
+    );
+    final iosCoordinatorEnd = editor.indexOf(
+      'if (!_isBluetoothV2Session)',
+      iosCoordinatorStart,
+    );
+    final iosCoordinator = editor.substring(
+      iosCoordinatorStart,
+      iosCoordinatorEnd,
+    );
+    expect(
+      iosCoordinator,
+      contains('allowRecoveryGenerationSupersession: true'),
+    );
+
     final playbackIntentStart = plugin.indexOf(
       'NSDictionary<NSString *, id> *recordingSourceOutput =',
     );
@@ -526,6 +557,28 @@ void main() {
     expect(playbackIntent, contains('fallback_succeeded'));
     expect(playbackIntent, contains('activeInputChannels'));
     expect(playbackIntent, contains('audioCallbackAttached'));
+    expect(
+      playbackIntent,
+      contains('playbackOpenProfileOutput = recordingSourceOutput'),
+    );
+    expect(
+      playbackIntent,
+      contains(
+        '!recoveringAfterPhysicalInvalidation &&\n'
+        '                   MixroomIOSOutputIsBluetoothDuplex(expectedOutput)',
+      ),
+    );
+    expect(playbackIntent, contains('beginOutputCallbackProofV2ObjC'));
+    expect(playbackIntent, contains('waitForOutputCallbackProofV2ObjC:2000'));
+    expect(
+      playbackIntent,
+      contains('MixroomIOSOutputIdentityIsObservable(actualOutput)'),
+    );
+    expect(
+      playbackIntent,
+      contains('!MixroomIOSOutputIsBluetoothDuplex(actualOutput)'),
+    );
+    expect(playbackIntent, contains('MixroomIOSPlaybackSnapshotMatchesClock'));
     expect(playbackIntent, isNot(contains('dispatch_after')));
     final discard = playbackIntent.indexOf(
       '[JuceBridge discardRecordingCaptureObjC]',

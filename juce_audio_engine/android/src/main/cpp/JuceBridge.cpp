@@ -3428,17 +3428,17 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveInputMonitoringEnabledJNI
                                                   { JuceEngine::get().setLiveInputMonitoringEnabled(enabled == JNI_TRUE); });
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveInputMonitorTargetV2JNI(
-    JNIEnv *, jclass, jint row, jint channelStart, jint channelCount)
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_activateLiveInputMonitoringV2JNI(
+    JNIEnv *env, jclass, jint row, jint channelStart, jint channelCount)
 {
-    bool success = false;
+    juce::NamedValueSet facts;
     juce::MessageManager::getInstance()->callSync([&]
     {
-        success = JuceEngine::get().setLiveInputMonitorTargetV2(
+        facts = JuceEngine::get().activateLiveInputMonitoringV2(
             (int)row, (int)channelStart, (int)channelCount);
     });
-    return success ? JNI_TRUE : JNI_FALSE;
+    return namedValueStatsToJavaMap(env, facts);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -3472,13 +3472,6 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRest
     auto result = JuceEngine::get().finalizeRecordingCapture();
     juce::MessageManager::getInstance()->callSync([]
                                                   { JuceEngine::get().completeRecordingStop(false); });
-    return namedValueStatsToJavaMap(env, result.toNamedValueSet());
-}
-
-extern "C" JNIEXPORT jobject JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingForMonitoringV2JNI(JNIEnv *env, jclass)
-{
-    auto result = JuceEngine::get().finalizeRecordingCapture();
     return namedValueStatsToJavaMap(env, result.toNamedValueSet());
 }
 

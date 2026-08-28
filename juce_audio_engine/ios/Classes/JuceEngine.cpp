@@ -8467,13 +8467,17 @@ bool JuceEngine::play()
     {
         const int activeInputChannels =
             dev != nullptr ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
-        const bool verifiedRecordingInputActive =
-            wavCapture.isActive() &&
-            desiredInputOpenChannels.load(std::memory_order_relaxed) > 0 &&
-            activeInputChannels == desiredInputOpenChannels.load(std::memory_order_relaxed);
+        const int desiredInputChannels =
+            desiredInputOpenChannels.load(std::memory_order_relaxed);
+        const bool verifiedPreparedInputShape =
+            desiredInputChannels > 0 &&
+            activeInputChannels == desiredInputChannels;
+        const bool verifiedOwnedInputActive =
+            verifiedPreparedInputShape &&
+            (wavCapture.isActive() || shouldRouteLiveInputToGraphV2());
         const bool invalidV2Route = v2PlaybackCallbackDetached ||
             missingOutputRoute ||
-            (activeInputChannels != 0 && !verifiedRecordingInputActive);
+            (activeInputChannels != 0 && !verifiedOwnedInputActive);
         if (invalidV2Route)
         {
             pause();

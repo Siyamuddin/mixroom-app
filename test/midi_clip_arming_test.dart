@@ -22,6 +22,7 @@ Future<AudioTrack> _buildTrack({
     rowIndex: rowIndex,
   );
 }
+
 void main() {
   test('V2 recording resolves MIDI before audio-row validation', () {
     final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
@@ -53,6 +54,49 @@ void main() {
     expect(audioGuard, greaterThan(laneStart));
   });
 
+  test('explicit audio row outranks stale MIDI editor state', () {
+    final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
+    final start = editor.indexOf('Future<void> _startRecordingJuce() async {');
+    final end = editor.indexOf(
+      'Future<void> _letRecordingVisualStatePaint()',
+      start,
+    );
+    final method = editor.substring(start, end);
+
+    final audioSelection = method.indexOf('final explicitAudioRowSelected =');
+    final midiResolution = method.indexOf('_activeMidiRecordingClipIndex()');
+    expect(audioSelection, greaterThanOrEqualTo(0));
+    expect(midiResolution, greaterThan(audioSelection));
+    expect(method, contains('if (!explicitAudioRowSelected)'));
+    expect(
+      method,
+      contains('_rows[_selectedRow].kind == TimelineRowKind.audio'),
+    );
+  });
+
+  test('audio take owns a stable row ID through publication', () {
+    final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
+    final start = editor.indexOf('Future<void> _startAudioRecordingJuce()');
+    final stop = editor.indexOf('Future<void> _stopAudioRecordingJuce', start);
+    final startMethod = editor.substring(start, stop);
+    final stopEnd = editor.indexOf('Future<void> _addAudioTrackFromFile', stop);
+    final stopMethod = editor.substring(stop, stopEnd);
+
+    expect(startMethod, contains('final targetRowId = _rowIdAt(_selectedRow)'));
+    expect(startMethod, contains('_audioRecordingTargetRowId = targetRowId'));
+    expect(stopMethod, contains('_rowIndexForId(targetRowId)'));
+    expect(
+      stopMethod,
+      isNot(
+        contains(
+          'final int row = (_selectedRow >= 0 && _selectedRow < _rowCount)',
+        ),
+      ),
+    );
+    expect(stopMethod, contains("_rows[row].kind != TimelineRowKind.audio"));
+    expect(stopMethod, contains('_audioRecordingTargetRowId = null'));
+  });
+
   test('record button reaches MIDI resolution before V2 audio validation', () {
     final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
     final handlerStart = editor.indexOf(
@@ -79,9 +123,7 @@ void main() {
       'resolveSelectedInstrumentLaneRecordingRow(',
     );
     final audioCapability = method.indexOf('if (!_supportsV2AudioRecording)');
-    final audioInvalidation = method.indexOf(
-      'if (_v2AudioSessionInvalidated)',
-    );
+    final audioInvalidation = method.indexOf('if (_v2AudioSessionInvalidated)');
 
     expect(midiTarget, greaterThanOrEqualTo(0));
     expect(laneTarget, greaterThan(midiTarget));
@@ -199,9 +241,7 @@ void main() {
 
   test('MIDI stop reaches idle before fallible engine synchronization', () {
     final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
-    final start = editor.indexOf(
-      'Future<bool> _stopMidiClipRecordingImpl({',
-    );
+    final start = editor.indexOf('Future<bool> _stopMidiClipRecordingImpl({');
     final end = editor.indexOf('Future<void> _startRecordingJuce()', start);
     final method = editor.substring(start, end);
 
@@ -210,9 +250,7 @@ void main() {
     );
     final runtimeClear = method.indexOf('_clearMidiRecordingRuntimeState();');
     final uiClear = method.indexOf('_isRecording = false;', runtimeClear);
-    final engineSync = method.indexOf(
-      'await _updateMidiClipEventsLive(clip)',
-    );
+    final engineSync = method.indexOf('await _updateMidiClipEventsLive(clip)');
     final previewRestore = method.indexOf(
       'await _setLiveMidiInputTargetClipIfNeeded(previewClip, force: true)',
     );
@@ -284,16 +322,8 @@ void main() {
 
   test('prefers active midi editor clip when available', () async {
     final tracks = <AudioTrack>[
-      await _buildTrack(
-        engineClipId: 11,
-        kind: ClipKind.midi,
-        label: 'piano',
-      ),
-      await _buildTrack(
-        engineClipId: 22,
-        kind: ClipKind.audio,
-        label: 'audio',
-      ),
+      await _buildTrack(engineClipId: 11, kind: ClipKind.midi, label: 'piano'),
+      await _buildTrack(engineClipId: 22, kind: ClipKind.audio, label: 'audio'),
     ];
 
     final armed = resolveArmedMidiClip(
@@ -305,69 +335,65 @@ void main() {
     expect(armed?.engineClipId, 11);
   });
 
-  test('falls back to the selected midi clip when editor clip is absent',
-      () async {
-    final tracks = <AudioTrack>[
-      await _buildTrack(
-        engineClipId: 11,
-        kind: ClipKind.audio,
-        label: 'audio',
-      ),
-      await _buildTrack(
-        engineClipId: 22,
-        kind: ClipKind.midi,
-        label: 'strings',
-      ),
-    ];
+  test(
+    'falls back to the selected midi clip when editor clip is absent',
+    () async {
+      final tracks = <AudioTrack>[
+        await _buildTrack(
+          engineClipId: 11,
+          kind: ClipKind.audio,
+          label: 'audio',
+        ),
+        await _buildTrack(
+          engineClipId: 22,
+          kind: ClipKind.midi,
+          label: 'strings',
+        ),
+      ];
 
-    final armed = resolveArmedMidiClip(
-      tracks: tracks,
-      activeMidiClipEngineId: null,
-      primarySelectedClipIndex: 1,
-    );
+      final armed = resolveArmedMidiClip(
+        tracks: tracks,
+        activeMidiClipEngineId: null,
+        primarySelectedClipIndex: 1,
+      );
 
-    expect(armed?.engineClipId, 22);
-  });
+      expect(armed?.engineClipId, 22);
+    },
+  );
 
-  test('recording ignores an armed midi clip from another selected row',
-      () async {
-    final tracks = <AudioTrack>[
-      await _buildTrack(
-        engineClipId: 11,
-        kind: ClipKind.midi,
-        label: 'piano',
-        rowIndex: 0,
-      ),
-      await _buildTrack(
-        engineClipId: 22,
-        kind: ClipKind.audio,
-        label: 'voice',
-        rowIndex: 1,
-      ),
-    ];
+  test(
+    'recording ignores an armed midi clip from another selected row',
+    () async {
+      final tracks = <AudioTrack>[
+        await _buildTrack(
+          engineClipId: 11,
+          kind: ClipKind.midi,
+          label: 'piano',
+          rowIndex: 0,
+        ),
+        await _buildTrack(
+          engineClipId: 22,
+          kind: ClipKind.audio,
+          label: 'voice',
+          rowIndex: 1,
+        ),
+      ];
 
-    final armed = resolveArmedMidiClip(
-      tracks: tracks,
-      activeMidiClipEngineId: 11,
-      primarySelectedClipIndex: 0,
-      requiredRowIndex: 1,
-    );
+      final armed = resolveArmedMidiClip(
+        tracks: tracks,
+        activeMidiClipEngineId: 11,
+        primarySelectedClipIndex: 0,
+        requiredRowIndex: 1,
+      );
 
-    expect(armed, isNull);
-  });
+      expect(armed, isNull);
+    },
+  );
 
   test('does not arm a non-midi primary selection', () async {
     final tracks = <AudioTrack>[
-      await _buildTrack(
-        engineClipId: 11,
-        kind: ClipKind.audio,
-        label: 'audio',
-      ),
-      await _buildTrack(
-        engineClipId: 22,
-        kind: ClipKind.midi,
-        label: 'bass',
-      ),
+      await _buildTrack(engineClipId: 11, kind: ClipKind.audio, label: 'audio'),
+      await _buildTrack(engineClipId: 22, kind: ClipKind.midi, label: 'bass'),
     ];
 
     final armed = resolveArmedMidiClip(
@@ -393,24 +419,16 @@ void main() {
     ];
 
     expect(
-      resolveSelectedInstrumentLaneRecordingRow(
-        rows: rows,
-        selectedRow: 1,
-      ),
+      resolveSelectedInstrumentLaneRecordingRow(rows: rows, selectedRow: 1),
       1,
     );
   });
 
   test('does not resolve an audio row for midi recording', () {
-    final rows = <TimelineRow>[
-      TimelineRow(rowId: 1, name: 'Audio', iconId: 0),
-    ];
+    final rows = <TimelineRow>[TimelineRow(rowId: 1, name: 'Audio', iconId: 0)];
 
     expect(
-      resolveSelectedInstrumentLaneRecordingRow(
-        rows: rows,
-        selectedRow: 0,
-      ),
+      resolveSelectedInstrumentLaneRecordingRow(rows: rows, selectedRow: 0),
       isNull,
     );
   });

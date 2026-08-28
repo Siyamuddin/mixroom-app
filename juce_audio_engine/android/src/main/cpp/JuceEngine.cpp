@@ -1195,6 +1195,7 @@ bool JuceEngine::initialisePlaybackV2Android()
     desiredInputOpenChannels.store(0, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     hasRecordingRestorePlaybackSetup = false;
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
@@ -1240,6 +1241,7 @@ bool JuceEngine::quiescePlaybackV2Android(bool closeDevice)
     if (!engineInitialized || metronomeCallback == nullptr)
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
     pause();
     if (!v2PlaybackCallbackDetached && audioCallbackAttached)
@@ -1263,6 +1265,7 @@ bool JuceEngine::reconfigurePlaybackV2Android()
     if (!engineInitialized || metronomeCallback == nullptr)
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
@@ -1320,6 +1323,7 @@ bool JuceEngine::prepareDefaultDuplexV2Android(int inputChannels)
         metronomeCallback == nullptr || wavCapture.isActive())
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     pause();
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
@@ -1376,6 +1380,7 @@ bool JuceEngine::prepareBluetoothDuplexV2Android()
     if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     pause();
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
@@ -1441,6 +1446,7 @@ void JuceEngine::shutdownEngine()
     requestLiveMidiPanicForAll(LiveMidiPanicMode::full);
 
     wavCapture.stop(true);
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
@@ -5828,15 +5834,19 @@ bool JuceEngine::playPlaybackV2Android()
     auto *device = deviceManager.getCurrentAudioDevice();
     const int activeInputChannels =
         device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0;
-    const bool verifiedRecordingInputActive =
-        wavCapture.isActive() &&
+    const int desiredInputChannels =
+        desiredInputOpenChannels.load(std::memory_order_relaxed);
+    const bool verifiedPreparedInputShape =
         androidV2RecordingPrepared &&
-        desiredInputOpenChannels.load(std::memory_order_relaxed) > 0 &&
-        activeInputChannels == desiredInputOpenChannels.load(std::memory_order_relaxed);
+        desiredInputChannels > 0 &&
+        activeInputChannels == desiredInputChannels;
+    const bool verifiedOwnedInputActive =
+        verifiedPreparedInputShape &&
+        (wavCapture.isActive() || shouldRouteLiveInputToGraphV2());
     if (!engineInitialized || !audioCallbackAttached ||
         metronomeCallback == nullptr || device == nullptr || !device->isOpen() ||
         device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
-        (activeInputChannels != 0 && !verifiedRecordingInputActive))
+        (activeInputChannels != 0 && !verifiedOwnedInputActive))
         return false;
 
     {
@@ -10669,6 +10679,8 @@ int JuceEngine::getActiveOutputChannelCount() const
 
 void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
+    if (!enabled)
+        liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     if (liveInputMonitoringEnabled == enabled)
         return;
@@ -10684,30 +10696,59 @@ bool JuceEngine::isLiveInputMonitoringEnabled() const noexcept
     return liveInputMonitoringEnabled;
 }
 
-bool JuceEngine::setLiveInputMonitorTargetV2(int row,
-                                             int channelStart,
-                                             int channelCount)
+juce::NamedValueSet JuceEngine::activateLiveInputMonitoringV2(int row,
+                                                              int channelStart,
+                                                              int channelCount)
 {
+    juce::NamedValueSet facts;
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     auto *device = deviceManager.getCurrentAudioDevice();
     const int activeInputs = device == nullptr
         ? 0
         : device->getActiveInputChannels().countNumberOfSetBits();
-    if (!androidV2RecordingPrepared || row < 0 || row >= (int)rows.size() ||
-        channelStart < 0 || (channelCount != 1 && channelCount != 2) ||
-        channelStart + channelCount > activeInputs)
-        return false;
+    const bool valid = androidV2RecordingPrepared && row >= 0 &&
+        row < (int)rows.size() && channelStart >= 0 &&
+        (channelCount == 1 || channelCount == 2) &&
+        channelStart + channelCount <= activeInputs;
 
-    liveMonitorTargetRow = row;
-    liveMonitorChannelStart = channelStart;
-    liveMonitorChannelCount = channelCount;
-    if (liveInputMonitoringEnabled)
+    if (valid)
     {
+        liveMonitorTargetRow = row;
+        liveMonitorChannelStart = channelStart;
+        liveMonitorChannelCount = channelCount;
+        liveInputMonitoringEnabled = true;
         constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
         syncLiveInputMonitorRoutingLocked(batchUpdate);
         commitGraphMutationLocked(false);
     }
-    return true;
+
+    const int connectionCount = liveMonitorConnections.size();
+    const bool active = valid && liveInputMonitoringEnabled &&
+        connectionCount == channelCount;
+    if (!active)
+    {
+        liveInputMonitoringEnabled = false;
+        constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+        clearLiveInputMonitorConnectionsLocked(batchUpdate);
+        commitGraphMutationLocked(false);
+    }
+    else
+    {
+        liveInputMonitoringActiveV2.store(true, std::memory_order_release);
+    }
+
+    facts.set("active", active);
+    facts.set("targetRow", active ? row : -1);
+    facts.set("channelStart", active ? channelStart : 0);
+    facts.set("channelCount", active ? channelCount : 0);
+    facts.set("connectionCount", active ? connectionCount : 0);
+    return facts;
+}
+
+bool JuceEngine::shouldRouteLiveInputToGraphV2() const noexcept
+{
+    return liveInputMonitoringActiveV2.load(std::memory_order_acquire);
 }
 
 void JuceEngine::clearLiveInputMonitorConnectionsLocked(

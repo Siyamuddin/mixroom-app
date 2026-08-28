@@ -5567,6 +5567,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   double _recordingStartMs = 0; // project time where the recording starts
   String? _recordingFilePath; // temp recorded file (m4a/wav/etc)
   String? _pendingUnpublishedRecordingPath;
+  int? _audioRecordingTargetRowId;
   Timer? _recordingPeakTimer;
   int _recordingPeakGeneration = 0;
   bool _recordingPeakPollBusy = false;
@@ -5836,6 +5837,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool? _liveInputMonitoringEffective;
   bool _v2LiveMonitoringRequested = false;
   bool _v2LiveMonitoringTransitionInFlight = false;
+  bool _macV2MonitoringSuspendedForRecording = false;
+  bool _androidV2MonitoringSuspendedForRecording = false;
   bool _v2MonitoringClockCompatible = true;
   int? _v2LiveMonitoringTargetRowId;
   int? _v2LiveMonitoringChannelStart;
@@ -9373,6 +9376,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (_isBluetoothV2Session && Platform.isIOS) {
         final coordinator = AudioRouteCoordinatorV2(
           adapter: const MethodChannelAudioRouteAdapterV2(),
+          allowRecoveryGenerationSupersession: true,
           onStateChanged: _handleAudioRouteCoordinatorStateV2,
           onTransition: _handleAudioRouteTransitionV2,
           onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
@@ -12539,6 +12543,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _midiRecordingClipIndex = null;
     _midiRecordingLiveInputArmed = false;
     _midiClipPendingV2RecoveryId = null;
+    _audioRecordingTargetRowId = null;
     if (_liveMidiEventPlaybackSupported) {
       _lastLiveMidiInputTargetClipId = -1;
       unawaited(
@@ -12932,6 +12937,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : _globalAudioClock;
     final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
     final interruptedMidiHadChanges = _endMidiRecordingForV2SafetyBoundary();
+    _audioRecordingTargetRowId = null;
     _clearV2LiveMonitoringState();
     _v2AudioSessionInvalidationNotice = notice;
     _v2AudioSessionInvalidated = true;
@@ -22247,20 +22253,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _startRecordingJuce() async {
-    final midiClipIndex = _activeMidiRecordingClipIndex();
-    if (midiClipIndex != null) {
-      await _startMidiClipRecording(midiClipIndex);
-      return;
-    }
-    final instrumentRow = resolveSelectedInstrumentLaneRecordingRow(
-      rows: _rows,
-      selectedRow: _selectedRow,
-    );
-    if (instrumentRow != null) {
-      await _startSelectedInstrumentLaneMidiRecording(
-        _rows[instrumentRow].rowId,
+    final explicitAudioRowSelected =
+        _isValidRowIndex(_selectedRow) &&
+        _rows[_selectedRow].kind == TimelineRowKind.audio;
+    if (!explicitAudioRowSelected) {
+      final midiClipIndex = _activeMidiRecordingClipIndex();
+      if (midiClipIndex != null) {
+        await _startMidiClipRecording(midiClipIndex);
+        return;
+      }
+      final instrumentRow = resolveSelectedInstrumentLaneRecordingRow(
+        rows: _rows,
+        selectedRow: _selectedRow,
       );
-      return;
+      if (instrumentRow != null) {
+        await _startSelectedInstrumentLaneMidiRecording(
+          _rows[instrumentRow].rowId,
+        );
+        return;
+      }
     }
     if (_isBluetoothV2Session) {
       if (!_supportsV2AudioRecording) {
@@ -22348,9 +22359,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _prepareAudioRecordingStartPreflight() async {
     if (_v2LiveMonitoringActive) {
       if (Platform.isMacOS) {
-        await _setV2LiveMonitoring(false);
-        if (_audioRouteCoordinatorV2?.intent !=
-            AudioRouteIntentV2.playbackOnly) {
+        if (!await _suspendMacV2MonitoringForRecording()) {
+          return false;
+        }
+      } else if (Platform.isAndroid) {
+        if (!await _suspendAndroidV2MonitoringForRecording()) {
           return false;
         }
       } else {
@@ -22613,6 +22626,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         return;
       }
+      final targetRowId = _rowIdAt(_selectedRow);
+      if (targetRowId < 0) {
+        _showSmallNotice('Select an audio row to record.');
+        return;
+      }
+      _audioRecordingTargetRowId = targetRowId;
 
       if (mounted) {
         setState(() {
@@ -22808,7 +22827,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await _restoreV2PlaybackOnlyAfterRecording();
       }
       if (!_isRecording) {
+        _audioRecordingTargetRowId = null;
         await _discardPendingUnpublishedRecordingFile();
+        if (_macV2MonitoringSuspendedForRecording ||
+            _androidV2MonitoringSuspendedForRecording) {
+          _clearV2LiveMonitoringState();
+        }
       }
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
@@ -22832,7 +22856,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<bool> _restoreV2RouteAfterAudioRecording() async {
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null || _v2AudioSessionInvalidated) return false;
-    if ((Platform.isAndroid || Platform.isIOS) && _v2LiveMonitoringRequested) {
+    final mayReuseMobileMonitoringRoute =
+        Platform.isIOS ||
+        (Platform.isAndroid && !_androidV2MonitoringSuspendedForRecording);
+    if (mayReuseMobileMonitoringRoute && _v2LiveMonitoringRequested) {
       final rowId = _v2LiveMonitoringTargetRowId;
       final channelStart = _v2LiveMonitoringChannelStart;
       final channelCount = _v2LiveMonitoringChannelCount;
@@ -22973,6 +23000,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {
     if (!_isRecording || _recordTransitionInFlight) return;
     _recordTransitionInFlight = true;
+    var resumeMacMonitoringAfterStop = false;
+    var resumeAndroidMonitoringAfterStop = false;
     try {
       _midiHeldNotesByKey.clear();
       _midiRecordNoteWallStartById.clear();
@@ -23095,9 +23124,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
 
-      final int row = (_selectedRow >= 0 && _selectedRow < _rowCount)
-          ? _selectedRow
-          : 0;
+      final targetRowId = _audioRecordingTargetRowId;
+      final row = targetRowId == null ? -1 : _rowIndexForId(targetRowId);
+      if (!_isValidRowIndex(row) || _rows[row].kind != TimelineRowKind.audio) {
+        await _discardPendingUnpublishedRecordingFile();
+        if (mounted) {
+          _showSmallNotice(
+            'Recording could not be saved because its target row is no longer available.',
+          );
+        }
+        return;
+      }
       final double startMs = _recordingStartMs;
       final recordingLatencyMs =
           await JuceAudioEngine.getEstimatedRecordingLatencyMs();
@@ -23196,8 +23233,53 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } else if (!keepPlaying && _isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       }
+      resumeMacMonitoringAfterStop =
+          recordingPublished &&
+          _macV2MonitoringSuspendedForRecording &&
+          !_v2AudioSessionInvalidated &&
+          !_v2AudioSessionRecoveryInProgress;
+      resumeAndroidMonitoringAfterStop =
+          recordingPublished &&
+          _androidV2MonitoringSuspendedForRecording &&
+          !_v2AudioSessionInvalidated &&
+          !_v2AudioSessionRecoveryInProgress;
     } finally {
       _recordTransitionInFlight = false;
+      _audioRecordingTargetRowId = null;
+      if (resumeMacMonitoringAfterStop) {
+        try {
+          await _resumeMacV2MonitoringAfterPublishedRecording();
+        } catch (error, stackTrace) {
+          _clearV2LiveMonitoringState();
+          debugPrint(
+            'Monitoring could not resume after recording: $error\n$stackTrace',
+          );
+          if (mounted) setState(() {});
+        }
+      } else if (_macV2MonitoringSuspendedForRecording) {
+        _clearV2LiveMonitoringState();
+        if (mounted) setState(() {});
+      }
+      if (resumeAndroidMonitoringAfterStop) {
+        try {
+          await _resumeAndroidV2MonitoringAfterPublishedRecording();
+        } catch (error, stackTrace) {
+          _clearV2LiveMonitoringState();
+          debugPrint(
+            'Android monitoring could not resume after recording: '
+            '$error\n$stackTrace',
+          );
+          if (mounted) {
+            _showSmallNotice(
+              'Monitoring is unavailable for the current audio route.',
+            );
+            setState(() {});
+          }
+        }
+      } else if (_androidV2MonitoringSuspendedForRecording) {
+        _clearV2LiveMonitoringState();
+        if (mounted) setState(() {});
+      }
     }
   }
 
@@ -45573,10 +45655,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Widget _buildInputMeterStrip() {
-    final peak = _recordingPeaks.isEmpty
-        ? 0.0
-        : _recordingPeaks.last.clamp(0.0, 1.0).toDouble();
+  Widget _buildInputMeterStrip(double inputPeak) {
+    final peak = inputPeak.clamp(0.0, 1.0).toDouble();
     return Container(
       height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -45642,6 +45722,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _isBluetoothV2Session &&
       (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) &&
       _v2LiveMonitoringRequested &&
+      !(Platform.isMacOS && _macV2MonitoringSuspendedForRecording) &&
+      !(Platform.isAndroid && _androidV2MonitoringSuspendedForRecording) &&
       (_audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.monitoring ||
           _audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.recording);
 
@@ -45682,9 +45764,252 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _clearV2LiveMonitoringState() {
     _v2LiveMonitoringRequested = false;
+    _macV2MonitoringSuspendedForRecording = false;
+    _androidV2MonitoringSuspendedForRecording = false;
     _v2LiveMonitoringTargetRowId = null;
     _v2LiveMonitoringChannelStart = null;
     _v2LiveMonitoringChannelCount = null;
+  }
+
+  Future<bool> _suspendMacV2MonitoringForRecording() async {
+    if (!Platform.isMacOS || !_v2LiveMonitoringActive) return true;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null ||
+        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+        coordinator.intent != AudioRouteIntentV2.monitoring ||
+        _v2LiveMonitoringTargetRowId == null ||
+        _v2LiveMonitoringChannelStart == null ||
+        _v2LiveMonitoringChannelCount == null) {
+      _clearV2LiveMonitoringState();
+      return false;
+    }
+
+    _v2LiveMonitoringTransitionInFlight = true;
+    if (mounted) setState(() {});
+    try {
+      final result = await coordinator.transitionIntent(
+        AudioRouteIntentV2.playbackOnly,
+      );
+      if (!result.succeeded ||
+          result.snapshot.intent != AudioRouteIntentV2.playbackOnly) {
+        _clearV2LiveMonitoringState();
+        await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+        _v2AudioSessionInvalidated = true;
+        _showSmallNotice(
+          'Audio output could not be restored. Reopen the audio editor.',
+        );
+        return false;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+      _macV2MonitoringSuspendedForRecording = true;
+      await _refreshSystemSelectedRouteInfoV2();
+      return true;
+    } finally {
+      _v2LiveMonitoringTransitionInFlight = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<bool> _suspendAndroidV2MonitoringForRecording() async {
+    if (!Platform.isAndroid || !_v2LiveMonitoringActive) return true;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null ||
+        coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+        coordinator.intent != AudioRouteIntentV2.monitoring ||
+        _v2LiveMonitoringTargetRowId == null ||
+        _v2LiveMonitoringChannelStart == null ||
+        _v2LiveMonitoringChannelCount == null) {
+      _clearV2LiveMonitoringState();
+      return false;
+    }
+
+    _v2LiveMonitoringTransitionInFlight = true;
+    if (mounted) setState(() {});
+    try {
+      final result = await coordinator.transitionIntent(
+        AudioRouteIntentV2.playbackOnly,
+      );
+      if (!result.succeeded ||
+          result.snapshot.intent != AudioRouteIntentV2.playbackOnly ||
+          result.snapshot.juce.activeInputChannels != 0 ||
+          (result.snapshot.juce.activeOutputChannels ?? 0) <= 0 ||
+          result.snapshot.juce.audioCallbackAttached != true) {
+        _clearV2LiveMonitoringState();
+        await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+        _v2AudioSessionInvalidated = true;
+        _showSmallNotice(
+          'Audio output could not be restored. Reopen the audio editor.',
+        );
+        return false;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+      _androidV2MonitoringSuspendedForRecording = true;
+      await _refreshSystemSelectedRouteInfoV2();
+      return true;
+    } finally {
+      _v2LiveMonitoringTransitionInFlight = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<bool> _activateV2LiveMonitoringTarget({
+    required int rowIndex,
+    required int rowId,
+    required int channelStart,
+    required int channelCount,
+  }) async {
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null) return false;
+    final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    final output = source.outputs.length == 1 ? source.outputs.single : null;
+    final outputAllowed =
+        output != null &&
+        (output.normalizedKind == AudioRouteKindV2.builtIn ||
+            output.normalizedKind == AudioRouteKindV2.wired ||
+            output.normalizedKind == AudioRouteKindV2.external);
+    if (!outputAllowed ||
+        source.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
+        source.intent != AudioRouteIntentV2.playbackOnly ||
+        source.inputs.isNotEmpty ||
+        source.juce.activeInputChannels != 0) {
+      _showSmallNotice(
+        'Monitoring is unavailable for the current audio route.',
+      );
+      return false;
+    }
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.monitoring,
+      operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+      recordingChannelStart: channelStart,
+      recordingChannelCount: channelCount,
+      monitoringTargetRow: rowIndex,
+    );
+    if (!result.succeeded ||
+        result.snapshot.intent != AudioRouteIntentV2.monitoring) {
+      _clearV2LiveMonitoringState();
+      if (coordinator.state == AudioRouteCoordinatorStateV2.failed) {
+        await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+        _v2AudioSessionInvalidated = true;
+        _showSmallNotice(
+          'Audio output could not be restored. Reopen the audio editor.',
+        );
+      } else {
+        _showSmallNotice(
+          'Monitoring is unavailable for the current audio route.',
+        );
+      }
+      return false;
+    }
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    _v2LiveMonitoringRequested = true;
+    _macV2MonitoringSuspendedForRecording = false;
+    _androidV2MonitoringSuspendedForRecording = false;
+    _v2LiveMonitoringTargetRowId = rowId;
+    _v2LiveMonitoringChannelStart = channelStart;
+    _v2LiveMonitoringChannelCount = channelCount;
+    await _refreshSystemSelectedRouteInfoV2();
+    return true;
+  }
+
+  Future<void> _resumeMacV2MonitoringAfterPublishedRecording() async {
+    if (!Platform.isMacOS || !_macV2MonitoringSuspendedForRecording) return;
+    final coordinator = _audioRouteCoordinatorV2;
+    final rowId = _v2LiveMonitoringTargetRowId;
+    final channelStart = _v2LiveMonitoringChannelStart;
+    final channelCount = _v2LiveMonitoringChannelCount;
+    final rowIndex = rowId == null ? -1 : _rowIndexForId(rowId);
+    final rowStillMatches =
+        rowIndex >= 0 &&
+        _isValidRowIndex(rowIndex) &&
+        _rows[rowIndex].rowId == rowId &&
+        _rows[rowIndex].kind == TimelineRowKind.audio &&
+        _rows[rowIndex].inputChannelStart == channelStart &&
+        _rows[rowIndex].inputChannelCount == channelCount;
+    final routeStillEligible =
+        !_audioRouteInfo.isBluetoothOutput &&
+        _v2MonitoringClockCompatible &&
+        !_v2AudioSessionInvalidated &&
+        !_v2AudioSessionRecoveryInProgress &&
+        coordinator != null &&
+        coordinator.state == AudioRouteCoordinatorStateV2.stable &&
+        coordinator.intent == AudioRouteIntentV2.playbackOnly;
+    if (!mounted ||
+        !_v2LiveMonitoringRequested ||
+        rowId == null ||
+        !rowStillMatches ||
+        !routeStillEligible ||
+        channelStart == null ||
+        channelCount == null) {
+      _clearV2LiveMonitoringState();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _v2LiveMonitoringTransitionInFlight = true;
+    if (mounted) setState(() {});
+    try {
+      final resumed = await _activateV2LiveMonitoringTarget(
+        rowIndex: rowIndex,
+        rowId: rowId,
+        channelStart: channelStart,
+        channelCount: channelCount,
+      );
+      if (!resumed) _clearV2LiveMonitoringState();
+    } finally {
+      _v2LiveMonitoringTransitionInFlight = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording() async {
+    if (!Platform.isAndroid || !_androidV2MonitoringSuspendedForRecording) {
+      return;
+    }
+    final coordinator = _audioRouteCoordinatorV2;
+    final rowId = _v2LiveMonitoringTargetRowId;
+    final channelStart = _v2LiveMonitoringChannelStart;
+    final channelCount = _v2LiveMonitoringChannelCount;
+    final rowIndex = rowId == null ? -1 : _rowIndexForId(rowId);
+    final rowStillMatches =
+        rowIndex >= 0 &&
+        _isValidRowIndex(rowIndex) &&
+        _rows[rowIndex].rowId == rowId &&
+        _rows[rowIndex].kind == TimelineRowKind.audio &&
+        _rows[rowIndex].inputChannelStart == channelStart &&
+        _rows[rowIndex].inputChannelCount == channelCount;
+    final routeStillEligible =
+        !_audioRouteInfo.isBluetoothOutput &&
+        !_v2AudioSessionInvalidated &&
+        !_v2AudioSessionRecoveryInProgress &&
+        coordinator != null &&
+        coordinator.state == AudioRouteCoordinatorStateV2.stable &&
+        coordinator.intent == AudioRouteIntentV2.playbackOnly;
+    if (!mounted ||
+        !_v2LiveMonitoringRequested ||
+        rowId == null ||
+        !rowStillMatches ||
+        !routeStillEligible ||
+        channelStart == null ||
+        channelCount == null) {
+      _clearV2LiveMonitoringState();
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _v2LiveMonitoringTransitionInFlight = true;
+    if (mounted) setState(() {});
+    try {
+      final resumed = await _activateV2LiveMonitoringTarget(
+        rowIndex: rowIndex,
+        rowId: rowId,
+        channelStart: channelStart,
+        channelCount: channelCount,
+      );
+      if (!resumed) _clearV2LiveMonitoringState();
+    } finally {
+      _v2LiveMonitoringTransitionInFlight = false;
+      if (mounted) setState(() {});
+    }
   }
 
   Future<bool> _disableV2MonitoringBeforeRemovingRow(int rowId) async {
@@ -45760,52 +46085,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         channelStart: row.inputChannelStart,
         channelCount: row.inputChannelCount,
       ).normalizeForCapacity(_effectiveInputChannelCountForSettings());
-      final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
-      final output = source.outputs.length == 1 ? source.outputs.single : null;
-      final outputAllowed =
-          output != null &&
-          (output.normalizedKind == AudioRouteKindV2.builtIn ||
-              output.normalizedKind == AudioRouteKindV2.wired ||
-              output.normalizedKind == AudioRouteKindV2.external);
-      if (!outputAllowed ||
-          source.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
-          source.intent != AudioRouteIntentV2.playbackOnly ||
-          source.inputs.isNotEmpty ||
-          source.juce.activeInputChannels != 0) {
-        _showSmallNotice(
-          'Monitoring is unavailable for the current audio route.',
-        );
-        return;
-      }
-      final result = await coordinator.transitionIntent(
-        AudioRouteIntentV2.monitoring,
-        operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
-        recordingChannelStart: selection.channelStart,
-        recordingChannelCount: selection.channelCount,
-        monitoringTargetRow: rowIndex,
+      await _activateV2LiveMonitoringTarget(
+        rowIndex: rowIndex,
+        rowId: rowId,
+        channelStart: selection.channelStart,
+        channelCount: selection.channelCount,
       );
-      if (!result.succeeded ||
-          result.snapshot.intent != AudioRouteIntentV2.monitoring) {
-        _clearV2LiveMonitoringState();
-        if (coordinator.state == AudioRouteCoordinatorStateV2.failed) {
-          await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
-          _v2AudioSessionInvalidated = true;
-          _showSmallNotice(
-            'Audio output could not be restored. Reopen the audio editor.',
-          );
-        } else {
-          _showSmallNotice(
-            'Monitoring is unavailable for the current audio route.',
-          );
-        }
-        return;
-      }
-      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
-      _v2LiveMonitoringRequested = true;
-      _v2LiveMonitoringTargetRowId = rowId;
-      _v2LiveMonitoringChannelStart = selection.channelStart;
-      _v2LiveMonitoringChannelCount = selection.channelCount;
-      await _refreshSystemSelectedRouteInfoV2();
     } finally {
       _v2LiveMonitoringTransitionInFlight = false;
       if (mounted) setState(() {});
@@ -45824,6 +46109,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     if (!mounted) return;
+
+    unawaited(_setNativeMeteringEnabled(true));
+    final inputMeterStream =
+        Stream<void>.periodic(const Duration(milliseconds: 100)).asyncMap((
+          _,
+        ) async {
+          if (_isRecording && _recordingPeaks.isNotEmpty) {
+            return _recordingPeaks.last.clamp(0.0, 1.0).toDouble();
+          }
+          final legacyMonitoringActive =
+              !_isBluetoothV2Session &&
+              (_liveInputMonitoringEffective ??
+                  _shouldEnableLiveInputMonitoring(_audioRouteInfo));
+          if (!_v2LiveMonitoringActive && !legacyMonitoringActive) return 0.0;
+          final targetRow =
+              _v2LiveMonitoringActive && _v2LiveMonitoringTargetRowId != null
+              ? _rowIndexForId(_v2LiveMonitoringTargetRowId!)
+              : _selectedRow;
+          if (!_isValidRowIndex(targetRow)) return 0.0;
+          final values = await JuceAudioEngine.getRowMeterValues(targetRow);
+          if (values.length < 2) return 0.0;
+          return math.max(values[0], values[1]).clamp(0.0, 1.0);
+        });
 
     await showModalBottomSheet<void>(
       context: context,
@@ -45903,7 +46211,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         const SizedBox(height: 8),
                         _buildAudioRoutingStatusCard(),
                         const SizedBox(height: 10),
-                        _buildInputMeterStrip(),
+                        StreamBuilder<double>(
+                          stream: inputMeterStream,
+                          initialData: 0.0,
+                          builder: (context, snapshot) =>
+                              _buildInputMeterStrip(snapshot.data ?? 0.0),
+                        ),
                         const SizedBox(height: 10),
                         _buildInputSelector(),
                         if (_shouldShowInputChannelRouteSelector()) ...[
@@ -45950,6 +46263,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           },
         );
       },
+    ).whenComplete(
+      () => _setNativeMeteringEnabled(_shouldPollMetersDuringPlayback),
     );
   }
 
@@ -45996,6 +46311,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildBluetoothRecordingPolicyCard() {
+    if (_isBluetoothV2Session) {
+      return const SizedBox.shrink();
+    }
+
     final showBluetoothOutput = _audioRouteInfo.isBluetoothOutput;
     final showBluetoothMic = _audioRouteInfo.inputIsBluetoothHeadset;
     final hardBlocksBluetoothMic = Platform.isMacOS;

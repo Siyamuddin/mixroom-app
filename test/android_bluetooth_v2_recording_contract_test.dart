@@ -259,7 +259,7 @@ void main() {
     );
   });
 
-  test('V2 transport accepts only the verified active recording input', () {
+  test('V2 transport accepts only a verified V2-owned active input', () {
     final playStart = engine.indexOf(
       'bool JuceEngine::playPlaybackV2Android()',
     );
@@ -267,20 +267,21 @@ void main() {
     final play = engine.substring(playStart, pauseStart);
 
     expect(play, contains('wavCapture.isActive()'));
+    expect(play, contains('shouldRouteLiveInputToGraphV2()'));
     expect(play, contains('androidV2RecordingPrepared'));
     expect(
       play,
-      contains('desiredInputOpenChannels.load(std::memory_order_relaxed) > 0'),
+      contains('desiredInputChannels > 0'),
     );
     expect(
       play,
       contains(
-        'activeInputChannels == desiredInputOpenChannels.load(std::memory_order_relaxed)',
+        'activeInputChannels == desiredInputChannels',
       ),
     );
     expect(
       play,
-      contains('(activeInputChannels != 0 && !verifiedRecordingInputActive)'),
+      contains('(activeInputChannels != 0 && !verifiedOwnedInputActive)'),
     );
     expect(play, isNot(contains('applyPreferredAudioDeviceSetup')));
   });

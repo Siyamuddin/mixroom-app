@@ -363,8 +363,13 @@ void main() {
     );
   });
 
-  test('restoration proves source identity and the current OS profile', () {
+  test('restoration proves the canonical saved source profile', () {
     final plugin = File(pluginPath).readAsStringSync();
+    final fingerprint = _between(
+      plugin,
+      'static NSString *MixroomOutputFingerprint(',
+      'static NSString *MixroomEffectiveOutputFingerprint',
+    );
     final intent = _between(
       plugin,
       '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
@@ -379,15 +384,20 @@ void main() {
     expect(restore, contains('MixroomOutputForUID(inventory, source[@"uid"])'));
     expect(restore, contains('samePolicyOutput'));
     expect(restore, contains('self.macIntentSourceFingerprintV2'));
+    expect(fingerprint, contains('device[@"rawTransport"]'));
+    expect(fingerprint, contains('device[@"outputChannels"]'));
+    expect(fingerprint, contains('device[@"sampleRateHz"]'));
+    expect(fingerprint, contains('device[@"bufferFrames"]'));
+    expect(fingerprint, contains('MixroomCoreAudioDeviceIsAlive(deviceID)'));
     expect(restore, contains('waitForMacOutputCallbackProofV2ObjC'));
     expect(restore, contains('reconfigureMacPlaybackRouteV2ObjC'));
     expect(
       restore,
-      contains('sampleRate:[candidatePlan[@"sampleRateHz"] doubleValue]'),
+      contains('sampleRate:[source[@"sampleRateHz"] doubleValue]'),
     );
     expect(
       restore,
-      contains('bufferFrames:[candidatePlan[@"bufferFrames"] integerValue]'),
+      contains('bufferFrames:[source[@"bufferFrames"] integerValue]'),
     );
     expect(restore, contains('getMacOutputCallbackProofFramesV2ObjC'));
     expect(restore, contains('callbackShapeValid'));
@@ -400,17 +410,30 @@ void main() {
       contains('outputSnapshotIsValid(snapshot, restoredOutput ?: candidate)'),
     );
     expect(restore, contains('MixroomMonotonicMilliseconds() + 2000.0'));
-    expect(restore, contains('MixroomOutputFingerprint(candidatePlan)'));
-    expect(restore, contains('currentProfileValid'));
-    expect(restore, contains('sourceProfileRestored'));
+    expect(restore, contains('NSMutableSet<NSString *> *attemptedFingerprints'));
+    expect(restore, contains('macIntentRouteConditionSignalledV2'));
+    expect(restore, contains('[condition waitUntilDate:'));
+    expect(restore, contains('remainingMilliseconds(restoreDeadline)'));
     expect(
       restore,
       contains(
-        'snapshotValid && currentProfileValid && sourceProfileRestored &&',
+        'self.macIntentOperationGenerationV2 ==\n'
+        '                   self.audioRouteGenerationV2',
       ),
     );
+    expect(
+      restore,
+      contains('[attemptedFingerprints containsObject:observedFingerprint]'),
+    );
+    expect(restore, contains('[JuceBridge cancelMacOutputCallbackProofV2ObjC]'));
+    expect(restore, contains('sourceProfileRestored'));
+    expect(
+      restore,
+      contains('snapshotValid && sourceProfileRestored && generationValid'),
+    );
+    expect(restore, isNot(contains('MixroomOutputFingerprint(candidatePlan)')));
+    expect(restore, isNot(contains('currentProfileValid')));
     expect(restore, contains('macIntentSourceFingerprintV2'));
-    expect(restore, isNot(contains('waitUntilDate')));
     expect(restore, isNot(contains('sleep')));
     expect(restore, isNot(contains('dispatch_after')));
   });

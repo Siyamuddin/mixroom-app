@@ -1907,6 +1907,23 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     return IntentOutcomeV2("failure", finalCode)
   }
 
+  private fun activateVerifiedMonitorGraphV2(
+    targetRow: Int,
+    channelStart: Int,
+    channelCount: Int,
+  ): Boolean {
+    val facts = JuceBridge.activateLiveInputMonitoringV2JNI(
+      targetRow,
+      channelStart,
+      channelCount,
+    )
+    return facts.boolValue("active") &&
+      facts.intValue("targetRow", -1) == targetRow &&
+      facts.intValue("channelStart", -1) == channelStart &&
+      facts.intValue("channelCount") == channelCount &&
+      facts.intValue("connectionCount") == channelCount
+  }
+
   private fun prepareSystemSelectedDuplexV2(
     generation: Long,
     mode: IntentOperationModeV2,
@@ -2055,15 +2072,15 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     operation.phase = "duplexVerified"
     if (purpose == InputLifecyclePurposeV2.MONITORING) {
-      if (!JuceBridge.setLiveInputMonitorTargetV2JNI(
+      if (!activateVerifiedMonitorGraphV2(
           monitoringTargetRow,
           channelStart,
           channelCount,
         )) {
-        operation.phase = "monitorTarget"
+        operation.phase = "monitorGraph"
         return failBluetoothDuplexV2(operation, "monitoring_unavailable")
       }
-      JuceBridge.setLiveInputMonitoringEnabledJNI(true)
+      audioRouteIntentV2 = AudioRouteIntentV2.MONITORING
     }
     updateDuplexProbeFactsV2(operation, "duplexVerified", "ok")
     return IntentOutcomeV2("success", "ok")
@@ -2600,6 +2617,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val operation = recordingOperationV2
       ?: return IntentOutcomeV2("failure", "actual_state_unavailable")
     if (
+      operation.purpose != InputLifecyclePurposeV2.RECORDING ||
       operation.cancelled.get() ||
       recordingCancellationRequestedV2.get() ||
       generation != operation.generation ||
@@ -2630,14 +2648,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     val readiness = validatePreparedRecordingV2(operation)
     if (readiness != "ok") return IntentOutcomeV2("failure", readiness)
-    if (!JuceBridge.setLiveInputMonitorTargetV2JNI(
+    if (!activateVerifiedMonitorGraphV2(
         operation.monitoringTargetRow,
         operation.recordingChannelStart,
         operation.recordingChannelCount,
       )) {
       return IntentOutcomeV2("failure", "monitoring_unavailable")
     }
-    JuceBridge.setLiveInputMonitoringEnabledJNI(true)
     audioRouteIntentV2 = AudioRouteIntentV2.MONITORING
     return IntentOutcomeV2("success", "ok")
   }
@@ -2886,10 +2903,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val operation = recordingOperationV2
     if (
       operation == null ||
+      operation.purpose != InputLifecyclePurposeV2.RECORDING ||
       operation.cancelled.get() ||
       recordingCancellationRequestedV2.get() ||
-      (audioRouteIntentV2 != AudioRouteIntentV2.PREPARING_RECORDING &&
-        audioRouteIntentV2 != AudioRouteIntentV2.MONITORING) ||
+      audioRouteIntentV2 != AudioRouteIntentV2.PREPARING_RECORDING ||
       lifecycleTransitionInProgressV2
     ) {
       result.success(false)
@@ -2940,16 +2957,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   }
 
   private fun stopPreparedCaptureV2(result: MethodChannel.Result) {
-    val returnToMonitoring = recordingOperationV2?.purpose ==
-      InputLifecyclePurposeV2.MONITORING
     lifecycleTransitionInProgressV2 = true
     audioLifecycleExecutorV2.execute {
       val captureResult = try {
-        if (returnToMonitoring) {
-          JuceBridge.stopRecordingForMonitoringV2JNI()
-        } else {
-          JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
-        }
+        JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
       } catch (error: Exception) {
         Log.e("JuceAudioEngine", "Android V2 capture stop failed", error)
         hashMapOf<String, Any>(
