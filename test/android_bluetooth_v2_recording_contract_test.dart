@@ -352,6 +352,16 @@ void main() {
         lifecycle,
         contains('Recording stopped because Mixroom went to the background.'),
       );
+      expect(
+        lifecycle,
+        isNot(
+          contains(
+            'Monitoring stopped because Mixroom went to the background.',
+          ),
+        ),
+      );
+      expect(background, contains('_backgroundRecordingImpactNotice()'));
+      expect(background, contains('_androidV2ForegroundImpactNotice'));
 
       final resumeStart = editor.indexOf(
         'Future<void> _handleAndroidEditorResumed() async',
@@ -385,6 +395,7 @@ void main() {
       expect(claim, lessThan(foregroundEpisode));
       expect(foregroundEpisode, lessThan(recovery));
       expect(resume, contains('_trackV2AudioSessionRecovery(recovery)'));
+      expect(resume, contains('successNotice: successNotice'));
 
       final recoveryStart = editor.indexOf(
         'Future<void> _recoverV2PlaybackAfterAudioSessionInvalidation',

@@ -55,6 +55,33 @@ void main() {
   });
 
   test(
+    'automatic monitoring resume fails silently when playback is healthy',
+    () {
+      final editor = File(editorPath).readAsStringSync();
+      final activation = _between(
+        editor,
+        'Future<bool> _activateV2LiveMonitoringTarget({',
+        'Future<void> _resumeMacV2MonitoringAfterPublishedRecording()',
+      );
+      final resumeMac = _between(
+        editor,
+        'Future<void> _resumeMacV2MonitoringAfterPublishedRecording()',
+        'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording()',
+      );
+      final resumeAndroid = _between(
+        editor,
+        'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording()',
+        'Future<bool> _disableV2MonitoringBeforeRemovingRow(',
+      );
+
+      expect(activation, contains('bool notifyOnUnavailable = true'));
+      expect(activation, contains('if (notifyOnUnavailable)'));
+      expect(resumeMac, contains('notifyOnUnavailable: false'));
+      expect(resumeAndroid, contains('notifyOnUnavailable: false'));
+    },
+  );
+
+  test(
     'legacy monitoring action remains wired to the existing engine path',
     () {
       final editor = File(editorPath).readAsStringSync();

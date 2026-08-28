@@ -548,6 +548,65 @@ void main() {
   });
 
   test(
+    'explicit output selection does not produce a redundant success toast',
+    () {
+      final editor = File(editorPath).readAsStringSync();
+      final selection = _between(
+        editor,
+        'Future<void> _selectMacOutputDevice(String name) async {',
+        'Future<void> _selectMacV2InputDevice(',
+      );
+      final transition = _between(
+        editor,
+        'void _handleAudioRouteTransitionV2(',
+        'Future<void> _flushDeferredAndroidRouteRefreshIfNeeded()',
+      );
+
+      expect(selection, contains('_macV2OutputSelectionInFlight = true'));
+      expect(selection, contains('finally'));
+      expect(selection, contains('_macV2OutputSelectionInFlight = false'));
+      expect(
+        transition,
+        contains(
+          'if (Platform.isMacOS && _macV2OutputSelectionInFlight) return',
+        ),
+      );
+      expect(
+        transition.indexOf('AudioRouteTransitionStatusV2.fallback'),
+        lessThan(transition.indexOf('_macV2OutputSelectionInFlight)')),
+        reason: 'a real fallback must remain visible',
+      );
+      expect(transition, contains('sameVisibleOutput'));
+      expect(
+        transition.indexOf('AudioRouteTransitionStatusV2.fallback'),
+        lessThan(transition.indexOf('if (sameVisibleOutput) return')),
+        reason: 'Bluetooth fallback must not be hidden by identity coalescing',
+      );
+    },
+  );
+
+  test('Bluetooth profile changes retain one user-visible device identity', () {
+    final editor = File(editorPath).readAsStringSync();
+    final identity = _between(
+      editor,
+      'String? _userVisibleOutputIdentityV2(',
+      'void _handleAudioRouteCoordinatorStateV2(',
+    );
+
+    expect(identity, contains('AudioRouteKindV2.bluetoothMedia'));
+    expect(identity, contains('AudioRouteKindV2.bluetoothDuplex'));
+    expect(identity, contains("return 'bluetooth:\$name'"));
+    expect(identity, contains("return 'uid:\$uid'"));
+    expect(
+      RegExp(
+        r'_v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2\(\s*initialRoute',
+      ).allMatches(editor).length,
+      2,
+      reason: 'both desktop/mobile coordinator startup paths seed identity',
+    );
+  });
+
+  test(
     'current-output recovery waits once for authoritative route evidence',
     () {
       final plugin = File(pluginPath).readAsStringSync();

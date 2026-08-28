@@ -5676,6 +5676,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _v2AudioSessionRecoveryInProgress = false;
   bool _androidV2ForegroundRecoveryPending = false;
   bool _iosV2ForegroundRecoveryPending = false;
+  String? _androidV2ForegroundImpactNotice;
+  String? _iosV2ForegroundImpactNotice;
+  bool _macV2OutputSelectionInFlight = false;
+  String? _v2UserVisibleOutputIdentity;
   Future<void>? _v2AudioSessionRecoveryFuture;
   Future<void>? _audioEngineShutdownFuture;
   static Future<void>? _processAudioEngineShutdownFuture;
@@ -9340,6 +9344,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           setState(() => _isLoadingNextScreen = false);
           return;
         }
+        _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
+          initialRoute,
+        );
         if (Platform.isMacOS) {
           await _loadMacV2AudioDevices();
         }
@@ -9394,6 +9401,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           setState(() => _isLoadingNextScreen = false);
           return;
         }
+        _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
+          initialRoute,
+        );
         await _refreshSystemSelectedRouteInfoV2();
         if (_v2HardwareSettingsApplicationPending) {
           _v2HardwareSettingsApplicationPending = false;
@@ -12712,11 +12722,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _androidV2ForegroundRecoveryPending = true;
     if (_v2AudioSessionInvalidated) return;
     _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
-    final recordingWasActive = _isRecording || _recordStartVisualPending;
+    _androidV2ForegroundImpactNotice = _backgroundRecordingImpactNotice();
     final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
-      notice: recordingWasActive
-          ? 'Recording stopped because Mixroom went to the background.'
-          : 'Monitoring stopped because Mixroom went to the background.',
+      notice:
+          _androidV2ForegroundImpactNotice ??
+          'Audio is temporarily unavailable.',
     );
     final cleanup = _cleanupV2InterruptedAudio(
       unpublishedRecordingPath: unpublishedRecordingPath,
@@ -12734,8 +12744,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     _iosV2ForegroundRecoveryPending = true;
     _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
+    _iosV2ForegroundImpactNotice = _backgroundRecordingImpactNotice();
     final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
-      notice: 'Audio is temporarily unavailable.',
+      notice:
+          _iosV2ForegroundImpactNotice ?? 'Audio is temporarily unavailable.',
     );
     final cleanup = _cleanupV2InterruptedAudio(
       unpublishedRecordingPath: unpublishedRecordingPath,
@@ -12750,6 +12762,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (cleanup != null) await cleanup;
     // UIApplicationDidBecomeActiveNotification emits the single native
     // foreground-reconciliation event. Its coordinator callback owns reopen.
+  }
+
+  String? _backgroundRecordingImpactNotice() {
+    if (_isMidiClipRecording) {
+      return 'MIDI recording stopped because Mixroom went to the background. Recorded notes were saved.';
+    }
+    if (_isRecording || _recordStartVisualPending) {
+      return 'Recording stopped because Mixroom went to the background.';
+    }
+    return null;
   }
 
   bool get _shouldDeferAndroidRouteRefresh =>
@@ -12880,13 +12902,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           event.cause == 'audioInterruptionEnded';
       if (foregroundRecoveryEvent) {
         _iosV2ForegroundRecoveryPending = false;
+        final successNotice = _iosV2ForegroundImpactNotice;
+        _iosV2ForegroundImpactNotice = null;
         final cleanup = _v2AudioSessionRecoveryFuture;
         final recovery = () async {
           if (cleanup != null) await cleanup;
           await _recoverV2PlaybackAfterAudioSessionInvalidation(
             shouldAttemptSystemOutputRecovery: true,
             unpublishedRecordingPath: null,
-            successNotice: 'Audio is ready. Press Play to continue.',
+            successNotice: successNotice,
           );
         }();
         _trackV2AudioSessionRecovery(recovery);
@@ -12906,19 +12930,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _audioRouteCoordinatorV2?.intent ==
             AudioRouteIntentV2.preparingRecording ||
         _audioRouteCoordinatorV2?.intent == AudioRouteIntentV2.recording;
+    final midiRecordingWasActive = _isMidiClipRecording;
+    final interruptionImpactNotice = midiRecordingWasActive
+        ? 'MIDI recording stopped because audio was interrupted. Recorded notes were saved.'
+        : recordingWasActive
+        ? 'Audio was interrupted. Recording stopped.'
+        : null;
     final pendingNotice = interruption
-        ? (recordingWasActive
-              ? 'Audio was interrupted. Recording stopped.'
-              : 'Audio is temporarily unavailable.')
+        ? (interruptionImpactNotice ?? 'Audio is temporarily unavailable.')
         : (shouldAttemptSystemOutputRecovery
               ? 'Audio output is changing. Please wait.'
               : 'Audio output changed during recording. Reopen the audio editor to continue.');
     final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
       notice: pendingNotice,
     );
-    if (interruption) _showSmallNotice(pendingNotice);
+    if (interruptionImpactNotice != null) {
+      _showSmallNotice(interruptionImpactNotice);
+    }
     final recoverySuccessNotice = interruption
-        ? 'Audio is ready. Press Play to continue.'
+        ? null
         : recordingWasActive
         ? 'Recording stopped because the audio device changed. Press Play to continue.'
         : 'Audio output changed. Press Play to continue.';
@@ -13028,7 +13058,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required bool shouldAttemptSystemOutputRecovery,
     required String? unpublishedRecordingPath,
     bool cleanupBeforeRecovery = false,
-    required String successNotice,
+    required String? successNotice,
   }) async {
     if (cleanupBeforeRecovery) {
       await _cleanupV2InterruptedAudio(
@@ -13048,6 +13078,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
       }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+      _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
+        recoveryResult.snapshot,
+      );
       if (!mounted) return;
       await _restoreInterruptedMidiClipAfterV2Recovery();
       if (!mounted) return;
@@ -13062,13 +13095,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {
         _v2AudioSessionInvalidated = false;
         _v2AudioSessionRecoveryInProgress = false;
-        _v2AudioSessionInvalidationNotice = successNotice;
+        if (successNotice != null) {
+          _v2AudioSessionInvalidationNotice = successNotice;
+        }
         if (Platform.isMacOS && recoveredOutputName.isNotEmpty) {
           _macOutputDeviceName = recoveredOutputName;
         }
       });
       if (Platform.isMacOS) unawaited(_loadMacV2AudioDevices());
-      _showSmallNotice(_v2AudioSessionInvalidationNotice);
+      if (successNotice != null) _showSmallNotice(successNotice);
       return;
     }
 
@@ -13099,6 +13134,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (!mounted || commandSerial != _transportCommandSerial) return;
     _syncTransportClock(_globalAudioClock, playing: false);
+  }
+
+  String? _userVisibleOutputIdentityV2(AudioRouteSnapshotV2 snapshot) {
+    if (snapshot.outputs.length != 1) return null;
+    final output = snapshot.outputs.single;
+    final name = output.name.trim().toLowerCase();
+    final bluetoothOutput = switch (output.normalizedKind) {
+      AudioRouteKindV2.bluetooth ||
+      AudioRouteKindV2.bluetoothMedia ||
+      AudioRouteKindV2.bluetoothDuplex ||
+      AudioRouteKindV2.bluetoothLe => true,
+      _ => false,
+    };
+    // Bluetooth playback and call profiles can use different native UIDs for
+    // the same physical device. Treat that profile transition as one visible
+    // device so it does not announce that the earbuds changed to themselves.
+    if (bluetoothOutput && name.isNotEmpty) return 'bluetooth:$name';
+    final uid = output.uid.trim();
+    if (uid.isNotEmpty) return 'uid:$uid';
+    if (name.isNotEmpty) {
+      return '${output.nativePortType.trim().toLowerCase()}:$name';
+    }
+    return null;
   }
 
   void _handleAudioRouteCoordinatorStateV2(AudioRouteCoordinatorStateV2 state) {
@@ -13141,6 +13199,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    final previousOutputIdentity = _v2UserVisibleOutputIdentity;
+    final nextOutputIdentity = _userVisibleOutputIdentityV2(result.snapshot);
+    final sameVisibleOutput =
+        previousOutputIdentity != null &&
+        nextOutputIdentity != null &&
+        previousOutputIdentity == nextOutputIdentity;
+    if (nextOutputIdentity != null) {
+      _v2UserVisibleOutputIdentity = nextOutputIdentity;
+    }
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
     final juceName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
     final endpointName = result.snapshot.outputs.isEmpty
@@ -13172,6 +13239,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+
+    // A successful explicit macOS selection is already visible in the
+    // selector. Keep warnings and fallbacks above, but do not confirm the
+    // user's own action with a redundant route-change toast.
+    if (Platform.isMacOS && _macV2OutputSelectionInFlight) return;
+
+    // Internal reconfiguration of the same visible device (most notably
+    // Bluetooth call mode returning to stereo playback) is not a device
+    // change from the user's perspective.
+    if (sameVisibleOutput) return;
 
     if (Platform.isAndroid) {
       _showSmallNotice('Audio output changed. Press Play to continue.');
@@ -13224,14 +13301,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _androidV2ForegroundRecoveryPending = false;
+    final successNotice = _androidV2ForegroundImpactNotice;
+    _androidV2ForegroundImpactNotice = null;
     final coordinator = _audioRouteCoordinatorV2;
     if (!_v2AudioSessionInvalidated || coordinator == null) return;
     coordinator.beginLocalInvalidationEpisode();
     final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
       shouldAttemptSystemOutputRecovery: true,
       unpublishedRecordingPath: null,
-      successNotice:
-          'Recording stopped because Mixroom went to the background.',
+      successNotice: successNotice,
     );
     _trackV2AudioSessionRecovery(recovery);
     await recovery;
@@ -22524,9 +22602,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
       if (usingBluetoothDuplex && !_bluetoothRecordingQualityNoticeShown) {
         _bluetoothRecordingQualityNoticeShown = true;
-        _showSmallNotice(
-          'Bluetooth microphone in use. Playback quality is reduced while recording.',
-        );
+        if (!(Platform.isMacOS &&
+            _macBluetoothCommunicationQualityNoticeShown)) {
+          _showSmallNotice(
+            'Bluetooth microphone in use. Playback quality is reduced while recording.',
+          );
+        }
       }
       return true;
     }
@@ -23269,12 +23350,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             'Android monitoring could not resume after recording: '
             '$error\n$stackTrace',
           );
-          if (mounted) {
-            _showSmallNotice(
-              'Monitoring is unavailable for the current audio route.',
-            );
-            setState(() {});
-          }
+          if (mounted) setState(() {});
         }
       } else if (_androidV2MonitoringSuspendedForRecording) {
         _clearV2LiveMonitoringState();
@@ -43553,16 +43629,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _showSmallNotice('Audio output is changing. Please wait.');
         return;
       }
-      final result = await coordinator.selectPlaybackOutput(trimmed);
-      if (!mounted) return;
-      if (!result.succeeded) {
-        await _loadMacV2AudioDevices();
-        return;
+      _macV2OutputSelectionInFlight = true;
+      try {
+        final result = await coordinator.selectPlaybackOutput(trimmed);
+        if (!mounted) return;
+        if (!result.succeeded) {
+          await _loadMacV2AudioDevices();
+          return;
+        }
+        final verifiedName =
+            result.snapshot.juce.outputDeviceName?.trim() ?? '';
+        _setStateAndRefreshProjectSettings(() {
+          _macOutputDeviceName = verifiedName.isEmpty ? trimmed : verifiedName;
+        });
+      } finally {
+        _macV2OutputSelectionInFlight = false;
       }
-      final verifiedName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
-      _setStateAndRefreshProjectSettings(() {
-        _macOutputDeviceName = verifiedName.isEmpty ? trimmed : verifiedName;
-      });
       return;
     }
     final trimmed = name.trim();
@@ -45857,6 +45939,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required int rowId,
     required int channelStart,
     required int channelCount,
+    bool notifyOnUnavailable = true,
   }) async {
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null) return false;
@@ -45872,9 +45955,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         source.intent != AudioRouteIntentV2.playbackOnly ||
         source.inputs.isNotEmpty ||
         source.juce.activeInputChannels != 0) {
-      _showSmallNotice(
-        'Monitoring is unavailable for the current audio route.',
-      );
+      if (notifyOnUnavailable) {
+        _showSmallNotice(
+          'Monitoring is unavailable for the current audio route.',
+        );
+      }
       return false;
     }
     final result = await coordinator.transitionIntent(
@@ -45894,9 +45979,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           'Audio output could not be restored. Reopen the audio editor.',
         );
       } else {
-        _showSmallNotice(
-          'Monitoring is unavailable for the current audio route.',
-        );
+        if (notifyOnUnavailable) {
+          _showSmallNotice(
+            'Monitoring is unavailable for the current audio route.',
+          );
+        }
       }
       return false;
     }
@@ -45953,6 +46040,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowId: rowId,
         channelStart: channelStart,
         channelCount: channelCount,
+        notifyOnUnavailable: false,
       );
       if (!resumed) _clearV2LiveMonitoringState();
     } finally {
@@ -46004,6 +46092,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rowId: rowId,
         channelStart: channelStart,
         channelCount: channelCount,
+        notifyOnUnavailable: false,
       );
       if (!resumed) _clearV2LiveMonitoringState();
     } finally {
