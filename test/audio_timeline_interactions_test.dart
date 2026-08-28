@@ -249,6 +249,28 @@ ScrollController _timelineVerticalScrollController(WidgetTester tester) {
   return candidates.first;
 }
 
+double _instrumentLanePopupOpacity(WidgetTester tester) {
+  return tester
+      .widget<AnimatedOpacity>(
+        find.byKey(const ValueKey('instrument_lane_region_popup')),
+      )
+      .opacity;
+}
+
+Future<void> _openInstrumentLaneMenu(
+  WidgetTester tester,
+  Offset position,
+) async {
+  final gesture = await tester.createGesture(
+    kind: PointerDeviceKind.mouse,
+    buttons: kSecondaryMouseButton,
+  );
+  await gesture.down(position);
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
 Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
   final rect = tester.getRect(
     find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
@@ -1604,6 +1626,96 @@ void main() {
     expect(createRequests, hasLength(1));
     expect(createRequests.single['row'], 0);
     expect(createRequests.single['timeMs'], isA<double>());
+  });
+
+  testWidgets('instrument lane menu stays anchored after vertical scrolling',
+      (tester) async {
+    final rows = List<TimelineRow>.generate(
+      10,
+      (index) => TimelineRow(
+        rowId: index + 1,
+        name: 'Keys ${index + 1}',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'piano',
+        instrumentName: 'Piano',
+      ),
+    );
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onMoveClipCommit: (_, __, ___) async {},
+        onCreateMidiClipInInstrumentLane: (_, __) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final verticalController = _timelineVerticalScrollController(tester);
+    const scrollOffset = 160.0;
+    verticalController.jumpTo(scrollOffset);
+    await tester.pumpAndSettle();
+
+    final timelineTopLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+    final tapPosition = timelineTopLeft +
+        const Offset(
+          _kHeaderWidth + 240.0,
+          _kRulerHeight + (4 * 80.0) + 40.0 - scrollOffset,
+        );
+    await _openInstrumentLaneMenu(tester, tapPosition);
+
+    final popupRect = tester.getRect(
+      find.byKey(const ValueKey('instrument_lane_region_popup')),
+    );
+    expect(popupRect.bottom, moreOrLessEquals(tapPosition.dy - 8.0));
+  });
+
+  testWidgets('instrument lane menu dismisses on cancel interactions',
+      (tester) async {
+    final rows = List<TimelineRow>.generate(
+      10,
+      (index) => TimelineRow(
+        rowId: index + 1,
+        name: 'Keys ${index + 1}',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'piano',
+        instrumentName: 'Piano',
+      ),
+    );
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onMoveClipCommit: (_, __, ___) async {},
+        onCreateMidiClipInInstrumentLane: (_, __) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openInstrumentLaneMenu(tester, _laneCenter(tester));
+    expect(_instrumentLanePopupOpacity(tester), 1.0);
+
+    final timelineTopLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+    await tester.tapAt(timelineTopLeft + const Offset(400.0, 20.0));
+    await tester.pumpAndSettle();
+    expect(_instrumentLanePopupOpacity(tester), 0.0);
+
+    await _openInstrumentLaneMenu(tester, _laneCenter(tester));
+    expect(_instrumentLanePopupOpacity(tester), 1.0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(_instrumentLanePopupOpacity(tester), 0.0);
+
+    await _openInstrumentLaneMenu(tester, _laneCenter(tester));
+    expect(_instrumentLanePopupOpacity(tester), 1.0);
+
+    _timelineVerticalScrollController(tester).jumpTo(80.0);
+    await tester.pumpAndSettle();
+    expect(_instrumentLanePopupOpacity(tester), 0.0);
   });
 
   testWidgets('add row menu can create an instrument lane', (tester) async {

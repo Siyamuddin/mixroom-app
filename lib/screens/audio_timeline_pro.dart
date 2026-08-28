@@ -2105,6 +2105,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _instrumentLaneRegionRow = null;
     _instrumentLaneRegionMs = null;
     _instrumentLaneRegionAnchorLocal = null;
+    _suppressNextTimelineTapAfterInstrumentLaneCreate = false;
   }
 
   void _clearCutPreview() {
@@ -5657,6 +5658,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _verticalScrollController.addListener(() {
       setState(() {
         _syncVerticalScrollOffsetFromController();
+        if (_showInstrumentLaneRegionPopup) {
+          _clearInstrumentLaneRegionPopupState();
+          _highlightedSegmentRow = null;
+          _highlightedSegmentStartMs = null;
+          _highlightedSegmentEndMs = null;
+        }
       });
     });
     widget.registerRowFxRefresher?.call(_refreshRowFx);
@@ -6250,7 +6257,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _automationClipMenuClipId != null ||
         _clipPopupMs != null ||
         _showPastePopup ||
-        _pasteRow != null;
+        _pasteRow != null ||
+        _showInstrumentLaneRegionPopup;
   }
 
   bool _dismissTimelineEscapeOverlay() {
@@ -6262,6 +6270,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _showPastePopup = false;
       _pasteRow = null;
       _pasteMs = null;
+      _clearInstrumentLaneRegionPopupState();
       _highlightedSegmentRow = null;
       _highlightedSegmentStartMs = null;
       _highlightedSegmentEndMs = null;
@@ -9964,7 +9973,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         left = (_headerWidth + anchor.dx - popupWidth / 2)
             .clamp(_headerWidth, _headerWidth + viewportWidth - popupWidth)
             .toDouble();
-        final anchorViewportY = anchor.dy;
+        final anchorViewportY = _contentYToTimelineViewportY(anchor.dy);
         top = anchorViewportY - popupHeight - 8;
         if (top < 0) {
           top = anchorViewportY + 8;
@@ -9985,46 +9994,58 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           opacity: visible ? 1.0 : 0.0,
           duration: const Duration(milliseconds: 90),
           curve: Curves.easeOut,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(18),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  key: const ValueKey('instrument_lane_region_popup_add'),
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () {
-                    unawaited(_createMidiRegionFromInstrumentLanePopup());
-                  },
-                  child: Container(
-                    width: popupWidth,
-                    height: popupHeight,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: _timelineGlassPopupDecoration(radius: 18),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(
-                          Icons.add_rounded,
-                          size: 18,
-                          color: _kTimelineShellText,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            L10n.translate(context, 'Add MIDI Region'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: _kTimelineShellText,
-                              fontFamily: 'Pretendard',
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
+          child: TapRegion(
+            enabled: visible,
+            onTapOutside: (_) {
+              if (!_showInstrumentLaneRegionPopup) return;
+              setState(() {
+                _clearInstrumentLaneRegionPopupState();
+                _highlightedSegmentRow = null;
+                _highlightedSegmentStartMs = null;
+                _highlightedSegmentEndMs = null;
+              });
+            },
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    key: const ValueKey('instrument_lane_region_popup_add'),
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () {
+                      unawaited(_createMidiRegionFromInstrumentLanePopup());
+                    },
+                    child: Container(
+                      width: popupWidth,
+                      height: popupHeight,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      decoration: _timelineGlassPopupDecoration(radius: 18),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(
+                            Icons.add_rounded,
+                            size: 18,
+                            color: _kTimelineShellText,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              L10n.translate(context, 'Add MIDI Region'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _kTimelineShellText,
+                                fontFamily: 'Pretendard',
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
