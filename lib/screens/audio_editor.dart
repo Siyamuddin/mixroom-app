@@ -45117,8 +45117,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         emitActionSummaries: false,
         stageEffectEnsures: true,
       );
-      if (report.attempted != mixActions.length ||
-          report.skippedReasons.isNotEmpty) {
+      // A gated or missing plugin must not undo tempo, pitch, or FX
+      // that did insert. Fail only when mix contributed nothing.
+      if (report.applied == 0 && report.skippedReasons.isNotEmpty) {
         throw StateError('v3_mix_actions_not_fully_applied');
       }
       final commandId = data['command_id']?.toString().trim() ?? '';
@@ -45128,6 +45129,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       }
       if (v3RuntimeExpectations != null) {
+        await _dropUnmetAiV3MixPresenceExpectations(
+          v3RuntimeExpectations,
+          data,
+        );
         _addAiV3Expectations(v3RuntimeExpectations, report.appliedMutations);
       }
     }
@@ -67767,6 +67772,84 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           kind != 'group_row_removed' &&
           kind != 'group_collapsed';
     });
+  }
+
+  /// Drop presence checks for plugins this mix asked to ensure or
+  /// delete but the engine never landed. Pre-capture would otherwise
+  /// roll back the whole V3 turn after a gated Clipper skip.
+  Future<void> _dropUnmetAiV3MixPresenceExpectations(
+    List<Map<String, dynamic>> expectations,
+    Map<String, dynamic> wrapper,
+  ) async {
+    for (final raw in (wrapper['actions'] as List? ?? const <Object>[])) {
+      if (raw is! Map || raw['data'] is! Map) continue;
+      final type = raw['type']?.toString() ?? '';
+      final bool isMaster;
+      final bool wantPresent;
+      switch (type) {
+        case 'ensure_effect':
+          isMaster = false;
+          wantPresent = true;
+          break;
+        case 'delete_effect':
+          isMaster = false;
+          wantPresent = false;
+          break;
+        case 'ensure_master_effect':
+          isMaster = true;
+          wantPresent = true;
+          break;
+        case 'delete_master_effect':
+          isMaster = true;
+          wantPresent = false;
+          break;
+        default:
+          continue;
+      }
+      final data = Map<String, dynamic>.from(raw['data'] as Map);
+      final needle = data['effect_name_contains']?.toString() ?? '';
+      if (needle.isEmpty) continue;
+      final row = isMaster ? null : _aiV3MixActionRow(data);
+      if (!isMaster && row == null) continue;
+      final matches = expectations.where((expectation) {
+        if (expectation['kind'] != 'mix_effect_presence') {
+          return false;
+        }
+        if ((expectation['master'] == true) != isMaster) {
+          return false;
+        }
+        if (expectation['needle'] != needle) return false;
+        if (!isMaster && expectation['row'] != row) return false;
+        return true;
+      }).toList(growable: false);
+      if (matches.isEmpty) continue;
+      final forceIndividualRow =
+          data['force_individual_row'] == true ||
+          matches.any(
+            (expectation) => expectation['force_individual_row'] == true,
+          );
+      final effects = isMaster
+          ? await JuceAudioEngine.getMasterEffects()
+          : await JuceAudioEngine.getTrackEffectsForRow(
+              row!,
+              forceIndividualRow: forceIndividualRow,
+            );
+      final present = effects.any(
+        (effect) => effect.toLowerCase().contains(needle.toLowerCase()),
+      );
+      if (present == wantPresent) continue;
+      expectations.removeWhere((expectation) {
+        if (expectation['kind'] != 'mix_effect_presence') {
+          return false;
+        }
+        if ((expectation['master'] == true) != isMaster) {
+          return false;
+        }
+        if (expectation['needle'] != needle) return false;
+        if (!isMaster && expectation['row'] != row) return false;
+        return true;
+      });
+    }
   }
 
   void _captureAiV3MixExpectations(

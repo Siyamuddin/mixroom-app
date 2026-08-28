@@ -48,6 +48,12 @@ names.
 | Skip codes | English scrape of `user_message` (`skip`, `won't generate`, …) | Closed `skipped` codes on PlanV3 (`import`, `export`, `generated_drums`, `binaural_8d`). App localizes. Missing/unknown codes are dropped |
 | Chat receipt | System bullet list plus assistant sentence; mix listed every EQ/compressor knob | Same chat chrome as before: system execution list plus assistant sentence. Mix stays an intent line. No Play/Undo chips. The floating “Applied N changes” toast is **kept**. Verified applies store `undo_record_id` on the chat message; per-bubble Undo must undo that record only when it is still the current stack top |
 | Stale selection | Invalid primary clip could fail snapshot building | Invalid primary clip / clip indices are dropped instead of failing the plan |
+| Mix skip as fatal | Any skipped MixAction (`v3_mix_actions_not_fully_applied`) rolled back tempo, pitch, and FX that had already inserted | Mix skips (gated or missing plugin, e.g. Clipper on free) no longer abort the V3 transaction. Tempo, pitch, and applied FX commit. Verify requires only plugins that actually inserted. Named `effect.ensure_configured` stays strict. |
+
+Style goals that expand into mix plus tempo/pitch used to die after EQ or
+compressor inserted because a later gated Clipper skip was treated as
+fatal. Apply now commits what landed; verify drops `mix_effect_presence`
+only for plugins this mix asked for and the engine never inserted.
 
 ### Code map
 
@@ -62,7 +68,8 @@ names.
 | `lib/ai/v3/ai_v3_planner_service.dart` | One align-collapse retry; retry reminder goes in `instructions` |
 | `lib/ai/v3/ai_v3_preparer.dart` | Mix pan-intent strip at prepare time |
 | `lib/ai/v3/ai_v3_context.dart`, `ai_v3_planning_snapshot.dart` | Automation targets + stale selection |
-| `lib/screens/audio_editor.dart` | Verified apply still inserts the system execution list plus assistant sentence; no extra action chips |
+| `lib/screens/audio_editor.dart` | Verified apply still inserts the system execution list plus assistant sentence; no extra action chips. Partial mix apply keeps sibling commands; unmet `mix_effect_presence` is dropped after apply |
+| `lib/ai/local_mixing_model.dart` | Clipper Threshold/Ceiling param tweaks use `skip_if_missing_effect: true`, matching Distortion |
 
 ## Behavior: before vs after
 
@@ -166,5 +173,6 @@ Replay on macOS with a project that already has audio:
 ## Update trigger
 
 Update this page when the compiler instructions, align-collapse retry,
-automation-target guarantee, mix pan-strip, skip-note policy, or verified
-chat receipt / undo-record binding changes.
+automation-target guarantee, mix pan-strip, skip-note policy, verified
+chat receipt / undo-record binding, or mix skip / verify-reconcile
+policy changes.
