@@ -979,7 +979,7 @@ void main() {
       },
     );
 
-    test('verified execution details collapse mix.apply_goal to intent', () {
+    test('verified execution details expand materialized mix summaries', () {
       expect(
         aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
@@ -991,10 +991,7 @@ void main() {
                 'command_id': 'mix-master',
                 'type': 'mix.apply_goal',
                 'status': 'prepared',
-                'preview_label':
-                    'Mix Master Bus (eq air_boost, compressor punch)',
-                'verified_label':
-                    'Mixed Master Bus (eq air_boost, compressor punch)',
+                'preview_label': 'Mix Master Bus',
               },
             ],
           },
@@ -1005,11 +1002,14 @@ void main() {
             ],
           },
         ),
-        <String>['Mixed Master Bus (eq air_boost, compressor punch)'],
+        <String>[
+          'Added Compressor to Master Bus',
+          'Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus)',
+        ],
       );
     });
 
-    test('verified completion uses receipt labels after success', () {
+    test('verified completion uses the planner summary after success', () {
       const bundle = <String, dynamic>{
         'plan': <String, dynamic>{'user_message': 'Deleted Track 3.'},
         'receipts': <Map<String, dynamic>>[
@@ -1021,153 +1021,10 @@ void main() {
           },
         ],
       };
-      expect(aiV3VerifiedCompletionMessage(bundle), 'Delete Track 3.');
+      expect(aiV3VerifiedCompletionMessage(bundle), 'Deleted Track 3.');
       expect(
         aiV3VerifiedConversationMessage(bundle),
         'Done:\n- Delete Track 3',
-      );
-    });
-
-    test('verified completion prefers receipts over planner copy', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message': 'Sped the track up. True binaural 8D is unsupported.',
-          'skipped': <String>['binaural_8d'],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'project.set_tempo',
-            'verified_label': 'Set project tempo to 180 BPM',
-          },
-          <String, dynamic>{
-            'type': 'clip.adjust_pitch_semitones',
-            'verified_label': 'Adjusted vocal pitch by 3 semitones',
-          },
-          <String, dynamic>{
-            'type': 'mix.apply_goal',
-            'preview_label': 'Mix all project rows (presence)',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, contains('180 BPM'));
-      expect(message, contains('3 semitones'));
-      expect(message, contains('presence'));
-      expect(message, contains('Mixroom skipped true binaural 8D.'));
-      expect(message, isNot(contains('Sped the track up.')));
-      expect(message, isNot(contains('unsupported')));
-      expect(message.length, lessThanOrEqualTo(_preferredUserMessageLength));
-    });
-
-    test('verified completion falls back to planner copy without receipts', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{'user_message': 'Deleted Track 3.'},
-      };
-      expect(aiV3VerifiedCompletionMessage(bundle), 'Deleted Track 3.');
-    });
-
-    test('verified completion omits skip boilerplate on named singles', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message':
-              'Adjusted Track 1 by 3 dB. Mixroom skipped importing and exporting.',
-          'commands': <Map<String, dynamic>>[
-            <String, dynamic>{'type': 'row.adjust_gain_db'},
-          ],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'row.adjust_gain_db',
-            'verified_label': 'Adjusted Track 1 gain by 3 dB',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, 'Adjusted Track 1 gain by 3 dB.');
-      expect(message, isNot(contains('import')));
-      expect(message, isNot(contains('skip')));
-    });
-
-    test('verified completion has no skip lecture when skipped is empty', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message': 'Sped the track up.',
-          'commands': <Map<String, dynamic>>[
-            <String, dynamic>{'type': 'project.set_tempo'},
-            <String, dynamic>{'type': 'mix.apply_goal'},
-          ],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'project.set_tempo',
-            'verified_label': 'Set project tempo to 160 BPM',
-          },
-          <String, dynamic>{
-            'type': 'mix.apply_goal',
-            'verified_label': 'Mixed all project rows',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, contains('160 BPM'));
-      expect(message, isNot(contains('Mixroom skipped')));
-      expect(message, isNot(contains('import')));
-      expect(message, isNot(contains('generated drums')));
-    });
-
-    test('verified completion shows asked-for skip even without commands', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message': 'Mixroom cannot add drum parts.',
-          'skipped': <String>['generated_drums'],
-        },
-      };
-      expect(
-        aiV3VerifiedCompletionMessage(bundle),
-        'Mixroom skipped generated drums.',
-      );
-    });
-
-    test('verified completion ignores skip wording in user_message', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message':
-              'Sped the track up. Mixroom won\'t generate new drum parts.',
-          'commands': <Map<String, dynamic>>[
-            <String, dynamic>{'type': 'project.set_tempo'},
-            <String, dynamic>{'type': 'mix.apply_goal'},
-          ],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'project.set_tempo',
-            'verified_label': 'Set project tempo to 132 BPM',
-          },
-          <String, dynamic>{
-            'type': 'mix.apply_goal',
-            'verified_label': 'Mixed all project rows',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, contains('132 BPM'));
-      expect(message, isNot(contains('Mixroom skipped')));
-      expect(message, isNot(contains("won't")));
-      expect(message, isNot(contains('drum')));
-    });
-
-    test('observe line reports command types, BPM, and clip pitches', () {
-      expect(
-        aiV3ObserveLine(
-          stage: 'apply',
-          commandTypes: const <String>[
-            'project.set_tempo',
-            'clip.adjust_pitch_semitones',
-          ],
-          bpm: 180,
-          clipPitches: const <double>[3, -2.5],
-        ),
-        '[V3 apply] commands=project.set_tempo,clip.adjust_pitch_semitones bpm=180.0 pitches=3,-2.50',
       );
     });
 

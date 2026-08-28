@@ -197,12 +197,6 @@ void main() {
     expect(row['has_usable_signal'], isFalse);
     expect(row['analysis_available'], isTrue);
     expect(row['has_analyzable_audio'], isFalse);
-    expect(
-      (row['automation_targets'] as List)
-          .map((value) => (value as Map)['target_id'])
-          .toList(),
-      containsAll(<String>['volume', 'mix:gain', 'mix:pan']),
-    );
     expect(row, isNot(contains('gain_ui')));
     expect(row, isNot(contains('pan_01')));
     expect(first.data['capabilities'], hasLength(aiV3CommandTypes.length));

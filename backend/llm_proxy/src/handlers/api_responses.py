@@ -50,12 +50,10 @@ from common.usage_repository import AiUsageRepository
 from common.v3_server_contract import (
     CONTRACT_VERSION as V3_SERVER_CONTRACT_VERSION,
     V3ContractError,
-    build_align_tempo_retry_provider_request,
     build_provider_request as build_v3_server_provider_request,
     contract_fingerprint as v3_server_contract_fingerprint,
     parse_and_validate_provider_plan,
     response_envelope as v3_server_response_envelope,
-    should_retry_align_tempo_collapse,
     validate_context_request as validate_v3_context_request,
 )
 
@@ -837,27 +835,6 @@ def _usage_from_payload(payload: Dict[str, Any]) -> tuple[int, int, int]:
         usage.get("total_tokens") or (prompt_tokens + completion_tokens)
     )
     return prompt_tokens, completion_tokens, total_tokens
-
-
-def _combined_usage_payload(*payloads: Dict[str, Any]) -> Dict[str, Any]:
-    prompt_tokens = 0
-    completion_tokens = 0
-    total_tokens = 0
-    cached_tokens = 0
-    for payload in payloads:
-        current_prompt, current_completion, current_total = _usage_from_payload(payload)
-        prompt_tokens += current_prompt
-        completion_tokens += current_completion
-        total_tokens += current_total
-        cached_tokens += _cached_prompt_tokens_from_payload(payload)
-    usage: Dict[str, Any] = {
-        "input_tokens": prompt_tokens,
-        "output_tokens": completion_tokens,
-        "total_tokens": total_tokens,
-    }
-    if cached_tokens:
-        usage["input_tokens_details"] = {"cached_tokens": cached_tokens}
-    return {"usage": usage}
 
 
 def _cached_prompt_tokens_from_payload(payload: Dict[str, Any]) -> int:
@@ -3705,87 +3682,6 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     ),
                     error=error.code,
                 )
-            if should_retry_align_tempo_collapse(validated_plan):
-                request_log_context["v3_align_tempo_retry_attempted"] = True
-                retry_request_body = build_align_tempo_retry_provider_request(
-                    v3_server_request,
-                    model=_configured_v3_model() or "gpt-5.6-luna",
-                    reasoning_effort=_configured_v3_reasoning_effort(),
-                    max_output_tokens=8192,
-                    prompt_cache_retention="24h",
-                    store=True,
-                )
-                retry_payload: Dict[str, Any] = {}
-                try:
-                    retry_proxy_response = provider.forward_request(
-                        api_key=api_key,
-                        request_body=retry_request_body,
-                        timeout_seconds=_request_timeout_seconds(),
-                    )
-                    retry_observability = retry_proxy_response.get("observability") or {}
-                    if isinstance(retry_observability, dict):
-                        retry_roundtrip_ms = int(
-                            retry_observability.get("provider_roundtrip_ms") or 0
-                        )
-                        retry_openai_api_ms = int(
-                            retry_observability.get("openai_api_ms") or 0
-                        )
-                        provider_roundtrip_ms += retry_roundtrip_ms
-                        openai_api_ms += retry_openai_api_ms
-                        request_log_context["provider_roundtrip_ms"] = (
-                            provider_roundtrip_ms
-                        )
-                        request_log_context["openai_api_ms"] = openai_api_ms
-                    retry_status_code = int(
-                        retry_proxy_response.get("statusCode") or 500
-                    )
-                    retry_response_body = retry_proxy_response.get("body")
-                    if isinstance(retry_response_body, str):
-                        decoded_retry = json.loads(retry_response_body)
-                        if isinstance(decoded_retry, dict):
-                            retry_payload = decoded_retry
-                    billing_payload = {
-                        **response_payload,
-                        **_combined_usage_payload(response_payload, retry_payload),
-                    }
-                    if 200 <= retry_status_code < 300:
-                        retry_plan = parse_and_validate_provider_plan(
-                            retry_payload,
-                            command_types=v3_server_request[
-                                "supported_command_types"
-                            ],
-                            resource_refs_enabled=v3_server_request[
-                                "resource_refs_enabled"
-                            ],
-                        )
-                        validated_plan = retry_plan
-                        billing_payload = {
-                            **retry_payload,
-                            **_combined_usage_payload(
-                                response_payload,
-                                retry_payload,
-                            ),
-                        }
-                        request_log_context[
-                            "v3_align_tempo_retry_succeeded"
-                        ] = True
-                    else:
-                        request_log_context[
-                            "v3_align_tempo_retry_succeeded"
-                        ] = False
-                        request_log_context[
-                            "v3_align_tempo_retry_failure_code"
-                        ] = "upstream_status"
-                except (V3ContractError, json.JSONDecodeError, TypeError, ValueError):
-                    request_log_context["v3_align_tempo_retry_succeeded"] = False
-                    request_log_context[
-                        "v3_align_tempo_retry_failure_code"
-                    ] = "invalid_retry_output"
-                except Exception:
-                    request_log_context["v3_align_tempo_retry_succeeded"] = False
-                    request_log_context[
-                        "v3_align_tempo_retry_failure_code"
-                    ] = "retry_unavailable"
             response_payload = v3_server_response_envelope(
                 plan=validated_plan,
                 prompt_trace_id=prompt_trace_id,

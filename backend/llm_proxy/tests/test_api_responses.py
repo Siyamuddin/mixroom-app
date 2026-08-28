@@ -94,30 +94,6 @@ class _FakeProvider:
         return result
 
 
-class _SequencedProvider(_FakeProvider):
-    def __init__(self, response_bodies: list[dict]) -> None:
-        super().__init__(response_body=response_bodies[0])
-        self.response_bodies = list(response_bodies)
-        self.request_bodies: list[dict] = []
-
-    def forward_request(
-        self,
-        *,
-        api_key: str,
-        request_body: dict,
-        timeout_seconds: int,
-    ) -> dict:
-        self.request_bodies.append(request_body)
-        if not self.response_bodies:
-            raise AssertionError("unexpected provider call")
-        self._response_body = self.response_bodies.pop(0)
-        return super().forward_request(
-            api_key=api_key,
-            request_body=request_body,
-            timeout_seconds=timeout_seconds,
-        )
-
-
 class _ReservationResult:
     def __init__(
         self,
@@ -216,9 +192,7 @@ class ApiResponsesTests(unittest.TestCase):
         return {
             "schema_version": "plan_v3_prototype_2",
             "outcome": "respond",
-            "goal_kind": "question",
             "user_message": "No project changes were needed.",
-            "skipped": [],
             "commands": [],
             "question_options": [],
         }
@@ -639,110 +613,6 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(self.fake_usage_repo.reserve_calls, [])
         get_provider.assert_not_called()
 
-    def test_v3_server_contract_preserves_compound_align_collapse_retry(self) -> None:
-        first_plan = {
-            "schema_version": "plan_v3_prototype_2",
-            "outcome": "plan",
-            "goal_kind": "production_goal",
-            "user_message": "The clip was aligned.",
-            "skipped": [],
-            "commands": [
-                {
-                    "command_id": "align-1",
-                    "type": "clip.align_tempo_to_project",
-                    "arguments": {"clip_id": "clip-1", "mode": "preserve_pitch"},
-                }
-            ],
-            "question_options": [],
-        }
-        retried_plan = {
-            "schema_version": "plan_v3_prototype_2",
-            "outcome": "plan",
-            "goal_kind": "production_goal",
-            "user_message": "The remix was made faster and brighter.",
-            "skipped": [],
-            "commands": [
-                {
-                    "command_id": "tempo-1",
-                    "type": "project.set_tempo",
-                    "arguments": {
-                        "bpm": 150,
-                        "time_stretch_audio": True,
-                        "preserve_pitch": True,
-                    },
-                }
-            ],
-            "question_options": [],
-        }
-        provider = _SequencedProvider(
-            [
-                {
-                    "id": "first-response",
-                    "output": [
-                        {
-                            "type": "function_call",
-                            "name": "submit_plan_v3",
-                            "arguments": json.dumps(first_plan),
-                        }
-                    ],
-                    "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
-                },
-                {
-                    "id": "retry-response",
-                    "output": [
-                        {
-                            "type": "function_call",
-                            "name": "submit_plan_v3",
-                            "arguments": json.dumps(retried_plan),
-                        }
-                    ],
-                    "usage": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
-                },
-            ]
-        )
-        body = self._v3_context_body(
-            original_request="Make this a faster, brighter remix.",
-            supported_command_types=[
-                "clip.align_tempo_to_project",
-                "project.set_tempo",
-            ],
-        )
-        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
-        with mock.patch.dict(
-            os.environ,
-            {
-                "AI_V3_ENABLED": "true",
-                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
-                "AI_V3_MODEL": "gpt-5.6-luna",
-                "AI_V3_REASONING_EFFORT": "low",
-            },
-            clear=False,
-        ), mock.patch.object(
-            api_responses, "_load_api_key", return_value="sk-test"
-        ), mock.patch.object(
-            api_responses, "get_provider", return_value=provider
-        ):
-            result = api_responses.handler(event, None)
-
-        self.assertEqual(result["statusCode"], 200)
-        response = json.loads(result["body"])
-        self.assertEqual(response["plan"], retried_plan)
-        self.assertEqual(len(provider.request_bodies), 2)
-        self.assertNotIn(
-            "previous plan collapsed a production_goal",
-            provider.request_bodies[0]["instructions"],
-        )
-        self.assertIn(
-            "previous plan collapsed a production_goal",
-            provider.request_bodies[1]["instructions"],
-        )
-        self.assertEqual(
-            provider.request_bodies[1]["metadata"]["retry_reason"],
-            "production_goal_align_tempo_collapse",
-        )
-        self.assertEqual(self.fake_usage_repo.finalize_calls[-1]["actual_tokens"], 180)
-        self.assertEqual(self.fake_usage_repo.finalize_calls[-1]["actual_prompts"], 1)
-
     def test_v3_server_contract_rejects_unknown_fields_and_versions_before_quota(
         self,
     ) -> None:
@@ -762,69 +632,6 @@ class ApiResponsesTests(unittest.TestCase):
                     result = api_responses.handler(event, None)
                 self.assertIn(result["statusCode"], {400, 413})
         self.assertEqual(self.fake_usage_repo.reserve_calls, [])
-
-    def test_v3_server_contract_compound_retry_failure_keeps_first_valid_plan(
-        self,
-    ) -> None:
-        first_plan = {
-            "schema_version": "plan_v3_prototype_2",
-            "outcome": "plan",
-            "goal_kind": "production_goal",
-            "user_message": "The clip was aligned.",
-            "skipped": [],
-            "commands": [
-                {
-                    "command_id": "align-1",
-                    "type": "clip.align_tempo_to_project",
-                    "arguments": {"clip_id": "clip-1", "mode": "preserve_pitch"},
-                }
-            ],
-            "question_options": [],
-        }
-        provider = _SequencedProvider(
-            [
-                {
-                    "id": "first-response",
-                    "output": [
-                        {
-                            "type": "function_call",
-                            "name": "submit_plan_v3",
-                            "arguments": json.dumps(first_plan),
-                        }
-                    ],
-                    "usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
-                },
-                {
-                    "id": "invalid-retry",
-                    "output": [],
-                    "usage": {"input_tokens": 50, "output_tokens": 5, "total_tokens": 55},
-                },
-            ]
-        )
-        event = _authed_event(
-            json.dumps(
-                self._v3_context_body(
-                    supported_command_types=["clip.align_tempo_to_project"]
-                )
-            ),
-            path="/v1/llm/v3/responses",
-        )
-        with mock.patch.dict(
-            os.environ,
-            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
-            clear=False,
-        ), mock.patch.object(
-            api_responses, "_load_api_key", return_value="sk-test"
-        ), mock.patch.object(
-            api_responses, "get_provider", return_value=provider
-        ):
-            result = api_responses.handler(event, None)
-
-        self.assertEqual(result["statusCode"], 200)
-        self.assertEqual(json.loads(result["body"])["plan"], first_plan)
-        self.assertEqual(len(provider.request_bodies), 2)
-        self.assertEqual(self.fake_usage_repo.finalize_calls[-1]["actual_tokens"], 175)
-        self.assertEqual(self.fake_usage_repo.finalize_calls[-1]["actual_prompts"], 1)
 
     def test_v3_server_contract_kill_switches_run_before_provider(self) -> None:
         server_event = _authed_event(

@@ -39,10 +39,11 @@ application execution authority.
 
 ## Server-owned contract amendment (2026-08-29)
 
-Backend contract v2 is the sole source of truth for V3 system instructions,
+Backend contract v3 is the sole source of truth for V3 system instructions,
 command descriptions, canonical provider schema, tool-call policy, model and
-reasoning selection, token/cache/storage policy, the generalized
-musical-dimension compiler, and the align-only `production_goal` retry.
+reasoning selection, and token/cache/storage policy. It deliberately tracks the
+V3 behavior on reverted main and excludes the reverted PR #27 semantic compiler,
+goal classification, skipped-capability fields, and retry behavior.
 
 Updated Flutter clients send `mixroom_v3_context_v1` facts and a sorted command
 capability subset, accept only `v3_plan_response_server_v1`, and perform no

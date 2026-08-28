@@ -2,12 +2,9 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:flutter/foundation.dart' show debugPrint;
-
 import 'ai_debug.dart';
 import 'v3/ai_v3_context.dart';
 import 'v3/ai_v3_contract.dart';
-import 'v3/ai_v3_automation_targets.dart';
 import 'v3/ai_v3_planner_service.dart';
 import 'v3/ai_v3_preparer.dart';
 import 'v3/ai_v3_mix_materializer.dart';
@@ -22,8 +19,6 @@ import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
-
-const int _aiV3PreferredUserMessageLength = 500;
 
 typedef AiV3ClipTempoDetector = Future<double?> Function(AudioTrack clip);
 typedef AiV3ClipBoundaryAnalyzer =
@@ -82,12 +77,8 @@ List<String> aiV3VerifiedExecutionDetails(
   if (rawReceipts is List) {
     for (final rawReceipt in rawReceipts.whereType<Map>()) {
       final commandId = rawReceipt['command_id']?.toString().trim() ?? '';
-      final commandType = rawReceipt['type']?.toString().trim() ?? '';
-      // mix.apply_goal expands into many FX knobs. Keep the receipt intent
-      // (brighter EQ, punchier compressor) instead of every parameter line.
-      final executionSummaries = commandType == 'mix.apply_goal'
-          ? const <String>[]
-          : executionSummariesByCommandId[commandId] ?? const <String>[];
+      final executionSummaries =
+          executionSummariesByCommandId[commandId] ?? const <String>[];
       if (executionSummaries.isNotEmpty) {
         for (final summary in executionSummaries) {
           addDetail(summary);
@@ -171,81 +162,13 @@ String aiV3AlreadySatisfiedConversationMessage(Map<String, dynamic> bundle) {
   ].join('\n');
 }
 
-String aiV3ObserveLine({
-  required String stage,
-  required Iterable<String> commandTypes,
-  required double bpm,
-  required Iterable<double> clipPitches,
-}) {
-  final pitches = clipPitches
-      .map(
-        (pitch) =>
-            pitch.toStringAsFixed(pitch == pitch.roundToDouble() ? 0 : 2),
-      )
-      .join(',');
-  return '[V3 $stage] commands=${commandTypes.join(',')} bpm=$bpm pitches=$pitches';
-}
-
-String aiV3VerifiedCompletionMessage(
-  Map<String, dynamic> bundle, {
-  String Function(List<AiV3SkipCode> codes)? skipNoteLocalizer,
-}) {
+String aiV3VerifiedCompletionMessage(Map<String, dynamic> bundle) {
   final plan = bundle['plan'];
-  final plannerMessage = plan is Map
+  final message = plan is Map
       ? plan['user_message']?.toString().trim() ?? ''
       : '';
-  final receiptSummary = _aiV3ReceiptCompletionSummary(bundle);
-  final skipNote = _aiV3ShouldAttachSkipNote(bundle)
-      ? (skipNoteLocalizer ?? aiV3SkipNoteSentence)(
-          _aiV3SkipCodesFromBundle(bundle),
-        )
-      : '';
-  if (receiptSummary.isEmpty && skipNote.isEmpty) {
-    return plannerMessage.isEmpty ? 'Done.' : plannerMessage;
-  }
-  var receipts = receiptSummary;
-  if (skipNote.isEmpty) {
-    if (receipts.length > _aiV3PreferredUserMessageLength) {
-      receipts = receipts.substring(0, _aiV3PreferredUserMessageLength).trim();
-    }
-    return receipts;
-  }
-  final separator = receipts.isEmpty ? 0 : 1;
-  final budget = _aiV3PreferredUserMessageLength - skipNote.length - separator;
-  if (budget <= 0) {
-    return skipNote.length <= _aiV3PreferredUserMessageLength
-        ? skipNote
-        : skipNote.substring(0, _aiV3PreferredUserMessageLength).trim();
-  }
-  if (receipts.length > budget) {
-    receipts = receipts.substring(0, budget).trim();
-  }
-  return receipts.isEmpty ? skipNote : '$receipts $skipNote';
+  return message.isEmpty ? 'Done.' : message;
 }
-
-String _aiV3ReceiptCompletionSummary(Map<String, dynamic> bundle) {
-  final rawReceipts = bundle['receipts'];
-  if (rawReceipts is! List) return '';
-  final sentences = <String>[];
-  for (final raw in rawReceipts.whereType<Map>()) {
-    final verified = raw['verified_label']?.toString().trim() ?? '';
-    final preview = raw['preview_label']?.toString().trim() ?? '';
-    var label = verified.isNotEmpty ? verified : preview;
-    if (label.isEmpty) continue;
-    if (!label.endsWith('.')) label = '$label.';
-    if (!sentences.contains(label)) sentences.add(label);
-  }
-  return sentences.join(' ');
-}
-
-List<AiV3SkipCode> _aiV3SkipCodesFromBundle(Map<String, dynamic> bundle) {
-  final plan = bundle['plan'];
-  if (plan is! Map) return const <AiV3SkipCode>[];
-  return parseAiV3SkipCodes(plan['skipped']);
-}
-
-bool _aiV3ShouldAttachSkipNote(Map<String, dynamic> bundle) =>
-    _aiV3SkipCodesFromBundle(bundle).isNotEmpty;
 
 String _aiV3ClarificationMessage(String question, List<String> options) {
   if (options.isEmpty) return question;
@@ -1365,14 +1288,6 @@ class ChatPipeline {
       );
     }
     final plan = result.plan;
-    final planLine = aiV3ObserveLine(
-      stage: 'plan',
-      commandTypes: plan.commands.map((command) => command.type),
-      bpm: bpm,
-      clipPitches: audioTracks.map((clip) => clip.pitchSemitones),
-    );
-    debugPrint(planLine);
-    aiDebugLog('v3_plan', planLine);
     var preparationElapsedMs = 0;
     var mixMaterializationMeta = const <String, dynamic>{};
     _push('user', userText);
@@ -1803,7 +1718,7 @@ class ChatPipeline {
   }) {
     return _automationTargetsSnapshotForEffects(
       row.effects,
-      mixTargets: const <String>['volume', 'mix:gain', 'mix:pan'],
+      mixTargets: const <String>['volume'],
       maxFx: maxFx,
       maxParamsPerFx: maxParamsPerFx,
     );
@@ -2262,11 +2177,9 @@ class ChatPipeline {
                   },
                 )
                 .toList(growable: false),
-            'automation_targets': aiV3EnsureRowMixAutomationTargets(
-              List<Map<String, dynamic>>.from(
-                automationTargetsByRow[row.rowIndex] ??
-                    const <Map<String, dynamic>>[],
-              ),
+            'automation_targets': List<Map<String, dynamic>>.from(
+              automationTargetsByRow[row.rowIndex] ??
+                  const <Map<String, dynamic>>[],
             ),
           };
         })

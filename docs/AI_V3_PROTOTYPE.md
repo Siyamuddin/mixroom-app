@@ -9,7 +9,7 @@ Updated clients use the authenticated context-only contract:
 
 ```text
 original request + recent conversation + deterministic CoreContextV3 facts
-                    -> backend contract v2 semantic planner
+                    -> backend contract v3 semantic planner
                     -> validated PlanV3 envelope
                     -> Flutter preparation, transaction, readback, and undo
 ```
@@ -20,12 +20,13 @@ capability. It does not ship or send V3 system instructions, tool definitions,
 model or reasoning policy, provider input, cache/storage settings, or request
 overrides.
 
-Backend contract v2 owns all V3 semantics and provider policy. This includes
+Backend contract v3 owns all V3 semantics and provider policy. This includes
 the language, MIDI, mixing, and resource-reference instructions; the canonical
-`submit_plan_v3` provider schema; the request-independent musical-dimension
-compiler introduced for generalized compound requests; and the single
-align-only `production_goal` retry. The retry is server-side, so an updated
-client makes exactly one authenticated request per user prompt.
+`submit_plan_v3` provider schema; and the model, reasoning, token, cache, and
+provider-storage policy. Contract v3 matches the V3 behavior on reverted main;
+it contains none of the PR #27 compiler, goal-classification, skipped-capability,
+or align-only retry additions. An updated client makes exactly one authenticated
+request per user prompt.
 
 ## Client boundary
 

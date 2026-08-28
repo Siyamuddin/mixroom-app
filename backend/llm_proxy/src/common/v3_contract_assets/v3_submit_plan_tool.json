@@ -22,34 +22,10 @@
         ],
         "description": "Use plan exactly when commands is non-empty. Use respond, clarify, or unsupported only when commands is empty."
       },
-      "goal_kind": {
-        "type": "string",
-        "enum": [
-          "named_edit",
-          "production_goal",
-          "question",
-          "unsupported"
-        ],
-        "description": "Intent of the original request, independent of how many commands are emitted and independent of earlier conversation. Use production_goal for a production-style, remix, version, or listening-format result. Use named_edit for a named single DAW action, including pitch-only vocal-character metaphors and an explicit align-to-tempo request. Use question when the request does not ask to change the project. Use unsupported when Mixroom cannot do the request. A production_goal that only emits clip.align_tempo_to_project is still production_goal."
-      },
       "user_message": {
         "type": "string",
         "minLength": 1,
-        "description": "Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. If this original request asked for import, export, generated drums, or true binaural 8D and Mixroom will not do it, put that in skipped, not in this text. This text is held until exact execution and readback succeed. Keep other responses under 500 characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language."
-      },
-      "skipped": {
-        "type": "array",
-        "maxItems": 4,
-        "description": "Closed codes for Mixroom product limits that this original request asked for and this plan did not fake. Use import, export, generated_drums, or binaural_8d only when THIS request asked for that capability. generated_drums means Mixroom will not create drum or generated audio parts: commands must stay empty of sample.place. Leave empty otherwise. Do not invent other codes.",
-        "items": {
-          "type": "string",
-          "enum": [
-            "binaural_8d",
-            "export",
-            "generated_drums",
-            "import"
-          ]
-        }
+        "description": "Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. This text is held until exact execution and readback succeed. Keep other responses under 500 characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language."
       },
       "commands": {
         "type": "array",
@@ -3292,9 +3268,7 @@
     "required": [
       "schema_version",
       "outcome",
-      "goal_kind",
       "user_message",
-      "skipped",
       "commands",
       "question_options"
     ],

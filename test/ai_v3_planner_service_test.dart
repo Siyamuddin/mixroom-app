@@ -25,9 +25,7 @@ AiV3CoreContext _context({List<Map<String, String>> conversation = const []}) =>
 Map<String, dynamic> _respondPlan() => <String, dynamic>{
   'schema_version': aiV3PlanVersion,
   'outcome': 'respond',
-  'goal_kind': 'question',
   'user_message': 'The project is at 120 BPM.',
-  'skipped': const <Object>[],
   'commands': const <Object>[],
   'question_options': const <Object>[],
 };
@@ -252,14 +250,12 @@ void main() {
     expect(httpCalls, 1);
   });
 
-  test('does not repeat an align-only production plan on the client', () async {
+  test('sends one client request for an align-only plan', () async {
     var calls = 0;
     final plan = <String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': 'plan',
-      'goal_kind': 'production_goal',
       'user_message': 'The clip was aligned.',
-      'skipped': const <Object>[],
       'commands': <Map<String, dynamic>>[
         <String, dynamic>{
           'command_id': 'align-1',
@@ -282,7 +278,6 @@ void main() {
       commandTypes: const <String>{'clip.align_tempo_to_project'},
     ).plan(context: _context(), originalRequest: 'Make this a remix.');
 
-    expect(result.plan.goalKind, AiV3GoalKind.productionGoal);
     expect(calls, 1);
   });
 
@@ -290,9 +285,7 @@ void main() {
     final plan = <String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': 'plan',
-      'goal_kind': 'named_edit',
       'user_message': 'Playback started.',
-      'skipped': const <Object>[],
       'commands': <Map<String, dynamic>>[
         <String, dynamic>{
           'command_id': 'play-1',

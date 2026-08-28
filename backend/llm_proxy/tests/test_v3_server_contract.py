@@ -17,12 +17,11 @@ from common import v3_server_contract  # noqa: E402
 class V3ServerContractTests(unittest.TestCase):
     def test_approved_v3_contract_assets_match_golden_hashes(self) -> None:
         expected = {
-            "v3_align_tempo_retry_instructions.txt": "84c3f2fd94c9d57fb43a898d6b9748b026723d1d4503506ddfd7597b7d5926af",
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
-            "v3_instructions.txt": "ad510332fce4e664170d5ab5378f6af41e16cbbda17128de0e85c0f96643f94e",
-            "v3_instructions_resource_refs.txt": "9970f056882aa24ea58aab1c9a9dee2205d6c64c04e9d0ffc8de37def76ac96b",
-            "v3_submit_plan_tool.json": "c6e02a820f22501a5b98af38f57ab8ff32b4ab65a31c8766adf60eab2cbdeb4c",
-            "v3_submit_plan_tool_resource_refs.json": "d526ff016dbd0a18abc34821e43c8251af9f3eda14239d583775e5fe8f8b33c2",
+            "v3_instructions.txt": "e5be3fc19a013ca4a5e5fa3b0e9a55fd7711136530b8e5dac4e9eecea4d5e327",
+            "v3_instructions_resource_refs.txt": "2758f7938f575672c7ad09ac7c405793e6e38de83f47ad61541b10cda0cdb506",
+            "v3_submit_plan_tool.json": "618f7ae8d98a6c4aa5b8816492f5296dfbac52d943a557aa1669970db6162c42",
+            "v3_submit_plan_tool_resource_refs.json": "4598d32a7846cb5caa04557f4a2597aca0febe7a1751649b507add79b638ffd1",
         }
         asset_directory = SRC / "common" / "v3_contract_assets"
         actual = {
@@ -94,9 +93,7 @@ class V3ServerContractTests(unittest.TestCase):
         plan = {
             "schema_version": "plan_v3_prototype_2",
             "outcome": "respond",
-            "goal_kind": "question",
             "user_message": "Done.",
-            "skipped": [],
             "commands": [],
             "question_options": [],
             "internal_reasoning": "secret",
@@ -116,59 +113,6 @@ class V3ServerContractTests(unittest.TestCase):
                 resource_refs_enabled=False,
             )
         self.assertEqual(raised.exception.code, "v3_plan_schema_invalid")
-
-    def test_compound_align_tempo_retry_is_data_driven(self) -> None:
-        base = {
-            "outcome": "plan",
-            "goal_kind": "production_goal",
-            "commands": [
-                {"type": "clip.align_tempo_to_project"},
-                {"type": "clip.align_tempo_to_project"},
-            ],
-        }
-        self.assertTrue(v3_server_contract.should_retry_align_tempo_collapse(base))
-        self.assertFalse(
-            v3_server_contract.should_retry_align_tempo_collapse(
-                {**base, "goal_kind": "named_edit"}
-            )
-        )
-        self.assertFalse(
-            v3_server_contract.should_retry_align_tempo_collapse(
-                {
-                    **base,
-                    "commands": [
-                        {"type": "clip.align_tempo_to_project"},
-                        {"type": "mix.apply_goal"},
-                    ],
-                }
-            )
-        )
-
-    def test_compound_retry_request_keeps_server_contract_and_adds_reminder(self) -> None:
-        request = {
-            "original_request": "Make this a faster, brighter remix.",
-            "conversation": [],
-            "core_context": {"schema_version": "core_context_v3_prototype_1"},
-            "supported_command_types": {
-                "clip.align_tempo_to_project",
-                "project.set_tempo",
-                "mix.apply_goal",
-            },
-            "resource_refs_enabled": False,
-            "prompt_trace_id": "retry-test",
-        }
-        retried = v3_server_contract.build_align_tempo_retry_provider_request(
-            request,
-            model="gpt-5.6-luna",
-            reasoning_effort="low",
-        )
-        self.assertIn("previous plan collapsed a production_goal", retried["instructions"])
-        self.assertEqual(
-            retried["metadata"]["retry_reason"],
-            "production_goal_align_tempo_collapse",
-        )
-        self.assertEqual(retried["tool_choice"]["name"], "submit_plan_v3")
-        self.assertFalse(retried["parallel_tool_calls"])
 
 
 if __name__ == "__main__":
