@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-06-04  
+Last reviewed: 2026-08-29
 Update trigger: Update this when navigation, state ownership, service
 boundaries, backend contracts, or top-level product surfaces change.
 
@@ -80,12 +80,14 @@ Entry points:
 - `backend/llm_proxy/src/handlers/api_responses.py`
 - `backend/llm_proxy/src/handlers/api_mix_resolve.py`
 
-The Flutter app builds project context and action requests. The backend proxy
-owns provider selection, prompt/runtime policy, and server-side model calls.
-Updated clients route one-shot V3 through the authenticated
-`/v1/llm/v3/responses` endpoint; older clients continue using
-`/v1/llm/responses`. Adaptive V3 remains a detached evaluation path and cannot
-replace or execute the visible plan.
+The Flutter app builds deterministic project facts and executes validated
+actions. Backend contract v2 owns V3 semantic instructions, the canonical
+provider tool schema, compound-goal compiler and retry, model/runtime policy,
+and provider calls. Updated clients send the context-only
+`mixroom_v3_context_v1` contract through authenticated
+`/v1/llm/v3/responses`; older released clients remain on the separately gated
+legacy contract during migration. Adaptive, compact, retrieval, and capture
+planners are not shipped in Flutter.
 
 Current V3 commands are reversible and explicitly classified for immediate
 local execution. The client prepares the complete plan, rechecks its state

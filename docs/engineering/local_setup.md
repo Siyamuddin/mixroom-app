@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-07-26
+Last reviewed: 2026-08-29
 Update trigger: Update this when supported platforms, required SDK versions,
 native library selection, media dependencies, or backend local setup changes.
 
@@ -75,5 +75,8 @@ Use those docs when working on auth, billing, entitlements, admin APIs, AI
 proxy behavior, or deployment.
 
 Local V3 backend work uses the existing LLM proxy stack and test environment.
-The server-owned V3 settings are `AI_V3_ENABLED`, `AI_V3_MODEL`, and
-`AI_V3_REASONING_EFFORT`; no provider key belongs in the Flutter client.
+Run its Python test suite before any deployment. The context-only contract is
+gated by `AI_V3_SERVER_CONTRACT_ENABLED`; the temporary released-client path is
+gated separately by `AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED`. Model, reasoning,
+prompt, tool, cache, storage, and provider credentials are backend settings and
+must not be added to Flutter configuration.

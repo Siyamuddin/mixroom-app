@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-06-04  
+Last reviewed: 2026-08-29
 Update trigger: Update this when project schema, clip storage, waveform
 storage, asset import, backup/recovery, cloud sync, collaboration, or export
 file behavior changes.
@@ -69,6 +69,9 @@ serialized key.
 Action-first V3 execution does not introduce a project schema. Verified local
 changes enter the existing compound Undo history and persistence path; failed
 or rolled-back work must not be saved as a successful assistant completion.
+PRO-62 moves V3 semantic planning to the backend but preserves client-side
+project-context collection and the existing persistence and Undo boundaries.
+No project-file field or migration is introduced by that cutover.
 
 ## Export Interaction
 

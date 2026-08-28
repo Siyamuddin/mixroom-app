@@ -35,6 +35,12 @@ dart analyze
 flutter test
 ```
 
+Run the AI IP source gate for every app release candidate:
+
+```bash
+dart run tool/check_ai_ip_boundary.dart --static
+```
+
 For backend changes, run the relevant backend test suite from the backend
 directory before deploying.
 
@@ -75,6 +81,19 @@ flutter build macos
 flutter build windows
 ```
 
+Scan each release-equivalent output before signing or distribution. Pass the
+APK/AAB archive itself and the unpacked iOS, macOS, and Windows application
+directories so assets, native/AOT binaries, frameworks, and symbol bundles are
+included:
+
+```bash
+dart run tool/check_ai_ip_boundary.dart --artifact <artifact-or-directory>
+```
+
+Any V3 or other-AI finding blocks distribution. Update the reviewed manifest
+only when a value is proven non-sensitive; do not allowlist an unrelated prompt
+or direct-provider marker to make a release pass.
+
 ## Backend Deploys
 
 App API and AI proxy deployments use AWS SAM and related scripts. Start with:
@@ -87,12 +106,14 @@ App API and AI proxy deployments use AWS SAM and related scripts. Start with:
 Do not treat app release and backend release as independent when auth, billing,
 entitlements, AI actions, feature flags, or cloud project behavior changes.
 
-For an AI V3 client release, deploy and verify the authenticated
+For an AI V3 client release, deploy and verify the authenticated context-only
 `/v1/llm/v3/responses` route before distributing a build with
-`AI_V3_PRIMARY_ENABLED=true`. The backend owns `AI_V3_MODEL`,
-`AI_V3_REASONING_EFFORT`, and the `AI_V3_ENABLED` kill switch. A client build
-with `AI_V3_PRIMARY_ENABLED=false` keeps the existing V1 route; the app never
-silently retries an individual failed V3 request through V1.
+`AI_V3_PRIMARY_ENABLED=true`. Backend contract v2 owns all V3 semantics and
+provider policy. Keep `AI_V3_SERVER_CONTRACT_ENABLED=true` and
+`AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED=true` while released legacy clients need
+compatibility. A client build with `AI_V3_PRIMARY_ENABLED=false` keeps the
+existing V1 route; the app never silently retries an individual failed V3
+request through V1.
 
 ## Release Sign-Off
 

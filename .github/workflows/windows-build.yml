@@ -32,6 +32,9 @@ jobs:
       - name: Build Windows release
         run: flutter build windows --release
 
+      - name: Enforce AI IP boundary
+        run: dart run tool/check_ai_ip_boundary.dart --static --artifact build/windows/x64/runner/Release
+
       - name: Package portable build
         shell: pwsh
         run: |

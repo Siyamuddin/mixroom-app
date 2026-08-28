@@ -2,7 +2,7 @@
 
 Owner: Audio Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-08-29
 Update trigger: Update this when playback, recording, plugin scanning,
 rendering/export, MIDI, routing, bundled native libraries, or JUCE build inputs
 change.
@@ -50,6 +50,8 @@ V3 action-first chat changes do not bypass this boundary. Prepared AI actions
 still use the same Flutter-owned transaction, native synchronization, exact
 readback, and rollback paths. Slow local rendering or analysis may show
 progress, but chat cannot report success until native verification completes.
+The PRO-62 server-owned planner cutover changes only how semantic plans arrive;
+it does not change audio-engine APIs, execution ordering, or native build inputs.
 
 ## Export Path
 

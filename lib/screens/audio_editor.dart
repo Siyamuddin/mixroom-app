@@ -69,8 +69,6 @@ import 'package:mixroom/ai/producer_data_collector.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/remote_mixing_magnitude_predictor.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
-import 'package:mixroom/ai/v3/ai_v3_capture.dart';
-import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
@@ -9091,80 +9089,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       magnitudePredictor: _magnitudePredictor,
       aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
-              apiKey: LlmConfig.effectiveAiV3PrototypeEnabled
-                  ? LlmConfig.openAiApiKey
-                  : '',
-              model: LlmConfig.aiV3Model,
-              reasoningEffort: LlmConfig.aiV3ReasoningEffort,
               requestTimeout: Duration(
                 seconds: LlmConfig.requestTimeoutSeconds,
               ),
-              proxyApiBaseUrl:
-                  LlmConfig.effectiveAiV3ProxyEnabled &&
-                      !LlmConfig.effectiveAiV3PrototypeEnabled
-                  ? LlmConfig.effectiveProxyApiBaseUrl
-                  : '',
+              proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
               proxyPath: LlmConfig.aiV3ProxyPath,
               authTokenProvider: authService.getIdTokenOrNull,
               refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
               resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
             )
           : null,
-      aiV3CompactShadowPlanner:
-          LlmConfig.aiV3CompactShadowEvaluationEnabled &&
-              LlmConfig.aiV3CaptureEnabled &&
-              LlmConfig.aiV3DetachedComparisonsEnabled &&
-              LlmConfig.canUseDirectOpenAi
-          ? AiV3PlannerService(
-              apiKey: LlmConfig.openAiApiKey,
-              model: LlmConfig.aiV3Model,
-              reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-              requestTimeout: Duration(
-                seconds: LlmConfig.requestTimeoutSeconds,
-              ),
-              commandTypes: aiV3CommonCommandTypes,
-              architecture: 'v3_compact_common_shadow',
-              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
-            )
-          : null,
-      aiV3AdaptiveShadowPlanner:
-          LlmConfig.aiV3AdaptiveShadowEnabled &&
-              LlmConfig.aiV3CaptureEnabled &&
-              LlmConfig.aiV3DetachedComparisonsEnabled &&
-              LlmConfig.canUseDirectOpenAi
-          ? AiV3AdaptivePlannerService(
-              apiKey: LlmConfig.openAiApiKey,
-              model: LlmConfig.aiV3Model,
-              reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-              requestTimeout: Duration(
-                seconds: LlmConfig.requestTimeoutSeconds,
-              ),
-              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
-            )
-          : null,
-      aiV3AdaptiveShadowComparisonPlanner:
-          LlmConfig.aiV3AdaptiveShadowEnabled &&
-              LlmConfig.aiV3CaptureEnabled &&
-              LlmConfig.aiV3DetachedComparisonsEnabled &&
-              LlmConfig.canUseDirectOpenAi &&
-              LlmConfig.aiV3AdaptiveComparisonModel.trim().isNotEmpty &&
-              LlmConfig.aiV3AdaptiveComparisonModel.trim() !=
-                  LlmConfig.aiV3Model.trim()
-          ? AiV3AdaptivePlannerService(
-              apiKey: LlmConfig.openAiApiKey,
-              model: LlmConfig.aiV3AdaptiveComparisonModel,
-              reasoningEffort: LlmConfig.aiV3ReasoningEffort,
-              requestTimeout: Duration(
-                seconds: LlmConfig.requestTimeoutSeconds,
-              ),
-              resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
-            )
-          : null,
-      aiV3Capture: AiV3Capture(
-        enabled: LlmConfig.aiV3CaptureEnabled,
-        directoryPath: LlmConfig.aiV3CaptureDirectory,
-      ),
-      aiV3DetachedComparisonsEnabled: LlmConfig.aiV3DetachedComparisonsEnabled,
       aiV3ContextProfile: parseAiV3ContextProfile(LlmConfig.aiV3ContextProfile),
       aiV3ClipTempoDetector: _detectClipTempoBpm,
       aiV3ClipBoundaryAnalyzer: _analyzeAiV3ClipBoundaries,
@@ -31033,7 +30967,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'daw.automation_edit',
       'daw.clean_content_rows',
       if (LlmConfig.effectiveAiV3Enabled) ...<String>{
-        'ai_v3.one_shot.prototype',
         'daw.stem_separate',
         'daw.audio_enhance',
         'daw.midi_compose.audio_to_midi',
@@ -31063,7 +30996,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : const <Map<String, dynamic>>[];
     return <String, dynamic>{
       'ai_capabilities': aiCapabilities,
-      'ai_v3_prototype_enabled': LlmConfig.effectiveAiV3Enabled,
       if (LlmConfig.normalizedContextPackingMode != 'full')
         'ai_context_packing_mode': LlmConfig.normalizedContextPackingMode,
       if (LlmConfig.normalizedToolRoutingMode != 'full')
