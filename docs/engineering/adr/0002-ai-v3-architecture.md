@@ -1,7 +1,7 @@
 # 0002: AI V3 Uses One Semantic Planner And A Transactional Executor
 
-Status: Accepted; authenticated one-shot production routing implemented,
-deployment gated
+Status: Accepted; server-owned context-only V3 deployed, Flutter cutover in
+release-candidate verification
 
 Date: 2026-07-17
 
@@ -33,13 +33,29 @@ one semantic planner
 -> one transactional executor
 ```
 
-The same planner may request one bounded batch of read-only facts. That is
-context access, not another semantic authority.
+The planner contract and all semantic guidance live on the backend. Flutter
+supplies bounded facts, validates the returned PlanV3, and remains the only
+application execution authority.
 
-The decision-complete compact-core, domain, retrieval, prompt, music-provider,
-performance, and migration specification is
-[`../ai_v3_adaptive_planner.md`](../ai_v3_adaptive_planner.md). That document
-implements this ADR; it does not introduce another semantic stage.
+## Server-owned contract amendment (2026-08-29)
+
+Backend contract v3 is the sole source of truth for V3 system instructions,
+command descriptions, canonical provider schema, tool-call policy, model and
+reasoning selection, and token/cache/storage policy. It deliberately tracks the
+V3 behavior on reverted main and excludes the reverted PR #27 semantic compiler,
+goal classification, skipped-capability fields, and retry behavior.
+
+Updated Flutter clients send `mixroom_v3_context_v1` facts and a sorted command
+capability subset, accept only `v3_plan_response_server_v1`, and perform no
+direct-provider or legacy fallback after a V3 failure. Released clients remain
+supported temporarily by the separately controlled legacy backend route.
+
+Adaptive, compact, retrieval, capture, and music-generation planner
+experiments were removed from the shipped client. Any successor experiment
+must be implemented behind a server-owned contract.
+
+The former adaptive planner specification is retained as historical design
+documentation only; it is not an active client architecture.
 
 ## Adaptive-planner amendment (2026-07-20)
 
@@ -58,9 +74,8 @@ uses:
   assumed production composition path;
 - measured latency objectives rather than a fixed architectural timeout.
 
-The current 54-command one-shot planner is the authenticated production route
-for updated clients. The adaptive path remains detached and shadow-only until
-it passes its activation gates.
+The current command surface is planned by backend contract v3. There is no
+adaptive or shadow planner in the shipped application.
 
 ## Goals
 

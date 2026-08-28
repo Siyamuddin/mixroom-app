@@ -47,6 +47,15 @@ from common.llm_provider import (
 from common.logging_utils import build_request_log_context, log_request_complete
 from common.monitoring import capture_exception, init_sentry
 from common.usage_repository import AiUsageRepository
+from common.v3_server_contract import (
+    CONTRACT_VERSION as V3_SERVER_CONTRACT_VERSION,
+    V3ContractError,
+    build_provider_request as build_v3_server_provider_request,
+    contract_fingerprint as v3_server_contract_fingerprint,
+    parse_and_validate_provider_plan,
+    response_envelope as v3_server_response_envelope,
+    validate_context_request as validate_v3_context_request,
+)
 
 _secret_cache: Any | None = None
 _secret_cache_loaded_at: float | None = None
@@ -418,6 +427,24 @@ def _v3_enabled() -> bool:
     return _env_value("AI_V3_ENABLED", default="true").lower() == "true"
 
 
+def _v3_server_contract_enabled() -> bool:
+    return (
+        _env_value("AI_V3_SERVER_CONTRACT_ENABLED", default="false").lower()
+        == "true"
+    )
+
+
+def _v3_legacy_client_contract_enabled() -> bool:
+    return (
+        _env_value("AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED", default="true").lower()
+        == "true"
+    )
+
+
+def _is_v3_server_contract_request(body: Dict[str, Any]) -> bool:
+    return "request_contract" in body
+
+
 def _configured_v3_model() -> str:
     return _env_value("AI_V3_MODEL", default="gpt-5.6-luna")
 
@@ -428,7 +455,7 @@ def _configured_v3_reasoning_effort() -> str:
     return normalized if normalized in supported else "low"
 
 
-def _validate_v3_request_body(body: Dict[str, Any]) -> None:
+def _validate_v3_legacy_request_body(body: Dict[str, Any]) -> None:
     if any(key in body for key in _STRUCTURED_MIXROOM_FIELDS):
         raise ValueError("V3 requires an OpenAI-compatible planner request.")
     tools = body.get("tools")
@@ -2947,6 +2974,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
 
     is_v3_request = _is_v3_responses_path(request_path)
+    is_v3_server_contract_request = (
+        is_v3_request and _is_v3_server_contract_request(body)
+    )
+    v3_server_request: Dict[str, Any] | None = None
     if is_v3_request and not _v3_enabled():
         return _finalize(
             json_response(
@@ -2961,13 +2992,54 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="v3_disabled",
         )
     if is_v3_request:
-        try:
-            _validate_v3_request_body(body)
-        except ValueError as error:
-            return _finalize(
-                json_response(400, {"error": str(error)}),
-                error="invalid_v3_request",
-            )
+        if is_v3_server_contract_request:
+            if not _v3_server_contract_enabled():
+                return _finalize(
+                    json_response(
+                        503,
+                        {
+                            "error": {
+                                "code": "v3_server_contract_disabled",
+                                "message": "AI V3 server planning is temporarily disabled.",
+                            }
+                        },
+                    ),
+                    error="v3_server_contract_disabled",
+                )
+            try:
+                v3_server_request = validate_v3_context_request(
+                    body,
+                    raw_body_bytes=len(raw_body.encode("utf-8")),
+                )
+            except V3ContractError as error:
+                return _finalize(
+                    json_response(
+                        400,
+                        {"error": {"code": error.code, "message": str(error)}},
+                    ),
+                    error=error.code,
+                )
+        else:
+            if not _v3_legacy_client_contract_enabled():
+                return _finalize(
+                    json_response(
+                        503,
+                        {
+                            "error": {
+                                "code": "v3_legacy_client_contract_disabled",
+                                "message": "This AI V3 client contract is disabled.",
+                            }
+                        },
+                    ),
+                    error="v3_legacy_client_contract_disabled",
+                )
+            try:
+                _validate_v3_legacy_request_body(body)
+            except ValueError as error:
+                return _finalize(
+                    json_response(400, {"error": str(error)}),
+                    error="invalid_v3_request",
+                )
 
     if http_method == "POST" and request_path.endswith("/v1/llm/conversation-events"):
         try:
@@ -2983,12 +3055,33 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 error="conversation_event_failed",
             )
 
-    prompt_trace_id = _prompt_trace_id_from_body(body)
+    prompt_trace_id = (
+        str(v3_server_request.get("prompt_trace_id") or "").strip()
+        if v3_server_request is not None
+        else _prompt_trace_id_from_body(body)
+    ) or str(uuid4())
     request_log_context["prompt_trace_id"] = prompt_trace_id
-    project_id = str(body.get("project_id") or "").strip()
-    request_log_context["project_id"] = project_id
-    analytics_enabled = analytics_enabled_from_body(body)
-    client_context = client_context_from_body(body)
+    project_id = (
+        str(v3_server_request.get("project_id") or "").strip()
+        if v3_server_request is not None
+        else str(body.get("project_id") or "").strip()
+    )
+    if v3_server_request is not None:
+        if project_id:
+            request_log_context["project_id_hash"] = _short_hash(project_id)
+    else:
+        request_log_context["project_id"] = project_id
+    analytics_enabled = (
+        False
+        if v3_server_request is not None
+        else analytics_enabled_from_body(body)
+    )
+    client_context = (
+        dict(v3_server_request.get("analytics_context") or {})
+        if v3_server_request is not None
+        else client_context_from_body(body)
+    )
+    logged_project_id = "" if v3_server_request is not None else project_id
     client_capabilities = _client_capabilities_from_context(client_context)
     raw_ai_feature = (
         "ai_chat_v3"
@@ -3036,17 +3129,27 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     normalized_body = dict(body)
     normalized_body["conversation_state_mode"] = conversation_state_mode_effective
 
-    try:
-        request_body = _normalize_request_body(
-            normalized_body,
-            default_model=str(runtime_config.get("model") or default_model),
-            ai_feature=ai_feature,
+    if v3_server_request is not None:
+        request_body = build_v3_server_provider_request(
+            v3_server_request,
+            model=_configured_v3_model() or "gpt-5.6-luna",
+            reasoning_effort=_configured_v3_reasoning_effort(),
+            max_output_tokens=8192,
+            prompt_cache_retention="24h",
+            store=True,
         )
-    except ValueError as error:
-        return _finalize(
-            json_response(400, {"error": str(error)}),
-            error="request_normalization_failed",
-        )
+    else:
+        try:
+            request_body = _normalize_request_body(
+                normalized_body,
+                default_model=str(runtime_config.get("model") or default_model),
+                ai_feature=ai_feature,
+            )
+        except ValueError as error:
+            return _finalize(
+                json_response(400, {"error": str(error)}),
+                error="request_normalization_failed",
+            )
 
     allow_model_override = (
         os.environ.get("ALLOW_CLIENT_MODEL_OVERRIDE", "false").lower() == "true"
@@ -3056,12 +3159,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     ):
         request_body["model"] = configured_model
 
-    _apply_ai_runtime_overrides(
-        request_body,
-        ai_feature=ai_feature,
-        runtime_config=runtime_config,
-        is_structured_request=is_structured_request,
-    )
+    if v3_server_request is None:
+        _apply_ai_runtime_overrides(
+            request_body,
+            ai_feature=ai_feature,
+            runtime_config=runtime_config,
+            is_structured_request=is_structured_request,
+        )
     if is_v3_request:
         request_body["model"] = configured_model or "gpt-5.6-luna"
         request_body["reasoning"] = {
@@ -3086,6 +3190,12 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         request_body=request_body,
         runtime_config=runtime_config,
     )
+    if v3_server_request is not None:
+        runtime_config_fingerprint = v3_server_contract_fingerprint(
+            command_types=v3_server_request["supported_command_types"],
+            resource_refs_enabled=v3_server_request["resource_refs_enabled"],
+        )
+        request_log_context["v3_contract_version"] = V3_SERVER_CONTRACT_VERSION
     request_log_context["provider"] = provider.name
     request_log_context["effective_model"] = str(request_body.get("model") or "").strip()
     request_log_context["runtime_config_fingerprint"] = runtime_config_fingerprint
@@ -3171,7 +3281,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 _ensure_openai_conversation_id(
                     api_key=api_key,
                     user_id=user_id,
-                    project_id=project_id,
+                    project_id=logged_project_id,
                     ai_feature=ai_feature,
                     conversation_state_mode=conversation_state_mode_effective,
                     conversation_session_id=conversation_session_id,
@@ -3255,7 +3365,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 {
                     "message": "AI usage reservation failed",
                     "user_id": user_id,
-                    "project_id": project_id,
+                    "project_id": logged_project_id,
                     "feature": ai_feature,
                     "subscription_tier": subscription_tier,
                     "reserved_credits": reserved_credits,
@@ -3288,7 +3398,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
         _safe_log_usage_event(
             user_id=user_id,
-            project_id=project_id,
+            project_id=logged_project_id,
             prompt_trace_id=prompt_trace_id,
             request_id=str(request_log_context.get("request_id") or ""),
             feature=ai_feature,
@@ -3312,7 +3422,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 user_id=user_id,
                 client_context=client_context,
                 extra={
-                    "project_id": project_id,
+                    "project_id": logged_project_id,
                     "ai_feature": ai_feature,
                     "model_name": request_body.get("model"),
                     "prompt_trace_id": prompt_trace_id,
@@ -3373,7 +3483,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             user_id=user_id,
             client_context=client_context,
             extra={
-                "project_id": project_id,
+                "project_id": logged_project_id,
                 "ai_feature": ai_feature,
                 "model_name": request_body.get("model"),
                 "prompt_trace_id": prompt_trace_id,
@@ -3438,7 +3548,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             )
         _safe_log_usage_event(
             user_id=user_id,
-            project_id=project_id,
+            project_id=logged_project_id,
             prompt_trace_id=prompt_trace_id,
             request_id=str(request_log_context.get("request_id") or ""),
             feature=ai_feature,
@@ -3463,7 +3573,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 user_id=user_id,
                 client_context=client_context,
                 extra={
-                    "project_id": project_id,
+                    "project_id": logged_project_id,
                     "ai_feature": ai_feature,
                     "model_name": request_body.get("model"),
                     "prompt_trace_id": prompt_trace_id,
@@ -3483,10 +3593,19 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _finalize(
             json_response(
                 502,
-                {
-                    "error": "LLM upstream unavailable.",
-                    "observability": _observability_payload(),
-                },
+                (
+                    {
+                        "error": {
+                            "code": "v3_upstream_unavailable",
+                            "message": "AI V3 planning is temporarily unavailable.",
+                        }
+                    }
+                    if v3_server_request is not None
+                    else {
+                        "error": "LLM upstream unavailable.",
+                        "observability": _observability_payload(),
+                    }
+                ),
             ),
             error="llm_upstream_unavailable",
         )
@@ -3504,17 +3623,86 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     if 200 <= status_code < 300:
         normalization_started_at = time.perf_counter()
-        response_payload, normalization_issues, normalization_refunded = _normalize_success_payload(
-            request_body=request_body,
-            payload=response_payload,
-            client_capabilities=client_capabilities,
-        )
+        billing_payload = response_payload
+        if v3_server_request is not None:
+            try:
+                validated_plan = parse_and_validate_provider_plan(
+                    response_payload,
+                    command_types=v3_server_request["supported_command_types"],
+                    resource_refs_enabled=v3_server_request["resource_refs_enabled"],
+                )
+            except V3ContractError as error:
+                try:
+                    _usage_repo.release_usage(
+                        user_id,
+                        subscription_tier=subscription_tier,
+                        reserved_credits=reserved_credits,
+                        reserved_tokens=reserved_tokens,
+                        reserved_prompts=1,
+                        reserved_quota_prompts=reservation.reserved_quota_prompts,
+                        reserved_grant_prompts=reservation.reserved_grant_prompts,
+                    )
+                except Exception as release_error:
+                    capture_exception(
+                        release_error,
+                        context={**request_log_context, "feature": ai_feature},
+                        tags={"service": "llm_proxy"},
+                    )
+                _safe_log_usage_event(
+                    user_id=user_id,
+                    project_id=logged_project_id,
+                    prompt_trace_id=prompt_trace_id,
+                    request_id=str(request_log_context.get("request_id") or ""),
+                    feature=ai_feature,
+                    model=str(request_body.get("model") or ""),
+                    provider=provider.name,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    credits_charged=0,
+                    status="failed",
+                    error_code=error.code,
+                    runtime_config_fingerprint=runtime_config_fingerprint,
+                    app_version=str(client_context.get("app_version") or ""),
+                    platform=str(client_context.get("platform") or ""),
+                    proxy_handler_ms_total=int(
+                        (time.perf_counter() - started_at) * 1000
+                    ),
+                    provider_roundtrip_ms=provider_roundtrip_ms,
+                )
+                return _finalize(
+                    json_response(
+                        502,
+                        {
+                            "error": {
+                                "code": "v3_invalid_provider_output",
+                                "message": "AI V3 could not produce a valid plan.",
+                            }
+                        },
+                    ),
+                    error=error.code,
+                )
+            response_payload = v3_server_response_envelope(
+                plan=validated_plan,
+                prompt_trace_id=prompt_trace_id,
+                request_id=str(request_log_context.get("request_id") or ""),
+                fingerprint=runtime_config_fingerprint,
+            )
+            normalization_issues: list[str] = []
+            normalization_refunded = False
+        else:
+            response_payload, normalization_issues, normalization_refunded = _normalize_success_payload(
+                request_body=request_body,
+                payload=response_payload,
+                client_capabilities=client_capabilities,
+            )
+            billing_payload = response_payload
         response_normalize_ms = int((time.perf_counter() - normalization_started_at) * 1000)
         if response_normalize_ms > 0:
             request_log_context["response_normalize_ms"] = response_normalize_ms
         _update_request_log_context_with_cache_response(
             request_log_context,
-            response_payload,
+            billing_payload,
         )
         proxy_response = {
             **proxy_response,
@@ -3531,11 +3719,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     }
                 )
             )
-        prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(response_payload)
-        resolved_tool = _resolved_tool_name_from_payload(response_payload)
+        prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(billing_payload)
+        resolved_tool = _resolved_tool_name_from_payload(billing_payload)
         if resolved_tool:
             request_log_context["resolved_tool"] = resolved_tool
-        provider_response_id = str(response_payload.get("id") or "").strip()
+        provider_response_id = str(billing_payload.get("id") or "").strip()
         if provider_response_id:
             request_log_context["provider_response_id"] = provider_response_id
         credits_charged = calculate_credit_cost(
@@ -3610,7 +3798,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             )
         _safe_log_usage_event(
             user_id=user_id,
-            project_id=project_id,
+            project_id=logged_project_id,
             prompt_trace_id=prompt_trace_id,
             request_id=str(request_log_context.get("request_id") or ""),
             feature=ai_feature,
@@ -3642,7 +3830,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 user_id=user_id,
                 client_context=client_context,
                 extra={
-                    "project_id": project_id,
+                    "project_id": logged_project_id,
                     "ai_feature": ai_feature,
                     "model_name": response_payload.get("model") or request_body.get("model"),
                     "prompt_trace_id": prompt_trace_id,
@@ -3684,7 +3872,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     user_id=user_id,
                     client_context=client_context,
                     extra={
-                        "project_id": project_id,
+                        "project_id": logged_project_id,
                         "ai_feature": ai_feature,
                         "model_name": response_payload.get("model")
                         or request_body.get("model"),
@@ -3707,11 +3895,16 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 ),
                 enabled=analytics_enabled,
             )
-        response_payload["observability"] = _observability_payload()
-        proxy_response = {
-            **proxy_response,
-            "body": json.dumps(response_payload),
-        }
+        if v3_server_request is None:
+            response_payload["observability"] = _observability_payload()
+        proxy_response = (
+            json_response(status_code, response_payload)
+            if v3_server_request is not None
+            else {
+                **proxy_response,
+                "body": json.dumps(response_payload),
+            }
+        )
         return _finalize(proxy_response)
 
     prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(response_payload)
@@ -3722,8 +3915,12 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     provider_response_id = str(response_payload.get("id") or "").strip()
     if provider_response_id:
         request_log_context["provider_response_id"] = provider_response_id
-    error_code = _error_code_from_payload(response_payload, status_code)
-    if status_code >= 400:
+    error_code = (
+        "v3_upstream_error"
+        if v3_server_request is not None
+        else _error_code_from_payload(response_payload, status_code)
+    )
+    if status_code >= 400 and v3_server_request is None:
         print(
             json.dumps(
                 {
@@ -3756,7 +3953,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
     _safe_log_usage_event(
         user_id=user_id,
-        project_id=project_id,
+        project_id=logged_project_id,
         prompt_trace_id=prompt_trace_id,
         request_id=str(request_log_context.get("request_id") or ""),
         feature=ai_feature,
@@ -3782,7 +3979,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             user_id=user_id,
             client_context=client_context,
             extra={
-                "project_id": project_id,
+                "project_id": logged_project_id,
                 "ai_feature": ai_feature,
                 "model_name": request_body.get("model"),
                 "prompt_trace_id": prompt_trace_id,
@@ -3810,14 +4007,30 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             },
             tags={"service": "llm_proxy"},
         )
-    response_payload["observability"] = _observability_payload()
     client_status_code = _client_status_code_for_upstream_error(status_code)
-    if client_status_code != status_code:
-        response_payload["error"] = "LLM upstream rate limited. Please try again shortly."
-        response_payload["code"] = "llm_upstream_rate_limited"
-    proxy_response = {
-        **proxy_response,
-        "statusCode": client_status_code,
-        "body": json.dumps(response_payload),
-    }
+    if v3_server_request is not None:
+        response_payload = {
+            "error": {
+                "code": (
+                    "v3_upstream_rate_limited"
+                    if status_code == 429
+                    else "v3_upstream_error"
+                ),
+                "message": "AI V3 planning is temporarily unavailable.",
+            }
+        }
+    else:
+        response_payload["observability"] = _observability_payload()
+        if client_status_code != status_code:
+            response_payload["error"] = "LLM upstream rate limited. Please try again shortly."
+            response_payload["code"] = "llm_upstream_rate_limited"
+    proxy_response = (
+        json_response(client_status_code, response_payload)
+        if v3_server_request is not None
+        else {
+            **proxy_response,
+            "statusCode": client_status_code,
+            "body": json.dumps(response_payload),
+        }
+    )
     return _finalize(proxy_response, error=error_code)

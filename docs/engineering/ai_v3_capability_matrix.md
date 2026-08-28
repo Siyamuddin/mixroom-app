@@ -2,7 +2,7 @@
 
 Owner: AI Engineering
 Status: Complete source audit; execution evidence remains capability-specific
-Last reviewed: 2026-07-26
+Last reviewed: 2026-08-29
 
 The machine-readable authority is
 [`tool/ai_v3_eval/v3_capabilities.yaml`](../../tool/ai_v3_eval/v3_capabilities.yaml).
@@ -55,9 +55,15 @@ Status meanings:
 No capability is marked `verified` merely because its schema parses or a mock
 test passes. No entry remains `not_audited`.
 
-Routing status is independent of capability coverage. Updated clients select
-authenticated one-shot V3, older clients remain on V1, and adaptive V3 remains
-detached shadow-only. This routing change adds no command or capability claim.
+Routing status is independent of capability coverage. Updated clients send
+context and an executable command allowlist to the authenticated server-owned
+V3 contract. The backend owns prompts, tool descriptions, and provider policy
+for the V3 behavior on reverted main; it does not include the reverted PR #27
+musical-dimension compiler or align-only production-goal retry. Released legacy
+V3 clients remain supported by the backend compatibility switch, while V1
+remains available when the V3 product switch is disabled. Adaptive and compact
+shadow planners are no longer shipped. This routing change adds no command or
+capability claim.
 
 ## V1 architecture
 
@@ -250,8 +256,9 @@ are simply absent from this capture set.
 
 ## V1→V3 migration order
 
-1. Keep the existing typed V3 prototype and its stable-ID preparation,
-   preview, local transaction, and readback boundary.
+1. Keep the typed V3 wire plan and its stable-ID preparation, preview, local
+   transaction, and readback boundary while backend contract v3 owns semantic
+   planning.
 2. Add representative typed core editing slices: transport, row lifecycle/state,
    clip core, MIDI editing, effect instances, and general automation.
 3. The `mix.apply_goal` vertical slice now integrates typed GoalVector,
@@ -264,11 +271,12 @@ are simply absent from this capture set.
 6. Measure large projects/catalogs before enabling the optional single
    planner-owned retrieval round.
 
-## Adaptive V3 capability placement
+## Historical adaptive V3 capability placement
 
-The authoritative adaptive-planner specification is
+The historical adaptive-planner specification is
 [`ai_v3_adaptive_planner.md`](ai_v3_adaptive_planner.md). It prevents V1 parity
-from becoming one flat schema.
+from becoming one flat schema. Its shipped Dart implementation was removed by
+PRO-62; future adaptive or retrieval work belongs behind the server contract.
 
 ### Always-present common commands
 

@@ -3,11 +3,25 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-import '../ai_model_cost.dart';
 import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
-import 'ai_v3_planner_request.dart';
 import 'ai_v3_resources.dart';
+
+const String aiV3ContextRequestContract = 'mixroom_v3_context_v1';
+const String aiV3ServerResponseVersion = 'v3_plan_response_server_v1';
+
+const Set<String> _allowedResponseFields = <String>{
+  'schema_version',
+  'plan',
+  'trace',
+  'prompt_rate_limit',
+};
+const Set<String> _allowedTraceFields = <String>{
+  'contract_version',
+  'contract_fingerprint',
+  'prompt_trace_id',
+  'request_id',
+};
 
 class AiV3PlannerException implements Exception {
   const AiV3PlannerException(
@@ -15,6 +29,7 @@ class AiV3PlannerException implements Exception {
     this.detail = '',
     this.diagnostic = const <String, dynamic>{},
   ]);
+
   final String code;
   final String detail;
   final Map<String, dynamic> diagnostic;
@@ -26,23 +41,13 @@ class AiV3PlannerException implements Exception {
 }
 
 class AiV3PlannerResult {
-  const AiV3PlannerResult({
-    required this.plan,
-    required this.rawResponse,
-    required this.meta,
-    this.requestBody = const <String, dynamic>{},
-  });
+  const AiV3PlannerResult({required this.plan, required this.meta});
 
   final AiV3Plan plan;
-  final Map<String, dynamic> rawResponse;
   final Map<String, dynamic> meta;
-  final Map<String, dynamic> requestBody;
 }
 
 abstract interface class AiV3Planner {
-  String get model;
-  String get reasoningEffort;
-
   Future<AiV3PlannerResult> plan({
     required AiV3CoreContext context,
     required String originalRequest,
@@ -50,42 +55,72 @@ abstract interface class AiV3Planner {
   });
 }
 
+Map<String, dynamic> buildAiV3ContextRequestBody({
+  required Map<String, dynamic> contextData,
+  required String originalRequest,
+  String? promptTraceId,
+  Set<String> commandTypes = aiV3CommandTypes,
+  bool resourceRefsEnabled = false,
+}) {
+  final coreContext = Map<String, dynamic>.from(contextData)
+    ..remove('original_request')
+    ..remove('conversation');
+  final rawConversation = contextData['conversation'];
+  final conversation = <Map<String, String>>[];
+  if (rawConversation is List) {
+    for (final rawTurn in rawConversation.whereType<Map>()) {
+      final role = rawTurn['role']?.toString().trim() ?? '';
+      final content = rawTurn['content']?.toString().trim() ?? '';
+      if ((role == 'user' || role == 'assistant') && content.isNotEmpty) {
+        conversation.add(<String, String>{'role': role, 'content': content});
+      }
+    }
+  }
+  final boundedConversation = conversation.length <= 12
+      ? conversation
+      : conversation.sublist(conversation.length - 12);
+  final project = coreContext['project'];
+  final projectId = project is Map
+      ? project['project_id']?.toString().trim() ?? ''
+      : '';
+  final normalizedTraceId = (promptTraceId ?? '').trim();
+  final sortedCommandTypes = commandTypes.toList(growable: false)..sort();
+
+  return <String, dynamic>{
+    'request_contract': aiV3ContextRequestContract,
+    'original_request': originalRequest.trim(),
+    'conversation': boundedConversation,
+    'core_context': coreContext,
+    'plan_schema_version': aiV3PlanVersion,
+    'supported_command_types': sortedCommandTypes,
+    'resource_refs_enabled': resourceRefsEnabled,
+    if (projectId.isNotEmpty) 'project_id': projectId,
+    if (normalizedTraceId.isNotEmpty) 'prompt_trace_id': normalizedTraceId,
+  };
+}
+
 class AiV3PlannerService implements AiV3Planner {
   AiV3PlannerService({
-    this.apiKey = '',
-    required this.model,
-    this.reasoningEffort = 'low',
-    this.requestTimeout = const Duration(seconds: 40),
-    Set<String> commandTypes = aiV3CommandTypes,
-    this.architecture = 'v3_one_shot_prototype',
-    this.proxyApiBaseUrl = '',
+    required this.proxyApiBaseUrl,
     this.proxyPath = '/v1/llm/v3/responses',
     this.authTokenProvider,
     this.refreshAuthTokenProvider,
+    this.requestTimeout = const Duration(seconds: 40),
+    Set<String> commandTypes = aiV3CommandTypes,
     this.resourceRefsEnabled = false,
     http.Client? httpClient,
-  })  : assert(commandTypes.isNotEmpty),
-        commandTypes = Set<String>.unmodifiable(commandTypes),
-        _httpClient = httpClient ?? http.Client();
+  }) : assert(commandTypes.isNotEmpty),
+       commandTypes = Set<String>.unmodifiable(commandTypes),
+       _httpClient = httpClient ?? http.Client();
 
-  static const String _apiUrl = 'https://api.openai.com/v1/responses';
-
-  final String apiKey;
-  @override
-  final String model;
-  @override
-  final String reasoningEffort;
-  final Duration requestTimeout;
-  final Set<String> commandTypes;
-  final String architecture;
   final String proxyApiBaseUrl;
   final String proxyPath;
   final Future<String?> Function()? authTokenProvider;
   final Future<String?> Function()? refreshAuthTokenProvider;
+  final Duration requestTimeout;
+  final Set<String> commandTypes;
   final bool resourceRefsEnabled;
   final http.Client _httpClient;
-
-  bool get _usesProxy => proxyApiBaseUrl.trim().isNotEmpty;
 
   @override
   Future<AiV3PlannerResult> plan({
@@ -93,32 +128,25 @@ class AiV3PlannerService implements AiV3Planner {
     required String originalRequest,
     String? promptTraceId,
   }) async {
-    if (model.trim().isEmpty ||
-        (!_usesProxy && apiKey.trim().isEmpty) ||
-        (_usesProxy && authTokenProvider == null)) {
-      throw const AiV3PlannerException('v3_openai_configuration_missing');
+    if (proxyApiBaseUrl.trim().isEmpty || authTokenProvider == null) {
+      throw const AiV3PlannerException('v3_proxy_configuration_missing');
     }
-    final body = buildAiV3PlannerRequestBody(
+    final body = buildAiV3ContextRequestBody(
       contextData: context.data,
       originalRequest: originalRequest,
-      model: model,
-      reasoningEffort: reasoningEffort,
       promptTraceId: promptTraceId,
       commandTypes: commandTypes,
-      architecture: architecture,
       resourceRefsEnabled: resourceRefsEnabled,
     );
-    final stopwatch = Stopwatch()..start();
-    late http.Response response;
     try {
-      response = _usesProxy
-          ? await _postProxy(body, promptTraceId: promptTraceId)
-          : await _postDirect(body);
+      final response = await _postProxy(body);
+      return _parseResponse(response);
     } on TimeoutException {
       throw const AiV3PlannerException('v3_planner_timeout');
-    } finally {
-      stopwatch.stop();
     }
+  }
+
+  AiV3PlannerResult _parseResponse(http.Response response) {
     Map<String, dynamic> decoded;
     try {
       final value = jsonDecode(response.body);
@@ -132,130 +160,113 @@ class AiV3PlannerService implements AiV3Planner {
       );
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final error = decoded['error'];
-      final errorCode =
-          error is Map ? error['code']?.toString().trim() ?? '' : '';
-      final errorParam =
-          error is Map ? error['param']?.toString().trim() ?? '' : '';
-      final errorMessage =
-          error is Map ? error['message']?.toString().trim() ?? '' : '';
-      final safeMessage = errorMessage
-          .replaceAll(RegExp(r'\bsk-[A-Za-z0-9_-]+\b'), '[redacted]')
-          .replaceAll(RegExp(r'\s+'), ' ');
+      final rawError = decoded['error'];
+      final rawCode = rawError is Map ? rawError['code']?.toString() ?? '' : '';
+      final safeCode = RegExp(r'^[a-z0-9_]{1,80}$').hasMatch(rawCode)
+          ? rawCode
+          : 'server_error';
       throw AiV3PlannerException(
         'v3_planner_http_error',
-        <String>[
-          response.statusCode.toString(),
-          errorCode.isEmpty ? 'unknown' : errorCode,
-          if (errorParam.isNotEmpty) 'param=$errorParam',
-          if (safeMessage.isNotEmpty)
-            'message=${safeMessage.substring(0, safeMessage.length > 500 ? 500 : safeMessage.length)}',
-        ].join(':'),
+        'http_${response.statusCode}:$safeCode',
       );
     }
-    final usage = decoded['usage'] is Map
-        ? Map<String, dynamic>.from(decoded['usage'] as Map)
-        : const <String, dynamic>{};
-    late final Map<String, dynamic> arguments;
+    if (decoded['schema_version'] != aiV3ServerResponseVersion ||
+        decoded.keys.any((key) => !_allowedResponseFields.contains(key))) {
+      throw const AiV3PlannerException('v3_server_response_contract_invalid');
+    }
+    final rawTrace = decoded['trace'];
+    if (rawTrace is! Map ||
+        rawTrace.keys.any((key) => !_allowedTraceFields.contains(key))) {
+      throw const AiV3PlannerException('v3_server_response_contract_invalid');
+    }
+    final trace = <String, String>{};
+    for (final key in _allowedTraceFields) {
+      final value = rawTrace[key];
+      if (value is String && value.trim().isNotEmpty) {
+        trace[key] = value.trim();
+      }
+    }
+    if ((trace['contract_version'] ?? '').isEmpty ||
+        (trace['contract_fingerprint'] ?? '').isEmpty) {
+      throw const AiV3PlannerException('v3_server_response_contract_invalid');
+    }
+    final rawPlan = decoded['plan'];
+    if (rawPlan is! Map) {
+      throw const AiV3PlannerException('v3_server_response_contract_invalid');
+    }
     late final AiV3Plan plan;
     try {
-      arguments = _functionArguments(decoded);
       plan = AiV3Plan.fromJson(
-        arguments,
+        Map<String, dynamic>.from(rawPlan),
         allowResourceRefs: resourceRefsEnabled,
         resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
       );
-      if (plan.commands
-          .any((command) => !commandTypes.contains(command.type))) {
-        throw const AiV3ContractException(
-          'v3_planner_command_outside_surface',
-        );
+      if (plan.commands.any(
+        (command) => !commandTypes.contains(command.type),
+      )) {
+        throw const AiV3ContractException('v3_planner_command_outside_surface');
       }
     } on AiV3ContractException catch (error) {
-      throw AiV3PlannerException(
-        'v3_planner_contract_invalid',
-        error.code,
-        <String, dynamic>{
-          'raw_response': decoded,
-          'tool_arguments': arguments,
-          'usage': usage,
-        },
-      );
-    } on AiV3PlannerException catch (error) {
-      throw AiV3PlannerException(
-        error.code,
-        error.detail,
-        <String, dynamic>{
-          'raw_response': decoded,
-          'usage': usage,
-        },
-      );
+      throw AiV3PlannerException('v3_planner_contract_invalid', error.code);
     }
-    final serviceTier = decoded['service_tier']?.toString() ?? '';
+    final rateLimit = _sanitizePromptRateLimit(decoded['prompt_rate_limit']);
     return AiV3PlannerResult(
       plan: plan,
-      rawResponse: decoded,
       meta: <String, dynamic>{
-        'architecture': architecture,
-        'model': decoded['model']?.toString().trim().isNotEmpty == true
-            ? decoded['model'].toString().trim()
-            : model,
-        'reasoning_effort': reasoningEffort,
-        'llm_route': _usesProxy ? 'authenticated_proxy' : 'direct_openai_debug',
-        'context_profile': context.profileName,
-        'context_approximate_tokens': context.approximateTokens,
-        'model_call_elapsed_ms': stopwatch.elapsedMilliseconds,
-        'usage': usage,
-        if (estimateOpenAiModelCost(
-          model: model,
-          usage: usage,
-          serviceTier: serviceTier,
-        )
-            case final cost?)
-          'cost_estimate': cost,
-        'provider_response_id': decoded['id'],
+        'trace': trace,
+        if (rateLimit.isNotEmpty) 'prompt_rate_limit': rateLimit,
       },
-      requestBody: body,
     );
   }
 
-  Future<http.Response> _postDirect(Map<String, dynamic> body) {
-    return _httpClient
-        .post(
-          Uri.parse(_apiUrl),
-          headers: <String, String>{
-            'Authorization': 'Bearer ${apiKey.trim()}',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(body),
-        )
-        .timeout(requestTimeout);
+  Map<String, dynamic> _sanitizePromptRateLimit(Object? raw) {
+    if (raw is! Map) return const <String, dynamic>{};
+    Map<String, dynamic> window(Object? value) {
+      if (value is! Map) return const <String, dynamic>{};
+      return <String, dynamic>{
+        for (final key in const <String>['used', 'limit', 'remaining'])
+          if (value[key] is num) key: value[key],
+        if (value['resets_at'] is String)
+          'resets_at': (value['resets_at'] as String).trim(),
+      };
+    }
+
+    final extra = raw['extra_prompt_bank'];
+    return <String, dynamic>{
+      if (window(raw['daily']).isNotEmpty) 'daily': window(raw['daily']),
+      if (window(raw['weekly']).isNotEmpty) 'weekly': window(raw['weekly']),
+      if (raw['can_submit'] is bool) 'can_submit': raw['can_submit'],
+      if (raw['blocked_by'] is String)
+        'blocked_by': (raw['blocked_by'] as String).trim(),
+      if (extra is Map)
+        'extra_prompt_bank': <String, dynamic>{
+          if (extra['remaining'] is num) 'remaining': extra['remaining'],
+          if (extra['consumed_first'] is bool)
+            'consumed_first': extra['consumed_first'],
+        },
+    };
   }
 
-  Future<http.Response> _postProxy(
-    Map<String, dynamic> body, {
-    String? promptTraceId,
-  }) async {
-    var token = await _resolveProxyAuthToken();
+  Future<http.Response> _postProxy(Map<String, dynamic> body) async {
+    var token = await _resolveProxyAuthToken(authTokenProvider);
+    var refreshUsed = false;
+    if (token == null && refreshAuthTokenProvider != null) {
+      refreshUsed = true;
+      token = await _resolveProxyAuthToken(refreshAuthTokenProvider);
+    }
     if (token == null) {
       throw const AiV3PlannerException('v3_proxy_auth_token_missing');
     }
-    var response = await _postProxyWithToken(
-      body,
-      token: token,
-      promptTraceId: promptTraceId,
-    );
+    var response = await _postProxyWithToken(body, token: token);
     if ((response.statusCode == 401 || response.statusCode == 403) &&
+        !refreshUsed &&
         refreshAuthTokenProvider != null) {
-      token = await _resolveProxyAuthToken(forceRefresh: true);
+      refreshUsed = true;
+      token = await _resolveProxyAuthToken(refreshAuthTokenProvider);
       if (token == null) {
         throw const AiV3PlannerException('v3_proxy_auth_token_missing');
       }
-      response = await _postProxyWithToken(
-        body,
-        token: token,
-        promptTraceId: promptTraceId,
-      );
+      response = await _postProxyWithToken(body, token: token);
     }
     return response;
   }
@@ -263,38 +274,22 @@ class AiV3PlannerService implements AiV3Planner {
   Future<http.Response> _postProxyWithToken(
     Map<String, dynamic> body, {
     required String token,
-    String? promptTraceId,
-  }) {
-    final normalizedTraceId = (promptTraceId ?? '').trim();
-    final proxyBody = <String, dynamic>{
-      ...body,
-      'ai_feature': 'ai_chat_v3',
-      'client_context': <String, dynamic>{
-        'ai_architecture': architecture,
-      },
-      if (normalizedTraceId.isNotEmpty) 'prompt_trace_id': normalizedTraceId,
-    };
-    return _httpClient
-        .post(
-          _proxyUri(),
-          headers: <String, String>{
-            'Authorization': 'Bearer $token',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(proxyBody),
-        )
-        .timeout(requestTimeout);
-  }
+  }) => _httpClient
+      .post(
+        _proxyUri(),
+        headers: <String, String>{
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(body),
+      )
+      .timeout(requestTimeout);
 
-  Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
-    final provider =
-        forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
+  Future<String?> _resolveProxyAuthToken(
+    Future<String?> Function()? provider,
+  ) async {
     final token = (await provider?.call())?.trim() ?? '';
     if (token.isNotEmpty) return token;
-    if (!forceRefresh && refreshAuthTokenProvider != null) {
-      final refreshed = (await refreshAuthTokenProvider!.call())?.trim() ?? '';
-      if (refreshed.isNotEmpty) return refreshed;
-    }
     return null;
   }
 
@@ -304,42 +299,8 @@ class AiV3PlannerService implements AiV3Planner {
     final path = configuredPath.isEmpty
         ? '/v1/llm/v3/responses'
         : (configuredPath.startsWith('/')
-            ? configuredPath
-            : '/$configuredPath');
+              ? configuredPath
+              : '/$configuredPath');
     return Uri.parse('$base$path');
   }
-}
-
-Map<String, dynamic> _functionArguments(Map<String, dynamic> response) {
-  final output = response['output'];
-  if (output is! List) {
-    throw const AiV3PlannerException('v3_planner_tool_call_missing');
-  }
-  final calls = output
-      .whereType<Map>()
-      .where((value) => value['type'] == 'function_call')
-      .toList(growable: false);
-  if (calls.isEmpty) {
-    throw const AiV3PlannerException('v3_planner_tool_call_missing');
-  }
-  if (calls.length != 1) {
-    throw const AiV3PlannerException('v3_planner_tool_call_count_invalid');
-  }
-  final call = calls.single;
-  if (call['name'] != 'submit_plan_v3') {
-    throw const AiV3PlannerException('v3_planner_tool_call_invalid');
-  }
-  final rawArguments = call['arguments'];
-  if (rawArguments is Map) {
-    return Map<String, dynamic>.from(rawArguments);
-  }
-  if (rawArguments is String) {
-    try {
-      final decoded = jsonDecode(rawArguments);
-      if (decoded is Map) return Map<String, dynamic>.from(decoded);
-    } catch (_) {
-      throw const AiV3PlannerException('v3_planner_arguments_invalid_json');
-    }
-  }
-  throw const AiV3PlannerException('v3_planner_arguments_invalid_json');
 }

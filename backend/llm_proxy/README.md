@@ -21,9 +21,18 @@ This package is the minimal beta-safe backend for Mixroom chat. Its job is to:
 
 This is the beta target architecture. The app should send context only; Lambda owns the server prompt, tools, and default model.
 
-The dedicated V3 route accepts the strict one-shot `submit_plan_v3` request,
-pins the configured V3 model and reasoning effort server-side, and can be
-disabled with `AI_V3_ENABLED=false`. Existing clients remain on the V1 route.
+The dedicated V3 route has two explicitly gated contracts:
+
+- `request_contract: "mixroom_v3_context_v1"` accepts facts only and builds the
+  complete prompt, tool schema, capability intersection, and provider policy on
+  the server. It returns a validated `v3_plan_response_server_v1` envelope.
+- The legacy client-authored one-shot request remains temporarily available for
+  released applications.
+
+`AI_V3_ENABLED=false` disables the whole V3 route.
+`AI_V3_SERVER_CONTRACT_ENABLED=false` rolls back only the context-only mode.
+`AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED=false` disables the transitional legacy
+mode after released clients have migrated.
 
 ## AWS services
 
@@ -82,8 +91,24 @@ sam deploy --guided
 - `LLM_MAX_OUTPUT_TOKENS`
 - `LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS`
 - `AI_V3_ENABLED`
+- `AI_V3_SERVER_CONTRACT_ENABLED`
+- `AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED`
 - `AI_V3_MODEL`
 - `AI_V3_REASONING_EFFORT`
+
+### V3 context-only request
+
+The accepted top-level fields are deliberately closed: `request_contract`,
+`original_request`, `conversation`, `core_context`, `plan_schema_version`,
+`supported_command_types`, `resource_refs_enabled`, and optional `project_id`,
+`prompt_trace_id`, and `analytics_context`. Unknown fields and client-provided
+prompts, tools, provider input, model/reasoning controls, token limits, cache,
+and storage controls are rejected before quota reservation.
+
+The backend intersects `supported_command_types` with its canonical allowlist.
+A client can reduce its executable surface but cannot add commands. Prompt and
+tool snapshots live under `src/common/v3_contract_assets`; their approved hashes
+are pinned in `tests/test_v3_server_contract.py`.
 
 ## Secrets
 

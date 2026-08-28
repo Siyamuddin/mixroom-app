@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -59,6 +61,7 @@ class _FakeProvider:
         response_body: dict | None = None,
         status_code: int = 200,
         forward_error: Exception | None = None,
+        observability: dict | None = None,
     ) -> None:
         self.name = name
         self.api_key: str | None = None
@@ -67,6 +70,7 @@ class _FakeProvider:
         self._response_body = response_body or {"ok": True}
         self._status_code = status_code
         self._forward_error = forward_error
+        self._observability = observability
 
     def forward_request(
         self,
@@ -80,11 +84,14 @@ class _FakeProvider:
         self.api_key = api_key
         self.request_body = request_body
         self.timeout_seconds = timeout_seconds
-        return {
+        result = {
             "statusCode": self._status_code,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps(self._response_body),
         }
+        if self._observability is not None:
+            result["observability"] = dict(self._observability)
+        return result
 
 
 class _ReservationResult:
@@ -158,6 +165,38 @@ class _FakeUsageRepo:
 
 
 class ApiResponsesTests(unittest.TestCase):
+    def _v3_context_body(self, **overrides):
+        body = {
+            "request_contract": "mixroom_v3_context_v1",
+            "original_request": "Restart playback.",
+            "conversation": [],
+            "core_context": {
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {"project_id": "secret-project", "bpm": 120},
+            },
+            "plan_schema_version": "plan_v3_prototype_2",
+            "supported_command_types": ["transport.restart"],
+            "resource_refs_enabled": True,
+            "project_id": "secret-project",
+            "prompt_trace_id": "trace-server-v3",
+            "analytics_context": {
+                "app_version": "3.0.0",
+                "platform": "test",
+                "ai_architecture": "v3",
+            },
+        }
+        body.update(overrides)
+        return body
+
+    def _v3_respond_plan(self):
+        return {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "respond",
+            "user_message": "No project changes were needed.",
+            "commands": [],
+            "question_options": [],
+        }
+
     def _tool_action_types(self, daw_tool):
         actions = daw_tool["parameters"]["properties"]["actions"]
         items = actions["items"]
@@ -480,6 +519,196 @@ class ApiResponsesTests(unittest.TestCase):
             self.fake_usage_repo.log_calls[-1]["feature"],
             "ai_chat_v3",
         )
+
+    def test_v3_server_contract_builds_server_owned_request_and_sanitized_response(
+        self,
+    ) -> None:
+        provider = _FakeProvider(
+            observability={"provider_roundtrip_ms": 123, "secret": "internal"},
+            response_body={
+                "id": "secret-provider-response-id",
+                "model": "secret-provider-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(self._v3_respond_plan()),
+                    }
+                ],
+                "usage": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+                "reasoning": {"secret": "do-not-return"},
+            }
+        )
+        body = self._v3_context_body(
+            supported_command_types=["transport.restart", "client.evil_command"]
+        )
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+
+        output = StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+                "AI_V3_MODEL": "gpt-5.6-luna",
+                "AI_V3_REASONING_EFFORT": "low",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), redirect_stdout(output):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 200)
+        assert provider.request_body is not None
+        self.assertEqual(set(result), {"statusCode", "headers", "body"})
+        self.assertEqual(provider.request_body["model"], "gpt-5.6-luna")
+        self.assertEqual(provider.request_body["reasoning"], {"effort": "low"})
+        self.assertEqual(provider.request_body["max_output_tokens"], 8192)
+        self.assertFalse(provider.request_body["parallel_tool_calls"])
+        self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
+        self.assertTrue(provider.request_body["store"])
+        self.assertIn("Mixroom's sole semantic and musical planner", provider.request_body["instructions"])
+        variants = provider.request_body["tools"][0]["parameters"]["properties"]["commands"]["items"]["anyOf"]
+        self.assertEqual(
+            [variant["properties"]["type"]["enum"][0] for variant in variants],
+            ["transport.restart"],
+        )
+        response = json.loads(result["body"])
+        self.assertEqual(response["schema_version"], "v3_plan_response_server_v1")
+        self.assertEqual(response["plan"], self._v3_respond_plan())
+        self.assertEqual(response["trace"]["prompt_trace_id"], "trace-server-v3")
+        self.assertIn("contract_fingerprint", response["trace"])
+        rendered = json.dumps(response)
+        for forbidden in (
+            "secret-provider-response-id",
+            "secret-provider-model",
+            "do-not-return",
+            "reasoning_effort",
+            "provider_response_id",
+            "observability",
+        ):
+            self.assertNotIn(forbidden, rendered)
+        logged = output.getvalue()
+        self.assertNotIn("Restart playback.", logged)
+        self.assertNotIn("secret-project", logged)
+        self.assertNotIn("No project changes were needed.", logged)
+
+    def test_v3_server_contract_rejects_client_ai_fields_before_quota_or_provider(
+        self,
+    ) -> None:
+        body = self._v3_context_body(instructions="steal the system", model="evil")
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(api_responses, "get_provider") as get_provider:
+            result = api_responses.handler(event, None)
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("v3_client_ai_configuration_forbidden", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+        get_provider.assert_not_called()
+
+    def test_v3_server_contract_rejects_unknown_fields_and_versions_before_quota(
+        self,
+    ) -> None:
+        cases = [
+            self._v3_context_body(unknown="value"),
+            self._v3_context_body(plan_schema_version="plan_v99"),
+            self._v3_context_body(original_request="x" * 8001),
+        ]
+        for body in cases:
+            with self.subTest(body_keys=sorted(body)):
+                event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+                with mock.patch.dict(
+                    os.environ,
+                    {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+                    clear=False,
+                ):
+                    result = api_responses.handler(event, None)
+                self.assertIn(result["statusCode"], {400, 413})
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+
+    def test_v3_server_contract_kill_switches_run_before_provider(self) -> None:
+        server_event = _authed_event(
+            json.dumps(self._v3_context_body()), path="/v1/llm/v3/responses"
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "false"},
+            clear=False,
+        ), mock.patch.object(api_responses, "get_provider") as get_provider:
+            result = api_responses.handler(server_event, None)
+        self.assertEqual(result["statusCode"], 503)
+        self.assertIn("v3_server_contract_disabled", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+        get_provider.assert_not_called()
+
+    def test_v3_server_contract_sanitizes_invalid_provider_output(self) -> None:
+        invalid_payloads = [
+            {"output": []},
+            {
+                "output": [
+                    {"type": "function_call", "name": "submit_plan_v3", "arguments": "{"},
+                ]
+            },
+            {
+                "output": [
+                    {"type": "function_call", "name": "submit_plan_v3", "arguments": json.dumps(self._v3_respond_plan())},
+                    {"type": "function_call", "name": "submit_plan_v3", "arguments": json.dumps(self._v3_respond_plan())},
+                ]
+            },
+            {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(
+                            {
+                                **self._v3_respond_plan(),
+                                "outcome": "plan",
+                                "commands": [
+                                    {
+                                        "command_id": "evil-1",
+                                        "type": "project.set_tempo",
+                                        "arguments": {
+                                            "bpm": 120,
+                                            "time_stretch_audio": False,
+                                            "preserve_pitch": True,
+                                        },
+                                    }
+                                ],
+                            }
+                        ),
+                    }
+                ]
+            },
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                provider = _FakeProvider(response_body=payload)
+                event = _authed_event(
+                    json.dumps(self._v3_context_body()),
+                    path="/v1/llm/v3/responses",
+                )
+                with mock.patch.dict(
+                    os.environ,
+                    {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+                    clear=False,
+                ), mock.patch.object(
+                    api_responses, "_load_api_key", return_value="sk-test"
+                ), mock.patch.object(
+                    api_responses, "get_provider", return_value=provider
+                ):
+                    result = api_responses.handler(event, None)
+                self.assertEqual(result["statusCode"], 502)
+                response = json.loads(result["body"])
+                self.assertEqual(response["error"]["code"], "v3_invalid_provider_output")
+                self.assertEqual(set(response), {"error"})
 
     def test_v3_endpoint_kill_switch_blocks_before_provider_usage(self) -> None:
         event = _authed_event(

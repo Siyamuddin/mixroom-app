@@ -1,0 +1,41 @@
+{
+  "static_v3_markers": [
+    "aiV3PlannerInstructions",
+    "buildAiV3PlannerRequestBody",
+    "aiV3SubmitPlanTool",
+    "AiV3AdaptivePlanner",
+    "AiV3Capture",
+    "CompactCoreV3",
+    "PlanningSnapshotV3",
+    "AI_V3_MODEL",
+    "AI_V3_REASONING_EFFORT",
+    "AI_V3_CAPTURE_ENABLED",
+    "AI_V3_ADAPTIVE_SHADOW_ENABLED",
+    "AI_V3_COMPACT_SHADOW_EVALUATION_ENABLED",
+    "v3_openai_configuration_missing",
+    "Do not create or target rows above row_index 4."
+  ],
+  "v3_artifact_markers": [
+    "You are Mixroom's sole semantic and musical planner.",
+    "ORIGINAL_REQUEST_VERBATIM:",
+    "RECENT_CONVERSATION_JSON:",
+    "CORE_CONTEXT_V3_JSON:",
+    "The previous plan collapsed a production_goal",
+    "Do not use clip.align_tempo_to_project as a style substitute.",
+    "Every question option must be a distinct, concise, meaningful answer",
+    "aiV3MusicalDimensionCompilerInstructions",
+    "aiV3AlignTempoCollapseRetryReminder",
+    "submit_plan_v3",
+    "Do not create or target rows above row_index 4."
+  ],
+  "cross_ai_artifact_markers": [
+    "https://api.openai.com/v1/responses",
+    "https://api.openai.com/v1/conversations",
+    "You are Mixroom AI Co-Producer.",
+    "You are Mixroom's video timeline assistant",
+    "prompt_cache_retention",
+    "parallel_tool_calls",
+    "max_output_tokens",
+    "tool_choice"
+  ]
+}

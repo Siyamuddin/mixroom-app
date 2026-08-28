@@ -1,102 +1,83 @@
-# AI V3 one-shot planner
+# AI V3 server-owned planner
 
-> Implementation snapshot only. The canonical complete architecture and
-> delivery plan is [ADR 0002](engineering/adr/0002-ai-v3-architecture.md). The
-> capability inventory is
-> [AI V3 Capability Matrix](engineering/ai_v3_capability_matrix.md). If this
-> prototype note conflicts with the ADR, the ADR wins.
+> Implementation snapshot only. The canonical architecture is
+> [ADR 0002](engineering/adr/0002-ai-v3-architecture.md), and the executable
+> capability inventory is the
+> [AI V3 Capability Matrix](engineering/ai_v3_capability_matrix.md).
 
-V3 uses the same compact one-planner architecture in local evaluation and
-updated production clients:
+Updated clients use the authenticated context-only contract:
 
 ```text
-original request + deterministic CoreContextV3
-                    -> one GPT planner
-                    -> strict PlanV3
-                    -> Flutter preparation, policy, transaction, readback
+original request + recent conversation + deterministic CoreContextV3 facts
+                    -> backend contract v3 semantic planner
+                    -> validated PlanV3 envelope
+                    -> Flutter preparation, transaction, readback, and undo
 ```
 
-The active one-shot path has no Intent LLM, selector, semantic validator,
-repair call, Python compiler, or silent V1 fallback. Flutter is the only
-preparation and execution authority. Updated clients use authenticated one-shot
-V3; released older clients continue using the unchanged V1 endpoint.
+Flutter sends `request_contract: mixroom_v3_context_v1`, the PlanV3 schema
+version, its sorted command capability allowlist, and the resource-reference
+capability. It does not ship or send V3 system instructions, tool definitions,
+model or reasoning policy, provider input, cache/storage settings, or request
+overrides.
 
-The initial `PlanV3` deliberately has no model-authored preservation or
-negative-policy map. The original request remains authoritative, and each typed
-command changes only its operation-specific target and state. Flutter rejects
-unknown targets, unavailable resources, stale state, malformed payloads, and
-failed readback, but it does not reinterpret the request or add semantic vetoes.
+Backend contract v3 owns all V3 semantics and provider policy. This includes
+the language, MIDI, mixing, and resource-reference instructions; the canonical
+`submit_plan_v3` provider schema; and the model, reasoning, token, cache, and
+provider-storage policy. Contract v3 matches the V3 behavior on reverted main;
+it contains none of the PR #27 compiler, goal-classification, skipped-capability,
+or align-only retry additions. An updated client makes exactly one authenticated
+request per user prompt.
 
-## Production and compatibility routing
+## Client boundary
 
-Updated clients default to one-shot V3 through the authenticated
-`/v1/llm/v3/responses` proxy route. The backend owns the Luna model, low
-reasoning effort, output ceiling, usage accounting, and server kill switch.
-OpenAI credentials never ship in the app.
+Flutter remains authoritative only for deterministic application facts and
+safe execution:
 
-Set `AI_V3_PRIMARY_ENABLED=false` at build time to produce a V1-compatible
-client. This is an explicit route selection, not a silent per-request fallback.
-Older released clients remain unchanged because they continue calling
-`/v1/llm/responses`.
+- project context collection and bounded recent conversation;
+- PlanV3 wire types, command allowlist, and strict argument validation;
+- resource binding and factual preparation;
+- local analysis and mixing materialization;
+- atomic execution, readback, rollback, undo, and UI handoff.
 
-Direct OpenAI V3 remains available only for explicit local debug evaluation:
+The client accepts only `v3_plan_response_server_v1`. It revalidates every
+command against its own supported surface and retains only the plan plus
+allowlisted trace and prompt-rate-limit metadata. It never falls back to legacy
+V3, V1, or direct OpenAI after an individual V3 failure. One token refresh is
+allowed for `401` or `403`.
 
-```text
-AI_V3_PROTOTYPE_ENABLED=true
-AI_V3_MODEL=gpt-5.6-luna
-AI_V3_REASONING_EFFORT=low
-AI_V3_CONTEXT_PROFILE=essential
-AI_V3_CAPTURE_ENABLED=true
-AI_V3_CAPTURE_DIR=tool/ai_v3_captures.local
+## Routing and compatibility
+
+`AI_V3_PRIMARY_ENABLED=false` is the build-time client kill switch. Updated
+clients otherwise use `/v1/llm/v3/responses` through the configured
+authenticated proxy. The server keeps both
+`AI_V3_SERVER_CONTRACT_ENABLED=true` and
+`AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED=true` while already-released clients
+still need the legacy client-authored contract. New clients never select that
+legacy route.
+
+Context size limits remain deterministic: 32 rows, 128 clips, 512 MIDI notes,
+and 250 indexed library assets. Oversized projects fail without semantic
+fallback.
+
+Every current command is reversible `auto_apply`. Flutter prepares the full
+plan, rechecks state, executes one transaction, reads the result back, and only
+then shows a verified receipt with Undo available. Clarifications, unsupported
+requests, blocked prerequisites, no-ops, and failures do not mutate the project.
+
+## Release gate
+
+Run the repository-owned source and artifact scanner before distribution:
+
+```bash
+dart run tool/check_ai_ip_boundary.dart --static
+dart run tool/check_ai_ip_boundary.dart --artifact <release-output>
 ```
 
-Production backend settings are:
+The reviewed marker manifest is `tool/ai_ip_boundary_manifest.json`. V3 prompt,
+tool, retry, provider-policy, and removed-experiment markers are forbidden in
+shipped source and release artifacts. The artifact scan also reports V1, video,
+or other AI prompt/provider markers as blocking follow-up migrations.
 
-```text
-AI_V3_ENABLED=true
-AI_V3_MODEL=gpt-5.6-luna
-AI_V3_REASONING_EFFORT=low
-```
-
-Use `enriched` and `rich` for the deterministic context-profile experiment.
-Projects above 32 rows, 128 clips, 512 MIDI notes, or 250 indexed assets return
-specific `prototype_context_*_limit` errors instead of truncating or falling
-back.
-
-Every current V3 command is explicitly classified as reversible `auto_apply`.
-After factual preparation, the app rechecks the state digest, executes the
-complete plan immediately in one undo transaction, reads back the result, and
-only then shows a concise verified completion receipt with Undo available.
-Clarifications, unsupported requests, blocked prerequisites, no-ops, and
-failures never execute. The pending Apply/Cancel path remains available for a
-future command explicitly classified as `confirm`, such as an irreversible
-external side effect. Any failed action or mismatch is rolled back in reverse
-order.
-
-Detached comparison planners run only when their explicit debug flags are
-enabled and a local capture is active. Those are additional paid API calls and
-must remain off outside an intentional evaluation session.
-
-## Development evaluation
-
-Deterministic unit and integration suites are the committed verification
-surface. Live provider comparisons are deliberately not included in this clean
-branch. Local captures may be enabled explicitly for manual evaluation, remain
-ignored, and must never be committed.
-
-## Prototype boundaries
-
-- Fifty-three typed commands covering 65 of 87 canonical V1 operations; at
-  most 16 commands per plan.
-- Transport playback, restart, metronome, and loop state roll back with a
-  failed V3 bundle but never enter normal user Undo/Redo history. Mixed-plan
-  Undo reverses persistent edits without rewinding successful transport state.
-- At most 256 serialized MIDI notes per plan and eight bars per generated clip;
-  existing-clip MIDI edits may result in at most 512 notes.
-- Built-in effect configuration uses exposed parameter IDs; existing row
-  effect removal and bypass use exact native instance IDs.
-- No external jobs, fuzzy target matching, or repair. Local staged Spleeter
-  and Basic Pitch operations complete before their editor mutations. Adaptive
-  V3 supports one bounded factual retrieval round in detached shadow mode;
-  active one-shot V3 remains a single planner call.
-- Captures are observational and never affect the visible result.
+Adaptive, compact, retrieval, capture, and music-generation planner prototypes
+are historical designs only. They are not compiled into the application; any
+future experiment belongs behind a server-owned contract.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -5,617 +6,401 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
-import 'package:mixroom/ai/v3/ai_v3_planner_request.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
-import 'package:mixroom/ai/v3/ai_v3_adaptive_midi_planner.dart';
-import 'package:mixroom/ai/v3/ai_v3_user_facing_text.dart';
 
-AiV3CoreContext _context() => const AiV3CoreContext(
+AiV3CoreContext _context({List<Map<String, String>> conversation = const []}) =>
+    AiV3CoreContext(
       profile: AiV3ContextProfile.essential,
       stateDigest: 'digest-1',
       data: <String, dynamic>{
         'schema_version': 'core_context_v3_prototype_1',
-        'project': <String, dynamic>{'bpm': 120},
-        'rows': <Object>[],
-        'clips': <Object>[],
+        'original_request': 'duplicate must be removed',
+        'conversation': conversation,
+        'project': <String, dynamic>{'project_id': 'project-1', 'bpm': 120},
+        'rows': const <Object>[],
+        'clips': const <Object>[],
       },
     );
-
-Map<String, dynamic> _responseWithArguments(Object arguments) =>
-    <String, dynamic>{
-      'id': 'resp_v3_test',
-      'service_tier': 'default',
-      'output': <Map<String, dynamic>>[
-        <String, dynamic>{
-          'type': 'function_call',
-          'name': 'submit_plan_v3',
-          'arguments': arguments,
-        },
-      ],
-      'usage': <String, dynamic>{
-        'input_tokens': 100,
-        'output_tokens': 20,
-        'output_tokens_details': <String, dynamic>{'reasoning_tokens': 5},
-      },
-    };
 
 Map<String, dynamic> _respondPlan() => <String, dynamic>{
-      'schema_version': aiV3PlanVersion,
-      'outcome': 'respond',
-      'user_message': 'The project is at 120 BPM.',
-      'commands': const <Object>[],
-      'question_options': const <Object>[],
-    };
+  'schema_version': aiV3PlanVersion,
+  'outcome': 'respond',
+  'user_message': 'The project is at 120 BPM.',
+  'commands': const <Object>[],
+  'question_options': const <Object>[],
+};
+
+Map<String, dynamic> _serverResponse(
+  Map<String, dynamic> plan, {
+  Map<String, dynamic> extra = const <String, dynamic>{},
+  Map<String, dynamic> traceExtra = const <String, dynamic>{},
+}) => <String, dynamic>{
+  'schema_version': aiV3ServerResponseVersion,
+  'plan': plan,
+  'trace': <String, dynamic>{
+    'contract_version': 'mixroom_v3_server_contract_2',
+    'contract_fingerprint': 'abcdef0123456789',
+    'request_id': 'request-1',
+    ...traceExtra,
+  },
+  ...extra,
+};
+
+AiV3PlannerService _service(
+  http.Client client, {
+  Future<String?> Function()? authTokenProvider,
+  Future<String?> Function()? refreshAuthTokenProvider,
+  Set<String> commandTypes = aiV3CommandTypes,
+  bool resourceRefsEnabled = false,
+  Duration timeout = const Duration(seconds: 2),
+}) => AiV3PlannerService(
+  proxyApiBaseUrl: 'https://proxy.example/',
+  proxyPath: 'v1/llm/v3/responses',
+  authTokenProvider: authTokenProvider ?? () async => 'session-token',
+  refreshAuthTokenProvider: refreshAuthTokenProvider,
+  commandTypes: commandTypes,
+  resourceRefsEnabled: resourceRefsEnabled,
+  requestTimeout: timeout,
+  httpClient: client,
+);
 
 void main() {
-  test('sends one strict V3 tool and preserves the original request', () async {
-    const request = '현재 BPM이 뭐야? Do not change anything.';
-    late Map<String, dynamic> sent;
-    final client = MockClient((http.Request httpRequest) async {
-      sent = Map<String, dynamic>.from(
-        jsonDecode(httpRequest.body) as Map,
-      );
-      return http.Response(
-        jsonEncode(_responseWithArguments(jsonEncode(_respondPlan()))),
-        200,
-      );
-    });
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      reasoningEffort: 'low',
-      httpClient: client,
+  test('builds only the context request contract with sorted capabilities', () {
+    final conversation = List<Map<String, String>>.generate(
+      14,
+      (index) => <String, String>{
+        'role': index.isEven ? 'user' : 'assistant',
+        'content': 'turn-$index',
+      },
     );
-
-    final result = await service.plan(
-      context: _context(),
-      originalRequest: request,
+    final body = buildAiV3ContextRequestBody(
+      contextData: _context(conversation: conversation).data,
+      originalRequest: ' Keep everything unchanged. ',
       promptTraceId: 'trace-1',
-    );
-
-    expect(result.plan.outcome, 'respond');
-    expect(result.requestBody, sent);
-    expect(sent['max_output_tokens'], 8192);
-    expect(sent['parallel_tool_calls'], isFalse);
-    expect((sent['tools'] as List), hasLength(1));
-    expect((sent['tools'] as List).single['name'], 'submit_plan_v3');
-    final oneShotTool = Map<String, dynamic>.from(
-      (sent['tools'] as List).single as Map,
-    );
-    final adaptiveTool = Map<String, dynamic>.from(
-      (buildAiV3AdaptiveFirstRequestBody(
-        compactCore: const <String, dynamic>{},
-        originalRequest: request,
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'low',
-      )['tools'] as List)
-          .first as Map,
-    );
-    expect(oneShotTool, adaptiveTool);
-    expect(
-      sent['instructions'],
-      allOf(
-        contains('Never invent a group.'),
-        contains('multiple named ungrouped rows'),
-        contains('Use all_rows only'),
-        contains('user_message must contain one focused question only'),
-        contains('distinct, concise, meaningful'),
-        contains('Never include Cancel, Something else, Other'),
-      ),
-    );
-    expect(
-      sent['instructions'],
-      contains(aiV3CustomerLanguageInstructions),
-    );
-    expect(sent['instructions'], contains('general music creator'));
-    expect(sent['instructions'], contains('clear, easy-to-understand'));
-    expect(sent['instructions'], contains('deeper technical detail'));
-    expect(
-      sent['instructions'],
-      contains('request or conversation clearly shows'),
-    );
-    expect(sent['instructions'], contains('user-visible terms'));
-    expect(
-      sent['instructions'],
-      contains('non-user-visible application context'),
-    );
-    expect(sent['instructions'], contains('never reveal or transform them'));
-    expect(
-      sent['instructions'],
-      contains('one or two brief, past-tense sentences'),
-    );
-    expect(
-      sent['instructions'],
-      contains('Never copy the request into a successful plan summary'),
-    );
-    expect(sent['instructions'], contains('completed musical result'));
-    expect(sent['instructions'], contains('under 500 characters'));
-    expect(sent['instructions'], contains('Always finish naturally'));
-    expect(jsonEncode(sent['input']), contains(request));
-    expect(jsonEncode(sent), isNot(contains('intent_frame')));
-    expect(jsonEncode(sent), isNot(contains('legacy_action')));
-    expect(
-      sent,
-      buildAiV3PlannerRequestBody(
-        contextData: _context().data,
-        originalRequest: request,
-        model: 'gpt-5.4-mini',
-        reasoningEffort: 'low',
-        promptTraceId: 'trace-1',
-      ),
-    );
-  });
-
-  test('opt-in service accepts an ordered stem-to-pitch output reference',
-      () async {
-    final rawPlan = <String, dynamic>{
-      'schema_version': aiV3PlanVersion,
-      'outcome': 'plan',
-      'user_message': 'Separated the stems and adjusted the generated clip.',
-      'commands': <Map<String, dynamic>>[
-        <String, dynamic>{
-          'command_id': 'separate',
-          'type': 'clip.separate_stems',
-          'arguments': <String, dynamic>{'clip_id': 'source'},
-        },
-        <String, dynamic>{
-          'command_id': 'pitch',
-          'type': 'clip.adjust_pitch_semitones',
-          'arguments': <String, dynamic>{
-            'clip_ref': <String, dynamic>{
-              'command_id': 'separate',
-              'output': 'instrumental_clip',
-            },
-            'delta_semitones': -1,
-          },
-        },
-      ],
-      'question_options': const <Object>[],
-    };
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'test-model',
+      commandTypes: const <String>{'transport.stop', 'transport.play'},
       resourceRefsEnabled: true,
-      httpClient: MockClient((_) async => http.Response(
-            jsonEncode(_responseWithArguments(jsonEncode(rawPlan))),
-            200,
-          )),
     );
 
-    final result = await service.plan(
-      context: _context(),
-      originalRequest: 'Perform the ordered edit.',
-    );
-
-    expect(result.plan.commands, hasLength(2));
-    expect(
-      result.plan.commands.last.arguments['clip_ref'],
-      <String, dynamic>{
-        'command_id': 'separate',
-        'output': 'instrumental_clip',
-      },
-    );
-  });
-
-  test('opt-in service accepts generated MIDI clip transpose reference',
-      () async {
-    final rawPlan = <String, dynamic>{
-      'schema_version': aiV3PlanVersion,
-      'outcome': 'plan',
-      'user_message': 'Created and transposed the generated MIDI clip.',
-      'commands': <Map<String, dynamic>>[
-        <String, dynamic>{
-          'command_id': 'create-midi',
-          'type': 'midi.create_clip',
-          'arguments': <String, dynamic>{
-            'destination': <String, dynamic>{
-              'new_row': <String, dynamic>{
-                'name': 'Synth',
-                'instrument_id': 'mixroom.basic_synth',
-              },
-            },
-            'start_beat': 0,
-            'length_beats': 4,
-            'notes': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'pitch': 60,
-                'start_beat': 0,
-                'length_beats': 1,
-                'velocity': 0.8,
-              },
-            ],
-          },
-        },
-        <String, dynamic>{
-          'command_id': 'transpose',
-          'type': 'midi.transpose',
-          'arguments': <String, dynamic>{
-            'clip_ref': <String, dynamic>{
-              'command_id': 'create-midi',
-              'output': 'midi_clip',
-            },
-            'semitones': 2,
-          },
-        },
-      ],
-      'question_options': const <Object>[],
-    };
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'test-model',
-      resourceRefsEnabled: true,
-      httpClient: MockClient((_) async => http.Response(
-            jsonEncode(_responseWithArguments(jsonEncode(rawPlan))),
-            200,
-          )),
-    );
-
-    final result = await service.plan(
-      context: _context(),
-      originalRequest: 'Create a MIDI clip and transpose that generated clip.',
-    );
-
-    expect(result.plan.commands.map((command) => command.type), <String>[
-      'midi.create_clip',
-      'midi.transpose',
+    expect(body.keys.toSet(), <String>{
+      'request_contract',
+      'original_request',
+      'conversation',
+      'core_context',
+      'plan_schema_version',
+      'supported_command_types',
+      'resource_refs_enabled',
+      'project_id',
+      'prompt_trace_id',
+    });
+    expect(body['request_contract'], aiV3ContextRequestContract);
+    expect(body['original_request'], 'Keep everything unchanged.');
+    expect(body['plan_schema_version'], aiV3PlanVersion);
+    expect(body['supported_command_types'], <String>[
+      'transport.play',
+      'transport.stop',
     ]);
-    expect(
-      result.plan.commands.last.arguments['clip_ref'],
-      <String, dynamic>{
-        'command_id': 'create-midi',
-        'output': 'midi_clip',
+    expect(body['resource_refs_enabled'], isTrue);
+    expect(body['project_id'], 'project-1');
+    expect(body['prompt_trace_id'], 'trace-1');
+    expect(body['conversation'], hasLength(12));
+    expect((body['conversation'] as List).first['content'], 'turn-2');
+    final core = body['core_context'] as Map;
+    expect(core.containsKey('original_request'), isFalse);
+    expect(core.containsKey('conversation'), isFalse);
+    for (final forbidden in <String>{
+      'model',
+      'reasoning',
+      'instructions',
+      'tools',
+      'tool_choice',
+      'parallel_tool_calls',
+      'max_output_tokens',
+      'store',
+      'input',
+      'messages',
+      'ai_feature',
+      'client_context',
+    }) {
+      expect(body.containsKey(forbidden), isFalse, reason: forbidden);
+    }
+  });
+
+  test(
+    'authenticated proxy sends context only and parses sanitized envelope',
+    () async {
+      late http.Request sentRequest;
+      late Map<String, dynamic> sentBody;
+      final client = MockClient((request) async {
+        sentRequest = request;
+        sentBody = Map<String, dynamic>.from(jsonDecode(request.body) as Map);
+        return http.Response(
+          jsonEncode(
+            _serverResponse(
+              _respondPlan(),
+              extra: <String, dynamic>{
+                'prompt_rate_limit': <String, dynamic>{'can_submit': true},
+              },
+              traceExtra: <String, dynamic>{'prompt_trace_id': 'trace-1'},
+            ),
+          ),
+          200,
+        );
+      });
+
+      final result = await _service(client).plan(
+        context: _context(),
+        originalRequest: 'What is the BPM?',
+        promptTraceId: 'trace-1',
+      );
+
+      expect(
+        sentRequest.url.toString(),
+        'https://proxy.example/v1/llm/v3/responses',
+      );
+      expect(sentRequest.headers['authorization'], 'Bearer session-token');
+      expect(sentBody['request_contract'], aiV3ContextRequestContract);
+      expect(sentBody.containsKey('instructions'), isFalse);
+      expect(sentBody.containsKey('tools'), isFalse);
+      expect(sentBody.containsKey('model'), isFalse);
+      expect(result.plan.outcome, 'respond');
+      expect(result.meta.containsKey('model'), isFalse);
+      expect(result.meta.containsKey('reasoning_effort'), isFalse);
+      expect(result.meta.containsKey('provider_response_id'), isFalse);
+      expect(result.meta['prompt_rate_limit'], <String, dynamic>{
+        'can_submit': true,
+      });
+    },
+  );
+
+  test(
+    'refreshes rejected authentication exactly once with the same body',
+    () async {
+      var calls = 0;
+      final authorizations = <String>[];
+      final bodies = <String>[];
+      final client = MockClient((request) async {
+        calls += 1;
+        authorizations.add(request.headers['authorization'] ?? '');
+        bodies.add(request.body);
+        if (calls == 1)
+          return http.Response('{"error":{"code":"expired"}}', 401);
+        return http.Response(jsonEncode(_serverResponse(_respondPlan())), 200);
+      });
+
+      await _service(
+        client,
+        authTokenProvider: () async => 'expired-token',
+        refreshAuthTokenProvider: () async => 'refreshed-token',
+      ).plan(context: _context(), originalRequest: 'What is the BPM?');
+
+      expect(calls, 2);
+      expect(authorizations, <String>[
+        'Bearer expired-token',
+        'Bearer refreshed-token',
+      ]);
+      expect(bodies[0], bodies[1]);
+    },
+  );
+
+  test('does not call HTTP without app authentication', () async {
+    final service = _service(
+      MockClient((_) async {
+        fail('HTTP must not run without authentication.');
+      }),
+      authTokenProvider: () async => null,
+    );
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'What is the BPM?'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_proxy_auth_token_missing',
+        ),
+      ),
+    );
+  });
+
+  test('uses at most one token refresh for the entire request', () async {
+    var httpCalls = 0;
+    var refreshCalls = 0;
+    final service = _service(
+      MockClient((_) async {
+        httpCalls += 1;
+        return http.Response('{"error":{"code":"expired"}}', 401);
+      }),
+      authTokenProvider: () async => null,
+      refreshAuthTokenProvider: () async {
+        refreshCalls += 1;
+        return 'refreshed-token';
       },
     );
+
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'What is the BPM?'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_http_error',
+        ),
+      ),
+    );
+    expect(refreshCalls, 1);
+    expect(httpCalls, 1);
   });
 
-  test('authenticated proxy preserves the V3 request and hides API keys',
-      () async {
-    late http.Request sentRequest;
-    late Map<String, dynamic> sentBody;
-    final client = MockClient((request) async {
-      sentRequest = request;
-      sentBody = Map<String, dynamic>.from(
-        jsonDecode(request.body) as Map,
-      );
-      return http.Response(
-        jsonEncode(<String, dynamic>{
-          ..._responseWithArguments(jsonEncode(_respondPlan())),
-          'model': 'gpt-5.6-luna',
-        }),
-        200,
-      );
-    });
-    final service = AiV3PlannerService(
-      model: 'gpt-5.6-luna',
-      reasoningEffort: 'low',
-      proxyApiBaseUrl: 'https://proxy.example/',
-      proxyPath: 'v1/llm/v3/responses',
-      authTokenProvider: () async => 'app-session-token',
-      httpClient: client,
-    );
-
-    final result = await service.plan(
-      context: _context(),
-      originalRequest: 'Keep everything unchanged.',
-      promptTraceId: 'trace-proxy',
-    );
-
-    expect(sentRequest.url.toString(),
-        'https://proxy.example/v1/llm/v3/responses');
-    expect(sentRequest.headers['authorization'], 'Bearer app-session-token');
-    expect(sentBody['ai_feature'], 'ai_chat_v3');
-    expect(sentBody['prompt_trace_id'], 'trace-proxy');
-    expect(
-      sentBody['client_context'],
-      <String, dynamic>{'ai_architecture': 'v3_one_shot_prototype'},
-    );
-    expect(sentBody['store'], isTrue);
-    expect(jsonEncode(sentBody), isNot(contains('sk-')));
-    expect(result.requestBody.containsKey('ai_feature'), isFalse);
-    expect(result.meta['llm_route'], 'authenticated_proxy');
-    expect(result.meta['model'], 'gpt-5.6-luna');
-  });
-
-  test('authenticated proxy refreshes rejected app auth exactly once',
-      () async {
+  test('sends one client request for an align-only plan', () async {
     var calls = 0;
-    final authorizations = <String>[];
-    final client = MockClient((request) async {
+    final plan = <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'The clip was aligned.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'align-1',
+          'type': 'clip.align_tempo_to_project',
+          'arguments': <String, dynamic>{
+            'clip_id': 'clip-1',
+            'mode': 'preserve_pitch',
+          },
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+    final client = MockClient((_) async {
       calls += 1;
-      authorizations.add(request.headers['authorization'] ?? '');
-      if (calls == 1) {
-        return http.Response('{"error":"expired"}', 401);
-      }
-      return http.Response(
-        jsonEncode(_responseWithArguments(jsonEncode(_respondPlan()))),
-        200,
-      );
+      return http.Response(jsonEncode(_serverResponse(plan)), 200);
     });
-    final service = AiV3PlannerService(
-      model: 'gpt-5.6-luna',
-      proxyApiBaseUrl: 'https://proxy.example',
-      authTokenProvider: () async => 'expired-token',
-      refreshAuthTokenProvider: () async => 'refreshed-token',
-      httpClient: client,
-    );
 
-    await service.plan(
-      context: _context(),
-      originalRequest: 'What is the BPM?',
-    );
+    final result = await _service(
+      client,
+      commandTypes: const <String>{'clip.align_tempo_to_project'},
+    ).plan(context: _context(), originalRequest: 'Make this a remix.');
 
-    expect(calls, 2);
-    expect(
-      authorizations,
-      <String>['Bearer expired-token', 'Bearer refreshed-token'],
-    );
+    expect(calls, 1);
   });
 
-  test('authenticated proxy fails safely when app auth is unavailable',
-      () async {
-    final service = AiV3PlannerService(
-      model: 'gpt-5.6-luna',
-      proxyApiBaseUrl: 'https://proxy.example',
-      authTokenProvider: () async => null,
-      httpClient: MockClient((_) async {
-        fail('HTTP must not run without app authentication.');
-      }),
-    );
-
-    await expectLater(
-      service.plan(
-        context: _context(),
-        originalRequest: 'What is the BPM?',
-      ),
-      throwsA(isA<AiV3PlannerException>().having(
-        (error) => error.code,
-        'code',
-        'v3_proxy_auth_token_missing',
-      )),
-    );
-  });
-
-  test('compact planner rejects commands outside its declared surface',
-      () async {
-    final client = MockClient((_) async => http.Response(
-          jsonEncode(_responseWithArguments(jsonEncode(<String, dynamic>{
-            'schema_version': aiV3PlanVersion,
-            'outcome': 'plan',
-            'user_message': 'Transpose.',
-            'commands': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'command_id': 'transpose',
-                'type': 'midi.transpose',
-                'arguments': <String, dynamic>{
-                  'clip_id': 'clip-1',
-                  'semitones': -2,
-                },
-              },
-            ],
-            'question_options': const <Object>[],
-          }))),
-          200,
-        ));
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      commandTypes: aiV3CommonCommandTypes,
-      architecture: 'v3_compact_common_shadow',
-      httpClient: client,
-    );
-
-    await expectLater(
-      service.plan(
-        context: _context(),
-        originalRequest: 'Transpose the clip.',
-      ),
-      throwsA(isA<AiV3PlannerException>().having(
-        (error) => error.detail,
-        'detail',
-        'v3_planner_command_outside_surface',
-      )),
-    );
-  });
-
-  test('rejects missing or malformed tool output without repair', () async {
-    final missingToolClient = MockClient((_) async => http.Response(
-          jsonEncode(<String, dynamic>{'output': const <Object>[]}),
-          200,
-        ));
-    final missingToolService = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      httpClient: missingToolClient,
+  test('rejects commands outside the declared client surface', () async {
+    final plan = <String, dynamic>{
+      'schema_version': aiV3PlanVersion,
+      'outcome': 'plan',
+      'user_message': 'Playback started.',
+      'commands': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'command_id': 'play-1',
+          'type': 'transport.play',
+          'arguments': const <String, dynamic>{},
+        },
+      ],
+      'question_options': const <Object>[],
+    };
+    final client = MockClient(
+      (_) async => http.Response(jsonEncode(_serverResponse(plan)), 200),
     );
     await expectLater(
-      missingToolService.plan(
-        context: _context(),
-        originalRequest: 'What is the BPM?',
-      ),
+      _service(
+        client,
+        commandTypes: const <String>{'transport.stop'},
+      ).plan(context: _context(), originalRequest: 'Play.'),
       throwsA(
         isA<AiV3PlannerException>().having(
           (error) => error.code,
           'code',
-          'v3_planner_tool_call_missing',
-        ),
-      ),
-    );
-
-    final malformedClient = MockClient((_) async => http.Response(
-          jsonEncode(_responseWithArguments('{not-json')),
-          200,
-        ));
-    final malformedService = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      httpClient: malformedClient,
-    );
-    await expectLater(
-      malformedService.plan(
-        context: _context(),
-        originalRequest: 'What is the BPM?',
-      ),
-      throwsA(
-        isA<AiV3PlannerException>().having(
-          (error) => error.code,
-          'code',
-          'v3_planner_arguments_invalid_json',
+          'v3_planner_contract_invalid',
         ),
       ),
     );
   });
 
-  test('rejects multiple or unknown tool calls without choosing one', () async {
-    Future<void> expectRejected(
-      List<Map<String, dynamic>> output,
-      String code,
-    ) async {
-      final client = MockClient((_) async => http.Response(
-            jsonEncode(<String, dynamic>{'output': output}),
-            200,
-          ));
-      final service = AiV3PlannerService(
-        apiKey: 'test-key',
-        model: 'gpt-5.4-mini',
-        httpClient: client,
+  test('rejects provider-shaped and unknown response fields', () async {
+    for (final payload in <Map<String, dynamic>>[
+      <String, dynamic>{'output': const <Object>[]},
+      _serverResponse(
+        _respondPlan(),
+        extra: <String, dynamic>{'model': 'secret'},
+      ),
+      _serverResponse(
+        _respondPlan(),
+        traceExtra: <String, dynamic>{'provider_response_id': 'secret'},
+      ),
+      <String, dynamic>{
+        ..._serverResponse(_respondPlan()),
+        'schema_version': 'v3_plan_response_server_v99',
+      },
+    ]) {
+      final client = MockClient(
+        (_) async => http.Response(jsonEncode(payload), 200),
       );
       await expectLater(
-        service.plan(context: _context(), originalRequest: 'What is the BPM?'),
-        throwsA(isA<AiV3PlannerException>().having(
-          (error) => error.code,
-          'code',
-          code,
-        )),
+        _service(
+          client,
+        ).plan(context: _context(), originalRequest: 'Question.'),
+        throwsA(
+          isA<AiV3PlannerException>().having(
+            (error) => error.code,
+            'code',
+            'v3_server_response_contract_invalid',
+          ),
+        ),
       );
     }
-
-    final submit = <String, dynamic>{
-      'type': 'function_call',
-      'name': 'submit_plan_v3',
-      'arguments': jsonEncode(_respondPlan()),
-    };
-    await expectRejected(
-      <Map<String, dynamic>>[submit, Map<String, dynamic>.from(submit)],
-      'v3_planner_tool_call_count_invalid',
-    );
-    await expectRejected(
-      <Map<String, dynamic>>[
-        submit,
-        <String, dynamic>{
-          'type': 'function_call',
-          'name': 'unknown_tool',
-          'arguments': '{}',
-        },
-      ],
-      'v3_planner_tool_call_count_invalid',
-    );
-    await expectRejected(
-      <Map<String, dynamic>>[
-        <String, dynamic>{
-          'type': 'function_call',
-          'name': 'unknown_tool',
-          'arguments': '{}',
-        },
-      ],
-      'v3_planner_tool_call_invalid',
-    );
   });
 
-  test('retains raw provider output when PlanV3 semantics are invalid',
-      () async {
-    final invalidPlan = _respondPlan()
-      ..['commands'] = <Map<String, dynamic>>[
-        <String, dynamic>{
-          'command_id': 'mute',
-          'type': 'row.set_muted',
-          'arguments': <String, dynamic>{'row_id': 1, 'muted': true},
-        },
-      ];
-    final client = MockClient((_) async => http.Response(
-          jsonEncode(_responseWithArguments(jsonEncode(invalidPlan))),
-          200,
-        ));
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      httpClient: client,
-    );
-
-    await expectLater(
-      service.plan(context: _context(), originalRequest: 'Mute row one.'),
-      throwsA(
-        isA<AiV3PlannerException>()
-            .having(
-              (error) => error.code,
-              'code',
-              'v3_planner_contract_invalid',
-            )
-            .having(
-              (error) => error.detail,
-              'detail',
-              'v3_outcome_command_mismatch',
-            )
-            .having(
-              (error) => error.diagnostic['tool_arguments'],
-              'tool arguments',
-              isNotNull,
-            ),
+  test('does not retain arbitrary server error messages', () async {
+    final client = MockClient(
+      (_) async => http.Response(
+        jsonEncode(<String, dynamic>{
+          'error': <String, dynamic>{
+            'code': 'v3_server_contract_disabled',
+            'message': 'secret prompt and sk-sensitive',
+          },
+        }),
+        503,
       ),
     );
+    try {
+      await _service(
+        client,
+      ).plan(context: _context(), originalRequest: 'Question.');
+      fail('Expected a planner exception.');
+    } on AiV3PlannerException catch (error) {
+      expect(error.code, 'v3_planner_http_error');
+      expect(error.detail, 'http_503:v3_server_contract_disabled');
+      expect(error.toString(), isNot(contains('secret prompt')));
+      expect(error.diagnostic, isEmpty);
+    }
   });
 
-  test('reports timeout as a sanitized planner error', () async {
-    final client = MockClient((_) async {
-      await Future<void>.delayed(const Duration(milliseconds: 30));
-      return http.Response('{}', 200);
-    });
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      requestTimeout: const Duration(milliseconds: 1),
-      httpClient: client,
+  test('maps invalid JSON and timeout to safe failures', () async {
+    await expectLater(
+      _service(
+        MockClient((_) async => http.Response('not-json', 200)),
+      ).plan(context: _context(), originalRequest: 'Question.'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_response_invalid_json',
+        ),
+      ),
     );
 
+    final timeoutClient = MockClient((_) async {
+      await Completer<void>().future;
+      return http.Response('{}', 200);
+    });
     await expectLater(
-      service.plan(context: _context(), originalRequest: 'Rename the row.'),
+      _service(
+        timeoutClient,
+        timeout: const Duration(milliseconds: 1),
+      ).plan(context: _context(), originalRequest: 'Question.'),
       throwsA(
         isA<AiV3PlannerException>().having(
           (error) => error.code,
           'code',
           'v3_planner_timeout',
         ),
-      ),
-    );
-  });
-
-  test('preserves sanitized OpenAI error detail for local diagnosis', () async {
-    final client = MockClient((_) async => http.Response(
-          jsonEncode(<String, dynamic>{
-            'error': <String, dynamic>{
-              'code': 'invalid_function_parameters',
-              'param': 'tools[0].parameters',
-              'message': 'Unsupported keyword near sk-secret-value',
-            },
-          }),
-          400,
-        ));
-    final service = AiV3PlannerService(
-      apiKey: 'test-key',
-      model: 'gpt-5.4-mini',
-      httpClient: client,
-    );
-
-    await expectLater(
-      service.plan(context: _context(), originalRequest: 'Rename the row.'),
-      throwsA(
-        isA<AiV3PlannerException>()
-            .having((error) => error.detail, 'detail', contains('tools[0]'))
-            .having((error) => error.detail, 'detail', contains('[redacted]'))
-            .having(
-              (error) => error.detail,
-              'detail',
-              isNot(contains('sk-secret-value')),
-            ),
       ),
     );
   });

@@ -417,8 +417,6 @@ class AiV3CoreContextBuilder {
           'prototype_context_row_capacity_missing');
     }
     final effectiveMaxRows = math.min(maxRows, configuredMaxRows);
-    final rowCreationPolicy =
-        clientContext['row_creation_policy']?.toString().trim() ?? '';
     final rowIdByIndex = <int, int>{
       for (final row in rows)
         if (row['display_index'] is int && row['row_id'] is int)
@@ -511,7 +509,6 @@ class AiV3CoreContextBuilder {
           'current_rows': rows.length,
           'max_rows': effectiveMaxRows,
           'can_create': rows.length < effectiveMaxRows,
-          if (rowCreationPolicy.isNotEmpty) 'policy': rowCreationPolicy,
         },
         'tempo_stretch_enabled': tempoStretchEnabled,
       },

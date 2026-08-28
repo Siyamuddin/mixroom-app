@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-08-29
 Update trigger: Update this when test commands, QA flows, diagnostics, logging,
 crash reporting, integration tests, or release gates change.
 
@@ -51,6 +51,17 @@ tests matching the handler or common module you changed.
 For authenticated V3 routing changes, cover the dedicated V3 endpoint, its
 server kill switch, the unchanged V1 endpoint, client token refresh, and the
 client build switch before running the wider Flutter V3 suite.
+
+For V3 AI-IP boundary changes, run the source and release-artifact scanner:
+
+```bash
+dart run tool/check_ai_ip_boundary.dart --static
+dart run tool/check_ai_ip_boundary.dart --artifact <release-file-or-directory>
+```
+
+Scan complete Android archives, Apple app bundles, and the Windows Release
+directory. A V3 or cross-AI finding blocks distribution; update the backend
+boundary instead of adding an unexplained allowlist exception.
 
 For V3 execution-policy changes, verify the canonical policy table covers every
 command, clear plans return `execute_now`, no success message appears before
