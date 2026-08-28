@@ -33,7 +33,6 @@ import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
-import 'package:mixroom/helpers/cloud_auto_sync_follow_up.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_midi_key_state.dart';
@@ -15170,7 +15169,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _cloudAutoSyncInFlight = true;
     _cloudAutoSyncDirty = false;
     Duration? retryDelay;
-    var nonRetryableFailure = false;
     try {
       await _projectAutosaveCoordinator.flush();
       if (!_canContinueCloudAutoSync()) {
@@ -15290,12 +15288,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         service.close();
       }
     } catch (error) {
-      nonRetryableFailure = _isCloudAutoSyncNonRetryable(error);
+      _cloudAutoSyncDirty = true;
+      final nonRetryable = _isCloudAutoSyncNonRetryable(error);
       if (error.toString().toLowerCase().contains('revision conflict')) {
         _cloudAutoSyncConflict = true;
       }
-      if (!nonRetryableFailure) {
-        _cloudAutoSyncDirty = true;
+      if (!nonRetryable) {
         _cloudAutoSyncFailureCount = math.min(
           _cloudAutoSyncFailureCount + 1,
           4,
@@ -15314,29 +15312,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Cloud auto sync skipped after $reason: $error');
     } finally {
       _cloudAutoSyncInFlight = false;
-      final followUp = cloudAutoSyncFollowUp(
-        canAttempt: _canAttemptAutoCloudSync(),
-        dirty: _cloudAutoSyncDirty,
-        nonRetryableFailure: nonRetryableFailure,
-        hasRetryDelay: retryDelay != null,
-      );
-      if (followUp == CloudAutoSyncFollowUp.delayed) {
+      if (retryDelay != null && _canAttemptAutoCloudSync()) {
         _cloudAutoSyncTimer?.cancel();
-        _cloudAutoSyncTimer = Timer(retryDelay!, () {
+        _cloudAutoSyncTimer = Timer(retryDelay, () {
           _cloudAutoSyncTimer = null;
-          unawaited(
-            _runCloudAutoSync(reason: cloudAutoSyncFollowUpReason(followUp)),
-          );
+          unawaited(_runCloudAutoSync(reason: 'retry'));
         });
-      } else if (followUp == CloudAutoSyncFollowUp.immediate) {
+      } else if (_cloudAutoSyncDirty && _canAttemptAutoCloudSync()) {
         // Do not lose an edit made while the preceding upload was in flight.
         // The follow-up run re-reads the canonical source before publishing.
         _cloudAutoSyncTimer?.cancel();
         _cloudAutoSyncTimer = Timer(Duration.zero, () {
           _cloudAutoSyncTimer = null;
-          unawaited(
-            _runCloudAutoSync(reason: cloudAutoSyncFollowUpReason(followUp)),
-          );
+          unawaited(_runCloudAutoSync(reason: 'pending-edits'));
         });
       }
       ProjectManager.endCloudProjectSync(syncActivityId);
