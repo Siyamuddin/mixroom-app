@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 REQUEST_CONTRACT = "mixroom_v3_context_v1"
 RESPONSE_SCHEMA_VERSION = "v3_plan_response_server_v1"
-CONTRACT_VERSION = "mixroom_v3_server_contract_1"
+CONTRACT_VERSION = "mixroom_v3_server_contract_2"
 
 _ASSET_DIRECTORY = Path(__file__).with_name("v3_contract_assets")
 _METADATA = json.loads(
@@ -27,6 +27,9 @@ _INSTRUCTIONS = (_ASSET_DIRECTORY / "v3_instructions.txt").read_text(
 ).strip()
 _RESOURCE_REF_INSTRUCTIONS = (
     _ASSET_DIRECTORY / "v3_instructions_resource_refs.txt"
+).read_text(encoding="utf-8").strip()
+_ALIGN_TEMPO_RETRY_INSTRUCTIONS = (
+    _ASSET_DIRECTORY / "v3_align_tempo_retry_instructions.txt"
 ).read_text(encoding="utf-8").strip()
 _TOOLS = {
     False: json.loads(
@@ -333,6 +336,48 @@ def build_provider_request(
         "store": bool(store),
         "metadata": metadata,
     }
+
+
+def build_align_tempo_retry_provider_request(
+    request: Mapping[str, Any],
+    *,
+    model: str,
+    reasoning_effort: str,
+    max_output_tokens: int = 8192,
+    prompt_cache_retention: str = "24h",
+    store: bool = True,
+) -> dict[str, Any]:
+    provider_request = build_provider_request(
+        request,
+        model=model,
+        reasoning_effort=reasoning_effort,
+        max_output_tokens=max_output_tokens,
+        prompt_cache_retention=prompt_cache_retention,
+        store=store,
+    )
+    provider_request["instructions"] = "\n".join(
+        [provider_request["instructions"], _ALIGN_TEMPO_RETRY_INSTRUCTIONS]
+    )
+    provider_request["metadata"] = {
+        **provider_request["metadata"],
+        "retry_reason": "production_goal_align_tempo_collapse",
+    }
+    return provider_request
+
+
+def should_retry_align_tempo_collapse(plan: Mapping[str, Any]) -> bool:
+    commands = plan.get("commands")
+    return (
+        plan.get("outcome") == "plan"
+        and plan.get("goal_kind") == "production_goal"
+        and isinstance(commands, list)
+        and bool(commands)
+        and all(
+            isinstance(command, dict)
+            and command.get("type") == "clip.align_tempo_to_project"
+            for command in commands
+        )
+    )
 
 
 def contract_fingerprint(*, command_types: Sequence[str], resource_refs_enabled: bool) -> str:

@@ -110,6 +110,13 @@ A client can reduce its executable surface but cannot add commands. Prompt and
 tool snapshots live under `src/common/v3_contract_assets`; their approved hashes
 are pinned in `tests/test_v3_server_contract.py`.
 
+The server contract also owns the PRO-16/PRO-18 compound-request safeguard: a
+valid `production_goal` plan containing only `clip.align_tempo_to_project` is
+retried once with the approved align-collapse reminder. The retry stays within
+the same authenticated request and quota reservation, bills the combined token
+usage, and falls back to the first valid plan if the retry is unavailable or
+invalid. Named edits and already-compound plans are never retried.
+
 ## Secrets
 
 Store the active provider API key in an SSM Parameter Store `SecureString`.

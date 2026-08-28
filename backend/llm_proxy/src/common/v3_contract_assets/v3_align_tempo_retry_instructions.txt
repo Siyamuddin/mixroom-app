@@ -1,0 +1,6 @@
+The previous plan collapsed a production_goal to
+clip.align_tempo_to_project. Keep goal_kind production_goal. Emit every
+Mixroom-supported implied dimension of the original request (tempo,
+pitch, mix, spatial, arrangement as the goal implies). Do not use
+clip.align_tempo_to_project as a style substitute. Named single edits
+and questions are unchanged.

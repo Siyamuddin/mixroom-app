@@ -17,6 +17,7 @@ from common import v3_server_contract  # noqa: E402
 class V3ServerContractTests(unittest.TestCase):
     def test_approved_v3_contract_assets_match_golden_hashes(self) -> None:
         expected = {
+            "v3_align_tempo_retry_instructions.txt": "84c3f2fd94c9d57fb43a898d6b9748b026723d1d4503506ddfd7597b7d5926af",
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
             "v3_instructions.txt": "cf6455c7a0d03670c0f81f3806afa36d61702d10fec3ad9c75ff9cbfda783796",
             "v3_instructions_resource_refs.txt": "c2912bb6a8b4ae571460fecad578ab6ecc24b5f3243c4b64a5b5ab24f3c88f0c",
@@ -84,6 +85,59 @@ class V3ServerContractTests(unittest.TestCase):
                 resource_refs_enabled=False,
             )
         self.assertEqual(raised.exception.code, "v3_plan_schema_invalid")
+
+    def test_compound_align_tempo_retry_is_data_driven(self) -> None:
+        base = {
+            "outcome": "plan",
+            "goal_kind": "production_goal",
+            "commands": [
+                {"type": "clip.align_tempo_to_project"},
+                {"type": "clip.align_tempo_to_project"},
+            ],
+        }
+        self.assertTrue(v3_server_contract.should_retry_align_tempo_collapse(base))
+        self.assertFalse(
+            v3_server_contract.should_retry_align_tempo_collapse(
+                {**base, "goal_kind": "named_edit"}
+            )
+        )
+        self.assertFalse(
+            v3_server_contract.should_retry_align_tempo_collapse(
+                {
+                    **base,
+                    "commands": [
+                        {"type": "clip.align_tempo_to_project"},
+                        {"type": "mix.apply_goal"},
+                    ],
+                }
+            )
+        )
+
+    def test_compound_retry_request_keeps_server_contract_and_adds_reminder(self) -> None:
+        request = {
+            "original_request": "Make this a faster, brighter remix.",
+            "conversation": [],
+            "core_context": {"schema_version": "core_context_v3_prototype_1"},
+            "supported_command_types": {
+                "clip.align_tempo_to_project",
+                "project.set_tempo",
+                "mix.apply_goal",
+            },
+            "resource_refs_enabled": False,
+            "prompt_trace_id": "retry-test",
+        }
+        retried = v3_server_contract.build_align_tempo_retry_provider_request(
+            request,
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+        )
+        self.assertIn("previous plan collapsed a production_goal", retried["instructions"])
+        self.assertEqual(
+            retried["metadata"]["retry_reason"],
+            "production_goal_align_tempo_collapse",
+        )
+        self.assertEqual(retried["tool_choice"]["name"], "submit_plan_v3")
+        self.assertFalse(retried["parallel_tool_calls"])
 
 
 if __name__ == "__main__":
