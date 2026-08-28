@@ -23,20 +23,49 @@ internal enum class AndroidRecordingCleanupDispositionV2 {
 internal enum class AndroidRecordingRouteAdapterV2 {
   BUILT_IN,
   BLUETOOTH_COMMUNICATION,
-  SYSTEM_SELECTED_MEDIA,
+  SYSTEM_SELECTED,
 }
 
-/** Selects one A2DP recording adapter before any route mutation occurs. */
+internal object AndroidMonitoringReadinessV2 {
+  fun validate(facts: AndroidRecordingFactsV2): String {
+    val genericReadiness = AndroidSystemSelectedDuplexReadinessV2.validate(facts)
+    if (genericReadiness != "ok") return genericReadiness
+    val allowedKinds = setOf(
+      AndroidRouteKindV2.BUILT_IN,
+      AndroidRouteKindV2.WIRED,
+      AndroidRouteKindV2.EXTERNAL,
+    )
+    if (
+      facts.sourceOutput?.kind !in allowedKinds ||
+      facts.actualInput?.kind !in allowedKinds ||
+      facts.actualOutput?.kind !in allowedKinds
+    ) {
+      return "monitoring_unavailable"
+    }
+    return "ok"
+  }
+}
+
+/** Selects one system-owned recording adapter before any route mutation occurs. */
 internal object AndroidSystemRecordingRouteResolverV2 {
-  fun resolveA2dp(
+  fun resolve(
+    sourceKind: AndroidRouteKindV2,
     apiLevel: Int,
     communicationCandidateCount: Int,
-  ): AndroidRecordingRouteAdapterV2? = when {
-    communicationCandidateCount == 0 ->
-      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA
-    apiLevel >= 29 && communicationCandidateCount == 1 ->
-      AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION
-    else -> null
+  ): AndroidRecordingRouteAdapterV2? {
+    if (
+      sourceKind != AndroidRouteKindV2.BLUETOOTH_MEDIA &&
+      sourceKind != AndroidRouteKindV2.BLUETOOTH_LE
+    ) {
+      return AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED
+    }
+    return when {
+      communicationCandidateCount == 0 ->
+        AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED
+      apiLevel >= 29 && communicationCandidateCount == 1 ->
+        AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION
+      else -> null
+    }
   }
 }
 
@@ -152,6 +181,7 @@ internal data class AndroidRecordingFactsV2(
   val bufferFrames: Int,
   val inputStream: AndroidOboeOutputFactsV2,
   val outputStream: AndroidOboeOutputFactsV2,
+  val requiredInputChannels: Int = 1,
 )
 
 internal object AndroidRecordingReadinessV2 {
@@ -182,7 +212,8 @@ internal object AndroidRecordingReadinessV2 {
     if (
       !facts.deviceOpen ||
       !facts.callbackAttached ||
-      facts.activeInputChannels != 1 ||
+      facts.requiredInputChannels !in 1..32 ||
+      facts.activeInputChannels != facts.requiredInputChannels ||
       facts.activeOutputChannels <= 0 ||
       facts.sampleRateHz <= 0.0 ||
       facts.bufferFrames <= 0
@@ -196,7 +227,7 @@ internal object AndroidRecordingReadinessV2 {
       !inputStream.available ||
       !inputStream.running ||
       inputStream.routedDeviceId != input.id ||
-      inputStream.channelCount != 1 ||
+      inputStream.channelCount != facts.requiredInputChannels ||
       (inputStream.sampleRateHz ?: 0) <= 0 ||
       (inputStream.bufferFrames ?: 0) <= 0 ||
       !outputStream.available ||
@@ -218,30 +249,15 @@ internal object AndroidRecordingReadinessV2 {
   }
 }
 
-/**
- * Verifies Android's default non-communication input while preserving an
- * already-selected Bluetooth media output. This deliberately accepts only
- * observable microphone-capable route classes and never infers identity from
- * a product name or Bluetooth address.
- */
-internal object AndroidSystemSelectedMediaDuplexReadinessV2 {
+/** Verifies an OS-selected non-communication duplex route from native facts. */
+internal object AndroidSystemSelectedDuplexReadinessV2 {
   fun validate(facts: AndroidRecordingFactsV2): String {
     if (!facts.ownedByV2) return "implementation_conflict"
     val source = facts.sourceOutput ?: return "no_output"
-    if (source.kind != AndroidRouteKindV2.BLUETOOTH_MEDIA) {
-      return "recording_route_unsupported"
-    }
 
     val input = facts.actualInput ?: return "no_input"
     val output = facts.actualOutput ?: return "no_output"
-    if (
-      input.kind !in setOf(
-        AndroidRouteKindV2.BUILT_IN,
-        AndroidRouteKindV2.WIRED,
-        AndroidRouteKindV2.EXTERNAL,
-      ) ||
-      output.fingerprint != source.fingerprint
-    ) {
+    if (output.fingerprint != source.fingerprint) {
       return "route_unstable"
     }
     if (
@@ -254,7 +270,8 @@ internal object AndroidSystemSelectedMediaDuplexReadinessV2 {
     if (
       !facts.deviceOpen ||
       !facts.callbackAttached ||
-      facts.activeInputChannels != 1 ||
+      facts.requiredInputChannels !in 1..32 ||
+      facts.activeInputChannels != facts.requiredInputChannels ||
       facts.activeOutputChannels <= 0 ||
       facts.sampleRateHz <= 0.0 ||
       facts.bufferFrames <= 0
@@ -264,11 +281,14 @@ internal object AndroidSystemSelectedMediaDuplexReadinessV2 {
 
     val inputStream = facts.inputStream
     val outputStream = facts.outputStream
+    val retainsBluetoothMedia =
+      source.kind == AndroidRouteKindV2.BLUETOOTH_MEDIA ||
+        source.kind == AndroidRouteKindV2.BLUETOOTH_LE
     if (
       !inputStream.available ||
       !inputStream.running ||
       inputStream.routedDeviceId != input.id ||
-      inputStream.channelCount != 1 ||
+      inputStream.channelCount != facts.requiredInputChannels ||
       (inputStream.sampleRateHz ?: 0) <= 0 ||
       (inputStream.bufferFrames ?: 0) <= 0 ||
       !outputStream.available ||
@@ -278,8 +298,8 @@ internal object AndroidSystemSelectedMediaDuplexReadinessV2 {
       outputStream.channelCount != facts.activeOutputChannels ||
       (outputStream.sampleRateHz ?: 0) <= 0 ||
       (outputStream.bufferFrames ?: 0) <= 0 ||
-      outputStream.performanceMode != "None" ||
-      outputStream.sharingMode != "Shared"
+      (retainsBluetoothMedia && outputStream.performanceMode != "None") ||
+      (retainsBluetoothMedia && outputStream.sharingMode != "Shared")
     ) {
       return "actual_state_unavailable"
     }

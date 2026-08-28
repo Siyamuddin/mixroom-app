@@ -70,6 +70,7 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -79,6 +80,7 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
       generation,
       outputDeviceName: outputDeviceName,
       inputDeviceName: inputDeviceName,
+      inputDeviceUID: inputDeviceUID,
       updateInputPreference: updateInputPreference,
       preferredSampleRateHz: preferredSampleRateHz,
       preferredBufferFrames: preferredBufferFrames,
@@ -91,11 +93,17 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
       {AudioRouteIntentOperationV2 operation =
-          AudioRouteIntentOperationV2.standard}) {
+          AudioRouteIntentOperationV2.standard,
+      int? recordingChannelStart,
+      int? recordingChannelCount,
+      int? monitoringTargetRow}) {
     return JuceAudioEngine.setAudioRouteIntentV2(
       intent,
       generation: generation,
       operation: operation,
+      recordingChannelStart: recordingChannelStart,
+      recordingChannelCount: recordingChannelCount,
+      monitoringTargetRow: monitoringTargetRow,
       platformOverride: platformOverride,
     );
   }
@@ -327,6 +335,9 @@ class AudioRouteInfo {
 
 class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
+    this.uid = '',
+    this.channelCount = 0,
+    this.clockDomain,
     required this.name,
     required this.isBluetoothInput,
     required this.isBuiltIn,
@@ -334,6 +345,9 @@ class AudioInputDeviceInfo {
     required this.transport,
   });
 
+  final String uid;
+  final int channelCount;
+  final int? clockDomain;
   final String name;
   final bool isBluetoothInput;
   final bool isBuiltIn;
@@ -342,6 +356,9 @@ class AudioInputDeviceInfo {
 
   factory AudioInputDeviceInfo.fromMap(Map<String, dynamic> map) {
     return AudioInputDeviceInfo(
+      uid: map['uid']?.toString() ?? '',
+      channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+      clockDomain: (map['clockDomain'] as num?)?.toInt(),
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
       isBuiltIn: map['isBuiltIn'] == true,
@@ -515,6 +532,7 @@ class JuceAudioEngine {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -529,6 +547,10 @@ class JuceAudioEngine {
       return _unavailableRouteTransitionV2(generation);
     }
     try {
+      final normalizedInputName = inputDeviceName?.trim() ?? '';
+      final normalizedInputUID = inputDeviceUID?.trim() ?? '';
+      final followsSystemInput =
+          normalizedInputName.isEmpty && normalizedInputUID.isEmpty;
       final arguments = <String, Object>{
         'generation': generation,
         'intent': 'playbackOnly',
@@ -538,10 +560,11 @@ class JuceAudioEngine {
         if (outputDeviceName?.trim().isNotEmpty == true)
           'outputDeviceName': outputDeviceName!.trim(),
         if (updateInputPreference) 'updateInputPreference': true,
-        if (updateInputPreference)
-          'followSystemInput': inputDeviceName?.trim().isNotEmpty != true,
-        if (updateInputPreference && inputDeviceName?.trim().isNotEmpty == true)
-          'inputDeviceName': inputDeviceName!.trim(),
+        if (updateInputPreference) 'followSystemInput': followsSystemInput,
+        if (updateInputPreference && normalizedInputName.isNotEmpty)
+          'inputDeviceName': normalizedInputName,
+        if (updateInputPreference && normalizedInputUID.isNotEmpty)
+          'inputDeviceUID': normalizedInputUID,
         if (updateHardwarePreferences) 'updateHardwarePreferences': true,
         if (updateHardwarePreferences && preferredSampleRateHz != null)
           'preferredSampleRateHz': preferredSampleRateHz,
@@ -571,6 +594,9 @@ class JuceAudioEngine {
     required int generation,
     AudioRouteIntentOperationV2 operation =
         AudioRouteIntentOperationV2.standard,
+    int? recordingChannelStart,
+    int? recordingChannelCount,
+    int? monitoringTargetRow,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -591,6 +617,12 @@ class JuceAudioEngine {
           'intent': intent.name,
           if (operation != AudioRouteIntentOperationV2.standard)
             'intentOperation': operation.name,
+          if (recordingChannelStart != null)
+            'recordingChannelStart': recordingChannelStart,
+          if (recordingChannelCount != null)
+            'recordingChannelCount': recordingChannelCount,
+          if (monitoringTargetRow != null)
+            'monitoringTargetRow': monitoringTargetRow,
         },
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);
@@ -700,7 +732,9 @@ class JuceAudioEngine {
     if (startup == null || startup.outputs.length != 1) return false;
     final current = await getAudioRouteSnapshotV2();
     final expectedInputChannels =
-        startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
+        startup.intent == AudioRouteIntentV2.playbackOnly
+            ? 0
+            : startup.juce.activeInputChannels ?? 0;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
@@ -722,7 +756,7 @@ class JuceAudioEngine {
       return false;
     }
     if ((platform == TargetPlatform.macOS || platform == TargetPlatform.iOS) &&
-        expectedInputChannels == 1) {
+        expectedInputChannels > 0) {
       if (startup.inputs.length != 1 ||
           current.intent == AudioRouteIntentV2.playbackOnly ||
           current.inputs.length != 1 ||

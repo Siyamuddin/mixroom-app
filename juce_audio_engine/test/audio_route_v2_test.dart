@@ -24,6 +24,31 @@ AudioRouteSnapshotV2 snapshot({
 }
 
 void main() {
+  test('route endpoint parses optional CoreAudio clock domain', () {
+    final endpoint = AudioRouteEndpointV2.fromMap(<String, dynamic>{
+      'direction': 'input',
+      'nativePortType': 'builtIn',
+      'normalizedKind': 'builtIn',
+      'uid': 'input-uid',
+      'name': 'Input',
+      'channelCount': 2,
+      'clockDomain': 42,
+    });
+
+    expect(endpoint.channelCount, 2);
+    expect(endpoint.clockDomain, 42);
+    expect(endpoint.toRawMap()['clockDomain'], 42);
+  });
+
+  test('monitoring intent round-trips through route snapshots', () {
+    final parsed = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+      'intent': 'monitoring',
+    });
+
+    expect(parsed.intent, AudioRouteIntentV2.monitoring);
+    expect(parsed.toRawMap()['intent'], 'monitoring');
+  });
+
   test('parses every endpoint and preserves unknown native port types', () {
     final parsed = AudioRouteSnapshotV2.fromMap(<String, dynamic>{
       'schemaVersion': 1,

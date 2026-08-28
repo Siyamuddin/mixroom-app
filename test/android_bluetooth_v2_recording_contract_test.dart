@@ -21,10 +21,10 @@ void main() {
     expect(plugin, contains('"setAudioRouteIntentV2"'));
     expect(plugin, contains('"abortRecordingV2"'));
     expect(plugin, contains('audioLifecycleExecutorV2'));
-    expect(plugin, contains('prepareBuiltInRecordingV2(generation)'));
+    expect(plugin, contains('prepareBuiltInRecordingV2('));
     expect(
       plugin,
-      contains('prepareSystemSelectedRecordingV2(generation, operationMode)'),
+      contains('prepareSystemSelectedRecordingV2('),
     );
     expect(plugin, contains('"systemSelectedRecording"'));
     expect(plugin, contains('restoreRecordingPlaybackV2(generation)'));
@@ -36,7 +36,7 @@ void main() {
     'prepared recording opens once and capture never reopens the device',
     () {
       final prepareStart = engine.indexOf(
-        'bool JuceEngine::prepareRecordingV2Android()',
+        'bool JuceEngine::prepareRecordingV2Android(int inputChannels)',
       );
       final waitStart = engine.indexOf(
         'bool JuceEngine::waitForV2CallbackReady',
@@ -54,7 +54,7 @@ void main() {
 
       expect(
         prepare,
-        contains('deviceManager.initialise(\n        1,\n        2'),
+        contains('deviceManager.initialise(\n        requestedInputs,\n        2'),
       );
       expect(prepare, contains('liveInputMonitoringEnabled = false'));
       expect(prepare, contains('androidV2CallbackProofPending'));
@@ -62,13 +62,20 @@ void main() {
         start,
         contains('const bool v2Recording = androidV2RecordingPrepared'),
       );
-      expect(start, contains('if (channelStart != 0 || channelCount != 1)'));
+      expect(start, contains('channelStart < 0'));
+      expect(start, contains('channelCount != 1 && channelCount != 2'));
+      expect(
+        start,
+        contains(
+          'requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed)',
+        ),
+      );
       expect(start, contains('else if (!applyPreferredAudioDeviceSetup'));
     },
   );
 
   test(
-    'editor chooses built-in or Bluetooth recording before permission and restores on Stop',
+    'editor follows every stable Android route before permission and restores on Stop',
     () {
       final preflightStart = editor.indexOf(
         'Future<bool> _prepareAudioRecordingStartPreflight()',
@@ -82,12 +89,15 @@ void main() {
       final stopEnd = editor.indexOf('\n  Future<', stopStart + 20);
       final stop = editor.substring(stopStart, stopEnd);
 
-      expect(preflight, contains('case AudioRouteKindV2.builtIn:'));
-      expect(preflight, contains('case AudioRouteKindV2.bluetoothMedia:'));
       expect(
         preflight,
         contains('AudioRouteIntentOperationV2.systemSelectedRecording'),
       );
+      expect(
+        preflight,
+        isNot(contains('switch (sourceOutput.normalizedKind)')),
+      );
+      expect(preflight, isNot(contains('case AudioRouteKindV2.')));
       expect(
         preflight.indexOf('getAudioRouteSnapshotV2()'),
         lessThan(
@@ -95,8 +105,16 @@ void main() {
         ),
       );
       expect(preflight, contains('AudioRouteIntentV2.preparingRecording'));
+      expect(
+        preflight,
+        contains('recordingChannelStart: _selectedChannelStart'),
+      );
+      expect(
+        preflight,
+        contains('recordingChannelCount: _selectedChannelCount'),
+      );
       expect(stop, contains('await JuceAudioEngine.stopRecording()'));
-      expect(stop, contains('_restoreV2PlaybackOnlyAfterRecording()'));
+      expect(stop, contains('_restoreV2RouteAfterAudioRecording()'));
     },
   );
 
@@ -241,7 +259,7 @@ void main() {
     );
   });
 
-  test('V2 transport accepts only the verified active recording input', () {
+  test('V2 transport accepts only a verified V2-owned active input', () {
     final playStart = engine.indexOf(
       'bool JuceEngine::playPlaybackV2Android()',
     );
@@ -249,14 +267,21 @@ void main() {
     final play = engine.substring(playStart, pauseStart);
 
     expect(play, contains('wavCapture.isActive()'));
+    expect(play, contains('shouldRouteLiveInputToGraphV2()'));
     expect(play, contains('androidV2RecordingPrepared'));
     expect(
       play,
-      contains('desiredInputOpenChannels.load(std::memory_order_relaxed) == 1'),
+      contains('desiredInputChannels > 0'),
     );
     expect(
       play,
-      contains('(activeInputChannels != 0 && !verifiedRecordingInputActive)'),
+      contains(
+        'activeInputChannels == desiredInputChannels',
+      ),
+    );
+    expect(
+      play,
+      contains('(activeInputChannels != 0 && !verifiedOwnedInputActive)'),
     );
     expect(play, isNot(contains('applyPreferredAudioDeviceSetup')));
   });
@@ -327,6 +352,16 @@ void main() {
         lifecycle,
         contains('Recording stopped because Mixroom went to the background.'),
       );
+      expect(
+        lifecycle,
+        isNot(
+          contains(
+            'Monitoring stopped because Mixroom went to the background.',
+          ),
+        ),
+      );
+      expect(background, contains('_backgroundRecordingImpactNotice()'));
+      expect(background, contains('_androidV2ForegroundImpactNotice'));
 
       final resumeStart = editor.indexOf(
         'Future<void> _handleAndroidEditorResumed() async',
@@ -360,6 +395,7 @@ void main() {
       expect(claim, lessThan(foregroundEpisode));
       expect(foregroundEpisode, lessThan(recovery));
       expect(resume, contains('_trackV2AudioSessionRecovery(recovery)'));
+      expect(resume, contains('successNotice: successNotice'));
 
       final recoveryStart = editor.indexOf(
         'Future<void> _recoverV2PlaybackAfterAudioSessionInvalidation',

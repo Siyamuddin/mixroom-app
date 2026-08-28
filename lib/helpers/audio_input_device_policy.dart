@@ -3,6 +3,40 @@ import 'package:juce_audio_engine/juce_audio_engine.dart';
 class AudioInputDevicePolicy {
   const AudioInputDevicePolicy();
 
+  Map<String, String> displayLabelsByUid(
+    Iterable<AudioInputDeviceInfo> devices,
+  ) {
+    final devicesByUid = <String, AudioInputDeviceInfo>{};
+    for (final device in devices) {
+      final uid = device.uid.trim();
+      final name = device.name.trim();
+      if (uid.isEmpty || name.isEmpty) continue;
+      devicesByUid.putIfAbsent(uid, () => device);
+    }
+
+    final groups = <String, List<AudioInputDeviceInfo>>{};
+    for (final device in devicesByUid.values) {
+      groups.putIfAbsent(_displayNameKey(device.name), () => []).add(device);
+    }
+
+    final labels = <String, String>{};
+    for (final group in groups.values) {
+      if (group.length == 1) {
+        final device = group.single;
+        labels[device.uid.trim()] = device.name.trim();
+        continue;
+      }
+      final ordered = [...group]
+        ..sort((left, right) => left.uid.trim().compareTo(right.uid.trim()));
+      for (var index = 0; index < ordered.length; index++) {
+        final device = ordered[index];
+        labels[device.uid.trim()] =
+            '${device.name.trim()} · ${_transportLabel(device.transport)} ${index + 1}';
+      }
+    }
+    return labels;
+  }
+
   bool isBluetoothInput(AudioInputDeviceInfo info) => info.isBluetoothInput;
 
   String? builtInInputName(Iterable<AudioInputDeviceInfo> devices) {
@@ -89,5 +123,20 @@ class AudioInputDevicePolicy {
         .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
+  }
+
+  String _displayNameKey(String value) => value.trim().toLowerCase();
+
+  String _transportLabel(String transport) {
+    return switch (transport.trim().toLowerCase()) {
+      'builtin' => 'Built-in',
+      'bluetooth' => 'Bluetooth',
+      'usb' => 'USB',
+      'firewire' => 'FireWire',
+      'pci' => 'PCI',
+      'aggregate' => 'Aggregate',
+      'virtual' => 'Virtual',
+      _ => 'External',
+    };
   }
 }

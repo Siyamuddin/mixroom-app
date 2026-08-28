@@ -21,6 +21,7 @@ enum AudioRouteCaptureConsistencyV2 {
 
 enum AudioRouteIntentV2 {
   playbackOnly,
+  monitoring,
   preparingRecording,
   recording,
 }
@@ -32,6 +33,7 @@ enum AudioRouteIntentV2 {
 enum AudioRouteIntentOperationV2 {
   standard,
   systemSelectedRecording,
+  systemSelectedMonitoring,
 }
 
 enum AudioRouteCoordinatorStateV2 {
@@ -72,6 +74,7 @@ class AudioRouteEndpointV2 {
     required this.uid,
     required this.name,
     required this.channelCount,
+    this.clockDomain,
   });
 
   final AudioRouteDirectionV2 direction;
@@ -80,6 +83,7 @@ class AudioRouteEndpointV2 {
   final String uid;
   final String name;
   final int? channelCount;
+  final int? clockDomain;
 
   factory AudioRouteEndpointV2.fromMap(Map<String, dynamic> map) {
     return AudioRouteEndpointV2(
@@ -97,6 +101,7 @@ class AudioRouteEndpointV2 {
       uid: map['uid']?.toString() ?? '',
       name: map['name']?.toString() ?? '',
       channelCount: _nullableInt(map['channelCount']),
+      clockDomain: _nullableInt(map['clockDomain']),
     );
   }
 
@@ -107,6 +112,7 @@ class AudioRouteEndpointV2 {
         'uid': uid,
         'name': name,
         'channelCount': channelCount,
+        'clockDomain': clockDomain,
       };
 }
 

@@ -11,6 +11,7 @@ abstract interface class AudioRouteAdapterV2 {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -20,7 +21,10 @@ abstract interface class AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
       {AudioRouteIntentOperationV2 operation =
-          AudioRouteIntentOperationV2.standard});
+          AudioRouteIntentOperationV2.standard,
+      int? recordingChannelStart,
+      int? recordingChannelCount,
+      int? monitoringTargetRow});
 
   Future<void> stopMonitoring();
 }
@@ -29,6 +33,7 @@ class AudioRouteCoordinatorV2 {
   AudioRouteCoordinatorV2({
     required AudioRouteAdapterV2 adapter,
     this.settlingDelay = const Duration(milliseconds: 100),
+    this.inputSelectionRecoveryDeadline = const Duration(seconds: 2),
     this.allowRecoveryGenerationSupersession = false,
     this.onStateChanged,
     this.onTransition,
@@ -37,6 +42,7 @@ class AudioRouteCoordinatorV2 {
 
   final AudioRouteAdapterV2 _adapter;
   final Duration settlingDelay;
+  final Duration inputSelectionRecoveryDeadline;
   final bool allowRecoveryGenerationSupersession;
   final void Function(AudioRouteCoordinatorStateV2 state)? onStateChanged;
   final void Function(AudioRouteTransitionResultV2 result)? onTransition;
@@ -65,6 +71,7 @@ class AudioRouteCoordinatorV2 {
   bool _disposed = false;
   AudioRouteIntentV2 _intent = AudioRouteIntentV2.playbackOnly;
   AudioRouteIntentV2? _transitioningIntent;
+  _PlaybackRecoveryWaiter? _inputSelectionRecoveryWaiter;
 
   AudioRouteIntentV2 get intent => _intent;
 
@@ -196,6 +203,10 @@ class AudioRouteCoordinatorV2 {
     }
     _lastFingerprint = event.fingerprint;
     _pending = event;
+    final waiter = _inputSelectionRecoveryWaiter;
+    if (waiter != null && event.generation > waiter.afterGeneration) {
+      waiter.targetGeneration = event.generation;
+    }
     _setState(AudioRouteCoordinatorStateV2.reconfiguring);
     _schedulePendingDrain();
   }
@@ -234,6 +245,14 @@ class AudioRouteCoordinatorV2 {
           ? AudioRouteCoordinatorStateV2.stable
           : AudioRouteCoordinatorStateV2.failed);
       onTransition?.call(result);
+      final waiter = _inputSelectionRecoveryWaiter;
+      if (waiter != null &&
+          waiter.targetGeneration != null &&
+          result.generation >= waiter.targetGeneration! &&
+          _pending == null &&
+          !waiter.completion.isCompleted) {
+        waiter.completion.complete(result);
+      }
     }
 
     _schedulePendingDrain();
@@ -242,7 +261,10 @@ class AudioRouteCoordinatorV2 {
   Future<AudioRouteTransitionResultV2> transitionIntent(
       AudioRouteIntentV2 intent,
       {AudioRouteIntentOperationV2 operation =
-          AudioRouteIntentOperationV2.standard}) async {
+          AudioRouteIntentOperationV2.standard,
+      int? recordingChannelStart,
+      int? recordingChannelCount,
+      int? monitoringTargetRow}) async {
     if (_disposed || !_started || _shutdownCancellation) {
       return _localFailure(intent, 'coordinator_disposed');
     }
@@ -267,6 +289,9 @@ class AudioRouteCoordinatorV2 {
         intent,
         generation,
         operation: operation,
+        recordingChannelStart: recordingChannelStart,
+        recordingChannelCount: recordingChannelCount,
+        monitoringTargetRow: monitoringTargetRow,
       );
     } catch (_) {
       result = _localFailure(intent, 'actual_state_unavailable');
@@ -286,16 +311,26 @@ class AudioRouteCoordinatorV2 {
       if (_disposed) {
         return _localFailure(intent, 'coordinator_disposed');
       }
-      final restoredPlaybackAfterPreparation =
+      final restoredPlaybackAfterRecordingPreparation =
           intent == AudioRouteIntentV2.preparingRecording &&
               result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
               result.snapshot.juce.deviceOpen == true &&
               result.snapshot.juce.activeInputChannels == 0 &&
               (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
+      final restoredPlaybackAfterMonitoring =
+          intent == AudioRouteIntentV2.monitoring &&
+              result.snapshot.intent == AudioRouteIntentV2.playbackOnly &&
+              result.snapshot.juce.deviceOpen == true &&
+              result.snapshot.juce.audioCallbackAttached == true &&
+              result.snapshot.juce.activeInputChannels == 0 &&
+              (result.snapshot.juce.activeOutputChannels ?? 0) > 0;
+      final restoredPlaybackAfterInputPreparation =
+          restoredPlaybackAfterRecordingPreparation ||
+              restoredPlaybackAfterMonitoring;
       final stale = result.generation != generation ||
           _latestGeneration != generation ||
           (result.diagnosticCode == 'stale_generation' &&
-              !restoredPlaybackAfterPreparation);
+              !restoredPlaybackAfterInputPreparation);
       if (stale) {
         _setState(AudioRouteCoordinatorStateV2.failed);
         return result.diagnosticCode == 'stale_generation'
@@ -305,7 +340,7 @@ class AudioRouteCoordinatorV2 {
       if (result.succeeded) {
         _intent = intent;
         _setState(AudioRouteCoordinatorStateV2.stable);
-      } else if (restoredPlaybackAfterPreparation) {
+      } else if (restoredPlaybackAfterInputPreparation) {
         _intent = AudioRouteIntentV2.playbackOnly;
         _setState(AudioRouteCoordinatorStateV2.stable);
       } else {
@@ -384,8 +419,10 @@ class AudioRouteCoordinatorV2 {
   /// mutating the active output-only route. A null/empty selection means
   /// follow the system default input.
   Future<AudioRouteTransitionResultV2> selectRecordingInput(
-    String? inputDeviceName,
-  ) async {
+    String? inputDeviceName, {
+    String? inputDeviceUID,
+    bool retryAfterPlaybackRecovery = false,
+  }) async {
     if (_disposed || !_started || _shutdownCancellation) {
       return _localFailure(
         AudioRouteIntentV2.playbackOnly,
@@ -396,21 +433,99 @@ class AudioRouteCoordinatorV2 {
         _intent != AudioRouteIntentV2.playbackOnly ||
         _applyInFlight ||
         _intentTransitionInFlight ||
+        _inputSelectionRecoveryWaiter != null ||
         _pending != null) {
       return _localFailure(AudioRouteIntentV2.playbackOnly, 'route_unstable');
     }
 
-    _applyInFlight = true;
     final generation = _latestGeneration;
-    AudioRouteTransitionResultV2 result;
+    final selection = inputDeviceName?.trim();
+    final selectionUID = inputDeviceUID?.trim();
+    final recoveryWaiter =
+        retryAfterPlaybackRecovery ? _PlaybackRecoveryWaiter(generation) : null;
+    _inputSelectionRecoveryWaiter = recoveryWaiter;
+    var result = await _applyRecordingInputPreference(
+      generation,
+      selection,
+      selectionUID,
+    );
+
     try {
-      result = await _adapter.applyPlaybackRoute(
+      if (_disposed) return result;
+      final stale = result.generation != generation ||
+          result.diagnosticCode == 'stale_generation' ||
+          (_latestGeneration != generation &&
+              result.diagnosticCode != 'actual_state_unavailable');
+      if (stale) {
+        return result.diagnosticCode == 'stale_generation'
+            ? result
+            : _localFailure(
+                AudioRouteIntentV2.playbackOnly,
+                'stale_generation',
+              );
+      }
+      if (!retryAfterPlaybackRecovery ||
+          result.diagnosticCode != 'actual_state_unavailable' ||
+          recoveryWaiter == null) {
+        return result;
+      }
+
+      final recovery = await recoveryWaiter.completion.future.timeout(
+        inputSelectionRecoveryDeadline,
+        onTimeout: () => null,
+      );
+      if (recovery == null ||
+          !recovery.succeeded ||
+          _disposed ||
+          _shutdownCancellation ||
+          _interruptionActive ||
+          _intent != AudioRouteIntentV2.playbackOnly ||
+          _state != AudioRouteCoordinatorStateV2.stable ||
+          _applyInFlight ||
+          _intentTransitionInFlight ||
+          _pending != null ||
+          _latestGeneration != recovery.generation) {
+        return result;
+      }
+
+      result = await _applyRecordingInputPreference(
+        recovery.generation,
+        selection,
+        selectionUID,
+      );
+      if (result.generation != recovery.generation ||
+          result.diagnosticCode == 'stale_generation' ||
+          _latestGeneration != recovery.generation) {
+        return result.diagnosticCode == 'stale_generation'
+            ? result
+            : _localFailure(
+                AudioRouteIntentV2.playbackOnly,
+                'stale_generation',
+              );
+      }
+      return result;
+    } finally {
+      if (identical(_inputSelectionRecoveryWaiter, recoveryWaiter)) {
+        _inputSelectionRecoveryWaiter = null;
+      }
+    }
+  }
+
+  Future<AudioRouteTransitionResultV2> _applyRecordingInputPreference(
+    int generation,
+    String? inputDeviceName,
+    String? inputDeviceUID,
+  ) async {
+    _applyInFlight = true;
+    try {
+      return await _adapter.applyPlaybackRoute(
         generation,
-        inputDeviceName: inputDeviceName?.trim(),
+        inputDeviceName: inputDeviceName,
+        inputDeviceUID: inputDeviceUID,
         updateInputPreference: true,
       );
     } catch (_) {
-      result = _localFailure(
+      return _localFailure(
         AudioRouteIntentV2.playbackOnly,
         'actual_state_unavailable',
       );
@@ -418,20 +533,6 @@ class AudioRouteCoordinatorV2 {
       _applyInFlight = false;
       _schedulePendingDrain();
     }
-
-    if (_disposed) return result;
-    final stale = result.generation != generation ||
-        result.diagnosticCode == 'stale_generation' ||
-        _latestGeneration != generation;
-    if (stale) {
-      return result.diagnosticCode == 'stale_generation'
-          ? result
-          : _localFailure(
-              AudioRouteIntentV2.playbackOnly,
-              'stale_generation',
-            );
-    }
-    return result;
   }
 
   /// Applies the existing project hardware preferences through the same
@@ -496,9 +597,10 @@ class AudioRouteCoordinatorV2 {
   }
 
   /// Serializes a playback-only recovery behind an intent transition that was
-  /// invalidated by a native route event. A native stale-generation preflight
-  /// may be superseded once when its immutable snapshot proves that the route
-  /// generation advanced before any device mutation began.
+  /// invalidated by a native route event. A native stale-generation result may
+  /// be superseded once when its immutable snapshot proves that the native
+  /// route generation advanced during the owned recovery. Native recovery is
+  /// responsible for quiescing any incomplete route before returning stale.
   Future<AudioRouteTransitionResultV2>
       recoverPlaybackAfterIntentInvalidation() async {
     final existing = _invalidationRecovery;
@@ -553,9 +655,9 @@ class AudioRouteCoordinatorV2 {
               _pending == null;
       if (!canSupersedeNativeStalePreflight) return result;
 
-      // The rejected native preflight did not mutate the route. Promote only
-      // the authoritative generation exposed by native/event facts, then
-      // replace that stale request once within the same invalidation episode.
+      // Promote only the authoritative generation exposed by native/event
+      // facts, then replace that stale request once within the same
+      // invalidation episode. All other stale transitions remain rejected.
       _latestGeneration = authoritativeGeneration;
       result = await transitionIntent(AudioRouteIntentV2.playbackOnly);
       return result;
@@ -623,8 +725,22 @@ class AudioRouteCoordinatorV2 {
     _settlingTimer?.cancel();
     _settlingTimer = null;
     _pending = null;
+    final waiter = _inputSelectionRecoveryWaiter;
+    if (waiter != null && !waiter.completion.isCompleted) {
+      waiter.completion.complete(null);
+    }
+    _inputSelectionRecoveryWaiter = null;
     await _subscription?.cancel();
     _subscription = null;
     if (_started) await _adapter.stopMonitoring();
   }
+}
+
+class _PlaybackRecoveryWaiter {
+  _PlaybackRecoveryWaiter(this.afterGeneration);
+
+  final int afterGeneration;
+  final Completer<AudioRouteTransitionResultV2?> completion =
+      Completer<AudioRouteTransitionResultV2?>();
+  int? targetGeneration;
 }
