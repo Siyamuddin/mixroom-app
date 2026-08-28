@@ -57,12 +57,13 @@ test passes. No entry remains `not_audited`.
 
 Routing status is independent of capability coverage. Updated clients send
 context and an executable command allowlist to the authenticated server-owned
-V3 contract. The backend owns prompts, tool descriptions, provider policy, the
-musical-dimension compiler, and the align-only production-goal retry. Released
-legacy V3 clients remain supported by the backend compatibility switch, while
-V1 remains available when the V3 product switch is disabled. Adaptive and
-compact shadow planners are no longer shipped. This routing change adds no
-command or capability claim.
+V3 contract. The backend owns prompts, tool descriptions, and provider policy
+for the V3 behavior on reverted main; it does not include the reverted PR #27
+musical-dimension compiler or align-only production-goal retry. Released legacy
+V3 clients remain supported by the backend compatibility switch, while V1
+remains available when the V3 product switch is disabled. Adaptive and compact
+shadow planners are no longer shipped. This routing change adds no command or
+capability claim.
 
 ## V1 architecture
 
@@ -256,7 +257,7 @@ are simply absent from this capture set.
 ## V1→V3 migration order
 
 1. Keep the typed V3 wire plan and its stable-ID preparation, preview, local
-   transaction, and readback boundary while backend contract v2 owns semantic
+   transaction, and readback boundary while backend contract v3 owns semantic
    planning.
 2. Add representative typed core editing slices: transport, row lifecycle/state,
    clip core, MIDI editing, effect instances, and general automation.

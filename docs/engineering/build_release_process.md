@@ -108,7 +108,7 @@ entitlements, AI actions, feature flags, or cloud project behavior changes.
 
 For an AI V3 client release, deploy and verify the authenticated context-only
 `/v1/llm/v3/responses` route before distributing a build with
-`AI_V3_PRIMARY_ENABLED=true`. Backend contract v2 owns all V3 semantics and
+`AI_V3_PRIMARY_ENABLED=true`. Backend contract v3 owns all V3 semantics and
 provider policy. Keep `AI_V3_SERVER_CONTRACT_ENABLED=true` and
 `AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED=true` while released legacy clients need
 compatibility. A client build with `AI_V3_PRIMARY_ENABLED=false` keeps the

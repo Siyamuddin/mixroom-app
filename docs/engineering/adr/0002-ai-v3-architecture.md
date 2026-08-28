@@ -74,7 +74,7 @@ uses:
   assumed production composition path;
 - measured latency objectives rather than a fixed architectural timeout.
 
-The current command surface is planned by backend contract v2. There is no
+The current command surface is planned by backend contract v3. There is no
 adaptive or shadow planner in the shipped application.
 
 ## Goals

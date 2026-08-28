@@ -775,5 +775,5 @@ but the run is not a claim of production activation.
 - Claiming all external work is atomic.
 - Achieving V1 parity by placing all 87 legacy operations in one schema.
 > Historical design record: the client-side adaptive planner described here is
-> not shipped. As of backend contract v2, all future semantic planner
+> not shipped. As of backend contract v3, all future semantic planner
 > experiments must run server-side. See [ADR 0002](adr/0002-ai-v3-architecture.md).
