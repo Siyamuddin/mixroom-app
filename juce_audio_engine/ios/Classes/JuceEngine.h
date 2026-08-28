@@ -5,6 +5,7 @@
 #include "NativeEffects.h"
 #include "JuceLogBridge.h"
 #include "../../native/RealtimeWavCapture.h"
+#include "../../native/SampledPitchSemantics.h"
 
 #include <array>
 #include <atomic>
@@ -4480,18 +4481,26 @@ private:
                 sampleRaw);
             SampledRegion regionDef;
             regionDef.sampleAssetPath = sampleAssetPath;
-            regionDef.loKey =
-                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lokey", 0.0)));
-            regionDef.hiKey =
-                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "hikey", 127.0)));
+            const double key = readSfzNumeric(
+                r, "key", std::numeric_limits<double>::quiet_NaN());
+            const double defaultLoKey = std::isfinite(key) ? key : 0.0;
+            const double defaultHiKey = std::isfinite(key) ? key : 127.0;
+            regionDef.loKey = juce::jlimit(
+                0,
+                127,
+                (int)std::lround(readSfzNumeric(r, "lokey", defaultLoKey)));
+            regionDef.hiKey = juce::jlimit(
+                regionDef.loKey,
+                127,
+                (int)std::lround(readSfzNumeric(r, "hikey", defaultHiKey)));
 
             double keyCenter = readSfzNumeric(r, "pitch_keycenter", std::numeric_limits<double>::quiet_NaN());
             if (!std::isfinite(keyCenter))
             {
-                keyCenter = readSfzNumeric(
-                    r,
-                    "key",
-                    (double)std::lround((regionDef.loKey + regionDef.hiKey) * 0.5));
+                keyCenter = std::isfinite(key)
+                                ? key
+                                : (double)std::lround(
+                                      (regionDef.loKey + regionDef.hiKey) * 0.5);
             }
             regionDef.keyCenter =
                 juce::jlimit(0, 127, (int)std::lround(keyCenter));
@@ -4841,7 +4850,8 @@ private:
 
         region.sampleStartFrame = startFrame;
         region.sampleEndFrameExclusive = endFrame;
-        region.keyCenter = juce::jlimit(0, 127, (int)std::round(preset.rootNote));
+        region.keyCenter = mixroom::effectiveSampleKeyCenter(
+            source.keyCenter, preset.rootNote);
         if (preset.timeStretchMode >= 0.5)
             region.pitchKeytrack = 0.0;
         region.oneShot = preset.samplePlayMode >= 0.5;
