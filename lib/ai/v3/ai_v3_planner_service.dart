@@ -8,7 +8,6 @@ import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_planner_request.dart';
 import 'ai_v3_resources.dart';
-import 'ai_v3_style_compiler.dart';
 
 class AiV3PlannerException implements Exception {
   const AiV3PlannerException(
@@ -65,9 +64,9 @@ class AiV3PlannerService implements AiV3Planner {
     this.refreshAuthTokenProvider,
     this.resourceRefsEnabled = false,
     http.Client? httpClient,
-  }) : assert(commandTypes.isNotEmpty),
-       commandTypes = Set<String>.unmodifiable(commandTypes),
-       _httpClient = httpClient ?? http.Client();
+  })  : assert(commandTypes.isNotEmpty),
+        commandTypes = Set<String>.unmodifiable(commandTypes),
+        _httpClient = httpClient ?? http.Client();
 
   static const String _apiUrl = 'https://api.openai.com/v1/responses';
 
@@ -99,75 +98,17 @@ class AiV3PlannerService implements AiV3Planner {
         (_usesProxy && authTokenProvider == null)) {
       throw const AiV3PlannerException('v3_openai_configuration_missing');
     }
+    final body = buildAiV3PlannerRequestBody(
+      contextData: context.data,
+      originalRequest: originalRequest,
+      model: model,
+      reasoningEffort: reasoningEffort,
+      promptTraceId: promptTraceId,
+      commandTypes: commandTypes,
+      architecture: architecture,
+      resourceRefsEnabled: resourceRefsEnabled,
+    );
     final stopwatch = Stopwatch()..start();
-    try {
-      final first = await _complete(
-        buildAiV3PlannerRequestBody(
-          contextData: context.data,
-          originalRequest: originalRequest,
-          model: model,
-          reasoningEffort: reasoningEffort,
-          promptTraceId: promptTraceId,
-          commandTypes: commandTypes,
-          architecture: architecture,
-          resourceRefsEnabled: resourceRefsEnabled,
-        ),
-        context: context,
-        promptTraceId: promptTraceId,
-        elapsedMs: () => stopwatch.elapsedMilliseconds,
-      );
-      if (!shouldRetryAiV3AlignTempoCollapse(first.plan)) {
-        return first;
-      }
-      try {
-        final retried = await _complete(
-          buildAiV3PlannerRequestBody(
-            contextData: context.data,
-            originalRequest: originalRequest,
-            model: model,
-            reasoningEffort: reasoningEffort,
-            promptTraceId: promptTraceId,
-            commandTypes: commandTypes,
-            architecture: architecture,
-            resourceRefsEnabled: resourceRefsEnabled,
-            extraInstructions: aiV3AlignTempoCollapseRetryReminder,
-          ),
-          context: context,
-          promptTraceId: promptTraceId,
-          elapsedMs: () => stopwatch.elapsedMilliseconds,
-        );
-        return AiV3PlannerResult(
-          plan: retried.plan,
-          rawResponse: retried.rawResponse,
-          meta: <String, dynamic>{
-            ...retried.meta,
-            'align_tempo_collapse_retried': true,
-          },
-          requestBody: retried.requestBody,
-        );
-      } on AiV3PlannerException {
-        return AiV3PlannerResult(
-          plan: first.plan,
-          rawResponse: first.rawResponse,
-          meta: <String, dynamic>{
-            ...first.meta,
-            'align_tempo_collapse_retried': false,
-            'align_tempo_collapse_retry_failed': true,
-          },
-          requestBody: first.requestBody,
-        );
-      }
-    } finally {
-      stopwatch.stop();
-    }
-  }
-
-  Future<AiV3PlannerResult> _complete(
-    Map<String, dynamic> body, {
-    required AiV3CoreContext context,
-    required String? promptTraceId,
-    required int Function() elapsedMs,
-  }) async {
     late http.Response response;
     try {
       response = _usesProxy
@@ -175,6 +116,8 @@ class AiV3PlannerService implements AiV3Planner {
           : await _postDirect(body);
     } on TimeoutException {
       throw const AiV3PlannerException('v3_planner_timeout');
+    } finally {
+      stopwatch.stop();
     }
     Map<String, dynamic> decoded;
     try {
@@ -190,15 +133,12 @@ class AiV3PlannerService implements AiV3Planner {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final error = decoded['error'];
-      final errorCode = error is Map
-          ? error['code']?.toString().trim() ?? ''
-          : '';
-      final errorParam = error is Map
-          ? error['param']?.toString().trim() ?? ''
-          : '';
-      final errorMessage = error is Map
-          ? error['message']?.toString().trim() ?? ''
-          : '';
+      final errorCode =
+          error is Map ? error['code']?.toString().trim() ?? '' : '';
+      final errorParam =
+          error is Map ? error['param']?.toString().trim() ?? '' : '';
+      final errorMessage =
+          error is Map ? error['message']?.toString().trim() ?? '' : '';
       final safeMessage = errorMessage
           .replaceAll(RegExp(r'\bsk-[A-Za-z0-9_-]+\b'), '[redacted]')
           .replaceAll(RegExp(r'\s+'), ' ');
@@ -225,10 +165,11 @@ class AiV3PlannerService implements AiV3Planner {
         allowResourceRefs: resourceRefsEnabled,
         resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
       );
-      if (plan.commands.any(
-        (command) => !commandTypes.contains(command.type),
-      )) {
-        throw const AiV3ContractException('v3_planner_command_outside_surface');
+      if (plan.commands
+          .any((command) => !commandTypes.contains(command.type))) {
+        throw const AiV3ContractException(
+          'v3_planner_command_outside_surface',
+        );
       }
     } on AiV3ContractException catch (error) {
       throw AiV3PlannerException(
@@ -241,10 +182,14 @@ class AiV3PlannerService implements AiV3Planner {
         },
       );
     } on AiV3PlannerException catch (error) {
-      throw AiV3PlannerException(error.code, error.detail, <String, dynamic>{
-        'raw_response': decoded,
-        'usage': usage,
-      });
+      throw AiV3PlannerException(
+        error.code,
+        error.detail,
+        <String, dynamic>{
+          'raw_response': decoded,
+          'usage': usage,
+        },
+      );
     }
     final serviceTier = decoded['service_tier']?.toString() ?? '';
     return AiV3PlannerResult(
@@ -259,13 +204,13 @@ class AiV3PlannerService implements AiV3Planner {
         'llm_route': _usesProxy ? 'authenticated_proxy' : 'direct_openai_debug',
         'context_profile': context.profileName,
         'context_approximate_tokens': context.approximateTokens,
-        'model_call_elapsed_ms': elapsedMs(),
+        'model_call_elapsed_ms': stopwatch.elapsedMilliseconds,
         'usage': usage,
         if (estimateOpenAiModelCost(
-              model: model,
-              usage: usage,
-              serviceTier: serviceTier,
-            )
+          model: model,
+          usage: usage,
+          serviceTier: serviceTier,
+        )
             case final cost?)
           'cost_estimate': cost,
         'provider_response_id': decoded['id'],
@@ -324,7 +269,9 @@ class AiV3PlannerService implements AiV3Planner {
     final proxyBody = <String, dynamic>{
       ...body,
       'ai_feature': 'ai_chat_v3',
-      'client_context': <String, dynamic>{'ai_architecture': architecture},
+      'client_context': <String, dynamic>{
+        'ai_architecture': architecture,
+      },
       if (normalizedTraceId.isNotEmpty) 'prompt_trace_id': normalizedTraceId,
     };
     return _httpClient
@@ -340,9 +287,8 @@ class AiV3PlannerService implements AiV3Planner {
   }
 
   Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
-    final provider = forceRefresh
-        ? refreshAuthTokenProvider
-        : authTokenProvider;
+    final provider =
+        forceRefresh ? refreshAuthTokenProvider : authTokenProvider;
     final token = (await provider?.call())?.trim() ?? '';
     if (token.isNotEmpty) return token;
     if (!forceRefresh && refreshAuthTokenProvider != null) {
@@ -358,8 +304,8 @@ class AiV3PlannerService implements AiV3Planner {
     final path = configuredPath.isEmpty
         ? '/v1/llm/v3/responses'
         : (configuredPath.startsWith('/')
-              ? configuredPath
-              : '/$configuredPath');
+            ? configuredPath
+            : '/$configuredPath');
     return Uri.parse('$base$path');
   }
 }

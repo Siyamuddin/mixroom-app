@@ -61,20 +61,18 @@ Future<_Fixture> _fixture({
   );
   final tracks = <AudioTrack>[audio, midi];
   for (var index = 0; index < extraAudioClipCount; index++) {
-    tracks.add(
-      await AudioTrack.create(
-        file: File('/tmp/extra-$index.wav'),
-        originalFile: File('/tmp/extra-$index.wav'),
-        audioDuration: const Duration(seconds: 1),
-        trimEnd: const Duration(seconds: 1),
-        offset: 2 + index.toDouble(),
-        rowIndex: 0,
-        rowId: 10,
-        engineClipId: 300 + index,
-        clipId: 'extra-${index.toString().padLeft(3, '0')}',
-        label: 'Extra $index',
-      ),
-    );
+    tracks.add(await AudioTrack.create(
+      file: File('/tmp/extra-$index.wav'),
+      originalFile: File('/tmp/extra-$index.wav'),
+      audioDuration: const Duration(seconds: 1),
+      trimEnd: const Duration(seconds: 1),
+      offset: 2 + index.toDouble(),
+      rowIndex: 0,
+      rowId: 10,
+      engineClipId: 300 + index,
+      clipId: 'extra-${index.toString().padLeft(3, '0')}',
+      label: 'Extra $index',
+    ));
   }
   final reverb = EffectState(
     effectIndex: 0,
@@ -102,7 +100,11 @@ Future<_Fixture> _fixture({
       roleOverride: 'vocals',
       groupId: 'vocals',
       clips: <ClipState>[
-        ClipState(startMs: 500, endMs: 4300, fileName: 'Guide Vocal.wav'),
+        ClipState(
+          startMs: 500,
+          endMs: 4300,
+          fileName: 'Guide Vocal.wav',
+        ),
       ],
       approxRms: 0.2,
       approxCrest: 2.1,
@@ -140,7 +142,9 @@ Future<_Fixture> _fixture({
       gain0to3: 2,
       pan0To1: 0.6,
       effects: const <EffectState>[],
-      volumeAutomation: <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
+      volumeAutomation: <AutomationPoint>[
+        AutomationPoint(x: 0, volume: 1),
+      ],
       hasAudio: false,
     ),
   ];
@@ -159,9 +163,12 @@ Future<_Fixture> _fixture({
         name: 'Vocals',
         rowIds: const <int>[10],
         effects: <EffectSnapshot>[
-          EffectSnapshot('Compressor', false, <String, dynamic>{
-            'threshold': 0.3,
-          }, stateBase64: 'group-state-must-not-be-captured'),
+          EffectSnapshot(
+            'Compressor',
+            false,
+            <String, dynamic>{'threshold': 0.3},
+            stateBase64: 'group-state-must-not-be-captured',
+          ),
         ],
       ),
     ],
@@ -212,7 +219,10 @@ Future<_Fixture> _fixture({
           },
         ],
         'automation_targets': <Map<String, dynamic>>[
-          <String, dynamic>{'target_id': 'row:10:volume', 'kind': 'gain'},
+          <String, dynamic>{
+            'target_id': 'row:10:volume',
+            'kind': 'gain',
+          },
         ],
       },
       <String, dynamic>{
@@ -351,8 +361,7 @@ Future<_Fixture> _fixture({
   );
 }
 
-PlanningSnapshotV3 _build(_Fixture fixture) =>
-    AiV3PlanningSnapshotBuilder(
+PlanningSnapshotV3 _build(_Fixture fixture) => AiV3PlanningSnapshotBuilder(
       idFactory: () => 'snapshot-fixed',
       clock: () => DateTime.parse(_capturedAt),
     ).build(
@@ -376,16 +385,15 @@ void main() {
     expect(snapshot.rowById.keys, <int>[10, 20]);
     expect(snapshot.clipById.keys, <String>['clip-audio', 'clip-midi']);
     expect(snapshot.groupById.keys, <String>['vocals']);
-    expect(snapshot.effectInstanceById.keys, <String>[
-      'fx-row-10-reverb',
-      'fx-master-limiter',
-    ]);
+    expect(
+      snapshot.effectInstanceById.keys,
+      <String>['fx-row-10-reverb', 'fx-master-limiter'],
+    );
     expect(snapshot.libraryAssetById, hasLength(2));
     expect(
-      ((snapshot.rowById[10]!['automation_targets'] as List)
-          .map((value) => (value as Map)['target_id'])
-          .toList()),
-      containsAll(<String>['volume', 'mix:gain', 'mix:pan']),
+      ((snapshot.rowById[10]!['automation_targets'] as List).single
+          as Map)['target_id'],
+      'volume',
     );
     expect(
       ((snapshot.data['selection'] as Map)['primary_selected_clip_id']),
@@ -402,13 +410,9 @@ void main() {
     expect(snapshot.data['project']['tempo_stretch_enabled'], isFalse);
     expect(snapshot.clipById['clip-audio']!['timeline_duration_ms'], 3800.0);
     expect(
-      snapshot.clipById['clip-audio']!['stretch_to_project_tempo'],
-      isFalse,
-    );
-    expect(
-      snapshot.clipById['clip-audio']!['tempo_stretch_preserve_pitch'],
-      isFalse,
-    );
+        snapshot.clipById['clip-audio']!['stretch_to_project_tempo'], isFalse);
+    expect(snapshot.clipById['clip-audio']!['tempo_stretch_preserve_pitch'],
+        isFalse);
     expect(
       (((snapshot.rowById[10]!['effects'] as List).single as Map)['parameters']
           as List),
@@ -431,186 +435,175 @@ void main() {
     expect((snapshot.safeMetadata['counts'] as Map)['midi_notes'], 2);
   });
 
-  test('drops stale selection indices instead of failing the snapshot', () async {
+  test('one-shot context and adaptive snapshot agree on authoritative facts',
+      () async {
     final fixture = await _fixture();
-    fixture.validation['selection'] = <String, dynamic>{
-      'selected_row_index': 99,
-      'selected_clip_indices': <int>[0, 2],
-      'primary_selected_clip_index': 2,
-    };
     final snapshot = _build(fixture);
-    final selection = snapshot.data['selection'] as Map;
-    expect(selection.containsKey('selected_row_id'), isFalse);
-    expect(selection['selected_clip_ids'], <String>['clip-audio']);
-    expect(selection.containsKey('primary_selected_clip_id'), isFalse);
-  });
+    final oneShot = const AiV3CoreContextBuilder().build(
+      profile: AiV3ContextProfile.essential,
+      userRequest: 'Edit the project.',
+      conversation: const <Map<String, String>>[],
+      validationState: fixture.validation,
+      audioTracks: fixture.tracks,
+      clientContext: fixture.client,
+      bpm: fixture.project.bpm,
+      beatsPerBar: 4,
+      beatUnit: 4,
+      projectId: 'project-1',
+    );
 
-  test(
-    'one-shot context and adaptive snapshot agree on authoritative facts',
-    () async {
-      final fixture = await _fixture();
-      final snapshot = _build(fixture);
-      final oneShot = const AiV3CoreContextBuilder().build(
-        profile: AiV3ContextProfile.essential,
-        userRequest: 'Edit the project.',
-        conversation: const <Map<String, String>>[],
-        validationState: fixture.validation,
-        audioTracks: fixture.tracks,
-        clientContext: fixture.client,
-        bpm: fixture.project.bpm,
-        beatsPerBar: 4,
-        beatUnit: 4,
-        projectId: 'project-1',
-      );
-
-      expect(oneShot.stateDigest, snapshot.stateDigest);
-      expect(
-        (oneShot.data['project'] as Map)['bpm'],
-        (snapshot.data['project'] as Map)['bpm'],
-      );
-      expect(
-        (oneShot.data['project'] as Map)['row_capacity'],
-        (snapshot.data['project'] as Map)['row_capacity'],
-      );
-      expect(oneShot.data['transport'], snapshot.data['transport']);
-      expect(oneShot.data['transport'] as Map, isNot(contains('playhead_ms')));
-      expect(snapshot.data['transport'] as Map, isNot(contains('playhead_ms')));
-      expect((oneShot.data['project'] as Map)['playhead_ms'], 1500);
-      expect((snapshot.data['project'] as Map)['playhead_ms'], 1500);
-      final oneShotSelection = oneShot.data['selection'] as Map;
-      final snapshotSelection = snapshot.data['selection'] as Map;
-      expect(oneShotSelection, <String, dynamic>{
+    expect(oneShot.stateDigest, snapshot.stateDigest);
+    expect(
+      (oneShot.data['project'] as Map)['bpm'],
+      (snapshot.data['project'] as Map)['bpm'],
+    );
+    expect(
+      (oneShot.data['project'] as Map)['row_capacity'],
+      (snapshot.data['project'] as Map)['row_capacity'],
+    );
+    expect(oneShot.data['transport'], snapshot.data['transport']);
+    expect(oneShot.data['transport'] as Map, isNot(contains('playhead_ms')));
+    expect(snapshot.data['transport'] as Map, isNot(contains('playhead_ms')));
+    expect((oneShot.data['project'] as Map)['playhead_ms'], 1500);
+    expect((snapshot.data['project'] as Map)['playhead_ms'], 1500);
+    final oneShotSelection = oneShot.data['selection'] as Map;
+    final snapshotSelection = snapshot.data['selection'] as Map;
+    expect(
+      oneShotSelection,
+      <String, dynamic>{
         'selected_row_id': snapshotSelection['selected_row_id'],
         'selected_clip_ids': snapshotSelection['selected_clip_ids'],
         'primary_selected_clip_id':
             snapshotSelection['primary_selected_clip_id'],
-      });
-      expect(
-        oneShot.data['instruments'],
-        (snapshot.data['catalogs'] as Map)['instrument_ids'],
-      );
-      expect(
-        oneShot.data['instrument_catalog'],
-        (snapshot.data['catalogs'] as Map)['instrument_catalog'],
-      );
+      },
+    );
+    expect(
+      oneShot.data['instruments'],
+      (snapshot.data['catalogs'] as Map)['instrument_ids'],
+    );
+    expect(
+      oneShot.data['instrument_catalog'],
+      (snapshot.data['catalogs'] as Map)['instrument_catalog'],
+    );
 
-      final oneShotRows = <int, Map>{
-        for (final row in (oneShot.data['rows'] as List).cast<Map>())
-          row['row_id'] as int: row,
-      };
-      for (final entry in snapshot.rowById.entries) {
-        final expected = entry.value;
-        final actual = oneShotRows[entry.key]!;
-        expect(actual['display_index'], expected['display_index']);
-        expect(actual['name'], expected['name']);
-        expect(actual['lane_kind'], expected['lane_kind']);
-        expect(actual['instrument_id'], expected['instrument_id']);
-        expect(actual['group_id'], expected['group_id']);
-        expect(actual['muted'], (expected['mixer'] as Map)['muted']);
-        expect(actual['soloed'], (expected['mixer'] as Map)['soloed']);
-        expect(actual['clip_ids'], expected['clip_ids']);
-        expect(
-          (actual['effects'] as List).cast<Map>().map(
-            (effect) => effect['effect_instance_id'],
-          ),
-          (expected['effects'] as List).cast<Map>().map(
-            (effect) => effect['effect_instance_id'],
-          ),
-        );
-      }
-
-      final oneShotClips = <String, Map>{
-        for (final clip in (oneShot.data['clips'] as List).cast<Map>())
-          clip['clip_id'].toString(): clip,
-      };
-      final bpm = fixture.project.bpm;
-      for (final entry in snapshot.clipById.entries) {
-        final expected = entry.value;
-        final actual = oneShotClips[entry.key]!;
-        expect(actual['row_id'], expected['row_id']);
-        expect(actual['kind'], expected['kind']);
-        expect(actual['instrument_id'], expected['instrument_id']);
-        expect(
-          actual['start_beat'],
-          closeTo((expected['start_seconds'] as num) * bpm / 60, 1e-9),
-        );
-        expect(
-          actual['length_beats'],
-          closeTo(
-            ((expected['trim_end_ms'] as num) -
-                    (expected['trim_start_ms'] as num)) *
-                bpm /
-                60000,
-            1e-9,
-          ),
-        );
-      }
-
-      final oneShotGroups = <String, Map>{
-        for (final group in (oneShot.data['groups'] as List).cast<Map>())
-          group['group_id'].toString(): group,
-      };
-      for (final entry in snapshot.groupById.entries) {
-        expect(
-          oneShotGroups[entry.key]!['member_row_ids'],
-          entry.value['member_row_ids'],
-        );
-        expect(
-          oneShotGroups[entry.key]!['collapsed'],
-          entry.value['collapsed'],
-        );
-      }
-    },
-  );
-
-  test(
-    'deep copies sources and deep-freezes every exposed collection',
-    () async {
-      final fixture = await _fixture();
-      final snapshot = _build(fixture);
-
-      fixture.tracks[1].midiNotes.first.pitch = 12;
-      fixture.tracks[0].volumeAutomation.first.volume = 1;
-      ((fixture.validation['automation_clips'] as List).single
-              as Map)['row_id'] =
-          999;
-      ((fixture.client['ai_v3_library_assets'] as List).first as Map)['path'] =
-          '/changed.wav';
-      fixture.project.rows.first.volumeAutomation.first.volume = 0;
-
+    final oneShotRows = <int, Map>{
+      for (final row in (oneShot.data['rows'] as List).cast<Map>())
+        row['row_id'] as int: row,
+    };
+    for (final entry in snapshot.rowById.entries) {
+      final expected = entry.value;
+      final actual = oneShotRows[entry.key]!;
+      expect(actual['display_index'], expected['display_index']);
+      expect(actual['name'], expected['name']);
+      expect(actual['lane_kind'], expected['lane_kind']);
+      expect(actual['instrument_id'], expected['instrument_id']);
+      expect(actual['group_id'], expected['group_id']);
       expect(
-        (((snapshot.clipById['clip-midi']!['midi_notes'] as List).first
-            as Map)['pitch']),
-        60,
+        actual['muted'],
+        (expected['mixer'] as Map)['muted'],
       );
       expect(
-        (((snapshot.clipById['clip-audio']!['volume_automation'] as List).first
-            as Map)['value']),
-        0.2,
+        actual['soloed'],
+        (expected['mixer'] as Map)['soloed'],
       );
+      expect(actual['clip_ids'], expected['clip_ids']);
       expect(
-        ((snapshot.data['automation_clips'] as List).single as Map)['row_id'],
-        10,
+        (actual['effects'] as List)
+            .cast<Map>()
+            .map((effect) => effect['effect_instance_id']),
+        (expected['effects'] as List)
+            .cast<Map>()
+            .map((effect) => effect['effect_instance_id']),
       );
-      expect(
-        snapshot.libraryAssetById['sample-0']!['path'],
-        '/library/sample-0.wav',
-      );
+    }
 
-      expect(() => snapshot.data['new'] = true, throwsUnsupportedError);
+    final oneShotClips = <String, Map>{
+      for (final clip in (oneShot.data['clips'] as List).cast<Map>())
+        clip['clip_id'].toString(): clip,
+    };
+    final bpm = fixture.project.bpm;
+    for (final entry in snapshot.clipById.entries) {
+      final expected = entry.value;
+      final actual = oneShotClips[entry.key]!;
+      expect(actual['row_id'], expected['row_id']);
+      expect(actual['kind'], expected['kind']);
+      expect(actual['instrument_id'], expected['instrument_id']);
       expect(
-        () => (snapshot.data['rows'] as List).add('new'),
-        throwsUnsupportedError,
+        actual['start_beat'],
+        closeTo((expected['start_seconds'] as num) * bpm / 60, 1e-9),
       );
       expect(
-        () =>
-            ((snapshot.data['project'] as Map)['row_capacity']
-                    as Map)['max_rows'] =
-                1,
-        throwsUnsupportedError,
+        actual['length_beats'],
+        closeTo(
+          ((expected['trim_end_ms'] as num) -
+                  (expected['trim_start_ms'] as num)) *
+              bpm /
+              60000,
+          1e-9,
+        ),
       );
-    },
-  );
+    }
+
+    final oneShotGroups = <String, Map>{
+      for (final group in (oneShot.data['groups'] as List).cast<Map>())
+        group['group_id'].toString(): group,
+    };
+    for (final entry in snapshot.groupById.entries) {
+      expect(
+        oneShotGroups[entry.key]!['member_row_ids'],
+        entry.value['member_row_ids'],
+      );
+      expect(
+        oneShotGroups[entry.key]!['collapsed'],
+        entry.value['collapsed'],
+      );
+    }
+  });
+
+  test('deep copies sources and deep-freezes every exposed collection',
+      () async {
+    final fixture = await _fixture();
+    final snapshot = _build(fixture);
+
+    fixture.tracks[1].midiNotes.first.pitch = 12;
+    fixture.tracks[0].volumeAutomation.first.volume = 1;
+    ((fixture.validation['automation_clips'] as List).single as Map)['row_id'] =
+        999;
+    ((fixture.client['ai_v3_library_assets'] as List).first as Map)['path'] =
+        '/changed.wav';
+    fixture.project.rows.first.volumeAutomation.first.volume = 0;
+
+    expect(
+      (((snapshot.clipById['clip-midi']!['midi_notes'] as List).first
+          as Map)['pitch']),
+      60,
+    );
+    expect(
+      (((snapshot.clipById['clip-audio']!['volume_automation'] as List).first
+          as Map)['value']),
+      0.2,
+    );
+    expect(
+      ((snapshot.data['automation_clips'] as List).single as Map)['row_id'],
+      10,
+    );
+    expect(snapshot.libraryAssetById['sample-0']!['path'],
+        '/library/sample-0.wav');
+
+    expect(
+      () => snapshot.data['new'] = true,
+      throwsUnsupportedError,
+    );
+    expect(
+      () => (snapshot.data['rows'] as List).add('new'),
+      throwsUnsupportedError,
+    );
+    expect(
+      () => ((snapshot.data['project'] as Map)['row_capacity']
+          as Map)['max_rows'] = 1,
+      throwsUnsupportedError,
+    );
+  });
 
   test('canonical output and content hash are deterministic', () async {
     final firstFixture = await _fixture();
@@ -627,65 +620,58 @@ void main() {
     expect(second.contentDigest, first.contentDigest);
   });
 
-  test(
-    'full snapshot does not apply current prompt context envelopes',
-    () async {
-      final snapshot = _build(
-        await _fixture(midiNoteCount: 600, libraryAssetCount: 300),
-      );
+  test('full snapshot does not apply current prompt context envelopes',
+      () async {
+    final snapshot = _build(await _fixture(
+      midiNoteCount: 600,
+      libraryAssetCount: 300,
+    ));
 
-      expect(
-        (snapshot.clipById['clip-midi']!['midi_notes'] as List),
-        hasLength(600),
-      );
-      expect(snapshot.libraryAssetById, hasLength(300));
-    },
-  );
+    expect(
+      (snapshot.clipById['clip-midi']!['midi_notes'] as List),
+      hasLength(600),
+    );
+    expect(snapshot.libraryAssetById, hasLength(300));
+  });
 
   test('rejects duplicate and contradictory stable identities', () async {
     final duplicate = await _fixture();
     duplicate.tracks.add(duplicate.tracks.first);
     expect(
       () => _build(duplicate),
-      throwsA(
-        isA<AiV3PlanningSnapshotException>().having(
-          (error) => error.code,
-          'code',
-          'planning_snapshot_clip_id_duplicate',
-        ),
-      ),
+      throwsA(isA<AiV3PlanningSnapshotException>().having(
+        (error) => error.code,
+        'code',
+        'planning_snapshot_clip_id_duplicate',
+      )),
     );
 
     final contradiction = await _fixture();
     ((contradiction.validation['rows'] as List).first as Map)['row_index'] = 1;
     expect(
       () => _build(contradiction),
-      throwsA(
-        isA<AiV3PlanningSnapshotException>().having(
-          (error) => error.code,
-          'code',
-          'planning_snapshot_row_index_incomplete',
-        ),
-      ),
+      throwsA(isA<AiV3PlanningSnapshotException>().having(
+        (error) => error.code,
+        'code',
+        'planning_snapshot_row_index_incomplete',
+      )),
     );
   });
 
-  test(
-    'serialization and capture metadata exclude secrets and opaque state',
-    () async {
-      final snapshot = _build(await _fixture());
-      final serialized = snapshot.canonicalJson;
-      final metadata = snapshot.safeMetadata.toString();
+  test('serialization and capture metadata exclude secrets and opaque state',
+      () async {
+    final snapshot = _build(await _fixture());
+    final serialized = snapshot.canonicalJson;
+    final metadata = snapshot.safeMetadata.toString();
 
-      expect(serialized, isNot(contains('must-never-be-captured')));
-      expect(serialized, isNot(contains('opaque-plugin-state')));
-      expect(serialized, isNot(contains('group-state-must-not-be-captured')));
-      expect(serialized, isNot(contains('hostedInstrumentStateBase64')));
-      expect(serialized, isNot(contains('normWaveformData')));
-      expect(metadata, isNot(contains('/library/')));
-      expect(metadata, isNot(contains('/tmp/')));
-    },
-  );
+    expect(serialized, isNot(contains('must-never-be-captured')));
+    expect(serialized, isNot(contains('opaque-plugin-state')));
+    expect(serialized, isNot(contains('group-state-must-not-be-captured')));
+    expect(serialized, isNot(contains('hostedInstrumentStateBase64')));
+    expect(serialized, isNot(contains('normWaveformData')));
+    expect(metadata, isNot(contains('/library/')));
+    expect(metadata, isNot(contains('/tmp/')));
+  });
 
   group('CompactCoreV3 shadow projection', () {
     test('projects ordinary-edit facts and bounded conversation', () async {
@@ -724,19 +710,24 @@ void main() {
       expect(clips['returned_count'], 2);
       expect(clips['has_more'], isFalse);
       expect(((clips['items'] as List).first as Map)['clip_id'], 'clip-midi');
-      expect((core.data['request_state'] as Map), <String, dynamic>{
-        'mode': 'modify_pending_plan',
-        'pending_plan_id': 'plan-fixed',
-      });
-      expect(core.data['selection'], <String, dynamic>{
-        'selected_row_id': 10,
-        'selected_clip_ids': <String>['clip-audio', 'clip-midi'],
-        'primary_selected_clip_id': 'clip-midi',
-      });
       expect(
-        (core.data['conversation'] as List).map(
-          (turn) => (turn as Map)['content'],
-        ),
+        (core.data['request_state'] as Map),
+        <String, dynamic>{
+          'mode': 'modify_pending_plan',
+          'pending_plan_id': 'plan-fixed',
+        },
+      );
+      expect(
+        core.data['selection'],
+        <String, dynamic>{
+          'selected_row_id': 10,
+          'selected_clip_ids': <String>['clip-audio', 'clip-midi'],
+          'primary_selected_clip_id': 'clip-midi',
+        },
+      );
+      expect(
+        (core.data['conversation'] as List)
+            .map((turn) => (turn as Map)['content']),
         <String>[
           'turn-2',
           'turn-3',
@@ -752,21 +743,18 @@ void main() {
       final domains = (core.data['capability_domains'] as List)
           .cast<Map>()
           .toList(growable: false);
-      final midiDomain = domains.singleWhere(
-        (domain) => domain['domain'] == 'midi',
-      );
+      final midiDomain =
+          domains.singleWhere((domain) => domain['domain'] == 'midi');
       expect(midiDomain['retrieval_enabled'], isTrue);
       expect(midiDomain.containsKey('capabilities'), isFalse);
       expect(midiDomain.containsKey('command_types'), isFalse);
-      final samplesDomain = domains.singleWhere(
-        (domain) => domain['domain'] == 'samples',
-      );
+      final samplesDomain =
+          domains.singleWhere((domain) => domain['domain'] == 'samples');
       expect(samplesDomain['retrieval_enabled'], isTrue);
       expect(samplesDomain.containsKey('capabilities'), isFalse);
       expect(samplesDomain.containsKey('command_types'), isFalse);
-      final mixDomain = domains.singleWhere(
-        (domain) => domain['domain'] == 'mix',
-      );
+      final mixDomain =
+          domains.singleWhere((domain) => domain['domain'] == 'mix');
       expect(mixDomain['retrieval_enabled'], isTrue);
       expect(mixDomain.containsKey('capabilities'), isFalse);
       expect(mixDomain.containsKey('command_types'), isFalse);
@@ -794,29 +782,29 @@ void main() {
       expect(((clips['items'] as List).single as Map)['clip_id'], 'clip-midi');
     });
 
-    test(
-      'default clip envelope returns 64 of 65 without hiding truncation',
-      () async {
-        final core = const AiV3CompactCoreBuilder().build(
-          snapshot: _build(await _fixture(extraAudioClipCount: 63)),
-          conversation: const <Map<String, String>>[],
-        );
-        final clips = core.data['clips'] as Map;
-        final returnedIds = (clips['items'] as List)
-            .whereType<Map>()
-            .map((clip) => clip['clip_id'])
-            .toSet();
+    test('default clip envelope returns 64 of 65 without hiding truncation',
+        () async {
+      final core = const AiV3CompactCoreBuilder().build(
+        snapshot: _build(await _fixture(extraAudioClipCount: 63)),
+        conversation: const <Map<String, String>>[],
+      );
+      final clips = core.data['clips'] as Map;
+      final returnedIds = (clips['items'] as List)
+          .whereType<Map>()
+          .map((clip) => clip['clip_id'])
+          .toSet();
 
-        expect(clips['total_count'], 65);
-        expect(clips['returned_count'], 64);
-        expect(clips['has_more'], isTrue);
-        expect(returnedIds, contains('clip-midi'));
-        expect(returnedIds, isNot(contains('extra-062')));
-      },
-    );
+      expect(clips['total_count'], 65);
+      expect(clips['returned_count'], 64);
+      expect(clips['has_more'], isTrue);
+      expect(returnedIds, contains('clip-midi'));
+      expect(returnedIds, isNot(contains('extra-062')));
+    });
 
     test('bounds resource identities while retaining known totals', () async {
-      final core = const AiV3CompactCoreBuilder(maxResourceIdentities: 1).build(
+      final core = const AiV3CompactCoreBuilder(
+        maxResourceIdentities: 1,
+      ).build(
         snapshot: _build(await _fixture()),
         conversation: const <Map<String, String>>[],
       );
@@ -827,36 +815,32 @@ void main() {
       expect(effects['has_more'], isTrue);
     });
 
-    test(
-      'is deterministic, immutable, and excludes detailed domains',
-      () async {
-        final first = const AiV3CompactCoreBuilder().build(
-          snapshot: _build(await _fixture()),
-          conversation: const <Map<String, String>>[],
-        );
-        final second = const AiV3CompactCoreBuilder().build(
-          snapshot: _build(await _fixture()),
-          conversation: const <Map<String, String>>[],
-        );
-        final serialized = first.canonicalJson;
+    test('is deterministic, immutable, and excludes detailed domains',
+        () async {
+      final first = const AiV3CompactCoreBuilder().build(
+        snapshot: _build(await _fixture()),
+        conversation: const <Map<String, String>>[],
+      );
+      final second = const AiV3CompactCoreBuilder().build(
+        snapshot: _build(await _fixture()),
+        conversation: const <Map<String, String>>[],
+      );
+      final serialized = first.canonicalJson;
 
-        expect(second.canonicalJson, first.canonicalJson);
-        expect(() => first.data['x'] = true, throwsUnsupportedError);
-        expect(
-          () => (first.data['rows'] as List).add('x'),
-          throwsUnsupportedError,
-        );
-        final keys = _recursiveKeys(first.data);
-        expect(keys, isNot(contains('midi_notes')));
-        expect(keys, isNot(contains('parameters')));
-        expect(keys, isNot(contains('automation_points')));
-        expect(keys, isNot(contains('pending_plan')));
-        expect(serialized, isNot(contains('/tmp/')));
-        expect(serialized, isNot(contains('/library/')));
-        expect(serialized, isNot(contains('centroid_hz')));
-        expect(keys, isNot(contains('command_schema')));
-      },
-    );
+      expect(second.canonicalJson, first.canonicalJson);
+      expect(() => first.data['x'] = true, throwsUnsupportedError);
+      expect(
+          () => (first.data['rows'] as List).add('x'), throwsUnsupportedError);
+      final keys = _recursiveKeys(first.data);
+      expect(keys, isNot(contains('midi_notes')));
+      expect(keys, isNot(contains('parameters')));
+      expect(keys, isNot(contains('automation_points')));
+      expect(keys, isNot(contains('pending_plan')));
+      expect(serialized, isNot(contains('/tmp/')));
+      expect(serialized, isNot(contains('/library/')));
+      expect(serialized, isNot(contains('centroid_hz')));
+      expect(keys, isNot(contains('command_schema')));
+    });
 
     test('reports row limits instead of hiding identities', () async {
       final snapshot = _build(await _fixture());
@@ -865,13 +849,11 @@ void main() {
           snapshot: snapshot,
           conversation: const <Map<String, String>>[],
         ),
-        throwsA(
-          isA<AiV3CompactCoreException>().having(
-            (error) => error.code,
-            'code',
-            'compact_core_row_limit',
-          ),
-        ),
+        throwsA(isA<AiV3CompactCoreException>().having(
+          (error) => error.code,
+          'code',
+          'compact_core_row_limit',
+        )),
       );
     });
   });

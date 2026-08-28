@@ -546,7 +546,6 @@ class GeneratedMusicBundleV3 {
     return AiV3Plan.fromJson(<String, dynamic>{
       'schema_version': aiV3PlanVersion,
       'outcome': 'plan',
-      'goal_kind': AiV3GoalKind.namedEdit.wireName,
       'user_message': userMessage,
       'commands': commands,
       'question_options': <String>[],

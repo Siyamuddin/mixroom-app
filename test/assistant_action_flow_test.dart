@@ -14,7 +14,6 @@ import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_planning_snapshot.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
-import 'package:mixroom/ai/v3/ai_v3_user_facing_text.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
@@ -50,7 +49,7 @@ class _FakeCloudLlmService extends CloudLlmService {
 
 class _QueuedFakeCloudLlmService extends CloudLlmService {
   _QueuedFakeCloudLlmService(this._results)
-    : super(apiKey: 'test-key', model: 'test');
+      : super(apiKey: 'test-key', model: 'test');
 
   final List<LlmResult> _results;
   final List<List<Map<String, String>>> seenConversations =
@@ -242,23 +241,27 @@ class _FakeAdaptivePlanner implements AiV3AdaptivePlanner {
 }
 
 Map<String, dynamic> _v3ClientContext() => <String, dynamic>{
-  'ai_v3_prototype_enabled': true,
-  'ai_v3_row_state': <Map<String, dynamic>>[
-    <String, dynamic>{'row_id': 101, 'muted': false, 'soloed': false},
-  ],
-  'ai_v3_clip_timeline_lengths_ms': <String, double>{},
-  'ai_v3_playhead_ms': 0,
-  'ai_v3_transport': <String, dynamic>{
-    'playing': false,
-    'recording': false,
-    'metronome_enabled': false,
-    'loop_enabled': false,
-    'loop_start_ms': 0,
-    'loop_end_ms': 0,
-  },
-  'current_rows': 1,
-  'max_rows': 32,
-};
+      'ai_v3_prototype_enabled': true,
+      'ai_v3_row_state': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'row_id': 101,
+          'muted': false,
+          'soloed': false,
+        },
+      ],
+      'ai_v3_clip_timeline_lengths_ms': <String, double>{},
+      'ai_v3_playhead_ms': 0,
+      'ai_v3_transport': <String, dynamic>{
+        'playing': false,
+        'recording': false,
+        'metronome_enabled': false,
+        'loop_enabled': false,
+        'loop_start_ms': 0,
+        'loop_end_ms': 0,
+      },
+      'current_rows': 1,
+      'max_rows': 32,
+    };
 
 class _FakeProjectStateBuilder extends ProjectStateBuilder {
   _FakeProjectStateBuilder({
@@ -299,8 +302,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
           .map(
             (t) => ClipState(
               startMs: t.offset * 1000.0,
-              endMs:
-                  t.offset * 1000.0 +
+              endMs: t.offset * 1000.0 +
                   (t.trimEnd - t.trimStart).inMilliseconds.toDouble(),
               fileName: t.file.path.split('/').last,
               gain0to3: t.gain,
@@ -316,12 +318,10 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
         laneKind: row < timelineRows.length
             ? timelineRows[row].kind.wireName
             : 'audio',
-        instrumentId: row < timelineRows.length
-            ? timelineRows[row].instrumentId
-            : '',
-        instrumentName: row < timelineRows.length
-            ? timelineRows[row].instrumentName
-            : '',
+        instrumentId:
+            row < timelineRows.length ? timelineRows[row].instrumentId : '',
+        instrumentName:
+            row < timelineRows.length ? timelineRows[row].instrumentName : '',
         clips: clips,
         approxRms: rowTracks.isEmpty ? 0.0 : (rowApproxRms[row] ?? 0.2),
         approxCrest: rowTracks.isEmpty ? 0.0 : (rowApproxCrest[row] ?? 1.5),
@@ -335,8 +335,7 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
         },
         roleConsistency: 1.0,
         clipTopRoles: const ['other'],
-        audioStats:
-            rowAudioStats[row] ??
+        audioStats: rowAudioStats[row] ??
             const {
               'centroid_hz': 1200.0,
               'zcr': 0.1,
@@ -355,14 +354,10 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
       );
     });
 
-    final overlapMatrix = List<List<int>>.generate(
-      rows,
-      (_) => List<int>.filled(rows, 0),
-    );
-    final overlapRatioMatrix = List<List<double>>.generate(
-      rows,
-      (_) => List<double>.filled(rows, 0),
-    );
+    final overlapMatrix =
+        List<List<int>>.generate(rows, (_) => List<int>.filled(rows, 0));
+    final overlapRatioMatrix =
+        List<List<double>>.generate(rows, (_) => List<double>.filled(rows, 0));
 
     return ProjectState(
       bpm: bpmFallback,
@@ -424,9 +419,11 @@ void main() {
   group('Assistant Action Pipeline Smoke', () {
     test('V3-disabled project chat keeps the existing V1 route', () async {
       final fakeLlm = _FakeCloudLlmService(
-        LlmResult.tool('informational_response', const <String, dynamic>{
-          'message': 'V1 handled the request.',
-        }, text: 'V1 handled the request.'),
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'V1 handled the request.'},
+          text: 'V1 handled the request.',
+        ),
       );
       final fakeV3 = _FakeAiV3Planner();
       final pipeline = ChatPipeline(
@@ -456,9 +453,11 @@ void main() {
 
     test('V3-enabled project chat uses V3 and does not call V1', () async {
       final fakeLlm = _FakeCloudLlmService(
-        LlmResult.tool('informational_response', const <String, dynamic>{
-          'message': 'Unexpected V1 result.',
-        }, text: 'Unexpected V1 result.'),
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'Unexpected V1 result.'},
+          text: 'Unexpected V1 result.',
+        ),
       );
       final fakeV3 = _FakeAiV3Planner();
       final pipeline = ChatPipeline(
@@ -489,180 +488,181 @@ void main() {
       expect(result.message, 'V3 handled the request.');
     });
 
-    test(
-      'invalid V3 planner output returns an actionable safe result',
-      () async {
-        final pipeline = ChatPipeline(
-          llm: _FakeCloudLlmService(
-            LlmResult.text('Unexpected V1 result.', null),
-          ),
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: const _FailingAiV3Planner('v3_planner_contract_invalid'),
-        );
-
-        final result = await pipeline.handleUserText(
-          text: 'Replace this instrument and add more musical parts.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Epic Melody', iconId: 1),
-          ],
-          clientContext: _v3ClientContext(),
-        );
-
-        expect(result.hasAiV3Handoff, isTrue);
-        expect(result.aiV3Handoff?['decision'], 'blocked');
-        expect(
-          result.aiV3Handoff?['error_code'],
-          'v3_planner_contract_invalid',
-        );
-        expect(
-          result.message,
-          'I could not turn the AI response into safe DAW changes. '
-          'Nothing was changed. Rephrase the request or split it into '
-          'smaller steps.',
-        );
-        expect(result.message, isNot(contains('AI request failed')));
-        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
-      },
-    );
-
-    test(
-      'clear mutating V3 request executes immediately without a pending plan',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
+    test('invalid V3 planner output returns an actionable safe result',
+        () async {
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
           LlmResult.text('Unexpected V1 result.', null),
-        );
-        final planner = _StaticAiV3Planner(
-          const AiV3Plan(
-            outcome: 'plan',
-            userMessage: 'Lowering Audio 1 by 2 dB.',
-            commands: <AiV3Command>[
-              AiV3Command(
-                commandId: 'gain',
-                type: 'row.adjust_gain_db',
-                arguments: <String, dynamic>{'row_id': 101, 'delta_db': -2},
-              ),
-            ],
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: planner,
-        );
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: const _FailingAiV3Planner('v3_planner_contract_invalid'),
+      );
 
-        final result = await pipeline.handleUserText(
-          text: 'Lower Audio 1 by 2 dB.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
-          ],
-          clientContext: _v3ClientContext(),
-        );
+      final result = await pipeline.handleUserText(
+        text: 'Replace this instrument and add more musical parts.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Epic Melody', iconId: 1),
+        ],
+        clientContext: _v3ClientContext(),
+      );
 
-        expect(result.aiV3Handoff?['decision'], 'execute_now');
-        expect(result.aiV3Handoff?['execution_policy'], 'auto_apply');
-        expect(
-          (result.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
-          'auto_apply',
-        );
-        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
-        expect(result.message, isEmpty);
-        expect(fakeLlm.seenUserText, isNull);
-
-        final bundle = Map<String, dynamic>.from(
-          result.aiV3Handoff?['prepared_bundle'] as Map,
-        );
-        final completionMessage = aiV3VerifiedConversationMessage(bundle);
-        pipeline.recordAiV3Execution(
-          handoff: result.aiV3Handoff!,
-          result: const <String, dynamic>{'status': 'succeeded'},
-          conversationMessage: completionMessage,
-        );
-        await pipeline.handleUserText(
-          text: 'What did you change?',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
-          ],
-          clientContext: _v3ClientContext(),
-        );
-        final secondConversation =
-            planner.seenContexts.last.data['conversation'] as List;
-        expect(
-          secondConversation.whereType<Map>().any(
-            (entry) =>
-                entry['role'] == 'assistant' &&
-                entry['content'] == completionMessage,
-          ),
-          isTrue,
-        );
-      },
-    );
+      expect(result.hasAiV3Handoff, isTrue);
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(
+        result.aiV3Handoff?['error_code'],
+        'v3_planner_contract_invalid',
+      );
+      expect(
+        result.message,
+        'I could not turn the AI response into safe DAW changes. '
+        'Nothing was changed. Rephrase the request or split it into '
+        'smaller steps.',
+      );
+      expect(result.message, isNot(contains('AI request failed')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
 
     test(
-      'already-satisfied plan returns an honest no-change response',
-      () async {
-        final planner = _StaticAiV3Planner(
-          const AiV3Plan(
-            outcome: 'plan',
-            userMessage: 'I will keep Audio 1 unmuted.',
-            commands: <AiV3Command>[
-              AiV3Command(
-                commandId: 'mute',
-                type: 'row.set_muted',
-                arguments: <String, dynamic>{'row_id': 101, 'muted': false},
-              ),
-            ],
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: _FakeCloudLlmService(
-            LlmResult.text('Unexpected V1 result.', null),
-          ),
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: planner,
-        );
-
-        final result = await pipeline.handleUserText(
-          text: 'Keep Audio 1 unmuted.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        'clear mutating V3 request executes immediately without a pending plan',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.text('Unexpected V1 result.', null),
+      );
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Lowering Audio 1 by 2 dB.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'delta_db': -2,
+              },
+            ),
           ],
-          clientStateDigest: 'no-op-state',
-          clientContext: _v3ClientContext(),
-        );
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
 
-        expect(result.aiV3Handoff?['decision'], 'respond');
-        expect(result.aiV3Handoff?['reason'], 'already_satisfied');
-        expect(
-          result.message,
-          'No changes were needed:\n- Unmuted Audio 1 (already set)',
-        );
-        expect(result.message, isNot(contains('I will')));
-        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
-      },
-    );
+      final result = await pipeline.handleUserText(
+        text: 'Lower Audio 1 by 2 dB.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'execute_now');
+      expect(result.aiV3Handoff?['execution_policy'], 'auto_apply');
+      expect(
+        (result.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
+        'auto_apply',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+      expect(result.message, isEmpty);
+      expect(fakeLlm.seenUserText, isNull);
+
+      final bundle = Map<String, dynamic>.from(
+        result.aiV3Handoff?['prepared_bundle'] as Map,
+      );
+      final completionMessage = aiV3VerifiedConversationMessage(bundle);
+      pipeline.recordAiV3Execution(
+        handoff: result.aiV3Handoff!,
+        result: const <String, dynamic>{'status': 'succeeded'},
+        conversationMessage: completionMessage,
+      );
+      await pipeline.handleUserText(
+        text: 'What did you change?',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+      final secondConversation =
+          planner.seenContexts.last.data['conversation'] as List;
+      expect(
+        secondConversation.whereType<Map>().any(
+              (entry) =>
+                  entry['role'] == 'assistant' &&
+                  entry['content'] == completionMessage,
+            ),
+        isTrue,
+      );
+    });
+
+    test('already-satisfied plan returns an honest no-change response',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'I will keep Audio 1 unmuted.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'mute',
+              type: 'row.set_muted',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'muted': false,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Keep Audio 1 unmuted.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientStateDigest: 'no-op-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(result.aiV3Handoff?['reason'], 'already_satisfied');
+      expect(
+        result.message,
+        'No changes were needed:\n- Unmuted Audio 1 (already set)',
+      );
+      expect(result.message, isNot(contains('I will')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
 
     test('clarification options survive the V3 handoff exactly', () async {
       final planner = _StaticAiV3Planner(
@@ -749,195 +749,194 @@ void main() {
       expect(result.message, isNot(contains('Options:')));
     });
 
-    test(
-      'factual preparation block explains the prerequisite without preview',
-      () async {
-        final planner = _StaticAiV3Planner(
-          const AiV3Plan(
-            outcome: 'plan',
-            userMessage: 'Creating another row.',
-            commands: <AiV3Command>[
-              AiV3Command(
-                commandId: 'create',
-                type: 'row.create',
-                arguments: <String, dynamic>{
-                  'name': 'Audio 2',
-                  'lane': <String, dynamic>{'kind': 'audio'},
-                  'position': <String, dynamic>{'kind': 'end'},
-                },
-              ),
-            ],
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: _FakeCloudLlmService(
-            LlmResult.text('Unexpected V1 result.', null),
-          ),
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: planner,
-          aiV3Preparer: const _FailingAiV3Preparer('v3_row_capacity_exceeded'),
-        );
-
-        final result = await pipeline.handleUserText(
-          text: 'Create another audio row.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+    test('factual preparation block explains the prerequisite without preview',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Creating another row.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'create',
+              type: 'row.create',
+              arguments: <String, dynamic>{
+                'name': 'Audio 2',
+                'lane': <String, dynamic>{'kind': 'audio'},
+                'position': <String, dynamic>{'kind': 'end'},
+              },
+            ),
           ],
-          clientContext: _v3ClientContext(),
-        );
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _FailingAiV3Preparer('v3_row_capacity_exceeded'),
+      );
 
-        expect(result.aiV3Handoff?['decision'], 'blocked');
-        expect(
-          result.aiV3Handoff?['message'],
-          'This project has reached its row limit. '
-          'Delete an existing row before creating another one.',
-        );
-        expect(result.message, result.aiV3Handoff?['message']);
-        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
-      },
-    );
-
-    test(
-      'empty-project mixing failure explains the missing material',
-      () async {
-        final planner = _StaticAiV3Planner(
-          const AiV3Plan(
-            outcome: 'plan',
-            userMessage: 'Mixing the complete project.',
-            commands: <AiV3Command>[
-              AiV3Command(
-                commandId: 'mix',
-                type: 'mix.apply_goal',
-                arguments: <String, dynamic>{
-                  'target': <String, dynamic>{'scope': 'all_rows'},
-                  'intents': <Map<String, dynamic>>[
-                    <String, dynamic>{
-                      'kind': 'balance',
-                      'direction': null,
-                      'descriptor': null,
-                    },
-                  ],
-                  'intensity': 0.5,
-                  'execution_profile': 'producer_safe',
-                  'audibility': 'noticeable',
-                  'style_tags': <String>[],
-                  'reset_fx': false,
-                  'reference': null,
-                },
-              ),
-            ],
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: _FakeCloudLlmService(
-            LlmResult.text('Unexpected V1 result.', null),
-          ),
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: planner,
-        );
-
-        final result = await pipeline.handleUserText(
-          text: 'Mix the complete project.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
-          ],
-          clientStateDigest: 'empty-mix-state',
-          clientContext: _v3ClientContext(),
-        );
-
-        expect(result.aiV3Handoff?['decision'], 'blocked');
-        expect(result.aiV3Handoff?['error_code'], 'v3_mix_audio_missing');
-        expect(
-          result.message,
-          'There is no playable audio or MIDI material to mix. '
-          'Add material to the project, then try again.',
-        );
-        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
-      },
-    );
-
-    test(
-      'future confirmation policy preserves Apply and Cancel handoff',
-      () async {
-        final planner = _StaticAiV3Planner(
-          const AiV3Plan(
-            outcome: 'plan',
-            userMessage: 'Preparing the requested change.',
-            commands: <AiV3Command>[
-              AiV3Command(
-                commandId: 'gain',
-                type: 'row.adjust_gain_db',
-                arguments: <String, dynamic>{'row_id': 101, 'delta_db': -2},
-              ),
-            ],
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: _FakeCloudLlmService(
-            LlmResult.text('Unexpected V1 result.', null),
-          ),
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: planner,
-          aiV3Preparer: const _ConfirmingAiV3Preparer(),
-        );
-        final timelineRows = <TimelineRow>[
+      final result = await pipeline.handleUserText(
+        text: 'Create another audio row.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
           TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
-        ];
+        ],
+        clientContext: _v3ClientContext(),
+      );
 
-        final preview = await pipeline.handleUserText(
-          text: 'Run the future external operation.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: timelineRows,
-          clientStateDigest: 'future-confirm-state',
-          clientContext: _v3ClientContext(),
-        );
-        expect(preview.aiV3Handoff?['decision'], 'ask_confirmation');
-        expect(pipeline.hasActiveAiV3PendingPlan(), isTrue);
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(
+        result.aiV3Handoff?['message'],
+        'This project has reached its row limit. '
+        'Delete an existing row before creating another one.',
+      );
+      expect(result.message, result.aiV3Handoff?['message']);
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
 
-        final apply = await pipeline.handleUserText(
-          text: 'apply',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: timelineRows,
-          clientStateDigest: 'future-confirm-state',
-          clientContext: _v3ClientContext(),
-        );
-        expect(apply.aiV3Handoff?['decision'], 'execute_now');
-        expect(apply.aiV3Handoff?['confirmation_granted'], isTrue);
-        expect(
-          (apply.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
-          'confirm',
-        );
-        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
-      },
-    );
+    test('empty-project mixing failure explains the missing material',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Mixing the complete project.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'mix',
+              type: 'mix.apply_goal',
+              arguments: <String, dynamic>{
+                'target': <String, dynamic>{'scope': 'all_rows'},
+                'intents': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'kind': 'balance',
+                    'direction': null,
+                    'descriptor': null,
+                  },
+                ],
+                'intensity': 0.5,
+                'execution_profile': 'producer_safe',
+                'audibility': 'noticeable',
+                'style_tags': <String>[],
+                'reset_fx': false,
+                'reference': null,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+      );
 
-    test(
-      'verified execution details report receipts without repeating plan',
-      () {
-        expect(
-          aiV3VerifiedExecutionDetails(const <String, dynamic>{
-            'plan': <String, dynamic>{'user_message': 'Ajustando la mezcla.'},
+      final result = await pipeline.handleUserText(
+        text: 'Mix the complete project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientStateDigest: 'empty-mix-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(result.aiV3Handoff?['error_code'], 'v3_mix_audio_missing');
+      expect(
+        result.message,
+        'There is no playable audio or MIDI material to mix. '
+        'Add material to the project, then try again.',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('future confirmation policy preserves Apply and Cancel handoff',
+        () async {
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Preparing the requested change.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'delta_db': -2,
+              },
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _ConfirmingAiV3Preparer(),
+      );
+      final timelineRows = <TimelineRow>[
+        TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+      ];
+
+      final preview = await pipeline.handleUserText(
+        text: 'Run the future external operation.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'future-confirm-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(preview.aiV3Handoff?['decision'], 'ask_confirmation');
+      expect(pipeline.hasActiveAiV3PendingPlan(), isTrue);
+
+      final apply = await pipeline.handleUserText(
+        text: 'apply',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'future-confirm-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(apply.aiV3Handoff?['decision'], 'execute_now');
+      expect(apply.aiV3Handoff?['confirmation_granted'], isTrue);
+      expect(
+        (apply.aiV3Handoff?['prepared_bundle'] as Map)['execution_policy'],
+        'confirm',
+      );
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
+    test('verified execution details report receipts without repeating plan',
+        () {
+      expect(
+        aiV3VerifiedExecutionDetails(
+          const <String, dynamic>{
+            'plan': <String, dynamic>{
+              'user_message': 'Ajustando la mezcla.',
+            },
             'receipts': <Map<String, dynamic>>[
               <String, dynamic>{
                 'status': 'prepared',
@@ -948,14 +947,14 @@ void main() {
                 'preview_label': 'Keep Piano unchanged',
               },
             ],
-          }),
-          <String>[
-            'Lower Guitar by 1.5 dB',
-            'Keep Piano unchanged (already set)',
-          ],
-        );
-      },
-    );
+          },
+        ),
+        <String>[
+          'Lower Guitar by 1.5 dB',
+          'Keep Piano unchanged (already set)',
+        ],
+      );
+    });
 
     test('runtime no-op receipts are updated without mutating preparation', () {
       final bundle = <String, dynamic>{
@@ -979,10 +978,10 @@ void main() {
         bundle,
         const <String>{'mix-row'},
       );
-      final verifiedReceipts = (verified['receipts'] as List)
-          .cast<Map<String, dynamic>>();
-      final originalReceipts = (bundle['receipts'] as List)
-          .cast<Map<String, dynamic>>();
+      final verifiedReceipts =
+          (verified['receipts'] as List).cast<Map<String, dynamic>>();
+      final originalReceipts =
+          (bundle['receipts'] as List).cast<Map<String, dynamic>>();
 
       expect(verifiedReceipts.first['status'], 'already_satisfied');
       expect(verifiedReceipts.first['expanded_action_count'], 0);
@@ -990,10 +989,10 @@ void main() {
       expect(verifiedReceipts.last['expanded_action_count'], 1);
       expect(originalReceipts.first['status'], 'prepared');
       expect(originalReceipts.first['expanded_action_count'], 2);
-      expect(aiV3VerifiedExecutionDetails(verified), <String>[
-        'Mix Drums (already set)',
-        'Mute Synth',
-      ]);
+      expect(
+        aiV3VerifiedExecutionDetails(verified),
+        <String>['Mix Drums (already set)', 'Mute Synth'],
+      );
     });
 
     test('verified execution details allow receipt localization', () {
@@ -1004,7 +1003,8 @@ void main() {
               <String, dynamic>{
                 'status': 'prepared',
                 'verified_label': 'Added/configured Chorus on Chords',
-                'verified_l10n_key': 'Added/configured {effect} on {target}.',
+                'verified_l10n_key':
+                    'Added/configured {effect} on {target}.',
                 'verified_l10n_args': <String, String>{
                   'effect': 'Chorus',
                   'target': 'Chords',
@@ -1021,11 +1021,11 @@ void main() {
       );
     });
 
-    test(
-      'already-satisfied completion is factual rather than future tense',
-      () {
-        expect(
-          aiV3AlreadySatisfiedConversationMessage(const <String, dynamic>{
+    test('already-satisfied completion is factual rather than future tense',
+        () {
+      expect(
+        aiV3AlreadySatisfiedConversationMessage(
+          const <String, dynamic>{
             'plan': <String, dynamic>{
               'user_message': 'I will make Piano blue.',
             },
@@ -1035,14 +1035,14 @@ void main() {
                 'preview_label': 'Set Piano color to blue',
               },
             ],
-          }),
-          'No changes were needed:\n'
-          '- Set Piano color to blue (already set)',
-        );
-      },
-    );
+          },
+        ),
+        'No changes were needed:\n'
+        '- Set Piano color to blue (already set)',
+      );
+    });
 
-    test('verified execution details collapse mix.apply_goal to intent', () {
+    test('verified execution details expand materialized mix summaries', () {
       expect(
         aiV3VerifiedExecutionDetails(
           const <String, dynamic>{
@@ -1054,10 +1054,7 @@ void main() {
                 'command_id': 'mix-master',
                 'type': 'mix.apply_goal',
                 'status': 'prepared',
-                'preview_label':
-                    'Mix Master Bus (eq air_boost, compressor punch)',
-                'verified_label':
-                    'Mixed Master Bus (eq air_boost, compressor punch)',
+                'preview_label': 'Mix Master Bus',
               },
             ],
           },
@@ -1069,14 +1066,17 @@ void main() {
           },
         ),
         <String>[
-          'Mixed Master Bus (eq air_boost, compressor punch)',
+          'Added Compressor to Master Bus',
+          'Adjusted Threshold from 0.50 to 0.42 on Compressor (Master Bus)',
         ],
       );
     });
 
-    test('verified completion uses receipt labels after success', () {
+    test('verified completion uses the planner summary after success', () {
       const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{'user_message': 'Deleted Track 3.'},
+        'plan': <String, dynamic>{
+          'user_message': 'Deleted Track 3.',
+        },
         'receipts': <Map<String, dynamic>>[
           <String, dynamic>{
             'command_id': 'delete-track-3',
@@ -1086,153 +1086,13 @@ void main() {
           },
         ],
       };
-      expect(aiV3VerifiedCompletionMessage(bundle), 'Delete Track 3.');
+      expect(
+        aiV3VerifiedCompletionMessage(bundle),
+        'Deleted Track 3.',
+      );
       expect(
         aiV3VerifiedConversationMessage(bundle),
         'Done:\n- Delete Track 3',
-      );
-    });
-
-    test('verified completion prefers receipts over planner copy', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message': 'Sped the track up. True binaural 8D is unsupported.',
-          'skipped': <String>['binaural_8d'],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'project.set_tempo',
-            'verified_label': 'Set project tempo to 180 BPM',
-          },
-          <String, dynamic>{
-            'type': 'clip.adjust_pitch_semitones',
-            'verified_label': 'Adjusted vocal pitch by 3 semitones',
-          },
-          <String, dynamic>{
-            'type': 'mix.apply_goal',
-            'preview_label': 'Mix all project rows (presence)',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, contains('180 BPM'));
-      expect(message, contains('3 semitones'));
-      expect(message, contains('presence'));
-      expect(message, contains('Mixroom skipped true binaural 8D.'));
-      expect(message, isNot(contains('Sped the track up.')));
-      expect(message, isNot(contains('unsupported')));
-      expect(message.length, lessThanOrEqualTo(aiV3PreferredUserMessageLength));
-    });
-
-    test('verified completion falls back to planner copy without receipts', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{'user_message': 'Deleted Track 3.'},
-      };
-      expect(aiV3VerifiedCompletionMessage(bundle), 'Deleted Track 3.');
-    });
-
-    test('verified completion omits skip boilerplate on named singles', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message':
-              'Adjusted Track 1 by 3 dB. Mixroom skipped importing and exporting.',
-          'commands': <Map<String, dynamic>>[
-            <String, dynamic>{'type': 'row.adjust_gain_db'},
-          ],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'row.adjust_gain_db',
-            'verified_label': 'Adjusted Track 1 gain by 3 dB',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, 'Adjusted Track 1 gain by 3 dB.');
-      expect(message, isNot(contains('import')));
-      expect(message, isNot(contains('skip')));
-    });
-
-    test('verified completion has no skip lecture when skipped is empty', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message': 'Sped the track up.',
-          'commands': <Map<String, dynamic>>[
-            <String, dynamic>{'type': 'project.set_tempo'},
-            <String, dynamic>{'type': 'mix.apply_goal'},
-          ],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'project.set_tempo',
-            'verified_label': 'Set project tempo to 160 BPM',
-          },
-          <String, dynamic>{
-            'type': 'mix.apply_goal',
-            'verified_label': 'Mixed all project rows',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, contains('160 BPM'));
-      expect(message, isNot(contains('Mixroom skipped')));
-      expect(message, isNot(contains('import')));
-      expect(message, isNot(contains('generated drums')));
-    });
-
-    test('verified completion shows asked-for skip even without commands', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message': 'Mixroom cannot add drum parts.',
-          'skipped': <String>['generated_drums'],
-        },
-      };
-      expect(
-        aiV3VerifiedCompletionMessage(bundle),
-        'Mixroom skipped generated drums.',
-      );
-    });
-
-    test('verified completion ignores skip wording in user_message', () {
-      const bundle = <String, dynamic>{
-        'plan': <String, dynamic>{
-          'user_message':
-              'Sped the track up. Mixroom won\'t generate new drum parts.',
-          'commands': <Map<String, dynamic>>[
-            <String, dynamic>{'type': 'project.set_tempo'},
-            <String, dynamic>{'type': 'mix.apply_goal'},
-          ],
-        },
-        'receipts': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'type': 'project.set_tempo',
-            'verified_label': 'Set project tempo to 132 BPM',
-          },
-          <String, dynamic>{
-            'type': 'mix.apply_goal',
-            'verified_label': 'Mixed all project rows',
-          },
-        ],
-      };
-      final message = aiV3VerifiedCompletionMessage(bundle);
-      expect(message, contains('132 BPM'));
-      expect(message, isNot(contains('Mixroom skipped')));
-      expect(message, isNot(contains("won't")));
-      expect(message, isNot(contains('drum')));
-    });
-
-    test('observe line reports command types, BPM, and clip pitches', () {
-      expect(
-        aiV3ObserveLine(
-          stage: 'apply',
-          commandTypes: const <String>[
-            'project.set_tempo',
-            'clip.adjust_pitch_semitones',
-          ],
-          bpm: 180,
-          clipPitches: const <double>[3, -2.5],
-        ),
-        '[V3 apply] commands=project.set_tempo,clip.adjust_pitch_semitones bpm=180.0 pitches=3,-2.50',
       );
     });
 
@@ -1255,7 +1115,9 @@ void main() {
             '• Adjusted Gain from -1.0 dB to -1.5 dB on Automation Lead •',
           ],
         ),
-        <String>['Adjust Automation Lead by -0.5 dB'],
+        <String>[
+          'Adjust Automation Lead by -0.5 dB',
+        ],
       );
     });
 
@@ -1274,7 +1136,8 @@ void main() {
                 'command_id': 'instrument',
                 'status': 'prepared',
                 'preview_label': 'Set Custom Keys instrument to Dream Pad',
-                'verified_label': 'Changed Custom Keys instrument to Dream Pad',
+                'verified_label':
+                    'Changed Custom Keys instrument to Dream Pad',
               },
             ],
           },
@@ -1290,80 +1153,81 @@ void main() {
       );
     });
 
-    test(
-      'adaptive evaluation stays detached from the visible V3 result',
-      () async {
-        final captureDirectory = await Directory.systemTemp.createTemp(
-          'mixroom_v3_routing_',
-        );
-        addTearDown(() async {
-          if (await captureDirectory.exists()) {
-            await captureDirectory.delete(recursive: true);
-          }
-        });
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('informational_response', const <String, dynamic>{
-            'message': 'Unexpected V1 result.',
-          }, text: 'Unexpected V1 result.'),
-        );
-        final fakeV3 = _FakeAiV3Planner();
-        final fakeAdaptive = _FakeAdaptivePlanner();
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 1),
-          mixModel: LocalMixingModel(),
-          aiV3Planner: fakeV3,
-          aiV3AdaptiveShadowPlanner: fakeAdaptive,
-          aiV3Capture: AiV3Capture(
-            enabled: true,
-            directoryPath: captureDirectory.path,
-          ),
-        );
-
-        final result = await pipeline.handleUserText(
-          text: 'Tell me about this project.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const <double>[1.0],
-          rowPan: const <double>[0.5],
-          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
-          bpmFallback: 120,
-          timelineRows: <TimelineRow>[
-            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
-          ],
-          promptTraceId: 'routing-shadow-test',
-          clientStateDigest: 'routing-shadow-state',
-          clientContext: _v3ClientContext(),
-        );
-        for (
-          var attempt = 0;
-          attempt < 50 && fakeAdaptive.callCount == 0;
-          attempt += 1
-        ) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
+    test('adaptive evaluation stays detached from the visible V3 result',
+        () async {
+      final captureDirectory =
+          await Directory.systemTemp.createTemp('mixroom_v3_routing_');
+      addTearDown(() async {
+        if (await captureDirectory.exists()) {
+          await captureDirectory.delete(recursive: true);
         }
+      });
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          const <String, dynamic>{'message': 'Unexpected V1 result.'},
+          text: 'Unexpected V1 result.',
+        ),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final fakeAdaptive = _FakeAdaptivePlanner();
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+        aiV3AdaptiveShadowPlanner: fakeAdaptive,
+        aiV3Capture: AiV3Capture(
+          enabled: true,
+          directoryPath: captureDirectory.path,
+        ),
+      );
 
-        expect(fakeLlm.seenUserText, isNull);
-        expect(fakeV3.callCount, 1);
-        expect(fakeAdaptive.callCount, 1);
-        expect(result.message, 'V3 handled the request.');
-        expect(result.aiV3Handoff?['decision'], 'respond');
-        expect(
-          result.aiV3Handoff?['plan']?['user_message'],
-          'V3 handled the request.',
-        );
-      },
-    );
+      final result = await pipeline.handleUserText(
+        text: 'Tell me about this project.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        promptTraceId: 'routing-shadow-test',
+        clientStateDigest: 'routing-shadow-state',
+        clientContext: _v3ClientContext(),
+      );
+      for (var attempt = 0;
+          attempt < 50 && fakeAdaptive.callCount == 0;
+          attempt += 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
 
-    test(
-      'forwards all added assistant action types via daw_assistant_actions',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('daw_assistant_actions', {
+      expect(fakeLlm.seenUserText, isNull);
+      expect(fakeV3.callCount, 1);
+      expect(fakeAdaptive.callCount, 1);
+      expect(result.message, 'V3 handled the request.');
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(
+        result.aiV3Handoff?['plan']?['user_message'],
+        'V3 handled the request.',
+      );
+    });
+
+    test('forwards all added assistant action types via daw_assistant_actions',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'assistant_message': 'Stubbed assistant response.',
             'actions': [
               {
                 'type': 'project_edit',
-                'data': {'operation': 'set_tempo', 'tempo_bpm': 156},
+                'data': {
+                  'operation': 'set_tempo',
+                  'tempo_bpm': 156,
+                },
               },
               {
                 'type': 'sample_insert',
@@ -1387,8 +1251,8 @@ void main() {
                     {
                       'text': 'Tap record',
                       'target_id': 'tutorial:transport:record',
-                    },
-                  ],
+                    }
+                  ]
                 },
               },
               {
@@ -1402,14 +1266,17 @@ void main() {
                 'type': 'clip_edit',
                 'data': {
                   'operation': 'auto_trim',
-                  'target': {'scope': 'selected'},
+                  'target': {'scope': 'selected'}
                 },
               },
               {
                 'type': 'effect_edit',
                 'data': {
                   'operation': 'remove',
-                  'target': {'row_index': 0, 'effect_name': 'Gain'},
+                  'target': {
+                    'row_index': 0,
+                    'effect_name': 'Gain',
+                  }
                 },
               },
               {
@@ -1449,7 +1316,7 @@ void main() {
                       'pitch': 48,
                       'start_beat': 0,
                       'length_beats': 1,
-                      'velocity': 0.8,
+                      'velocity': 0.8
                     },
                   ],
                 },
@@ -1470,326 +1337,323 @@ void main() {
                 },
               },
             ],
-          }, text: 'Stubbed assistant response.'),
-        );
+          },
+          text: 'Stubbed assistant response.',
+        ),
+      );
 
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio.wav',
-          row: 0,
-        );
-        final midi = await _makeMidiTrack(path: '/tmp/test_midi.mid', row: 1);
-        final tracks = <AudioTrack>[audio, midi];
+      final audio = await _makeAudioTrack(path: '/tmp/test_audio.wav', row: 0);
+      final midi = await _makeMidiTrack(path: '/tmp/test_midi.mid', row: 1);
+      final tracks = <AudioTrack>[audio, midi];
 
-        final result = await pipeline.handleUserText(
-          text: 'Do tutorial + edit actions',
-          audioTracks: tracks,
-          rowGain: const [1.0, 1.0, 1.0, 1.0, 1.0],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1.0),
-              AutomationPoint(x: 1000, volume: 1.0),
-            ],
-          ),
-          bpmFallback: 120.0,
-          selectedClipIndices: const [0],
-          primarySelectedClipIndex: 0,
-          selectedRowIndex: 0,
-        );
+      final result = await pipeline.handleUserText(
+        text: 'Do tutorial + edit actions',
+        audioTracks: tracks,
+        rowGain: const [1.0, 1.0, 1.0, 1.0, 1.0],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+            AutomationPoint(x: 1000, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        selectedClipIndices: const [0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 0,
+      );
 
-        expect(result.hasAssistantActions, isTrue);
-        expect(result.assistantActions.length, 12);
-        expect(
-          result.assistantActions.map((a) => a.type).toSet(),
-          equals(const {
-            'project_edit',
-            'sample_insert',
-            'tutorial',
-            'clarify',
-            'clip_edit',
-            'effect_edit',
-            'row_group_edit',
-            'row_color_edit',
-            'automation_edit',
-            'midi_compose',
-            'stem_separate',
-            'role_override',
-          }),
-        );
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions.length, 12);
+      expect(
+        result.assistantActions.map((a) => a.type).toSet(),
+        equals(const {
+          'project_edit',
+          'sample_insert',
+          'tutorial',
+          'clarify',
+          'clip_edit',
+          'effect_edit',
+          'row_group_edit',
+          'row_color_edit',
+          'automation_edit',
+          'midi_compose',
+          'stem_separate',
+          'role_override',
+        }),
+      );
 
-        expect(fakeLlm.seenSelectionSnapshot, isNotNull);
-        expect(fakeLlm.seenSelectionSnapshot, contains('selected_row_index=0'));
-        expect(
-          fakeLlm.seenSelectionSnapshot,
-          contains('selected_clip_indices=0'),
-        );
-        expect(
-          fakeLlm.seenSelectionSnapshot,
-          contains('primary_selected_clip_index=0'),
-        );
-        expect(fakeLlm.seenSelectionSnapshot, contains('selected_clip[0]'));
-        expect(
-          fakeLlm.seenSelectionSnapshot,
-          contains('selected_row_automation_targets='),
-        );
-      },
-    );
+      expect(fakeLlm.seenSelectionSnapshot, isNotNull);
+      expect(fakeLlm.seenSelectionSnapshot, contains('selected_row_index=0'));
+      expect(
+          fakeLlm.seenSelectionSnapshot, contains('selected_clip_indices=0'));
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('primary_selected_clip_index=0'),
+      );
+      expect(fakeLlm.seenSelectionSnapshot, contains('selected_clip[0]'));
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('selected_row_automation_targets='),
+      );
+    });
 
     test(
-      'selection snapshot forwards automation clip metadata for AI targeting',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('informational_response', {
-            'message': 'Captured.',
-          }, text: 'Captured.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 2),
-          mixModel: LocalMixingModel(),
-        );
+        'selection snapshot forwards automation clip metadata for AI targeting',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          {'message': 'Captured.'},
+          text: 'Captured.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 2),
+        mixModel: LocalMixingModel(),
+      );
 
-        await pipeline.handleUserText(
-          text: 'Tweak that automation clip.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const [1.0, 1.0],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            2,
-            (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1.0)],
-          ),
-          bpmFallback: 120.0,
-          selectedRowIndex: 0,
-          automationClipSnapshot:
-              'selected_row_automation_clips=Volume[volume]=#0{clip_id=ac_1,start_ms=0.0,length_ms=500.0,lane=0,muted=false,pattern_id=pat_shared}',
-        );
+      await pipeline.handleUserText(
+        text: 'Tweak that automation clip.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const [1.0, 1.0],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        selectedRowIndex: 0,
+        automationClipSnapshot:
+            'selected_row_automation_clips=Volume[volume]=#0{clip_id=ac_1,start_ms=0.0,length_ms=500.0,lane=0,muted=false,pattern_id=pat_shared}',
+      );
 
-        expect(
-          fakeLlm.seenSelectionSnapshot,
-          contains('selected_row_automation_clips='),
-        );
-        expect(fakeLlm.seenSelectionSnapshot, contains('clip_id=ac_1'));
-        expect(
-          fakeLlm.seenSelectionSnapshot,
-          contains('pattern_id=pat_shared'),
-        );
-      },
-    );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('selected_row_automation_clips='),
+      );
+      expect(fakeLlm.seenSelectionSnapshot, contains('clip_id=ac_1'));
+      expect(fakeLlm.seenSelectionSnapshot, contains('pattern_id=pat_shared'));
+    });
 
-    test(
-      'accepts full operation surface in a single stubbed action payload',
-      () async {
-        final actions = <Map<String, dynamic>>[
-          for (final op in const [
-            'trim',
-            'auto_trim',
-            'cut',
-            'stretch',
-            'glue',
-            'move',
-            'tempo_follow',
-            'auto_bpm_align',
-            'tempo_detect_set_project',
-            'duplicate',
-            'delete',
-            'dialog_cleanup',
-            'dialog_remove_range',
-            'dialog_tighten_pauses',
-            'dialog_lift_quiet',
-          ])
-            {
-              'type': 'clip_edit',
-              'data': {
-                'operation': op,
-                'target': {'clip_index': 0},
-              },
-            },
-          for (final op in const [
-            'add',
-            'remove',
-            'bypass',
-            'unbypass',
-            'toggle_bypass',
-          ])
-            {
-              'type': 'effect_edit',
-              'data': {
-                'operation': op,
-                'target': {'row_index': 0, 'effect_name': 'Gain'},
-              },
-            },
-          for (final op in const [
-            'set_points',
-            'add_ramp',
-            'clear',
-            'create_clip',
-            'duplicate_clip',
-            'move_clip',
-            'delete_clip',
-            'clear_clips',
-            'mute_clip',
-            'unmute_clip',
-            'toggle_clip_mute',
-            'set_clip_points',
-            'apply_template',
-          ])
-            {
-              'type': 'automation_edit',
-              'data': {
-                'operation': op,
-                'target': {'row_index': 0},
-              },
-            },
-          for (final op in const [
-            'compose_bassline',
-            'compose_pattern',
-            'replace_notes',
-            'append_notes',
-            'chop_notes',
-          ])
-            {
-              'type': 'midi_compose',
-              'data': {
-                'operation': op,
-                'target': {'row_index': 1},
-                'notes': [
-                  {
-                    'pitch': 48,
-                    'start_beat': 0,
-                    'length_beats': 1,
-                    'velocity': 0.8,
-                  },
-                ],
-              },
-            },
+    test('accepts full operation surface in a single stubbed action payload',
+        () async {
+      final actions = <Map<String, dynamic>>[
+        for (final op in const [
+          'trim',
+          'auto_trim',
+          'cut',
+          'stretch',
+          'glue',
+          'move',
+          'tempo_follow',
+          'auto_bpm_align',
+          'tempo_detect_set_project',
+          'duplicate',
+          'delete',
+          'dialog_cleanup',
+          'dialog_remove_range',
+          'dialog_tighten_pauses',
+          'dialog_lift_quiet',
+        ])
           {
-            'type': 'stem_separate',
+            'type': 'clip_edit',
             'data': {
-              'operation': 'vocal_instrumental',
-              'target': {'clip_index': 0},
-            },
+              'operation': op,
+              'target': {'clip_index': 0}
+            }
           },
+        for (final op in const [
+          'add',
+          'remove',
+          'bypass',
+          'unbypass',
+          'toggle_bypass',
+        ])
           {
-            'type': 'role_override',
+            'type': 'effect_edit',
             'data': {
-              'operation': 'set',
-              'target': {'row_index': 0},
-              'role': 'drums',
-            },
+              'operation': op,
+              'target': {'row_index': 0, 'effect_name': 'Gain'}
+            }
           },
-        ];
+        for (final op in const [
+          'set_points',
+          'add_ramp',
+          'clear',
+          'create_clip',
+          'duplicate_clip',
+          'move_clip',
+          'delete_clip',
+          'clear_clips',
+          'mute_clip',
+          'unmute_clip',
+          'toggle_clip_mute',
+          'set_clip_points',
+          'apply_template',
+        ])
+          {
+            'type': 'automation_edit',
+            'data': {
+              'operation': op,
+              'target': {'row_index': 0}
+            }
+          },
+        for (final op in const [
+          'compose_bassline',
+          'compose_pattern',
+          'replace_notes',
+          'append_notes',
+          'chop_notes',
+        ])
+          {
+            'type': 'midi_compose',
+            'data': {
+              'operation': op,
+              'target': {'row_index': 1},
+              'notes': [
+                {
+                  'pitch': 48,
+                  'start_beat': 0,
+                  'length_beats': 1,
+                  'velocity': 0.8,
+                }
+              ]
+            }
+          },
+        {
+          'type': 'stem_separate',
+          'data': {
+            'operation': 'vocal_instrumental',
+            'target': {'clip_index': 0}
+          }
+        },
+        {
+          'type': 'role_override',
+          'data': {
+            'operation': 'set',
+            'target': {'row_index': 0},
+            'role': 'drums',
+          }
+        },
+      ];
 
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('daw_assistant_actions', {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'assistant_message': 'Surface test.',
             'actions': actions,
-          }, text: 'Surface test.'),
-        );
+          },
+          text: 'Surface test.',
+        ),
+      );
 
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_2.wav',
-          row: 0,
-        );
-        final midi = await _makeMidiTrack(path: '/tmp/test_midi_2.mid', row: 1);
+      final audio =
+          await _makeAudioTrack(path: '/tmp/test_audio_2.wav', row: 0);
+      final midi = await _makeMidiTrack(path: '/tmp/test_midi_2.mid', row: 1);
 
-        final result = await pipeline.handleUserText(
-          text: 'Run surface operation payload',
-          audioTracks: <AudioTrack>[audio, midi],
-          rowGain: const [1, 1, 1, 1, 1],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
-            ],
-          ),
-          bpmFallback: 120,
-          selectedClipIndices: const [0],
-          primarySelectedClipIndex: 0,
-          selectedRowIndex: 0,
-        );
+      final result = await pipeline.handleUserText(
+        text: 'Run surface operation payload',
+        audioTracks: <AudioTrack>[audio, midi],
+        rowGain: const [1, 1, 1, 1, 1],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+        selectedClipIndices: const [0],
+        primarySelectedClipIndex: 0,
+        selectedRowIndex: 0,
+      );
 
-        expect(result.hasAssistantActions, isTrue);
-        expect(result.assistantActions.length, actions.length);
-        expect(
-          result.assistantActions
-              .where((a) => a.type == 'clip_edit')
-              .map((a) => (a.data['operation'] ?? '').toString())
-              .toSet(),
-          equals(const {
-            'trim',
-            'auto_trim',
-            'cut',
-            'stretch',
-            'glue',
-            'move',
-            'tempo_follow',
-            'auto_bpm_align',
-            'tempo_detect_set_project',
-            'duplicate',
-            'delete',
-            'dialog_cleanup',
-            'dialog_remove_range',
-            'dialog_tighten_pauses',
-            'dialog_lift_quiet',
-          }),
-        );
-        expect(
-          result.assistantActions
-              .where((a) => a.type == 'automation_edit')
-              .map((a) => (a.data['operation'] ?? '').toString())
-              .toSet(),
-          equals(const {
-            'set_points',
-            'add_ramp',
-            'clear',
-            'create_clip',
-            'duplicate_clip',
-            'move_clip',
-            'delete_clip',
-            'clear_clips',
-            'mute_clip',
-            'unmute_clip',
-            'toggle_clip_mute',
-            'set_clip_points',
-            'apply_template',
-          }),
-        );
-        expect(
-          result.assistantActions
-              .where((a) => a.type == 'midi_compose')
-              .map((a) => (a.data['operation'] ?? '').toString())
-              .toSet(),
-          equals(const {
-            'compose_bassline',
-            'compose_pattern',
-            'replace_notes',
-            'append_notes',
-            'chop_notes',
-          }),
-        );
-      },
-    );
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions.length, actions.length);
+      expect(
+        result.assistantActions
+            .where((a) => a.type == 'clip_edit')
+            .map((a) => (a.data['operation'] ?? '').toString())
+            .toSet(),
+        equals(const {
+          'trim',
+          'auto_trim',
+          'cut',
+          'stretch',
+          'glue',
+          'move',
+          'tempo_follow',
+          'auto_bpm_align',
+          'tempo_detect_set_project',
+          'duplicate',
+          'delete',
+          'dialog_cleanup',
+          'dialog_remove_range',
+          'dialog_tighten_pauses',
+          'dialog_lift_quiet',
+        }),
+      );
+      expect(
+        result.assistantActions
+            .where((a) => a.type == 'automation_edit')
+            .map((a) => (a.data['operation'] ?? '').toString())
+            .toSet(),
+        equals(const {
+          'set_points',
+          'add_ramp',
+          'clear',
+          'create_clip',
+          'duplicate_clip',
+          'move_clip',
+          'delete_clip',
+          'clear_clips',
+          'mute_clip',
+          'unmute_clip',
+          'toggle_clip_mute',
+          'set_clip_points',
+          'apply_template',
+        }),
+      );
+      expect(
+        result.assistantActions
+            .where((a) => a.type == 'midi_compose')
+            .map((a) => (a.data['operation'] ?? '').toString())
+            .toSet(),
+        equals(const {
+          'compose_bassline',
+          'compose_pattern',
+          'replace_notes',
+          'append_notes',
+          'chop_notes',
+        }),
+      );
+    });
 
-    test(
-      'delegates broad move-to-beginning clip commands to the LLM',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('daw_assistant_actions', {
+    test('delegates broad move-to-beginning clip commands to the LLM',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'assistant_message': 'Moved all clips to the beginning.',
             'actions': [
               {
@@ -1801,60 +1665,64 @@ void main() {
                 },
               },
             ],
-          }, text: 'Moved all clips to the beginning.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 2),
-          mixModel: LocalMixingModel(),
-        );
+          },
+          text: 'Moved all clips to the beginning.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 2),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio.wav',
-          row: 0,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'move all clips to beginning',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1.0, 1.0],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            2,
-            (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1.0)],
-          ),
-          bpmFallback: 120.0,
-        );
+      final audio = await _makeAudioTrack(path: '/tmp/test_audio.wav', row: 0);
+      final result = await pipeline.handleUserText(
+        text: 'move all clips to beginning',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1.0, 1.0],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+      );
 
-        expect(fakeLlm.seenUserText, 'move all clips to beginning');
-        expect(result.message, 'Moved all clips to the beginning.');
-        expect(result.hasAssistantActions, isTrue);
-        expect(result.assistantActions, hasLength(1));
-        expect(result.assistantActions.first.type, 'clip_edit');
-        expect(result.assistantActions.first.data['operation'], 'move');
-        expect(result.assistantActions.first.data['snap_to'], 'start');
-        expect(
-          (result.assistantActions.first.data['target'] as Map)['scope'],
-          'all',
-        );
-        expect(result.meta?['tool'], 'daw_assistant_actions');
-      },
-    );
+      expect(fakeLlm.seenUserText, 'move all clips to beginning');
+      expect(result.message, 'Moved all clips to the beginning.');
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions, hasLength(1));
+      expect(result.assistantActions.first.type, 'clip_edit');
+      expect(result.assistantActions.first.data['operation'], 'move');
+      expect(result.assistantActions.first.data['snap_to'], 'start');
+      expect(
+        (result.assistantActions.first.data['target'] as Map)['scope'],
+        'all',
+      );
+      expect(result.meta?['tool'], 'daw_assistant_actions');
+    });
 
     test('delegates broad move-to-measure clip commands to the LLM', () async {
       final fakeLlm = _FakeCloudLlmService(
-        LlmResult.tool('daw_assistant_actions', {
-          'assistant_message': 'Moved all clips to measure 3.',
-          'actions': [
-            {
-              'type': 'clip_edit',
-              'data': {
-                'operation': 'move',
-                'target': {'scope': 'all'},
-                'new_start_measure': 3,
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
+            'assistant_message': 'Moved all clips to measure 3.',
+            'actions': [
+              {
+                'type': 'clip_edit',
+                'data': {
+                  'operation': 'move',
+                  'target': {'scope': 'all'},
+                  'new_start_measure': 3,
+                },
               },
-            },
-          ],
-        }, text: 'Moved all clips to measure 3.'),
+            ],
+          },
+          text: 'Moved all clips to measure 3.',
+        ),
       );
 
       final pipeline = ChatPipeline(
@@ -1880,9 +1748,10 @@ void main() {
 
       expect(result.hasAssistantActions, isTrue);
       expect(result.assistantActions.single.type, 'clip_edit');
-      expect(result.assistantActions.single.data['target'], <String, dynamic>{
-        'scope': 'all',
-      });
+      expect(
+        result.assistantActions.single.data['target'],
+        <String, dynamic>{'scope': 'all'},
+      );
       expect(result.assistantActions.single.data['new_start_measure'], 3);
       expect(result.message, 'Moved all clips to measure 3.');
       expect(result.meta?['tool'], 'daw_assistant_actions');
@@ -1904,10 +1773,8 @@ void main() {
         mixModel: LocalMixingModel(),
       );
 
-      final audio = await _makeAudioTrack(
-        path: '/tmp/test_audio_info.wav',
-        row: 0,
-      );
+      final audio =
+          await _makeAudioTrack(path: '/tmp/test_audio_info.wav', row: 0);
       final result = await pipeline.handleUserText(
         text: 'What does compressor attack do?',
         audioTracks: <AudioTrack>[audio],
@@ -1929,11 +1796,12 @@ void main() {
       expect(result.meta?['tool'], 'informational_response');
     });
 
-    test(
-      'stores clarify text in conversation instead of hidden assistant copy',
-      () async {
-        final fakeLlm = _QueuedFakeCloudLlmService(<LlmResult>[
-          LlmResult.tool('daw_assistant_actions', {
+    test('stores clarify text in conversation instead of hidden assistant copy',
+        () async {
+      final fakeLlm = _QueuedFakeCloudLlmService(<LlmResult>[
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'assistant_message': 'Done.',
             'actions': [
               {
@@ -1944,138 +1812,141 @@ void main() {
                 },
               },
             ],
-          }, text: 'Done.'),
-          LlmResult.tool('informational_response', {
-            'cancels_pending': false,
-          }, text: 'Captured.'),
-        ]);
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 2),
-          mixModel: LocalMixingModel(),
-        );
+          },
+          text: 'Done.',
+        ),
+        LlmResult.tool(
+          'informational_response',
+          {'cancels_pending': false},
+          text: 'Captured.',
+        ),
+      ]);
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 2),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_clarify.wav',
-          row: 0,
-        );
-        final rowAutomation = List<List<AutomationPoint>>.generate(
-          2,
-          (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
-        );
+      final audio =
+          await _makeAudioTrack(path: '/tmp/test_audio_clarify.wav', row: 0);
+      final rowAutomation = List<List<AutomationPoint>>.generate(
+        2,
+        (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
+      );
 
-        await pipeline.handleUserText(
-          text: 'move it',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: rowAutomation,
-          bpmFallback: 120,
-        );
+      await pipeline.handleUserText(
+        text: 'move it',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: rowAutomation,
+        bpmFallback: 120,
+      );
 
-        await pipeline.handleUserText(
-          text: 'selected clip',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: rowAutomation,
-          bpmFallback: 120,
-        );
+      await pipeline.handleUserText(
+        text: 'selected clip',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: rowAutomation,
+        bpmFallback: 120,
+      );
 
-        final secondConversation = fakeLlm.seenConversations[1];
-        expect(
-          secondConversation.any(
-            (entry) =>
-                entry['role'] == 'assistant' &&
-                entry['content'] ==
-                    'Which clip should I move?\n\nOptions: selected clip / all clips',
-          ),
-          isTrue,
-        );
-        expect(
-          secondConversation.any(
-            (entry) =>
-                entry['role'] == 'assistant' && entry['content'] == 'Done.',
-          ),
-          isFalse,
-        );
-      },
-    );
+      final secondConversation = fakeLlm.seenConversations[1];
+      expect(
+        secondConversation.any(
+          (entry) =>
+              entry['role'] == 'assistant' &&
+              entry['content'] ==
+                  'Which clip should I move?\n\nOptions: selected clip / all clips',
+        ),
+        isTrue,
+      );
+      expect(
+        secondConversation.any(
+          (entry) =>
+              entry['role'] == 'assistant' && entry['content'] == 'Done.',
+        ),
+        isFalse,
+      );
+    });
 
-    test(
-      'does not persist guessed assistant copy for direct effect edits',
-      () async {
-        final fakeLlm = _QueuedFakeCloudLlmService(<LlmResult>[
-          LlmResult.tool(
-            'daw_assistant_actions',
-            {
-              'assistant_message': 'Removed the Clipper plugin from track 1.',
-              'actions': [
-                {
-                  'type': 'effect_edit',
-                  'data': {
-                    'operation': 'remove',
-                    'target': {'row_index': 0, 'effect_name': 'Gain'},
+    test('does not persist guessed assistant copy for direct effect edits',
+        () async {
+      final fakeLlm = _QueuedFakeCloudLlmService(<LlmResult>[
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
+            'assistant_message': 'Removed the Clipper plugin from track 1.',
+            'actions': [
+              {
+                'type': 'effect_edit',
+                'data': {
+                  'operation': 'remove',
+                  'target': {
+                    'row_index': 0,
+                    'effect_name': 'Gain',
                   },
                 },
-              ],
-            },
-            text: 'Removed the Clipper plugin from track 1.',
-          ),
-          LlmResult.tool('informational_response', {
-            'cancels_pending': false,
-          }, text: 'Captured.'),
-        ]);
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 2),
-          mixModel: LocalMixingModel(),
-        );
+              },
+            ],
+          },
+          text: 'Removed the Clipper plugin from track 1.',
+        ),
+        LlmResult.tool(
+          'informational_response',
+          {'cancels_pending': false},
+          text: 'Captured.',
+        ),
+      ]);
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 2),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_effect_edit.wav',
-          row: 0,
-        );
-        final rowAutomation = List<List<AutomationPoint>>.generate(
-          2,
-          (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
-        );
+      final audio = await _makeAudioTrack(
+          path: '/tmp/test_audio_effect_edit.wav', row: 0);
+      final rowAutomation = List<List<AutomationPoint>>.generate(
+        2,
+        (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
+      );
 
-        await pipeline.handleUserText(
-          text: 'Take out the plugin on the first track',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: rowAutomation,
-          bpmFallback: 120,
-        );
+      await pipeline.handleUserText(
+        text: 'Take out the plugin on the first track',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: rowAutomation,
+        bpmFallback: 120,
+      );
 
-        await pipeline.handleUserText(
-          text: 'what happened?',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: rowAutomation,
-          bpmFallback: 120,
-        );
+      await pipeline.handleUserText(
+        text: 'what happened?',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: rowAutomation,
+        bpmFallback: 120,
+      );
 
-        final secondConversation = fakeLlm.seenConversations[1];
-        expect(
-          secondConversation.any(
-            (entry) =>
-                entry['role'] == 'assistant' &&
-                entry['content'] == 'Removed the Clipper plugin from track 1.',
-          ),
-          isFalse,
-        );
-      },
-    );
+      final secondConversation = fakeLlm.seenConversations[1];
+      expect(
+        secondConversation.any(
+          (entry) =>
+              entry['role'] == 'assistant' &&
+              entry['content'] == 'Removed the Clipper plugin from track 1.',
+        ),
+        isFalse,
+      );
+    });
 
-    test(
-      'merges wrapped daw_assistant_actions calls into one action list',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('daw_assistant_actions', {
+    test('merges wrapped daw_assistant_actions calls into one action list',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'calls': [
               {
                 'assistant_message': 'Showing you in the UI.',
@@ -2088,10 +1959,10 @@ void main() {
                         {
                           'text': 'Open the drums effects tab.',
                           'target_id': 'row:0:effects_tab',
-                        },
+                        }
                       ],
                     },
-                  },
+                  }
                 ],
               },
               {
@@ -2104,70 +1975,83 @@ void main() {
                         {
                           'text': 'Open the reverb mix control.',
                           'target_id': 'row:0:fx_contains:reverb:param:mix',
-                        },
+                        }
                       ],
                     },
-                  },
+                  }
                 ],
               },
             ],
-          }, text: 'Showing you in the UI.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 2),
-          mixModel: LocalMixingModel(),
-        );
+          },
+          text: 'Showing you in the UI.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 2),
+        mixModel: LocalMixingModel(),
+      );
 
-        final result = await pipeline.handleUserText(
-          text: 'show me where the drum reverb mix is',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const [1, 1],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            2,
-            (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
-          ),
-          bpmFallback: 120,
-          selectedRowIndex: 0,
-        );
+      final result = await pipeline.handleUserText(
+        text: 'show me where the drum reverb mix is',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1)],
+        ),
+        bpmFallback: 120,
+        selectedRowIndex: 0,
+      );
 
-        expect(result.hasAssistantActions, isTrue);
-        expect(result.message, 'Showing you in the UI.');
-        expect(result.assistantActions, hasLength(2));
-        final stepTargetIds = result.assistantActions
-            .expand((a) => ((a.data['steps'] as List?) ?? const <dynamic>[]))
-            .whereType<Map>()
-            .map((step) => step['target_id'])
-            .toList(growable: false);
-        expect(
-          stepTargetIds,
-          containsAll(<String>[
-            'row:0:effects_tab',
-            'row:0:fx_contains:reverb:param:mix',
-          ]),
-        );
-      },
-    );
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.message, 'Showing you in the UI.');
+      expect(result.assistantActions, hasLength(2));
+      final stepTargetIds = result.assistantActions
+          .expand((a) => ((a.data['steps'] as List?) ?? const <dynamic>[]))
+          .whereType<Map>()
+          .map((step) => step['target_id'])
+          .toList(growable: false);
+      expect(
+        stepTargetIds,
+        containsAll(<String>[
+          'row:0:effects_tab',
+          'row:0:fx_contains:reverb:param:mix',
+        ]),
+      );
+    });
 
     test('routes mix_model_request execute to an applied mix result', () async {
       final fakeLlm = _FakeCloudLlmService(
-        LlmResult.tool('mix_model_request', {
-          'mode': 'execute',
-          'assistant_message': 'Applying a vocal gain bump now.',
-          'actions': [
-            {
-              'goal': {
-                'type': 'mix_request',
-                'intensity': 0.75,
-                'target': {'scope': 'row', 'row_index': 0, 'confidence': 0.9},
-                'intents': [
-                  {'kind': 'gain', 'direction': 'up', 'confidence': 0.95},
-                ],
-              },
-            },
-          ],
-        }, text: 'Applying a vocal gain bump now.'),
+        LlmResult.tool(
+          'mix_model_request',
+          {
+            'mode': 'execute',
+            'assistant_message': 'Applying a vocal gain bump now.',
+            'actions': [
+              {
+                'goal': {
+                  'type': 'mix_request',
+                  'intensity': 0.75,
+                  'target': {
+                    'scope': 'row',
+                    'row_index': 0,
+                    'confidence': 0.9,
+                  },
+                  'intents': [
+                    {
+                      'kind': 'gain',
+                      'direction': 'up',
+                      'confidence': 0.95,
+                    }
+                  ],
+                }
+              }
+            ],
+          },
+          text: 'Applying a vocal gain bump now.',
+        ),
       );
       final pipeline = ChatPipeline(
         llm: fakeLlm,
@@ -2175,10 +2059,8 @@ void main() {
         mixModel: LocalMixingModel(),
       );
 
-      final audio = await _makeAudioTrack(
-        path: '/tmp/test_audio_mix_exec.wav',
-        row: 0,
-      );
+      final audio =
+          await _makeAudioTrack(path: '/tmp/test_audio_mix_exec.wav', row: 0);
       final result = await pipeline.handleUserText(
         text: 'Turn this up a bit.',
         audioTracks: <AudioTrack>[audio],
@@ -2203,10 +2085,12 @@ void main() {
     });
 
     test(
-      'mix replies do not append local diagnostic notes to visible chat text',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('mix_model_request', {
+        'mix replies do not append local diagnostic notes to visible chat text',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
             'mode': 'execute',
             'assistant_message': 'Pushing the mix toward the reference now.',
             'actions': [
@@ -2214,102 +2098,109 @@ void main() {
                 'goal': {
                   'type': 'mix_request',
                   'intensity': 0.75,
-                  'target': {'scope': 'auto', 'confidence': 0.9},
+                  'target': {
+                    'scope': 'auto',
+                    'confidence': 0.9,
+                  },
                   'intents': [
-                    {'kind': 'balance', 'confidence': 0.95},
+                    {
+                      'kind': 'balance',
+                      'confidence': 0.95,
+                    }
                   ],
-                  'reference_target': {'row_index': 1, 'confidence': 0.95},
+                  'reference_target': {
+                    'row_index': 1,
+                    'confidence': 0.95,
+                  },
                   'reference_mode': 'full_mix',
                   'reference_closeness': 'balanced',
-                },
-              },
+                }
+              }
             ],
-          }, text: 'Pushing the mix toward the reference now.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(
-            rows: 2,
-            rowApproxRms: const <int, double>{0: 0.11, 1: 0.28},
-            rowAudioStats: const <int, Map<String, double>>{
-              0: <String, double>{
-                'centroid_hz': 1200.0,
-                'spectral_rolloff_hz': 2200.0,
-                'spectral_slope': -0.45,
-                'hf_rms': 0.10,
-                'bassiness': 0.16,
-                'sibilance': 0.07,
-                'side_ratio': 0.08,
-                'phase_corr': 0.95,
-                'stereo_imbalance': 0.03,
-                'integrated_lufs_est': -18.0,
-                'true_peak_dbfs': -6.0,
-                'lra_est': 7.0,
-                'transient_density': 0.52,
-                'clip_ratio': 0.02,
-                'st_rms_std': 0.12,
-              },
-              1: <String, double>{
-                'centroid_hz': 3200.0,
-                'spectral_rolloff_hz': 5600.0,
-                'spectral_slope': -0.12,
-                'hf_rms': 0.38,
-                'bassiness': 0.32,
-                'sibilance': 0.10,
-                'side_ratio': 0.58,
-                'phase_corr': 0.48,
-                'stereo_imbalance': 0.02,
-                'integrated_lufs_est': -10.5,
-                'true_peak_dbfs': -1.8,
-                'lra_est': 3.5,
-                'transient_density': 0.28,
-                'clip_ratio': 0.08,
-                'st_rms_std': 0.06,
-              },
+          },
+          text: 'Pushing the mix toward the reference now.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(
+          rows: 2,
+          rowApproxRms: const <int, double>{0: 0.11, 1: 0.28},
+          rowAudioStats: const <int, Map<String, double>>{
+            0: <String, double>{
+              'centroid_hz': 1200.0,
+              'spectral_rolloff_hz': 2200.0,
+              'spectral_slope': -0.45,
+              'hf_rms': 0.10,
+              'bassiness': 0.16,
+              'sibilance': 0.07,
+              'side_ratio': 0.08,
+              'phase_corr': 0.95,
+              'stereo_imbalance': 0.03,
+              'integrated_lufs_est': -18.0,
+              'true_peak_dbfs': -6.0,
+              'lra_est': 7.0,
+              'transient_density': 0.52,
+              'clip_ratio': 0.02,
+              'st_rms_std': 0.12,
             },
-          ),
-          mixModel: LocalMixingModel(),
-        );
+            1: <String, double>{
+              'centroid_hz': 3200.0,
+              'spectral_rolloff_hz': 5600.0,
+              'spectral_slope': -0.12,
+              'hf_rms': 0.38,
+              'bassiness': 0.32,
+              'sibilance': 0.10,
+              'side_ratio': 0.58,
+              'phase_corr': 0.48,
+              'stereo_imbalance': 0.02,
+              'integrated_lufs_est': -10.5,
+              'true_peak_dbfs': -1.8,
+              'lra_est': 3.5,
+              'transient_density': 0.28,
+              'clip_ratio': 0.08,
+              'st_rms_std': 0.06,
+            },
+          },
+        ),
+        mixModel: LocalMixingModel(),
+      );
 
-        final subject = await _makeAudioTrack(
-          path: '/tmp/test_subject.wav',
-          row: 0,
-        );
-        final reference = await _makeAudioTrack(
-          path: '/tmp/test_reference.wav',
-          row: 1,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'Match this closer to the reference.',
-          audioTracks: <AudioTrack>[subject, reference],
-          rowGain: const [1, 1],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            2,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
-            ],
-          ),
-          bpmFallback: 120,
-        );
+      final subject =
+          await _makeAudioTrack(path: '/tmp/test_subject.wav', row: 0);
+      final reference =
+          await _makeAudioTrack(path: '/tmp/test_reference.wav', row: 1);
+      final result = await pipeline.handleUserText(
+        text: 'Match this closer to the reference.',
+        audioTracks: <AudioTrack>[subject, reference],
+        rowGain: const [1, 1],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
 
-        expect(result.hasMix, isTrue);
-        expect(result.mixing, isNotNull);
-        expect(result.mixing!.notes, isNotEmpty);
-        expect(result.message, 'Pushing the mix toward the reference now.');
-        expect(
-          result.message,
-          isNot(contains('The reference looks more like a single element')),
-        );
-      },
-    );
+      expect(result.hasMix, isTrue);
+      expect(result.mixing, isNotNull);
+      expect(result.mixing!.notes, isNotEmpty);
+      expect(result.message, 'Pushing the mix toward the reference now.');
+      expect(
+        result.message,
+        isNot(contains('The reference looks more like a single element')),
+      );
+    });
 
-    test(
-      'unwraps wrapped mix_model_request calls and still produces a mix',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('mix_model_request', {
+    test('unwraps wrapped mix_model_request calls and still produces a mix',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
             'calls': [
               {
                 'mode': 'execute',
@@ -2329,265 +2220,257 @@ void main() {
                           'kind': 'reverb',
                           'direction': 'up',
                           'confidence': 0.9,
-                        },
+                        }
                       ],
-                    },
-                  },
+                    }
+                  }
                 ],
-              },
+              }
             ],
-          }, text: 'Added reverb to the drums track.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
+          },
+          text: 'Added reverb to the drums track.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_mix_calls.wav',
-          row: 0,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'Add reverb to drums.',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1, 1, 1, 1],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
-            ],
-          ),
-          bpmFallback: 120,
-        );
+      final audio =
+          await _makeAudioTrack(path: '/tmp/test_audio_mix_calls.wav', row: 0);
+      final result = await pipeline.handleUserText(
+        text: 'Add reverb to drums.',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1, 1, 1, 1],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
 
-        expect(result.hasMix, isTrue);
-        expect(result.mixing, isNotNull);
-        expect(result.mixing!.actions, isNotEmpty);
-        expect(result.message, contains('Added reverb to the drums track.'));
-        expect(result.meta?['tool'], 'mix_model_request');
-        expect(result.meta?['mode'], 'execute');
-      },
-    );
+      expect(result.hasMix, isTrue);
+      expect(result.mixing, isNotNull);
+      expect(result.mixing!.actions, isNotEmpty);
+      expect(result.message, contains('Added reverb to the drums track.'));
+      expect(result.meta?['tool'], 'mix_model_request');
+      expect(result.meta?['mode'], 'execute');
+    });
 
-    test(
-      'routes mix_model_request propose to pending proposal message',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool(
-            'mix_model_request',
-            {
-              'mode': 'propose',
-              'assistant_message':
-                  'I can tighten this with subtle EQ and gain.',
-              'asks_permission': false,
-              'actions': [
-                {
-                  'goal': {
-                    'type': 'mix_request',
-                    'intensity': 0.6,
-                    'target': {
-                      'scope': 'row',
-                      'row_index': 0,
-                      'confidence': 0.9,
-                    },
-                    'intents': [
-                      {
-                        'kind': 'eq',
-                        'descriptor': 'mud_cut',
-                        'confidence': 0.8,
-                      },
-                    ],
+    test('routes mix_model_request propose to pending proposal message',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
+            'mode': 'propose',
+            'assistant_message': 'I can tighten this with subtle EQ and gain.',
+            'asks_permission': false,
+            'actions': [
+              {
+                'goal': {
+                  'type': 'mix_request',
+                  'intensity': 0.6,
+                  'target': {
+                    'scope': 'row',
+                    'row_index': 0,
+                    'confidence': 0.9,
                   },
-                },
-              ],
-            },
-            text: 'I can tighten this with subtle EQ and gain.',
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
-
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_mix_propose.wav',
-          row: 0,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'Can you make this cleaner?',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1, 1, 1, 1],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
+                  'intents': [
+                    {
+                      'kind': 'eq',
+                      'descriptor': 'mud_cut',
+                      'confidence': 0.8,
+                    }
+                  ],
+                }
+              }
             ],
-          ),
-          bpmFallback: 120,
-        );
+          },
+          text: 'I can tighten this with subtle EQ and gain.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        expect(result.hasMix, isFalse);
-        expect(result.mixing, isNull);
-        expect(
-          result.message,
-          contains('Reply "yes" to apply or "no" to cancel.'),
-        );
-        expect(result.meta?['tool'], 'mix_model_request');
-        expect(result.meta?['mode'], 'propose');
-      },
-    );
+      final audio = await _makeAudioTrack(
+          path: '/tmp/test_audio_mix_propose.wav', row: 0);
+      final result = await pipeline.handleUserText(
+        text: 'Can you make this cleaner?',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1, 1, 1, 1],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
 
-    test(
-      'proposal keeps assistant message primary and appends hint once',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool(
-            'mix_model_request',
-            {
-              'mode': 'propose',
-              'assistant_message':
-                  'I can clean this up with subtle EQ and level balancing.',
-              'asks_permission': false,
-              'actions': [
-                {
-                  'goal': {
-                    'type': 'mix_request',
-                    'intensity': 0.6,
-                    'target': {
-                      'scope': 'row',
-                      'row_index': 0,
-                      'confidence': 0.9,
-                    },
-                    'intents': [
-                      {
-                        'kind': 'eq',
-                        'descriptor': 'mud_cut',
-                        'confidence': 0.8,
-                      },
-                    ],
+      expect(result.hasMix, isFalse);
+      expect(result.mixing, isNull);
+      expect(
+        result.message,
+        contains('Reply "yes" to apply or "no" to cancel.'),
+      );
+      expect(result.meta?['tool'], 'mix_model_request');
+      expect(result.meta?['mode'], 'propose');
+    });
+
+    test('proposal keeps assistant message primary and appends hint once',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
+            'mode': 'propose',
+            'assistant_message':
+                'I can clean this up with subtle EQ and level balancing.',
+            'asks_permission': false,
+            'actions': [
+              {
+                'goal': {
+                  'type': 'mix_request',
+                  'intensity': 0.6,
+                  'target': {
+                    'scope': 'row',
+                    'row_index': 0,
+                    'confidence': 0.9,
                   },
-                },
-              ],
-            },
-            text: 'I can clean this up with subtle EQ and level balancing.',
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
-
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_mix_propose_primary.wav',
-          row: 0,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'Clean this up a little.',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1, 1, 1, 1],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
+                  'intents': [
+                    {
+                      'kind': 'eq',
+                      'descriptor': 'mud_cut',
+                      'confidence': 0.8,
+                    }
+                  ],
+                }
+              }
             ],
-          ),
-          bpmFallback: 120,
-        );
+          },
+          text: 'I can clean this up with subtle EQ and level balancing.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        expect(
-          result.message.startsWith(
-            'I can clean this up with subtle EQ and level balancing.',
-          ),
-          isTrue,
-        );
-        expect(
-          RegExp(
-            'Reply "yes" to apply or "no" to cancel.',
-          ).allMatches(result.message).length,
-          1,
-        );
-      },
-    );
+      final audio = await _makeAudioTrack(
+          path: '/tmp/test_audio_mix_propose_primary.wav', row: 0);
+      final result = await pipeline.handleUserText(
+        text: 'Clean this up a little.',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1, 1, 1, 1],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
+
+      expect(
+        result.message.startsWith(
+          'I can clean this up with subtle EQ and level balancing.',
+        ),
+        isTrue,
+      );
+      expect(
+        RegExp('Reply "yes" to apply or "no" to cancel.')
+            .allMatches(result.message)
+            .length,
+        1,
+      );
+    });
 
     test(
-      'proposal does not duplicate approval hint if assistant already says it',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool(
-            'mix_model_request',
-            {
-              'mode': 'propose',
-              'assistant_message':
-                  'I can do that. Reply "yes" to apply or "no" to cancel.',
-              'asks_permission': false,
-              'actions': [
-                {
-                  'goal': {
-                    'type': 'mix_request',
-                    'intensity': 0.6,
-                    'target': {
-                      'scope': 'row',
-                      'row_index': 0,
-                      'confidence': 0.9,
-                    },
-                    'intents': [
-                      {'kind': 'gain', 'direction': 'up', 'confidence': 0.8},
-                    ],
+        'proposal does not duplicate approval hint if assistant already says it',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
+            'mode': 'propose',
+            'assistant_message':
+                'I can do that. Reply "yes" to apply or "no" to cancel.',
+            'asks_permission': false,
+            'actions': [
+              {
+                'goal': {
+                  'type': 'mix_request',
+                  'intensity': 0.6,
+                  'target': {
+                    'scope': 'row',
+                    'row_index': 0,
+                    'confidence': 0.9,
                   },
-                },
-              ],
-            },
-            text: 'I can do that. Reply "yes" to apply or "no" to cancel.',
-          ),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
-
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_mix_propose_dedupe.wav',
-          row: 0,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'Turn it up a little.',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1, 1, 1, 1],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
+                  'intents': [
+                    {
+                      'kind': 'gain',
+                      'direction': 'up',
+                      'confidence': 0.8,
+                    }
+                  ],
+                }
+              }
             ],
-          ),
-          bpmFallback: 120,
-        );
+          },
+          text: 'I can do that. Reply "yes" to apply or "no" to cancel.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        expect(
-          RegExp(
-            'Reply "yes" to apply or "no" to cancel.',
-          ).allMatches(result.message).length,
-          1,
-        );
-      },
-    );
+      final audio = await _makeAudioTrack(
+          path: '/tmp/test_audio_mix_propose_dedupe.wav', row: 0);
+      final result = await pipeline.handleUserText(
+        text: 'Turn it up a little.',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1, 1, 1, 1],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
 
-    test(
-      'proposal appends approval hint even when asks_permission is true',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('mix_model_request', {
+      expect(
+        RegExp('Reply "yes" to apply or "no" to cancel.')
+            .allMatches(result.message)
+            .length,
+        1,
+      );
+    });
+
+    test('proposal appends approval hint even when asks_permission is true',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'mix_model_request',
+          {
             'mode': 'propose',
             'assistant_message': 'I can make that change.',
             'asks_permission': true,
@@ -2596,122 +2479,129 @@ void main() {
                 'goal': {
                   'type': 'mix_request',
                   'intensity': 0.6,
-                  'target': {'scope': 'row', 'row_index': 0, 'confidence': 0.9},
+                  'target': {
+                    'scope': 'row',
+                    'row_index': 0,
+                    'confidence': 0.9,
+                  },
                   'intents': [
-                    {'kind': 'gain', 'direction': 'up', 'confidence': 0.8},
+                    {
+                      'kind': 'gain',
+                      'direction': 'up',
+                      'confidence': 0.8,
+                    }
                   ],
-                },
-              },
+                }
+              }
             ],
-          }, text: 'I can make that change.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 5),
-          mixModel: LocalMixingModel(),
-        );
+          },
+          text: 'I can make that change.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 5),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_audio_mix_propose_ask_true.wav',
-          row: 0,
-        );
-        final result = await pipeline.handleUserText(
-          text: 'Can you do that?',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1, 1, 1, 1, 1],
-          rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            5,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1),
-              AutomationPoint(x: 1000, volume: 1),
-            ],
-          ),
-          bpmFallback: 120,
-        );
+      final audio = await _makeAudioTrack(
+          path: '/tmp/test_audio_mix_propose_ask_true.wav', row: 0);
+      final result = await pipeline.handleUserText(
+        text: 'Can you do that?',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1, 1, 1, 1, 1],
+        rowPan: const [0.5, 0.5, 0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          5,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1),
+            AutomationPoint(x: 1000, volume: 1),
+          ],
+        ),
+        bpmFallback: 120,
+      );
 
-        expect(result.message, startsWith('I can make that change.'));
-        expect(
-          result.message,
-          contains('Reply "yes" to apply or "no" to cancel.'),
-        );
-      },
-    );
+      expect(result.message, startsWith('I can make that change.'));
+      expect(
+        result.message,
+        contains('Reply "yes" to apply or "no" to cancel.'),
+      );
+    });
 
-    test(
-      'runtime snapshots include master automation targets for AI planning',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('informational_response', {
-            'message': 'Captured.',
-          }, text: 'Captured.'),
-        );
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(
-            rows: 2,
-            masterEffects: const <EffectState>[
-              EffectState(
-                effectIndex: 0,
-                name: 'Master Comp',
-                isBypassed: false,
-                parameters: <EffectParameterState>[
-                  EffectParameterState(
-                    id: 'threshold',
-                    name: 'Threshold',
-                    type: 'float',
-                    value: -9.0,
-                    min: -60.0,
-                    max: 0.0,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          mixModel: LocalMixingModel(),
-        );
+    test('runtime snapshots include master automation targets for AI planning',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'informational_response',
+          {'message': 'Captured.'},
+          text: 'Captured.',
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(
+          rows: 2,
+          masterEffects: const <EffectState>[
+            EffectState(
+              effectIndex: 0,
+              name: 'Master Comp',
+              isBypassed: false,
+              parameters: <EffectParameterState>[
+                EffectParameterState(
+                  id: 'threshold',
+                  name: 'Threshold',
+                  type: 'float',
+                  value: -9.0,
+                  min: -60.0,
+                  max: 0.0,
+                ),
+              ],
+            ),
+          ],
+        ),
+        mixModel: LocalMixingModel(),
+      );
 
-        final audio = await _makeAudioTrack(
-          path: '/tmp/test_master_snapshot.wav',
-          row: 0,
-        );
-        await pipeline.handleUserText(
-          text: 'Automate the master compressor threshold.',
-          audioTracks: <AudioTrack>[audio],
-          rowGain: const [1.0, 1.0],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            2,
-            (_) => <AutomationPoint>[
-              AutomationPoint(x: 0, volume: 1.0),
-              AutomationPoint(x: 1000, volume: 1.0),
-            ],
-          ),
-          bpmFallback: 120.0,
-          selectedRowIndex: 0,
-        );
+      final audio =
+          await _makeAudioTrack(path: '/tmp/test_master_snapshot.wav', row: 0);
+      await pipeline.handleUserText(
+        text: 'Automate the master compressor threshold.',
+        audioTracks: <AudioTrack>[audio],
+        rowGain: const [1.0, 1.0],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+            AutomationPoint(x: 1000, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        selectedRowIndex: 0,
+      );
 
-        expect(fakeLlm.seenProjectSnapshot, contains('Master: '));
-        expect(
-          fakeLlm.seenProjectSnapshot,
-          contains(
-            'automation_targets=[gain | pan | fx0:Master Comp{Threshold}]',
-          ),
-        );
-        expect(
-          fakeLlm.seenSelectionSnapshot,
-          contains(
-            'master_automation_targets=gain | pan | fx0:Master Comp{Threshold}',
-          ),
-        );
-      },
-    );
+      expect(fakeLlm.seenProjectSnapshot, contains('Master: '));
+      expect(
+        fakeLlm.seenProjectSnapshot,
+        contains(
+          'automation_targets=[gain | pan | fx0:Master Comp{Threshold}]',
+        ),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains(
+          'master_automation_targets=gain | pan | fx0:Master Comp{Threshold}',
+        ),
+      );
+    });
 
     test('runtime snapshots expose human-readable row identity cues', () async {
       final fakeLlm = _FakeCloudLlmService(
-        LlmResult.tool('informational_response', {
-          'message': 'Captured.',
-        }, text: 'Captured.'),
+        LlmResult.tool(
+          'informational_response',
+          {'message': 'Captured.'},
+          text: 'Captured.',
+        ),
       );
       final pipeline = ChatPipeline(
         llm: fakeLlm,
@@ -2745,7 +2635,12 @@ void main() {
       await pipeline.handleUserText(
         text: 'Match the project closer to the reference.',
         audioTracks: <AudioTrack>[koreanTrack, midiTrack, referenceTrack],
-        rowNames: const <String>['Korean Vox', 'Pluck Bus', 'Reference', ''],
+        rowNames: const <String>[
+          'Korean Vox',
+          'Pluck Bus',
+          'Reference',
+          '',
+        ],
         rowGain: const [1.0, 1.0, 1.0, 1.0],
         rowPan: const [0.5, 0.5, 0.5, 0.5],
         rowAutomation: List<List<AutomationPoint>>.generate(
@@ -2787,11 +2682,16 @@ void main() {
       expect(
         fakeLlm.seenSelectionSnapshot,
         contains(
-          'selected_row_context{row_index=1,track_number=2,row_name="Pluck Bus",row_position=middle',
-        ),
+            'selected_row_context{row_index=1,track_number=2,row_name="Pluck Bus",row_position=middle'),
       );
-      expect(fakeLlm.seenSelectionSnapshot, contains('midi_state={none}'));
-      expect(fakeLlm.seenSelectionSnapshot, contains('fx_chain=[none]'));
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('midi_state={none}'),
+      );
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('fx_chain=[none]'),
+      );
       expect(
         fakeLlm.seenSelectionSnapshot,
         contains('occupied_row_position=middle-occupied'),
@@ -2804,14 +2704,20 @@ void main() {
         fakeLlm.seenSelectionSnapshot,
         contains('instrument_name=Sub Bass'),
       );
-      expect(fakeLlm.seenSelectionSnapshot, contains('clip_kind=midi'));
+      expect(
+        fakeLlm.seenSelectionSnapshot,
+        contains('clip_kind=midi'),
+      );
     });
 
-    test('runtime snapshots include concise fx chain state for AI planning', () async {
+    test('runtime snapshots include concise fx chain state for AI planning',
+        () async {
       final fakeLlm = _FakeCloudLlmService(
-        LlmResult.tool('informational_response', {
-          'message': 'Captured.',
-        }, text: 'Captured.'),
+        LlmResult.tool(
+          'informational_response',
+          {'message': 'Captured.'},
+          text: 'Captured.',
+        ),
       );
       final pipeline = ChatPipeline(
         llm: fakeLlm,
@@ -2894,10 +2800,8 @@ void main() {
         primarySelectedClipIndex: 0,
       );
 
-      expect(
-        fakeLlm.seenProjectSnapshot,
-        contains('fx_count=2 active_fx_count=1'),
-      );
+      expect(fakeLlm.seenProjectSnapshot,
+          contains('fx_count=2 active_fx_count=1'));
       expect(
         fakeLlm.seenProjectSnapshot,
         contains(
@@ -2928,18 +2832,22 @@ void main() {
       );
     });
 
-    test(
-      'passes master automation clip actions through for executor handling',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('daw_assistant_actions', {
+    test('passes master automation clip actions through for executor handling',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'assistant_message': 'Master automation clip queued.',
             'actions': [
               {
                 'type': 'automation_edit',
                 'data': {
                   'operation': 'create_clip',
-                  'target': {'scope': 'master', 'target_id': 'master:gain'},
+                  'target': {
+                    'scope': 'master',
+                    'target_id': 'master:gain',
+                  },
                   'start_ms': 200,
                   'length_ms': 600,
                 },
@@ -2961,69 +2869,73 @@ void main() {
                 },
               },
             ],
-          }, text: 'Master automation clip queued.'),
-        );
+          },
+          text: 'Master automation clip queued.',
+        ),
+      );
 
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(
-            rows: 2,
-            masterEffects: const <EffectState>[
-              EffectState(
-                effectIndex: 0,
-                name: 'Master Comp',
-                isBypassed: false,
-                parameters: <EffectParameterState>[
-                  EffectParameterState(
-                    id: 'threshold',
-                    name: 'Threshold',
-                    type: 'float',
-                    value: 0.4,
-                    min: 0.0,
-                    max: 1.0,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          mixModel: LocalMixingModel(),
-        );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(
+          rows: 2,
+          masterEffects: const <EffectState>[
+            EffectState(
+              effectIndex: 0,
+              name: 'Master Comp',
+              isBypassed: false,
+              parameters: <EffectParameterState>[
+                EffectParameterState(
+                  id: 'threshold',
+                  name: 'Threshold',
+                  type: 'float',
+                  value: 0.4,
+                  min: 0.0,
+                  max: 1.0,
+                ),
+              ],
+            ),
+          ],
+        ),
+        mixModel: LocalMixingModel(),
+      );
 
-        final result = await pipeline.handleUserText(
-          text: 'Automate the master compressor threshold.',
-          audioTracks: const <AudioTrack>[],
-          rowGain: const [1.0, 1.0],
-          rowPan: const [0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            2,
-            (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1.0)],
-          ),
-          bpmFallback: 120.0,
-          selectedRowIndex: 0,
-        );
+      final result = await pipeline.handleUserText(
+        text: 'Automate the master compressor threshold.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const [1.0, 1.0],
+        rowPan: const [0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          2,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        selectedRowIndex: 0,
+      );
 
-        expect(result.hasAssistantActions, isTrue);
-        expect(result.assistantActions, hasLength(2));
-        expect(
-          result.assistantActions.first.data['target']['scope'],
-          equals('master'),
-        );
-        expect(
-          result.assistantActions.first.data['target']['target_id'],
-          equals('master:gain'),
-        );
-        expect(
-          result.assistantActions.last.data['target']['target_id'],
-          startsWith('masterfxid:'),
-        );
-      },
-    );
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions, hasLength(2));
+      expect(
+        result.assistantActions.first.data['target']['scope'],
+        equals('master'),
+      );
+      expect(
+        result.assistantActions.first.data['target']['target_id'],
+        equals('master:gain'),
+      );
+      expect(
+        result.assistantActions.last.data['target']['target_id'],
+        startsWith('masterfxid:'),
+      );
+    });
 
-    test(
-      'passes group-scoped row actions through with group context',
-      () async {
-        final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool('daw_assistant_actions', {
+    test('passes group-scoped row actions through with group context',
+        () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.tool(
+          'daw_assistant_actions',
+          {
             'assistant_message': 'Drum bus compression queued.',
             'actions': [
               {
@@ -3040,7 +2952,10 @@ void main() {
               {
                 'type': 'adjust_effect_param_by_name',
                 'data': {
-                  'target': {'scope': 'group', 'group_id': 'drum_bus'},
+                  'target': {
+                    'scope': 'group',
+                    'group_id': 'drum_bus',
+                  },
                   'effect_name_contains': 'compressor',
                   'param_name': 'Threshold',
                   'mode': 'set',
@@ -3048,80 +2963,88 @@ void main() {
                 },
               },
             ],
-          }, text: 'Drum bus compression queued.'),
-        );
+          },
+          text: 'Drum bus compression queued.',
+        ),
+      );
 
-        final pipeline = ChatPipeline(
-          llm: fakeLlm,
-          projectBuilder: _FakeProjectStateBuilder(rows: 3),
-          mixModel: LocalMixingModel(),
-        );
-        final tracks = <AudioTrack>[
-          await _makeAudioTrack(path: '/tmp/kick.wav', row: 0, label: 'Kick'),
-          await _makeAudioTrack(path: '/tmp/snare.wav', row: 1, label: 'Snare'),
-        ];
-        final rows = <TimelineRow>[
-          TimelineRow(rowId: 101, name: 'Kick', iconId: 0, groupId: 'drum_bus'),
-          TimelineRow(
-            rowId: 102,
-            name: 'Snare',
-            iconId: 0,
-            groupId: 'drum_bus',
-          ),
-          TimelineRow(rowId: 103, name: 'Vocal', iconId: 0),
-        ];
-        final groups = <TrackGroup>[
-          TrackGroup(
-            id: 'drum_bus',
-            name: 'Drum Bus',
-            rowIds: <int>[101, 102],
-            collapsed: true,
-            effects: <EffectSnapshot>[
-              EffectSnapshot(
-                'mixroom://compressor',
-                false,
-                const <String, dynamic>{},
-                displayName: 'Compressor',
-              ),
-            ],
-          ),
-        ];
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 3),
+        mixModel: LocalMixingModel(),
+      );
+      final tracks = <AudioTrack>[
+        await _makeAudioTrack(path: '/tmp/kick.wav', row: 0, label: 'Kick'),
+        await _makeAudioTrack(path: '/tmp/snare.wav', row: 1, label: 'Snare'),
+      ];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 101,
+          name: 'Kick',
+          iconId: 0,
+          groupId: 'drum_bus',
+        ),
+        TimelineRow(
+          rowId: 102,
+          name: 'Snare',
+          iconId: 0,
+          groupId: 'drum_bus',
+        ),
+        TimelineRow(rowId: 103, name: 'Vocal', iconId: 0),
+      ];
+      final groups = <TrackGroup>[
+        TrackGroup(
+          id: 'drum_bus',
+          name: 'Drum Bus',
+          rowIds: <int>[101, 102],
+          collapsed: true,
+          effects: <EffectSnapshot>[
+            EffectSnapshot(
+              'mixroom://compressor',
+              false,
+              const <String, dynamic>{},
+              displayName: 'Compressor',
+            ),
+          ],
+        ),
+      ];
 
-        final result = await pipeline.handleUserText(
-          text: 'Compress the drum bus.',
-          audioTracks: tracks,
-          rowGain: const [1.0, 1.0, 1.0],
-          rowPan: const [0.5, 0.5, 0.5],
-          rowAutomation: List<List<AutomationPoint>>.generate(
-            3,
-            (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1.0)],
-          ),
-          bpmFallback: 120.0,
-          timelineRows: rows,
-          trackGroups: groups,
-        );
+      final result = await pipeline.handleUserText(
+        text: 'Compress the drum bus.',
+        audioTracks: tracks,
+        rowGain: const [1.0, 1.0, 1.0],
+        rowPan: const [0.5, 0.5, 0.5],
+        rowAutomation: List<List<AutomationPoint>>.generate(
+          3,
+          (_) => <AutomationPoint>[
+            AutomationPoint(x: 0, volume: 1.0),
+          ],
+        ),
+        bpmFallback: 120.0,
+        timelineRows: rows,
+        trackGroups: groups,
+      );
 
-        expect(fakeLlm.seenProjectSnapshot, contains('Group "Drum Bus"'));
-        expect(fakeLlm.seenProjectSnapshot, contains('group_id=drum_bus'));
-        expect(fakeLlm.seenProjectSnapshot, contains('member_tracks=1,2'));
-        expect(fakeLlm.seenProjectSnapshot, contains('fx_chain=[Compressor]'));
-        expect(fakeLlm.seenProjectSnapshot, contains('Track 1:'));
-        expect(fakeLlm.seenProjectSnapshot, contains('group_id=drum_bus'));
-        expect(result.hasAssistantActions, isTrue);
-        expect(result.assistantActions, hasLength(2));
-        expect(
-          result.assistantActions.first.data['target']['scope'],
-          equals('group'),
-        );
-        expect(
-          result.assistantActions.first.data['target']['group_id'],
-          equals('drum_bus'),
-        );
-        expect(
-          result.assistantActions.last.data['target']['group_id'],
-          equals('drum_bus'),
-        );
-      },
-    );
+      expect(fakeLlm.seenProjectSnapshot, contains('Group "Drum Bus"'));
+      expect(fakeLlm.seenProjectSnapshot, contains('group_id=drum_bus'));
+      expect(fakeLlm.seenProjectSnapshot, contains('member_tracks=1,2'));
+      expect(fakeLlm.seenProjectSnapshot, contains('fx_chain=[Compressor]'));
+      expect(fakeLlm.seenProjectSnapshot, contains('Track 1:'));
+      expect(fakeLlm.seenProjectSnapshot, contains('group_id=drum_bus'));
+      expect(result.hasAssistantActions, isTrue);
+      expect(result.assistantActions, hasLength(2));
+      expect(
+        result.assistantActions.first.data['target']['scope'],
+        equals('group'),
+      );
+      expect(
+        result.assistantActions.first.data['target']['group_id'],
+        equals('drum_bus'),
+      );
+      expect(
+        result.assistantActions.last.data['target']['group_id'],
+        equals('drum_bus'),
+      );
+    });
   });
 }
