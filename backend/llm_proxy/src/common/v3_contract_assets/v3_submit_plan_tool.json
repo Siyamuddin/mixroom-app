@@ -1,0 +1,3303 @@
+{
+  "type": "function",
+  "name": "submit_plan_v3",
+  "strict": true,
+  "description": "Return the complete V3 response or executable plan.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "schema_version": {
+        "type": "string",
+        "enum": [
+          "plan_v3_prototype_2"
+        ]
+      },
+      "outcome": {
+        "type": "string",
+        "enum": [
+          "clarify",
+          "plan",
+          "respond",
+          "unsupported"
+        ],
+        "description": "Use plan exactly when commands is non-empty. Use respond, clarify, or unsupported only when commands is empty."
+      },
+      "goal_kind": {
+        "type": "string",
+        "enum": [
+          "named_edit",
+          "production_goal",
+          "question",
+          "unsupported"
+        ],
+        "description": "Intent of the original request, independent of how many commands are emitted and independent of earlier conversation. Use production_goal for a production-style, remix, version, or listening-format result. Use named_edit for a named single DAW action, including pitch-only vocal-character metaphors and an explicit align-to-tempo request. Use question when the request does not ask to change the project. Use unsupported when Mixroom cannot do the request. A production_goal that only emits clip.align_tempo_to_project is still production_goal."
+      },
+      "user_message": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. If this original request asked for import, export, generated drums, or true binaural 8D and Mixroom will not do it, put that in skipped, not in this text. This text is held until exact execution and readback succeed. Keep other responses under 500 characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language."
+      },
+      "skipped": {
+        "type": "array",
+        "maxItems": 4,
+        "description": "Closed codes for Mixroom product limits that this original request asked for and this plan did not fake. Use import, export, generated_drums, or binaural_8d only when THIS request asked for that capability. generated_drums means Mixroom will not create drum or generated audio parts: commands must stay empty of sample.place. Leave empty otherwise. Do not invent other codes.",
+        "items": {
+          "type": "string",
+          "enum": [
+            "binaural_8d",
+            "export",
+            "generated_drums",
+            "import"
+          ]
+        }
+      },
+      "commands": {
+        "type": "array",
+        "maxItems": 16,
+        "description": "Complete ordered executable command list that preserves explicit create-versus-edit intent. When the current request explicitly asks for a new resource, include its supported producer command and target later operations through that producer output; never substitute a similar pre-existing resource. Non-empty requires outcome plan; every other outcome requires an empty list.",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "project.set_tempo"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "bpm": {
+                      "type": "number",
+                      "minimum": 20,
+                      "maximum": 999
+                    },
+                    "time_stretch_audio": {
+                      "type": "boolean"
+                    },
+                    "preserve_pitch": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "bpm",
+                    "time_stretch_audio",
+                    "preserve_pitch"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "transport.set_playing"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "playing": {
+                      "type": "boolean",
+                      "description": "Final playback state. False pauses without moving the playhead."
+                    }
+                  },
+                  "required": [
+                    "playing"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "transport.restart"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "transport.set_metronome_enabled"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Final enabled state. Do not emit a toggle."
+                    }
+                  },
+                  "required": [
+                    "enabled"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "transport.set_loop_enabled"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean",
+                      "description": "Final enabled state. Do not emit a toggle."
+                    }
+                  },
+                  "required": [
+                    "enabled"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.adjust_gain_db"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "delta_db": {
+                      "type": "number",
+                      "minimum": -60,
+                      "maximum": 24,
+                      "description": "Relative gain change in dB. “Down by 1 dB” means -1; this is not a final level."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "delta_db"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_gain_db"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "gain_db": {
+                      "type": "number",
+                      "minimum": -60,
+                      "maximum": 6,
+                      "description": "Absolute final gain in dB. “Set to -1 dB” means the resulting level is -1 dB."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "gain_db"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.adjust_pan"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "delta_signed": {
+                      "type": "number",
+                      "minimum": -2,
+                      "maximum": 2,
+                      "description": "Relative pan change from the current position. Negative moves farther left and positive moves farther right; this is not a final pan position."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "delta_signed"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_pan"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "pan_signed": {
+                      "type": "number",
+                      "minimum": -1,
+                      "maximum": 1,
+                      "description": "Absolute final pan position from -1 (fully left) through 0 (center) to +1 (fully right)."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "pan_signed"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_muted"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "muted": {
+                      "type": "boolean",
+                      "description": "Final mute state. For a toggle request, use the opposite of the row muted state supplied in project context."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "muted"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_soloed"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "soloed": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "soloed"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.rename"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "new_name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "new_name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_instrument"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Stable ID of one existing MIDI instrument row. The row identity, row name, MIDI notes, timing, mix state, and tempo state are preserved."
+                    },
+                    "instrument_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 160,
+                      "description": "Exact ID of one currently available instrument from project context or retrieved MIDI facts. Never invent or approximate an ID."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "instrument_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_role_override"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "role": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "vocals",
+                            "drums",
+                            "bass",
+                            "guitar",
+                            "synth",
+                            "other"
+                          ]
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Final semantic mix-role override for the row. Use null to clear the override and return to automatic role interpretation."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "role"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.apply_phone_mic_cleanup"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Stable ID of an existing audio row. Applies Mixroom’s fixed phone-recording cleanup chain to every current audio clip on that row."
+                    }
+                  },
+                  "required": [
+                    "row_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.select"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "row_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.set_color"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "color": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "red",
+                        "orange",
+                        "yellow",
+                        "green",
+                        "cyan",
+                        "blue",
+                        "purple",
+                        "magenta"
+                      ],
+                      "description": "Final row color. Use none to clear the color."
+                    }
+                  },
+                  "required": [
+                    "row_id",
+                    "color"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.create"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    },
+                    "lane": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "audio"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "midi"
+                              ]
+                            },
+                            "instrument_id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "instrument_id"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "position": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "end"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "before"
+                              ]
+                            },
+                            "row_id": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "row_id"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "after"
+                              ]
+                            },
+                            "row_id": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "row_id"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "lane",
+                    "position"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "row.delete"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "row_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "group.create"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "row_ids": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 32,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "description": "Two or more distinct stable IDs of rows that will become the complete new group membership. Display order is preserved."
+                    },
+                    "name": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Requested group name, or null to use the application default."
+                    }
+                  },
+                  "required": [
+                    "row_ids",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "group.remove_row"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "group_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "group_id",
+                    "row_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "group.set_collapsed"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "group_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "collapsed": {
+                      "type": "boolean",
+                      "description": "Final collapsed state. For a toggle request, use the opposite of the group collapsed state supplied in project context."
+                    }
+                  },
+                  "required": [
+                    "group_id",
+                    "collapsed"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.move_by_beats"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "delta_beats": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "delta_beats"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.trim_to_range"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start_beat": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Absolute project-timeline beat where the trimmed clip will begin, not an offset from the clip start. Must be within the clip current supplied timeline bounds."
+                    },
+                    "end_beat": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Absolute project-timeline beat where the trimmed clip will end, not a clip-relative length or offset. Must be within the clip current supplied timeline bounds and after start_beat."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "start_beat",
+                    "end_beat"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.split_at"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "at_beat": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Absolute project-timeline split beat. Produces left_clip and right_clip with the same clip kind as the input."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "at_beat"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.duplicate_to"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "destination_row_id": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "start_beat": {
+                      "type": "number",
+                      "minimum": 0,
+                      "description": "Absolute project-timeline start for the duplicate. Produces copy_clip with the same clip kind as the input."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "destination_row_id",
+                    "start_beat"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.delete"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "clip_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.glue"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_ids": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 32,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "description": "Distinct stable IDs of two or more audio clips on the same row. Gaps render as silence and overlaps are mixed."
+                    },
+                    "label": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 80
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Label for the rendered result, or null to use Glued Clip."
+                    }
+                  },
+                  "required": [
+                    "clip_ids",
+                    "label"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.separate_stems"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Stable ID of one existing audio clip to separate locally into vocal and instrumental stems."
+                    }
+                  },
+                  "required": [
+                    "clip_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.convert_to_midi"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Stable ID of one existing audio clip whose current audible clip content will be transcribed locally. The source clip is preserved."
+                    },
+                    "instrument_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact available instrument ID for the dedicated MIDI row created by this command. Basic Pitch determines the notes; do not supply note data. Produces midi_clip and midi_row outputs for later compatible commands."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "instrument_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.set_pitch_semitones"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "pitch_semitones": {
+                      "type": "number",
+                      "minimum": -12,
+                      "maximum": 12,
+                      "description": "Absolute final audio-clip pitch shift in semitones, not a relative change."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "pitch_semitones"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.adjust_pitch_semitones"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "delta_semitones": {
+                      "type": "number",
+                      "minimum": -24,
+                      "maximum": 24,
+                      "description": "Relative audio-clip pitch change in semitones. Never use for MIDI clips; use midi.transpose instead. Negative lowers pitch and positive raises it."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "delta_semitones"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.set_timeline_length_beats"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "length_beats": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "description": "Absolute final visible timeline length in project beats for one audio clip."
+                    },
+                    "preserve_pitch": {
+                      "type": "boolean",
+                      "description": "True changes length without changing perceived pitch; false uses repitch/resampling behavior."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "length_beats",
+                    "preserve_pitch"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.scale_timeline_length"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "factor": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "description": "Relative multiplier applied to the current visible timeline length. For example, 2 doubles the length and 0.5 halves it."
+                    },
+                    "preserve_pitch": {
+                      "type": "boolean",
+                      "description": "True changes length without changing perceived pitch; false uses repitch/resampling behavior."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "factor",
+                    "preserve_pitch"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.set_source_tempo_bpm"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "source_tempo_bpm": {
+                      "type": "number",
+                      "minimum": 20,
+                      "maximum": 999,
+                      "description": "Set the factual source tempo metadata for one audio clip in BPM. This does not detect tempo or change the project tempo."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "source_tempo_bpm"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.set_tempo_follow_mode"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "repitch",
+                        "preserve_pitch"
+                      ],
+                      "description": "Final project-tempo-follow mode: off disables following, repitch follows by resampling, and preserve_pitch follows without changing perceived pitch."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "mode"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.align_tempo_to_project"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "repitch",
+                        "preserve_pitch"
+                      ],
+                      "description": "Detect this audio clip’s source tempo locally, store it, and make only this clip follow the current project tempo. repitch resamples; preserve_pitch keeps perceived pitch."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "mode"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "project.set_tempo_from_clip"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "repitch",
+                        "preserve_pitch"
+                      ],
+                      "description": "Detect this audio clip’s source tempo locally, set the project tempo to the nearest whole detected BPM, and make only this clip follow in the requested mode."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "mode"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.trim_silence"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "edges": {
+                      "type": "string",
+                      "enum": [
+                        "start",
+                        "end",
+                        "both"
+                      ],
+                      "description": "Which silent clip edges to trim. Use both unless the user explicitly limits the request to the start or end."
+                    },
+                    "padding_ms": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 500,
+                      "description": "Silence padding retained around detected audible content. Use 8 ms when the user gives no padding preference."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "edges",
+                    "padding_ms"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "clip.align_first_sound"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "destination": {
+                      "description": "Move the clip without trimming or stretching so its locally detected first audible sound reaches this project position.",
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "project_beat"
+                            },
+                            "beat": {
+                              "type": "number",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "beat"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "nearest_beat"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "nearest_bar"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "playhead"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "project_start"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "destination"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "midi.transpose"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "semitones": {
+                      "type": "integer",
+                      "minimum": -48,
+                      "maximum": 48,
+                      "description": "Relative pitch change for the MIDI notes in one MIDI clip selected by stable ID or a supported typed output reference. Never use audio-clip pitch commands for MIDI clips."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "semitones"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "midi.create_clip"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "destination": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "row_id": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Stable ID of a row that already exists in the supplied project context. Never guess the ID of a row created earlier in this plan; use new_row when this command must create its destination."
+                            }
+                          },
+                          "required": [
+                            "row_id"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "new_row": {
+                              "type": "object",
+                              "description": "Creates this destination row as part of the command. It is the sole creator of that destination; do not also issue row.create for the same destination.",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 80
+                                },
+                                "instrument_id": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "name",
+                                "instrument_id"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "new_row"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "start_beat": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "length_beats": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "notes": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 256,
+                      "description": "Note starts are relative to the new clip. Every note must end within the clip length. This command produces the MIDI-clip output port midi_clip.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "pitch": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 127
+                          },
+                          "start_beat": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Beat offset relative to the clip start."
+                          },
+                          "length_beats": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "velocity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "pitch",
+                          "start_beat",
+                          "length_beats",
+                          "velocity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "destination",
+                    "start_beat",
+                    "length_beats",
+                    "notes"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "midi.replace_notes"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "notes": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 256,
+                      "description": "The complete replacement note set. Every note must end within the existing clip length. This edits the target in place and produces no output; later commands reuse the same clip_ref.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "pitch": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 127
+                          },
+                          "start_beat": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Beat offset relative to the clip start."
+                          },
+                          "length_beats": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "velocity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "pitch",
+                          "start_beat",
+                          "length_beats",
+                          "velocity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "notes"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "midi.append_notes"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "notes": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 256,
+                      "description": "Notes appended after the later of the current visible clip end or latest existing note end. Starts are relative to the new appended segment. The clip extends through the latest appended note. This edits the target in place and produces no output; later commands reuse the same clip_ref.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "pitch": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 127
+                          },
+                          "start_beat": {
+                            "type": "number",
+                            "minimum": 0,
+                            "description": "Beat offset relative to the clip start."
+                          },
+                          "length_beats": {
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "velocity": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "pitch",
+                          "start_beat",
+                          "length_beats",
+                          "velocity"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "notes"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "midi.chop_notes"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "subdivision": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 128,
+                      "description": "Each slice is 4 / subdivision beats. This edits the target in place and produces no output; later commands reuse the same clip_ref."
+                    },
+                    "range": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "start_beat": {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            "end_beat": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": [
+                            "start_beat",
+                            "end_beat"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "velocity_decay_per_slice": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "subdivision",
+                    "range",
+                    "velocity_decay_per_slice"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "effect.ensure_configured"
+                  ]
+                },
+                "arguments": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_id": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "effect_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "parameters": {
+                          "type": "array",
+                          "maxItems": 16,
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "parameter_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "value": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              }
+                            },
+                            "required": [
+                              "parameter_id",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "row_id",
+                        "effect_id",
+                        "parameters"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_ref": {
+                          "type": "object",
+                          "properties": {
+                            "command_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "output": {
+                              "type": "string",
+                              "enum": [
+                                "instrumental_row",
+                                "midi_row",
+                                "row",
+                                "vocals_row"
+                              ],
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "description": "Exact documented typed output port of the command named by command_id. Compatible producer-to-port pairs: clip.convert_to_midi -> midi_row; clip.separate_stems -> instrumental_row, vocals_row; row.create -> row."
+                            }
+                          },
+                          "required": [
+                            "command_id",
+                            "output"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "effect_id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "parameters": {
+                          "type": "array",
+                          "maxItems": 16,
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "parameter_id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "value": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              }
+                            },
+                            "required": [
+                              "parameter_id",
+                              "value"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "row_ref",
+                        "effect_id",
+                        "parameters"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "effect.remove"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "effect_instance_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact existing row-effect instance ID from context. Removes only that instance."
+                    }
+                  },
+                  "required": [
+                    "effect_instance_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "effect.set_bypassed"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "effect_instance_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact existing row-effect instance ID from context."
+                    },
+                    "bypassed": {
+                      "type": "boolean",
+                      "description": "Final bypass state. True disables/bypasses the effect; false enables/unbypasses it."
+                    }
+                  },
+                  "required": [
+                    "effect_instance_id",
+                    "bypassed"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "automation.gain_fade"
+                  ]
+                },
+                "arguments": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_id": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "start_beat": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "end_beat": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "from_gain_db": {
+                          "type": "number",
+                          "minimum": -120,
+                          "maximum": 24
+                        },
+                        "to_level": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "current"
+                              ]
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -120,
+                              "maximum": 24
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "row_id",
+                        "start_beat",
+                        "end_beat",
+                        "from_gain_db",
+                        "to_level"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_ref": {
+                          "type": "object",
+                          "properties": {
+                            "command_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "output": {
+                              "type": "string",
+                              "enum": [
+                                "instrumental_row",
+                                "midi_row",
+                                "row",
+                                "vocals_row"
+                              ],
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "description": "Exact documented typed output port of the command named by command_id. Compatible producer-to-port pairs: clip.convert_to_midi -> midi_row; clip.separate_stems -> instrumental_row, vocals_row; row.create -> row."
+                            }
+                          },
+                          "required": [
+                            "command_id",
+                            "output"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "start_beat": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "end_beat": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "from_gain_db": {
+                          "type": "number",
+                          "minimum": -120,
+                          "maximum": 24
+                        },
+                        "to_level": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "current"
+                              ]
+                            },
+                            {
+                              "type": "number",
+                              "minimum": -120,
+                              "maximum": 24
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "row_ref",
+                        "start_beat",
+                        "end_beat",
+                        "from_gain_db",
+                        "to_level"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "automation.set_points"
+                  ]
+                },
+                "arguments": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_id": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "automation_target_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Exact row-owned automation target ID supplied by project context or automation retrieval."
+                        },
+                        "points": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 128,
+                          "description": "Complete replacement lane in strictly increasing zero-based project beats. Values are normalized from 0 to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "beat": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "value_normalized": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              }
+                            },
+                            "required": [
+                              "beat",
+                              "value_normalized"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "row_id",
+                        "automation_target_id",
+                        "points"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_ref": {
+                          "type": "object",
+                          "properties": {
+                            "command_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "output": {
+                              "type": "string",
+                              "enum": [
+                                "instrumental_row",
+                                "midi_row",
+                                "row",
+                                "vocals_row"
+                              ],
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "description": "Exact documented typed output port of the command named by command_id. Compatible producer-to-port pairs: clip.convert_to_midi -> midi_row; clip.separate_stems -> instrumental_row, vocals_row; row.create -> row."
+                            }
+                          },
+                          "required": [
+                            "command_id",
+                            "output"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "automation_target_id": {
+                          "type": "string",
+                          "enum": [
+                            "volume",
+                            "mix:gain",
+                            "mix:pan"
+                          ],
+                          "description": "Guaranteed built-in automation target on a generated row."
+                        },
+                        "points": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 128,
+                          "description": "Complete replacement lane in strictly increasing zero-based project beats. Values are normalized from 0 to 1.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "beat": {
+                                "type": "number",
+                                "minimum": 0
+                              },
+                              "value_normalized": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              }
+                            },
+                            "required": [
+                              "beat",
+                              "value_normalized"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "row_ref",
+                        "automation_target_id",
+                        "points"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "automation.clear"
+                  ]
+                },
+                "arguments": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_id": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "automation_target_id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Exact row-owned automation target ID whose explicit lane will be cleared."
+                        }
+                      },
+                      "required": [
+                        "row_id",
+                        "automation_target_id"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "row_ref": {
+                          "type": "object",
+                          "properties": {
+                            "command_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "output": {
+                              "type": "string",
+                              "enum": [
+                                "instrumental_row",
+                                "midi_row",
+                                "row",
+                                "vocals_row"
+                              ],
+                              "minLength": 1,
+                              "maxLength": 80,
+                              "description": "Exact documented typed output port of the command named by command_id. Compatible producer-to-port pairs: clip.convert_to_midi -> midi_row; clip.separate_stems -> instrumental_row, vocals_row; row.create -> row."
+                            }
+                          },
+                          "required": [
+                            "command_id",
+                            "output"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "automation_target_id": {
+                          "type": "string",
+                          "enum": [
+                            "volume",
+                            "mix:gain",
+                            "mix:pan"
+                          ],
+                          "description": "Guaranteed built-in automation target on a generated row."
+                        }
+                      },
+                      "required": [
+                        "row_ref",
+                        "automation_target_id"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "sample.place"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "destination": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "row_id": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Stable ID of a row that already exists in the supplied project context. Never guess the ID of a row created earlier in this plan; use new_row when this command must create its destination."
+                            }
+                          },
+                          "required": [
+                            "row_id"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "new_row": {
+                              "type": "object",
+                              "description": "Creates this destination row as part of the command. It is the sole creator of that destination; do not also issue row.create for the same destination.",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 80
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "new_row"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "placements": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 128,
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "asset_id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "start_beat": {
+                            "type": "number",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "asset_id",
+                          "start_beat"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Place one or more samples. When this command contains exactly one placement, it produces the audio-clip output port audio_clip."
+                    }
+                  },
+                  "required": [
+                    "destination",
+                    "placements"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "sample.replace"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "clip_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact stable ID of one existing audio clip whose source sample will be replaced."
+                    },
+                    "asset_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Exact library asset ID for the replacement audio. Replacement preserves the clip identity, row, timeline start, gain, normalization, pitch, reverse state, crossfade, and clip-volume automation. It uses the shorter of the old visible length and new source length, and resets source-derived analysis and tempo-follow state."
+                    }
+                  },
+                  "required": [
+                    "clip_id",
+                    "asset_id"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "command_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "mix.apply_goal"
+                  ]
+                },
+                "arguments": {
+                  "type": "object",
+                  "properties": {
+                    "target": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "scope": {
+                              "type": "string",
+                              "enum": [
+                                "row"
+                              ]
+                            },
+                            "row_id": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "scope",
+                            "row_id"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "scope": {
+                              "type": "string",
+                              "enum": [
+                                "group"
+                              ]
+                            },
+                            "group_id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "scope",
+                            "group_id"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "scope": {
+                              "type": "string",
+                              "enum": [
+                                "all_rows"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "scope"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "scope": {
+                              "type": "string",
+                              "enum": [
+                                "master"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "scope"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "intents": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 4,
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "balance",
+                              "clipper",
+                              "compressor",
+                              "deesser",
+                              "delay",
+                              "distortion",
+                              "eq",
+                              "gain",
+                              "limiter",
+                              "pan",
+                              "reverb"
+                            ]
+                          },
+                          "direction": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "center",
+                                  "down",
+                                  "left",
+                                  "narrow",
+                                  "remove",
+                                  "right",
+                                  "up",
+                                  "widen"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "descriptor": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "air_boost",
+                                  "boom_cut",
+                                  "box_cut",
+                                  "dull_fix",
+                                  "harsh_cut",
+                                  "high_cut",
+                                  "low_cut",
+                                  "mud_cut",
+                                  "presence_boost",
+                                  "thin_fix",
+                                  "warmth_boost"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "direction",
+                          "descriptor"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "intensity": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "execution_profile": {
+                      "type": "string",
+                      "enum": [
+                        "producer_safe",
+                        "creative_bold",
+                        "experimental_extreme"
+                      ]
+                    },
+                    "audibility": {
+                      "type": "string",
+                      "enum": [
+                        "subtle",
+                        "noticeable",
+                        "obvious",
+                        "extreme"
+                      ]
+                    },
+                    "style_tags": {
+                      "type": "array",
+                      "maxItems": 8,
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      }
+                    },
+                    "reset_fx": {
+                      "type": "boolean"
+                    },
+                    "reference": {
+                      "description": "Optional reference configuration. A non-null reference requires returned reference-analysis facts confirming usable analyzed audio and reference suitability. Request those facts before planning when they have not been returned; otherwise clarify.",
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "row_id": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "tone",
+                                "loudness",
+                                "width",
+                                "glue",
+                                "full_mix"
+                              ]
+                            },
+                            "closeness": {
+                              "type": "string",
+                              "enum": [
+                                "loose",
+                                "balanced",
+                                "close"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "row_id",
+                            "mode",
+                            "closeness"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "target",
+                    "intents",
+                    "intensity",
+                    "execution_profile",
+                    "audibility",
+                    "style_tags",
+                    "reset_fx",
+                    "reference"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "command_id",
+                "type",
+                "arguments"
+              ],
+              "additionalProperties": false,
+              "description": "Use for subjective sonic or reference-mixing goals. Use exact row commands for explicit numeric gain or pan edits."
+            }
+          ]
+        }
+      },
+      "question_options": {
+        "type": "array",
+        "maxItems": 4,
+        "description": "Up to four distinct, concise, meaningful answers for clarify, written for the customer in the language of the unchanged current original request regardless of earlier conversation or retrieved text; may be empty when the question stands alone. Never include Cancel, Something else, Other, navigation, or custom-answer controls because the application supplies them. Otherwise empty.",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required": [
+      "schema_version",
+      "outcome",
+      "goal_kind",
+      "user_message",
+      "skipped",
+      "commands",
+      "question_options"
+    ],
+    "additionalProperties": false
+  }
+}
