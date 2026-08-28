@@ -19,8 +19,8 @@ class V3ServerContractTests(unittest.TestCase):
         expected = {
             "v3_align_tempo_retry_instructions.txt": "84c3f2fd94c9d57fb43a898d6b9748b026723d1d4503506ddfd7597b7d5926af",
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
-            "v3_instructions.txt": "cf6455c7a0d03670c0f81f3806afa36d61702d10fec3ad9c75ff9cbfda783796",
-            "v3_instructions_resource_refs.txt": "c2912bb6a8b4ae571460fecad578ab6ecc24b5f3243c4b64a5b5ab24f3c88f0c",
+            "v3_instructions.txt": "ad510332fce4e664170d5ab5378f6af41e16cbbda17128de0e85c0f96643f94e",
+            "v3_instructions_resource_refs.txt": "9970f056882aa24ea58aab1c9a9dee2205d6c64c04e9d0ffc8de37def76ac96b",
             "v3_submit_plan_tool.json": "c6e02a820f22501a5b98af38f57ab8ff32b4ab65a31c8766adf60eab2cbdeb4c",
             "v3_submit_plan_tool_resource_refs.json": "d526ff016dbd0a18abc34821e43c8251af9f3eda14239d583775e5fe8f8b33c2",
         }
@@ -57,6 +57,37 @@ class V3ServerContractTests(unittest.TestCase):
         self.assertEqual(
             [variant["properties"]["type"]["enum"][0] for variant in variants],
             ["transport.restart"],
+        )
+
+    def test_row_capacity_policy_is_server_owned(self) -> None:
+        request = {
+            "original_request": "Add a piano row.",
+            "conversation": [],
+            "core_context": {
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "row_capacity": {
+                        "current_rows": 5,
+                        "max_rows": 5,
+                        "can_create": False,
+                    }
+                },
+            },
+            "supported_command_types": {"row.create"},
+            "resource_refs_enabled": False,
+        }
+        provider_request = v3_server_contract.build_provider_request(
+            request,
+            model="server-model",
+            reasoning_effort="low",
+        )
+        self.assertIn(
+            "Treat project.row_capacity as authoritative",
+            provider_request["instructions"],
+        )
+        self.assertNotIn(
+            "row_creation_policy",
+            provider_request["messages"][0]["content"][2]["text"],
         )
 
     def test_provider_schema_rejects_unknown_plan_fields(self) -> None:

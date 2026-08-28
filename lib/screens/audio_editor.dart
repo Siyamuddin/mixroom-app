@@ -31085,9 +31085,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'plugin_access': _isFreePlan
           ? 'free_built_in_plus_on_device_plugins'
           : 'all_plugins',
-      'row_creation_policy': _isFreePlan
-          ? 'Do not create or target rows above row_index 4. If an operation needs new rows, reuse an existing row at or below row_index 4.'
-          : 'Rows may be created up to the app row limit.',
     };
   }
 

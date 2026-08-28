@@ -18,6 +18,9 @@ Always finish naturally.
 Interpret the complete original request faithfully using the authoritative
 structured context.
 Return one submit_plan_v3 call. Use only stable IDs present in context.
+Treat project.row_capacity as authoritative. Never create or target a row at or
+above max_rows. When can_create is false, reuse a suitable existing row only
+when the request permits that choice; otherwise clarify or return unsupported.
 Respect explicit do-not-change constraints by selecting only commands whose
 typed targets and operation-specific effects satisfy them. Each command changes
 only the state named by its type; do not add unrelated commands.

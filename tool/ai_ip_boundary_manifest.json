@@ -12,7 +12,8 @@
     "AI_V3_CAPTURE_ENABLED",
     "AI_V3_ADAPTIVE_SHADOW_ENABLED",
     "AI_V3_COMPACT_SHADOW_EVALUATION_ENABLED",
-    "v3_openai_configuration_missing"
+    "v3_openai_configuration_missing",
+    "Do not create or target rows above row_index 4."
   ],
   "v3_artifact_markers": [
     "You are Mixroom's sole semantic and musical planner.",
@@ -24,7 +25,8 @@
     "Every question option must be a distinct, concise, meaningful answer",
     "aiV3MusicalDimensionCompilerInstructions",
     "aiV3AlignTempoCollapseRetryReminder",
-    "submit_plan_v3"
+    "submit_plan_v3",
+    "Do not create or target rows above row_index 4."
   ],
   "cross_ai_artifact_markers": [
     "https://api.openai.com/v1/responses",
