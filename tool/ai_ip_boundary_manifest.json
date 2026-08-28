@@ -11,7 +11,8 @@
     "AI_V3_REASONING_EFFORT",
     "AI_V3_CAPTURE_ENABLED",
     "AI_V3_ADAPTIVE_SHADOW_ENABLED",
-    "AI_V3_COMPACT_SHADOW_EVALUATION_ENABLED"
+    "AI_V3_COMPACT_SHADOW_EVALUATION_ENABLED",
+    "v3_openai_configuration_missing"
   ],
   "v3_artifact_markers": [
     "You are Mixroom's sole semantic and musical planner.",

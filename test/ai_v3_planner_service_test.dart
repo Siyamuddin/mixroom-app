@@ -223,6 +223,35 @@ void main() {
     );
   });
 
+  test('uses at most one token refresh for the entire request', () async {
+    var httpCalls = 0;
+    var refreshCalls = 0;
+    final service = _service(
+      MockClient((_) async {
+        httpCalls += 1;
+        return http.Response('{"error":{"code":"expired"}}', 401);
+      }),
+      authTokenProvider: () async => null,
+      refreshAuthTokenProvider: () async {
+        refreshCalls += 1;
+        return 'refreshed-token';
+      },
+    );
+
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'What is the BPM?'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_http_error',
+        ),
+      ),
+    );
+    expect(refreshCalls, 1);
+    expect(httpCalls, 1);
+  });
+
   test('does not repeat an align-only production plan on the client', () async {
     var calls = 0;
     final plan = <String, dynamic>{

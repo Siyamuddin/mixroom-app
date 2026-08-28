@@ -24,8 +24,8 @@ const Set<String> aiV3Outcomes = <String>{
 };
 
 /// Intent label on PlanV3. Distinct from [AiV3Plan.outcome], which is
-/// execution mode. Flutter retries an align-tempo collapse only when this
-/// is [AiV3GoalKind.productionGoal]; it never classifies the user string.
+/// execution mode. The backend retries an align-tempo collapse only when this
+/// is [AiV3GoalKind.productionGoal]; neither side classifies the user string.
 enum AiV3GoalKind {
   productionGoal,
   namedEdit,

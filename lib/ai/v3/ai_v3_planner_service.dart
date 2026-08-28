@@ -248,14 +248,21 @@ class AiV3PlannerService implements AiV3Planner {
   }
 
   Future<http.Response> _postProxy(Map<String, dynamic> body) async {
-    var token = await _resolveProxyAuthToken();
+    var token = await _resolveProxyAuthToken(authTokenProvider);
+    var refreshUsed = false;
+    if (token == null && refreshAuthTokenProvider != null) {
+      refreshUsed = true;
+      token = await _resolveProxyAuthToken(refreshAuthTokenProvider);
+    }
     if (token == null) {
       throw const AiV3PlannerException('v3_proxy_auth_token_missing');
     }
     var response = await _postProxyWithToken(body, token: token);
     if ((response.statusCode == 401 || response.statusCode == 403) &&
+        !refreshUsed &&
         refreshAuthTokenProvider != null) {
-      token = await _resolveProxyAuthToken(forceRefresh: true);
+      refreshUsed = true;
+      token = await _resolveProxyAuthToken(refreshAuthTokenProvider);
       if (token == null) {
         throw const AiV3PlannerException('v3_proxy_auth_token_missing');
       }
@@ -278,16 +285,11 @@ class AiV3PlannerService implements AiV3Planner {
       )
       .timeout(requestTimeout);
 
-  Future<String?> _resolveProxyAuthToken({bool forceRefresh = false}) async {
-    final provider = forceRefresh
-        ? refreshAuthTokenProvider
-        : authTokenProvider;
+  Future<String?> _resolveProxyAuthToken(
+    Future<String?> Function()? provider,
+  ) async {
     final token = (await provider?.call())?.trim() ?? '';
     if (token.isNotEmpty) return token;
-    if (!forceRefresh && refreshAuthTokenProvider != null) {
-      final refreshed = (await refreshAuthTokenProvider!.call())?.trim() ?? '';
-      if (refreshed.isNotEmpty) return refreshed;
-    }
     return null;
   }
 

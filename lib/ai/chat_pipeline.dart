@@ -377,10 +377,6 @@ _AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(
     message:
         'Your session could not be verified for AI editing. Nothing was changed. Sign in again, then retry the request.',
   ),
-  'v3_openai_configuration_missing' => const _AiV3PreparationFailureResponse(
-    decision: 'unsupported',
-    message: 'AI editing is not available in this build. Nothing was changed.',
-  ),
   'v3_planner_contract_invalid' ||
   'v3_planner_tool_call_missing' ||
   'v3_planner_tool_call_count_invalid' ||
