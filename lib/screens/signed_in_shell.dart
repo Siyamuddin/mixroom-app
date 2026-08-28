@@ -705,11 +705,21 @@ class _SignedInShellState extends State<SignedInShell> {
           onOpenAccountPlans: _openSubscriptionAccountTab,
         );
       case MixroomMainTab.platform:
+        if (mixroomUsesPhoneLayout(context)) {
+          return ProjectsScreen(
+            key: const ValueKey<String>('phone_demo_projects'),
+            scrollToTopSignal: _scrollToTopSignal,
+            onUpgradeRequested: _openSubscriptionAccountTab,
+            demoOnly: true,
+          );
+        }
         return _PlatformTab(scrollToTopSignal: _scrollToTopSignal);
       case MixroomMainTab.projects:
         return ProjectsScreen(
+          key: const ValueKey<String>('projects_library'),
           scrollToTopSignal: _scrollToTopSignal,
           onUpgradeRequested: _openSubscriptionAccountTab,
+          hideDemoProjects: mixroomUsesPhoneLayout(context),
         );
       case MixroomMainTab.account:
         return AccountScreen(

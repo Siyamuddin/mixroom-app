@@ -217,6 +217,17 @@ bool mixroomUsesTabletLandscapeShell(BuildContext context) {
       size.width >= size.height;
 }
 
+bool mixroomUsesPhoneLayout(BuildContext context) {
+  final platform = PlatformCapabilities.current;
+  final size = MediaQuery.sizeOf(context);
+  final displaySize = currentFlutterDisplayLogicalSize();
+  return platform.isMobile &&
+      !isTabletLogicalWindowOrDisplaySize(
+        logicalWindowSize: size,
+        logicalDisplaySize: displaySize,
+      );
+}
+
 bool mixroomUsesSideRailNavigation(BuildContext context) {
   return mixroomUsesDesktopRailNavigation ||
       mixroomUsesTabletLandscapeShell(context);

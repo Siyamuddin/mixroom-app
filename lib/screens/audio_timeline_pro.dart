@@ -672,7 +672,6 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int clipIndex) onStretchClipToTempoPreservePitch;
   final Future<void> Function(int clipIndex)
   onDetectClipTempoAndSetProjectTempo;
-  final Future<void> Function(int clipIndex)? onOpenClipWarpEditor;
   final Future<void> Function(int clipIndex)? onOpenPitchLab;
   final void Function(
     int clipIndex,
@@ -888,7 +887,6 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onAdjustClipToTempo,
     required this.onStretchClipToTempoPreservePitch,
     required this.onDetectClipTempoAndSetProjectTempo,
-    this.onOpenClipWarpEditor,
     this.onOpenPitchLab,
     required this.onStretchClip,
     required this.onStretchClipCommit,
@@ -9013,21 +9011,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                     if (mounted) setState(() {});
                                   },
                                 ),
-                                if (widget.onOpenClipWarpEditor != null &&
-                                    PlatformCapabilities.current.isDesktop)
-                                  _buildInlineClipActionPill(
-                                    icon: Icons.blur_linear_rounded,
-                                    label: L10n.translate(context, 'Warp Pro'),
-                                    color: const Color(0xFF78D9FF),
-                                    compact: compactSheet,
-                                    onTap: () async {
-                                      _closeInlineClipControl();
-                                      await widget.onOpenClipWarpEditor!(
-                                        clipIndex,
-                                      );
-                                      if (mounted) setState(() {});
-                                    },
-                                  ),
                                 if (widget.onOpenPitchLab != null)
                                   _buildInlineClipActionPill(
                                     icon: Icons.graphic_eq_rounded,

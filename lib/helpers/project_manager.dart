@@ -93,6 +93,54 @@ class BundledDemoProjectAsset {
   const BundledDemoProjectAsset({required this.assetPath, required this.name});
 }
 
+class BundledDemoProjectPreviewRow {
+  const BundledDemoProjectPreviewRow({
+    required this.rowId,
+    required this.name,
+    required this.iconId,
+    required this.kind,
+    required this.color,
+  });
+
+  final int rowId;
+  final String name;
+  final int iconId;
+  final String kind;
+  final int color;
+}
+
+class BundledDemoProjectPreviewClip {
+  const BundledDemoProjectPreviewClip({
+    required this.label,
+    required this.rowId,
+    required this.rowIndex,
+    required this.offsetSeconds,
+    required this.durationSeconds,
+    required this.waveformPeaks,
+  });
+
+  final String label;
+  final int rowId;
+  final int rowIndex;
+  final double offsetSeconds;
+  final double durationSeconds;
+  final List<double> waveformPeaks;
+}
+
+class BundledDemoProjectPreview {
+  const BundledDemoProjectPreview({
+    required this.name,
+    required this.tempoBpm,
+    required this.rows,
+    required this.clips,
+  });
+
+  final String name;
+  final double tempoBpm;
+  final List<BundledDemoProjectPreviewRow> rows;
+  final List<BundledDemoProjectPreviewClip> clips;
+}
+
 class ProjectManager {
   static const int maxProjects = 10000;
   static const int maxFreeProjects = 10;
@@ -106,6 +154,8 @@ class ProjectManager {
       ValueNotifier<Set<String>>(const <String>{});
   static final Map<String, int> _cloudProjectSyncActivityCounts =
       <String, int>{};
+  static final Map<String, Future<BundledDemoProjectPreview?>>
+  _bundledDemoPreviewCache = <String, Future<BundledDemoProjectPreview?>>{};
   static Directory? _rootDirectoryOverrideForTesting;
 
   @visibleForTesting
@@ -560,6 +610,97 @@ class ProjectManager {
           ),
         )
         .toList(growable: false);
+  }
+
+  static Future<BundledDemoProjectPreview?> readBundledDemoProjectPreview(
+    String assetPath,
+  ) {
+    if (!isBundledDemoAssetPath(assetPath)) {
+      return Future<BundledDemoProjectPreview?>.value(null);
+    }
+    return _bundledDemoPreviewCache.putIfAbsent(
+      assetPath,
+      () => _readBundledDemoProjectPreviewUncached(assetPath),
+    );
+  }
+
+  static Future<BundledDemoProjectPreview?>
+  _readBundledDemoProjectPreviewUncached(String assetPath) async {
+    try {
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(
+          await rootBundle.loadString('$assetPath.preview.json'),
+        );
+      } catch (_) {
+        final data = await rootBundle.load(assetPath);
+        final bytes = data.buffer.asUint8List(
+          data.offsetInBytes,
+          data.lengthInBytes,
+        );
+        final archive = ZipDecoder().decodeBytes(bytes, verify: false);
+        final projectFile = archive.findFile('project.json');
+        if (projectFile == null || !projectFile.isFile) return null;
+        decoded = jsonDecode(utf8.decode(projectFile.content));
+      }
+      if (decoded is! Map) return null;
+      final project = Map<String, dynamic>.from(decoded);
+      final rowsJson = project['rows'];
+      final tracksJson = project['tracks'];
+      final rows = rowsJson is List
+          ? rowsJson
+                .whereType<Map>()
+                .map((value) {
+                  final row = Map<String, dynamic>.from(value);
+                  return BundledDemoProjectPreviewRow(
+                    rowId: (row['rowId'] as num?)?.toInt() ?? 0,
+                    name: (row['name'] as String?)?.trim() ?? '',
+                    iconId: (row['iconId'] as num?)?.toInt() ?? 0,
+                    kind: (row['kind'] as String?)?.trim() ?? 'audio',
+                    color: (row['color'] as num?)?.toInt() ?? 0,
+                  );
+                })
+                .toList(growable: false)
+          : const <BundledDemoProjectPreviewRow>[];
+      final clips = tracksJson is List
+          ? tracksJson
+                .whereType<Map>()
+                .map((value) {
+                  final track = Map<String, dynamic>.from(value);
+                  final trimStart =
+                      (track['trimStartMs'] as num?)?.toDouble() ?? 0.0;
+                  final trimEnd =
+                      (track['trimEndMs'] as num?)?.toDouble() ?? trimStart;
+                  return BundledDemoProjectPreviewClip(
+                    label: (track['label'] as String?)?.trim() ?? '',
+                    rowId: (track['rowId'] as num?)?.toInt() ?? 0,
+                    rowIndex: (track['rowIndex'] as num?)?.toInt() ?? 0,
+                    offsetSeconds:
+                        (track['offset'] as num?)?.toDouble().clamp(0.0, 1e9) ??
+                        0.0,
+                    durationSeconds: ((trimEnd - trimStart) / 1000).clamp(
+                      0.15,
+                      1e9,
+                    ),
+                    waveformPeaks:
+                        (track['waveformPeaks'] as List?)
+                            ?.whereType<num>()
+                            .map((value) => value.toDouble().clamp(0.0, 1.0))
+                            .toList(growable: false) ??
+                        const <double>[],
+                  );
+                })
+                .toList(growable: false)
+          : const <BundledDemoProjectPreviewClip>[];
+      return BundledDemoProjectPreview(
+        name: (project['name'] as String?)?.trim() ?? '',
+        tempoBpm: (project['tempoBpm'] as num?)?.toDouble() ?? 120.0,
+        rows: rows,
+        clips: clips,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<Set<String>> listDismissedBundledDemoAssetPaths() async {

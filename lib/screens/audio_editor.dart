@@ -4070,6 +4070,8 @@ const String _kDesktopPanelPitchLab = 'pitch_lab';
 const String _kDesktopPanelCaptureDeck = 'capture_deck';
 const double _kPianoRollDesktopDragHandleHeight = 42.0;
 const double _kPianoRollDesktopDragHandleRightInset = 320.0;
+const double _kPitchLabDesktopDragHandleHeight = 48.0;
+const double _kPitchLabDesktopDragHandleRightInset = 148.0;
 const List<BoxShadow> _kFloatingEditorWindowShadows = <BoxShadow>[
   BoxShadow(
     color: Color(0x6B000000),
@@ -5984,8 +5986,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<String, List<String>> _aiLibraryRolePathIndex =
       <String, List<String>>{};
   final Map<String, List<Map<String, int>>>
-  _aiPlayablePitchRangesByInstrumentId =
-      <String, List<Map<String, int>>>{};
+  _aiPlayablePitchRangesByInstrumentId = <String, List<Map<String, int>>>{};
   late final ja.AudioPlayer _samplePreviewPlayer;
   StreamSubscription<ja.PlayerState>? _samplePreviewStateSub;
   String? _auditioningSamplePath;
@@ -6007,9 +6008,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int? _desktopLastPluginRescanAtMs;
   final List<_ProjectLoadIssue> _projectLoadIssues = <_ProjectLoadIssue>[];
   final SfzDefinitionLoader _sfzDefinitionLoader = SfzDefinitionLoader();
-  static final Set<int> _allMidiPitches = Set<int>.unmodifiable(
-    <int>{for (var pitch = 0; pitch <= 127; pitch++) pitch},
-  );
+  static final Set<int> _allMidiPitches = Set<int>.unmodifiable(<int>{
+    for (var pitch = 0; pitch <= 127; pitch++) pitch,
+  });
   final Set<String> _sfzRangeDetectionFailuresLogged = <String>{};
   final LinkedHashMap<String, _DecodedStereoPcm> _sfzSampleCache =
       LinkedHashMap<String, _DecodedStereoPcm>();
@@ -8042,14 +8043,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         final sourceProject =
             (map['source_project'] as String?)?.trim().isNotEmpty == true
-                ? (map['source_project'] as String).trim()
-                : entryPack.isEmpty
-                    ? 'Bundled SFZ'
-                    : entryPack;
+            ? (map['source_project'] as String).trim()
+            : entryPack.isEmpty
+            ? 'Bundled SFZ'
+            : entryPack;
         final sourceLicense =
             (map['source_license'] as String?)?.trim().isNotEmpty == true
-                ? (map['source_license'] as String).trim()
-                : 'See bundled LICENSE';
+            ? (map['source_license'] as String).trim()
+            : 'See bundled LICENSE';
         loaded.add(<String, dynamic>{
           'id': explicitId.isNotEmpty ? explicitId : 'sfz.$idToken',
           'name': displayName,
@@ -9691,6 +9692,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           widthFraction: 0.84,
           heightFraction: 0.46,
         );
+      case _kDesktopPanelPitchLab:
+        return const DesktopEditorWindowLayout(
+          leftFraction: 0.08,
+          topFraction: 0.30,
+          widthFraction: 0.78,
+          heightFraction: 0.58,
+        );
       case _kDesktopPanelCaptureDeck:
         return const DesktopEditorWindowLayout(
           leftFraction: 0.16,
@@ -10939,14 +10947,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     },
     'chat_prompt_info_body': {
       'en':
-          'Ask for mix changes, editing help, or where tools live. This badge shows the percentage of prompt usage you have left.',
-      'ko': '믹스 수정, 편집 도움, 기능 위치를 물어볼 수 있어요. 이 배지에서 남은 프롬프트 사용량 비율을 확인할 수 있어요.',
-      'ja': 'ミックス修正や編集ヘルプ、機能の場所を質問できます。このバッジで残りのプロンプト使用率を確認できます。',
+          'Ask for mix changes, editing help, or where tools live. Open Usage to review your prompt limits.',
+      'ko': '믹스 수정, 편집 도움, 기능 위치를 물어볼 수 있어요. 사용량을 열어 프롬프트 한도를 확인할 수 있어요.',
+      'ja': 'ミックス修正や編集ヘルプ、機能の場所を質問できます。使用量を開くとプロンプト上限を確認できます。',
     },
     'chat_prompt_info_helper': {
-      'en': 'This badge shows the percentage of AI prompt usage left.',
-      'ko': '이 배지는 남은 AI 프롬프트 사용량 비율을 보여줍니다.',
-      'ja': 'このバッジは残りの AI プロンプト使用率を示します。',
+      'en': 'Open Usage to review your AI prompt limits.',
+      'ko': '사용량을 열어 AI 프롬프트 한도를 확인하세요.',
+      'ja': '使用量を開いて AI プロンプト上限を確認してください。',
     },
     'chat_send_title': {
       'en': 'Send this example.',
@@ -24810,8 +24818,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final spec = _instrumentSpecById(instrumentId);
     final aliasPath = _sampledAliasAssetPathForInstrumentId(instrumentId);
     if (!_isSampledInstrumentSpec(spec) && aliasPath == null) return null;
-    final sfzAssetPath = aliasPath ??
-        ((spec['sfzAssetPath'] as String?)?.trim() ?? '');
+    final sfzAssetPath =
+        aliasPath ?? ((spec['sfzAssetPath'] as String?)?.trim() ?? '');
     if (sfzAssetPath.isEmpty) return null;
     return _sfzDefinitionLoader.load(sfzAssetPath);
   }
@@ -24825,13 +24833,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _allMidiPitches;
     }
     final aliasPath = _sampledAliasAssetPathForInstrumentId(instrumentId);
-    final sampled = aliasPath != null ||
-        (spec != null && _isSampledInstrumentSpec(spec));
+    final sampled =
+        aliasPath != null || (spec != null && _isSampledInstrumentSpec(spec));
     if (!sampled) return _allMidiPitches;
 
     final definition = await _sfzDefinitionForInstrument(instrumentId);
     if (definition == null) {
-      final failureKey = aliasPath ??
+      final failureKey =
+          aliasPath ??
           (spec?['sfzAssetPath'] as String?)?.trim() ??
           instrumentId.trim();
       if (_sfzRangeDetectionFailuresLogged.add(failureKey)) {
@@ -24842,11 +24851,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _allMidiPitches;
     }
 
-    final sampleLowKey =
-        (params['sampleLowKey'] ?? 0.0).round().clamp(0, 127);
-    final sampleHighKey = (params['sampleHighKey'] ?? 127.0)
-        .round()
-        .clamp(sampleLowKey, 127);
+    final sampleLowKey = (params['sampleLowKey'] ?? 0.0).round().clamp(0, 127);
+    final sampleHighKey = (params['sampleHighKey'] ?? 127.0).round().clamp(
+      sampleLowKey,
+      127,
+    );
     return definition.playableInputPitches(
       remapPitch: (pitch) => _remapSampledMidiPitch(instrumentId, pitch),
       sampleLowKey: sampleLowKey,
@@ -30823,8 +30832,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _aiPlayablePitchRangesByInstrumentId
       ..clear()
       ..addEntries(
-        pitchRangeEntries
-            .whereType<MapEntry<String, List<Map<String, int>>>>(),
+        pitchRangeEntries.whereType<MapEntry<String, List<Map<String, int>>>>(),
       );
 
     final lines = <String>[];
@@ -31072,9 +31080,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'instrument_id': (spec['id'] as String? ?? '').trim(),
                 'name': (spec['name'] as String? ?? '').trim(),
                 'playable_pitch_ranges':
-                    _aiPlayablePitchRangesByInstrumentId[
-                      (spec['id'] as String? ?? '').trim()
-                    ] ??
+                    _aiPlayablePitchRangesByInstrumentId[(spec['id']
+                                as String? ??
+                            '')
+                        .trim()] ??
                     const <Map<String, int>>[],
               },
             )
@@ -34391,14 +34400,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       onTap: () => unawaited(
                         _handleDetectClipTempoAndSetProjectTempo(index),
                       ),
-                    ),
-                    clipPanelActionPill(
-                      icon: Icons.blur_linear_rounded,
-                      label: 'Warp Pro',
-                      color: const Color(0xFF78D9FF),
-                      onTap: PlatformCapabilities.current.isDesktop
-                          ? () => unawaited(_openClipWarpEditor(index))
-                          : null,
                     ),
                     clipPanelActionPill(
                       icon: Icons.graphic_eq_rounded,
@@ -40238,8 +40239,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     onPreviewNote: _previewPianoRollNote,
                     onKeyboardNoteDown: _handlePianoRollKeyboardNoteDown,
                     onKeyboardNoteUp: _handlePianoRollKeyboardNoteUp,
-                    resolvePlayablePitches:
-                        _playableMidiPitchesForInstrument,
+                    resolvePlayablePitches: _playableMidiPitchesForInstrument,
                     highlightedPitches: _desktopMidiHeldPitchesForPianoRoll(
                       clip,
                     ),
@@ -61328,12 +61328,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentId,
       instrumentParams,
     );
-    final unavailable = notes
-        .map((note) => note.pitch)
-        .where((pitch) => !playable.contains(pitch))
-        .toSet()
-        .toList(growable: false)
-      ..sort();
+    final unavailable =
+        notes
+            .map((note) => note.pitch)
+            .where((pitch) => !playable.contains(pitch))
+            .toSet()
+            .toList(growable: false)
+          ..sort();
     if (unavailable.isEmpty) return true;
 
     final instrumentName = _instrumentNameFromId(instrumentId);
@@ -70287,17 +70288,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (needle.isEmpty) continue;
       final row = isMaster ? null : _aiV3MixActionRow(data);
       if (!isMaster && row == null) continue;
-      final matches = expectations.where((expectation) {
-        if (expectation['kind'] != 'mix_effect_presence') {
-          return false;
-        }
-        if ((expectation['master'] == true) != isMaster) {
-          return false;
-        }
-        if (expectation['needle'] != needle) return false;
-        if (!isMaster && expectation['row'] != row) return false;
-        return true;
-      }).toList(growable: false);
+      final matches = expectations
+          .where((expectation) {
+            if (expectation['kind'] != 'mix_effect_presence') {
+              return false;
+            }
+            if ((expectation['master'] == true) != isMaster) {
+              return false;
+            }
+            if (expectation['needle'] != needle) return false;
+            if (!isMaster && expectation['row'] != row) return false;
+            return true;
+          })
+          .toList(growable: false);
       if (matches.isEmpty) continue;
       final forceIndividualRow =
           data['force_individual_row'] == true ||
@@ -78252,9 +78255,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
           return StatefulBuilder(
             builder: (ctx, setInnerState) => MixroomShellDialog(
-              radius: 26,
+              radius: 24,
+              maxWidth: 400,
               insetPadding: const EdgeInsets.symmetric(horizontal: 18),
-              color: const Color.fromRGBO(26, 38, 56, 0.94),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              color: const Color.fromRGBO(26, 38, 56, 0.92),
               child: DefaultTextStyle.merge(
                 style: const TextStyle(fontFamily: 'Pretendard'),
                 child: Column(
@@ -78264,11 +78269,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     Row(
                       children: [
                         Container(
-                          width: 42,
-                          height: 42,
+                          width: 32,
+                          height: 32,
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(14),
+                            shape: BoxShape.circle,
                             border: Border.all(
                               color: Colors.white.withValues(alpha: 0.10),
                             ),
@@ -78277,24 +78282,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           child: const Icon(
                             Icons.speed_rounded,
                             color: Color(0xFFF4F4F4),
-                            size: 20,
+                            size: 16,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             L10n.translate(ctx, 'Set Clip BPM'),
                             style: const TextStyle(
                               color: Color(0xFFF4F4F4),
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              height: 1.15,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                              height: 22 / 17,
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 12),
                     Text(
                       detected == null
                           ? L10n.translate(
@@ -78303,70 +78308,52 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             )
                           : '${L10n.translate(ctx, 'Detected')} ${detected.toStringAsFixed(1)} BPM. ${L10n.translate(ctx, 'Edit it if it is wrong.')}',
                       style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.82),
-                        fontSize: 13.5,
+                        color: Colors.white.withValues(alpha: 0.72),
+                        fontSize: 13,
                         fontWeight: FontWeight.w500,
-                        height: 1.35,
+                        height: 18 / 13,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    MixroomShellSurface(
+                      radius: 16,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 2,
+                      ),
+                      color: const Color.fromRGBO(244, 244, 244, 0.10),
+                      child: TextField(
+                        controller: controller,
+                        autofocus: true,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9\.,]'),
+                          ),
+                        ],
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                          height: 28 / 22,
+                        ),
+                        decoration: InputDecoration(
+                          suffixText: 'BPM',
+                          suffixStyle: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.48),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          errorText: errorText,
+                          border: InputBorder.none,
+                        ),
+                        onSubmitted: (_) => submit(setInnerState, true),
                       ),
                     ),
                     const SizedBox(height: 14),
-                    TextField(
-                      controller: controller,
-                      autofocus: true,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9\.,]')),
-                      ],
-                      style: const TextStyle(
-                        color: Color(0xFFF4F4F4),
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0,
-                      ),
-                      decoration: InputDecoration(
-                        suffixText: 'BPM',
-                        suffixStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.52),
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        errorText: errorText,
-                        filled: true,
-                        fillColor: Colors.white.withValues(alpha: 0.07),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.10),
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.10),
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.34),
-                          ),
-                        ),
-                      ),
-                      onSubmitted: (_) => submit(setInnerState, true),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '${L10n.translate(ctx, 'Stretch uses this as the clip source BPM.')} ${L10n.translate(ctx, 'Project is currently')} ${_formatTempoBpm(_tempo)} BPM.',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.62),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        height: 1.32,
-                      ),
-                    ),
-                    const SizedBox(height: 18),
                     Row(
                       children: [
                         Expanded(
@@ -78441,570 +78428,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           applyProjectTempo
               ? '${L10n.translate(context, 'Clip source set to')} ${manualBpm.toStringAsFixed(1)} BPM. ${L10n.translate(context, 'Project BPM updated.')}'
               : '${L10n.translate(context, 'Clip source set to')} ${manualBpm.toStringAsFixed(1)} BPM.',
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openClipWarpEditor(int clipIndex) async {
-    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
-    final clip = _audioTracks[clipIndex];
-    if (clip.isMidi) return;
-
-    final rawSec = _rawClipDurationSec(clip);
-    if (rawSec <= 0.0) return;
-
-    final initialBpm = _resolvedClipSourceTempoBpm(clip) > 0.0
-        ? _resolvedClipSourceTempoBpm(clip)
-        : _clampTempo(_tempo);
-    final bpmController = TextEditingController(
-      text: _formatTempoBpm(initialBpm),
-    );
-
-    var chosenWarpEnabled = clip.stretchToProjectTempo;
-    var chosenPreservePitch = clip.tempoStretchPreservePitch;
-    var chosenBpm = initialBpm;
-    var chosenMode = switch (normalizeTempoWarpMode(clip.tempoWarpMode)) {
-      kTempoWarpModeBeats => 'Beats',
-      kTempoWarpModeRepitch => 'Repitch',
-      _ => 'Complex',
-    };
-    if (clip.stretchToProjectTempo && !clip.tempoStretchPreservePitch) {
-      chosenMode = 'Repitch';
-    }
-
-    final action = await showDialog<String>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.62),
-      builder: (ctx) {
-        String? errorText;
-
-        void setBpmFromBars(StateSetter setInnerState, int bars) {
-          final beats = math.max(1.0, bars * _projectBarLengthQuarterBeats);
-          final next = _clampTempo((beats * 60.0) / rawSec);
-          setInnerState(() {
-            chosenWarpEnabled = true;
-            chosenPreservePitch = true;
-            chosenMode = bars <= 1 ? 'Beats' : 'Complex';
-            chosenBpm = next;
-            bpmController.text = _formatTempoBpm(next);
-            errorText = null;
-          });
-        }
-
-        void submit(StateSetter setInnerState) {
-          if (!chosenWarpEnabled) {
-            Navigator.of(ctx).pop('apply');
-            return;
-          }
-          final parsed = double.tryParse(
-            bpmController.text.trim().replaceAll(',', '.'),
-          );
-          if (parsed == null || !parsed.isFinite) {
-            setInnerState(() {
-              errorText = L10n.translate(ctx, 'Enter a valid BPM.');
-            });
-            return;
-          }
-          if (parsed < 20.0 || parsed > 999.0) {
-            setInnerState(() {
-              errorText = L10n.translate(
-                ctx,
-                'BPM must be between 20 and 999.',
-              );
-            });
-            return;
-          }
-          chosenBpm = _clampTempo(parsed);
-          chosenPreservePitch = chosenMode != 'Repitch';
-          Navigator.of(ctx).pop('apply');
-        }
-
-        Widget modeButton(
-          StateSetter setInnerState,
-          String label,
-          IconData icon,
-        ) {
-          final selected = chosenMode == label;
-          return Expanded(
-            child: Tooltip(
-              message: label,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(10),
-                onTap: () {
-                  setInnerState(() {
-                    chosenMode = label;
-                    chosenWarpEnabled = true;
-                    chosenPreservePitch = label != 'Repitch';
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 120),
-                  height: 40,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? const Color(0xFF78D9FF).withValues(alpha: 0.20)
-                        : Colors.white.withValues(alpha: 0.055),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected
-                          ? const Color(0xFF78D9FF).withValues(alpha: 0.42)
-                          : Colors.white.withValues(alpha: 0.09),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        icon,
-                        size: 15,
-                        color: selected
-                            ? const Color(0xFF78D9FF)
-                            : Colors.white70,
-                      ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          label,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: selected
-                                ? const Color(0xFFF4F4F4)
-                                : Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
-
-        Widget anchorButton(StateSetter setInnerState, int bars) {
-          final label = bars == 1 ? '1 bar' : '$bars bars';
-          return Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(10),
-              onTap: () => setBpmFromBars(setInnerState, bars),
-              child: Container(
-                height: 36,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.09),
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: Color(0xFFF4F4F4),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }
-
-        return StatefulBuilder(
-          builder: (ctx, setInnerState) {
-            final timelineSec = chosenWarpEnabled
-                ? rawSec * chosenBpm / _clampTempo(_tempo)
-                : rawSec;
-            final ratio = rawSec / math.max(0.001, timelineSec);
-            return MixroomShellDialog(
-              radius: 26,
-              insetPadding: const EdgeInsets.symmetric(horizontal: 18),
-              color: const Color.fromRGBO(18, 24, 32, 0.96),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: DefaultTextStyle.merge(
-                  style: const TextStyle(fontFamily: 'Pretendard'),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: const Color(
-                                0xFF78D9FF,
-                              ).withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: const Color(
-                                  0xFF78D9FF,
-                                ).withValues(alpha: 0.22),
-                              ),
-                            ),
-                            child: const Icon(
-                              Icons.blur_linear_rounded,
-                              color: Color(0xFF78D9FF),
-                              size: 21,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'Warp Pro',
-                              style: TextStyle(
-                                color: Color(0xFFF4F4F4),
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          Switch(
-                            value: chosenWarpEnabled,
-                            activeColor: const Color(0xFF78D9FF),
-                            onChanged: (value) {
-                              setInnerState(() {
-                                chosenWarpEnabled = value;
-                                errorText = null;
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        'Desktop warp maps clip time to project tempo. Use Complex for full mixes, Beats for drums, and Repitch when you want tape-style speed change.',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.72),
-                          fontSize: 12.5,
-                          height: 1.35,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: bpmController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                    decimal: true,
-                                  ),
-                              inputFormatters: [
-                                FilteringTextInputFormatter.allow(
-                                  RegExp(r'[0-9\.,]'),
-                                ),
-                              ],
-                              onChanged: (raw) {
-                                final parsed = double.tryParse(
-                                  raw.trim().replaceAll(',', '.'),
-                                );
-                                if (parsed != null && parsed.isFinite) {
-                                  setInnerState(() {
-                                    chosenBpm = _clampTempo(parsed);
-                                    errorText = null;
-                                  });
-                                }
-                              },
-                              style: const TextStyle(
-                                color: Color(0xFFF4F4F4),
-                                fontSize: 27,
-                                fontWeight: FontWeight.w800,
-                              ),
-                              decoration: InputDecoration(
-                                labelText: 'Source BPM',
-                                labelStyle: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.52),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                suffixText: 'BPM',
-                                suffixStyle: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.52),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                                errorText: errorText,
-                                filled: true,
-                                fillColor: Colors.white.withValues(alpha: 0.06),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(
-                                    color: Colors.white.withValues(alpha: 0.10),
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(
-                                    color: Colors.white.withValues(alpha: 0.10),
-                                  ),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(
-                                    color: const Color(
-                                      0xFF78D9FF,
-                                    ).withValues(alpha: 0.48),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Container(
-                            width: 132,
-                            padding: const EdgeInsets.all(11),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.055),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.09),
-                              ),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Project',
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.55),
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${_formatTempoBpm(_tempo)} BPM',
-                                  style: const TextStyle(
-                                    color: Color(0xFFF4F4F4),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '${ratio.toStringAsFixed(2)}x playback',
-                                  style: TextStyle(
-                                    color: const Color(
-                                      0xFF78D9FF,
-                                    ).withValues(alpha: 0.9),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          modeButton(
-                            setInnerState,
-                            'Beats',
-                            Icons.grid_4x4_rounded,
-                          ),
-                          const SizedBox(width: 8),
-                          modeButton(
-                            setInnerState,
-                            'Complex',
-                            Icons.graphic_eq_rounded,
-                          ),
-                          const SizedBox(width: 8),
-                          modeButton(
-                            setInnerState,
-                            'Repitch',
-                            Icons.speed_rounded,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        children: [
-                          anchorButton(setInnerState, 1),
-                          const SizedBox(width: 8),
-                          anchorButton(setInnerState, 2),
-                          const SizedBox(width: 8),
-                          anchorButton(setInnerState, 4),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () {
-                                setInnerState(() {
-                                  chosenBpm = _clampTempo(chosenBpm * 2.0);
-                                  bpmController.text = _formatTempoBpm(
-                                    chosenBpm,
-                                  );
-                                  chosenWarpEnabled = true;
-                                });
-                              },
-                              child: Container(
-                                height: 36,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.09),
-                                  ),
-                                ),
-                                child: const Text(
-                                  'x2',
-                                  style: TextStyle(
-                                    color: Color(0xFFF4F4F4),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: () {
-                                setInnerState(() {
-                                  chosenBpm = _clampTempo(chosenBpm * 0.5);
-                                  bpmController.text = _formatTempoBpm(
-                                    chosenBpm,
-                                  );
-                                  chosenWarpEnabled = true;
-                                });
-                              },
-                              child: Container(
-                                height: 36,
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.09),
-                                  ),
-                                ),
-                                child: const Text(
-                                  '/2',
-                                  style: TextStyle(
-                                    color: Color(0xFFF4F4F4),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: MixroomShellDialogButton(
-                              label: L10n.translate(ctx, 'Cancel'),
-                              onPressed: () => Navigator.of(ctx).pop(),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: MixroomShellDialogButton(
-                              label: chosenWarpEnabled
-                                  ? 'Apply Warp'
-                                  : 'Turn Off',
-                              accent: true,
-                              onPressed: () => submit(setInnerState),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    unawaited(
-      Future<void>.delayed(const Duration(milliseconds: 500), () {
-        bpmController.dispose();
-      }),
-    );
-    if (action != 'apply') return;
-
-    final before = _ClipStretchSnapshot(
-      offsetSec: clip.offset,
-      sourceTempoBpm: clip.sourceTempoBpm,
-      stretchToProjectTempo: clip.stretchToProjectTempo,
-      tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
-      tempoWarpMode: clip.tempoWarpMode,
-      tempoStretchEnabled: _tempoStretchEnabled,
-      tempoStretchPreservePitchDefault: _tempoStretchPreservePitchDefault,
-    );
-    final hasOtherAudioTempoFollow = _audioTracks
-        .where((track) => !track.isMidi && !identical(track, clip))
-        .any((track) => track.stretchToProjectTempo);
-    final after = _ClipStretchSnapshot(
-      offsetSec: clip.offset,
-      sourceTempoBpm: _clampTempo(chosenBpm),
-      stretchToProjectTempo: chosenWarpEnabled,
-      tempoStretchPreservePitch: chosenWarpEnabled && chosenPreservePitch,
-      tempoWarpMode: normalizeTempoWarpMode(chosenMode),
-      tempoStretchEnabled: chosenWarpEnabled || hasOtherAudioTempoFollow,
-      tempoStretchPreservePitchDefault: _tempoStretchPreservePitchDefault,
-    );
-    if (before.approxEquals(after)) return;
-
-    await _undoManager.execute(
-      _StretchClipResizeAction(
-        descriptionText: 'Apply clip warp',
-        tracks: _audioTracks,
-        originalIndex: clipIndex,
-        oldSnapshot: before,
-        newSnapshot: after,
-        applySnapshot: (target, snapshot) async {
-          target.offset = snapshot.offsetSec;
-          target.sourceTempoBpm = snapshot.sourceTempoBpm;
-          target.stretchToProjectTempo = snapshot.stretchToProjectTempo;
-          target.tempoStretchPreservePitch = snapshot.tempoStretchPreservePitch;
-          target.tempoWarpMode = normalizeTempoWarpMode(snapshot.tempoWarpMode);
-          _tempoStretchEnabled =
-              snapshot.tempoStretchEnabled ??
-              _audioTracks
-                  .where((t) => !t.isMidi)
-                  .any((t) => t.stretchToProjectTempo);
-          _tempoStretchPreservePitchDefault =
-              snapshot.tempoStretchPreservePitchDefault ??
-              _tempoStretchPreservePitchDefault;
-          final targetIndex = _audioTracks.indexOf(target);
-          if (targetIndex >= 0) {
-            await _syncClipTimingToEngine(targetIndex);
-          }
-          await _syncClipMixToEngine(target);
-          _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[target]);
-          _scheduleProjectAutosave();
-          if (mounted) setState(() {});
-        },
-      ),
-    );
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          chosenWarpEnabled
-              ? 'Warp applied: $chosenMode at ${_formatTempoBpm(chosenBpm)} BPM.'
-              : 'Warp turned off.',
         ),
       ),
     );
@@ -83432,8 +82855,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _handleDisableClipTempoFollow,
                                           onDetectClipTempoAndSetProjectTempo:
                                               _handleDetectClipTempoAndSetProjectTempo,
-                                          onOpenClipWarpEditor:
-                                              _openClipWarpEditor,
                                           onOpenPitchLab:
                                               _openAudioPitchLabForClip,
                                           onStartClipLoopPreview:
@@ -84823,6 +84244,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             );
                                           },
                                           topContextMenuHeight: 88,
+                                          dragHandleHeight:
+                                              _kPitchLabDesktopDragHandleHeight,
+                                          dragHandleRightInset:
+                                              _kPitchLabDesktopDragHandleRightInset,
+                                          outerShadows:
+                                              _kFloatingEditorWindowShadows,
                                           minWidth: 560,
                                           minHeight: 320,
                                           child: pitchLabChild,
@@ -88285,6 +87712,7 @@ class EditorUndoManager extends ChangeNotifier {
     if (!isCurrentUndoRecordId(recordId)) return null;
     return undo();
   }
+
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
       List.unmodifiable(_snapshotRecords(_undo));
   List<ProjectUndoSnapshotRecord> get redoSnapshotRecords =>
@@ -93191,11 +92619,7 @@ class _ChatBarState extends State<_ChatBar> {
     });
   }
 
-  String _badgeLabel() {
-    final status = widget.promptRateLimitStatus;
-    if (status == null) return '--%';
-    return '${status.remainingPercent}%';
-  }
+  String _badgeLabel(BuildContext context) => L10n.translate(context, 'Usage');
 
   String _badgeTooltip(BuildContext context) {
     final status = widget.promptRateLimitStatus;
@@ -93273,7 +92697,7 @@ class _ChatBarState extends State<_ChatBar> {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  _badgeLabel(),
+                  _badgeLabel(context),
                   style: const TextStyle(
                     fontFamily: 'Pretendard',
                     fontSize: 12,

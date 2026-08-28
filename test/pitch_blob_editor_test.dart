@@ -1,6 +1,8 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/pitch_blob_editor.dart';
@@ -448,6 +450,70 @@ void main() {
     );
 
     expect(vertical.controller!.offset, greaterThan(0));
+  });
+
+  testWidgets('PitchBlobEditor supports desktop wheel viewport movement',
+      (tester) async {
+    final clip = await _makeLowMidiClip();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 820,
+            height: 220,
+            child: PitchBlobEditor(
+              clip: clip,
+              bpm: 120,
+              projectPlayheadMs: 0,
+              isPlaying: false,
+              fullscreen: false,
+              onFullscreenChanged: (_) {},
+              onClose: () {},
+              onCommit: ({
+                required List<MidiNote> notes,
+                required Map<String, double> instrumentParams,
+                required String instrumentId,
+                required String instrumentName,
+              }) async {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final scrollables = tester.widgetList<SingleChildScrollView>(
+      find.byType(SingleChildScrollView),
+    );
+    final vertical = scrollables.firstWhere(
+      (scrollable) => scrollable.scrollDirection == Axis.vertical,
+    );
+    final horizontal = scrollables.firstWhere(
+      (scrollable) => scrollable.scrollDirection == Axis.horizontal,
+    );
+    final initialVertical = vertical.controller!.offset;
+
+    await tester.sendEventToBinding(
+      const PointerScrollEvent(
+        position: Offset(300, 150),
+        scrollDelta: Offset(0, -80),
+      ),
+    );
+    await tester.pump();
+    expect(vertical.controller!.offset, lessThan(initialVertical));
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendEventToBinding(
+      const PointerScrollEvent(
+        position: Offset(300, 150),
+        scrollDelta: Offset(0, 80),
+      ),
+    );
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(horizontal.controller!.offset, greaterThan(0));
   });
 
   testWidgets('PitchBlobEditor preview transport fits narrow bottom bar',

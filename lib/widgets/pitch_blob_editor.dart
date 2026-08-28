@@ -1,9 +1,31 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/models.dart';
+
+const Color _kPitchLabText = Color(0xFFF4F4F4);
+const Color _kPitchLabMutedText = Color(0xB8F4F4F4);
+const Color _kPitchLabBorder = Color.fromRGBO(255, 255, 255, 0.12);
+const Color _kPitchLabAccent = Color(0xFFE0B27F);
+
+BoxDecoration _mixroomPitchLabSurfaceDecoration({double radius = 24}) {
+  return BoxDecoration(
+    borderRadius: BorderRadius.circular(radius),
+    gradient: const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: <Color>[
+        Color.fromRGBO(87, 96, 106, 0.96),
+        Color.fromRGBO(49, 58, 68, 0.96),
+      ],
+    ),
+    border: Border.all(color: _kPitchLabBorder),
+  );
+}
 
 class PitchBlobEditor extends StatefulWidget {
   const PitchBlobEditor({
@@ -127,6 +149,8 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
   Map<String, MidiNote>? _dragStartNotesById;
   OverlayEntry? _helpPopoverEntry;
   String? _pendingVerticalCenterSignature;
+  int? _middlePanPointer;
+  Offset? _middlePanPosition;
 
   double get _rowHeight => _baseRowHeight * _verticalZoom;
   double get _pixelsPerBeat => _basePixelsPerBeat * _horizontalZoom;
@@ -427,8 +451,8 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                 constraints: const BoxConstraints(maxWidth: 292),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF111821),
-                    borderRadius: BorderRadius.circular(10),
+                    color: const Color(0xFF3A444E),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.10),
                     ),
@@ -452,15 +476,13 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                               width: 22,
                               height: 22,
                               decoration: BoxDecoration(
-                                color: const Color(0xFF66E0C2)
-                                    .withValues(alpha: 0.12),
+                                color: _kPitchLabAccent.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Icon(
                                 Icons.info_outline_rounded,
                                 size: 14,
-                                color: const Color(0xFF66E0C2)
-                                    .withValues(alpha: 0.96),
+                                color: _kPitchLabAccent,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -469,7 +491,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                                 _t('Pitch Lab'),
                                 style: const TextStyle(
                                   fontFamily: 'Pretendard',
-                                  color: Color(0xFFF7F8FA),
+                                  color: _kPitchLabText,
                                   fontSize: 12.25,
                                   fontWeight: FontWeight.w800,
                                   height: 1.1,
@@ -623,6 +645,53 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
           (_verticalController.hasClients ? _verticalController.offset : 0.0) -
               focalDelta.dy,
     );
+  }
+
+  void _scrollViewportBy({double horizontal = 0.0, double vertical = 0.0}) {
+    if (horizontal == 0.0 && vertical == 0.0) return;
+    _jumpViewportTo(
+      horizontal: _horizontalController.hasClients
+          ? _horizontalController.offset + horizontal
+          : null,
+      vertical: _verticalController.hasClients
+          ? _verticalController.offset + vertical
+          : null,
+    );
+  }
+
+  void _handleViewportPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    final shiftPressed = HardwareKeyboard.instance.logicalKeysPressed.contains(
+          LogicalKeyboardKey.shiftLeft,
+        ) ||
+        HardwareKeyboard.instance.logicalKeysPressed.contains(
+          LogicalKeyboardKey.shiftRight,
+        );
+    final delta = event.scrollDelta;
+    if (shiftPressed) {
+      _scrollViewportBy(horizontal: delta.dx + delta.dy);
+      return;
+    }
+    _scrollViewportBy(horizontal: delta.dx, vertical: delta.dy);
+  }
+
+  void _handleViewportPointerDown(PointerDownEvent event) {
+    if ((event.buttons & kMiddleMouseButton) == 0) return;
+    _middlePanPointer = event.pointer;
+    _middlePanPosition = event.position;
+  }
+
+  void _handleViewportPointerMove(PointerMoveEvent event) {
+    if (_middlePanPointer != event.pointer || _middlePanPosition == null) return;
+    final delta = event.position - _middlePanPosition!;
+    _middlePanPosition = event.position;
+    _panViewport(delta);
+  }
+
+  void _endMiddleViewportPan(PointerEvent event) {
+    if (_middlePanPointer != event.pointer) return;
+    _middlePanPointer = null;
+    _middlePanPosition = null;
   }
 
   double _contentWidthForZoom(double horizontalZoom, double viewportWidth) {
@@ -947,19 +1016,9 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(24),
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: const Color(0xFF0B0F14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
-          boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.34),
-              blurRadius: 18,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
+        decoration: _mixroomPitchLabSurfaceDecoration(),
         child: Column(
           children: <Widget>[
             _buildHeader(),
@@ -983,7 +1042,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
       height: 40,
       padding: const EdgeInsets.only(left: 12, right: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF101720),
+        color: Colors.white.withValues(alpha: 0.035),
         border: Border(
           bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
         ),
@@ -994,12 +1053,15 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
             width: 24,
             height: 24,
             decoration: BoxDecoration(
-              color: const Color(0xFF66E0C2).withValues(alpha: 0.14),
+              color: _kPitchLabAccent.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(7),
+              border: Border.all(
+                color: _kPitchLabAccent.withValues(alpha: 0.20),
+              ),
             ),
             child: const Icon(
-              Icons.auto_graph_rounded,
-              color: Color(0xFF66E0C2),
+              Icons.graphic_eq_rounded,
+              color: _kPitchLabAccent,
               size: 15,
             ),
           ),
@@ -1015,7 +1077,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontFamily: 'Pretendard',
-                    color: Color(0xFFF7F8FA),
+                    color: _kPitchLabText,
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
                     height: 1.05,
@@ -1026,9 +1088,9 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontFamily: 'Pretendard',
-                    color: Colors.white.withValues(alpha: 0.46),
+                    color: _kPitchLabMutedText,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
                     height: 1.05,
@@ -1065,7 +1127,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
       height: 42,
       padding: const EdgeInsets.fromLTRB(9, 5, 9, 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D131B),
+        color: Colors.white.withValues(alpha: 0.065),
         border: Border(
           bottom: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
         ),
@@ -1172,7 +1234,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
       height: 32,
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.045),
+        color: Colors.black.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
       ),
@@ -1227,7 +1289,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
       margin: const EdgeInsets.only(right: 7),
       padding: const EdgeInsets.symmetric(horizontal: 9),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.055),
+        color: Colors.black.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
@@ -1235,11 +1297,11 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
         child: DropdownButton<int>(
           value: _gridDivisionsPerBar,
           isDense: true,
-          dropdownColor: const Color(0xFF151B24),
-          iconEnabledColor: Colors.white.withValues(alpha: 0.58),
+          dropdownColor: const Color(0xFF3A444E),
+          iconEnabledColor: _kPitchLabMutedText,
           style: const TextStyle(
             fontFamily: 'Pretendard',
-            color: Color(0xFFF4F4F4),
+            color: _kPitchLabText,
             fontSize: 12,
             fontWeight: FontWeight.w700,
           ),
@@ -1280,7 +1342,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
       height: 52,
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 9),
       decoration: BoxDecoration(
-        color: const Color(0xFF0D131B),
+        color: Colors.white.withValues(alpha: 0.065),
         border: Border(
           top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
         ),
@@ -1412,8 +1474,16 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
             _contentWidthForZoom(_horizontalZoom, constraints.maxWidth);
         final contentHeight =
             _contentHeightForZoom(_verticalZoom, constraints.maxHeight);
-        return Stack(
-          children: <Widget>[
+        return Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerSignal: _handleViewportPointerSignal,
+          onPointerDown: _handleViewportPointerDown,
+          onPointerMove: _handleViewportPointerMove,
+          onPointerUp: _endMiddleViewportPan,
+          onPointerCancel: _endMiddleViewportPan,
+          onPointerPanZoomUpdate: (event) => _panViewport(event.panDelta),
+          child: Stack(
+            children: <Widget>[
             Positioned.fill(
               child: SingleChildScrollView(
                 controller: _horizontalController,
@@ -1484,7 +1554,8 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                 controller: _horizontalController,
               ),
             ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -1650,14 +1721,14 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
             onPointerUp: (_) => unawaited(_previewSingleNote(note!)),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: const Color(0xFF101720).withValues(alpha: 0.96),
+                color: const Color(0xFF3A444E).withValues(alpha: 0.98),
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: const Color(0xFF66E0C2).withValues(alpha: 0.56),
+                  color: _kPitchLabAccent.withValues(alpha: 0.62),
                 ),
                 boxShadow: <BoxShadow>[
                   BoxShadow(
-                    color: const Color(0xFF66E0C2).withValues(alpha: 0.24),
+                    color: _kPitchLabAccent.withValues(alpha: 0.22),
                     blurRadius: 12,
                     spreadRadius: 1,
                   ),
@@ -1672,7 +1743,7 @@ class _PitchBlobEditorState extends State<PitchBlobEditor> {
                 child: Icon(
                   Icons.volume_up_rounded,
                   size: 16,
-                  color: Color(0xFF66E0C2),
+                  color: _kPitchLabAccent,
                 ),
               ),
             ),
@@ -1742,8 +1813,8 @@ class _PitchLabButton extends StatelessWidget {
     final accent = danger
         ? const Color(0xFFFF837A)
         : selected
-            ? const Color(0xFF66E0C2)
-            : Colors.white.withValues(alpha: 0.72);
+            ? _kPitchLabAccent
+            : _kPitchLabMutedText;
     final progressValue = progress?.clamp(0.0, 1.0).toDouble();
     final contentPadding = EdgeInsets.symmetric(
       horizontal: label.isEmpty
@@ -1764,13 +1835,13 @@ class _PitchLabButton extends StatelessWidget {
             height: 28,
             decoration: BoxDecoration(
               color: selected
-                  ? const Color(0xFF66E0C2).withValues(alpha: 0.15)
+                  ? _kPitchLabAccent.withValues(alpha: 0.14)
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: selected
-                    ? const Color(0xFF66E0C2).withValues(alpha: 0.34)
-                    : Colors.white.withValues(alpha: 0.055),
+                    ? _kPitchLabAccent.withValues(alpha: 0.40)
+                    : Colors.white.withValues(alpha: 0.08),
               ),
             ),
             child: ClipRRect(
@@ -1784,8 +1855,7 @@ class _PitchLabButton extends StatelessWidget {
                         alignment: Alignment.centerLeft,
                         widthFactor: progressValue,
                         child: ColoredBox(
-                          color:
-                              const Color(0xFF66E0C2).withValues(alpha: 0.20),
+                          color: _kPitchLabAccent.withValues(alpha: 0.20),
                         ),
                       ),
                     ),
@@ -1809,7 +1879,7 @@ class _PitchLabButton extends StatelessWidget {
                                 fontFamily: 'Pretendard',
                                 color: danger
                                     ? accent
-                                    : Colors.white.withValues(alpha: 0.84),
+                                    : _kPitchLabText,
                                 fontSize: compact ? 10.5 : 11,
                                 fontWeight: FontWeight.w700,
                                 height: 1.0,
@@ -1830,7 +1900,7 @@ class _PitchLabButton extends StatelessWidget {
                         minHeight: 2.5,
                         backgroundColor: Colors.white.withValues(alpha: 0.06),
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          const Color(0xFF66E0C2).withValues(alpha: 0.92),
+                          _kPitchLabAccent.withValues(alpha: 0.92),
                         ),
                       ),
                     ),
@@ -1929,14 +1999,15 @@ class _PitchLabHorizontalScrollIndicatorState
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: _dragging
-                              ? const Color(0xFF66E0C2).withValues(alpha: 0.16)
+                              ? _kPitchLabAccent.withValues(alpha: 0.16)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(999),
                           boxShadow: _dragging
                               ? <BoxShadow>[
                                   BoxShadow(
-                                    color: const Color(0xFF66E0C2)
-                                        .withValues(alpha: 0.34),
+                                    color: _kPitchLabAccent.withValues(
+                                      alpha: 0.34,
+                                    ),
                                     blurRadius: 14,
                                     spreadRadius: 2,
                                   ),
@@ -1948,13 +2019,13 @@ class _PitchLabHorizontalScrollIndicatorState
                           curve: Curves.easeOutCubic,
                           height: _dragging ? 7 : 5,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF66E0C2).withValues(
+                            color: _kPitchLabAccent.withValues(
                               alpha: _dragging ? 0.95 : 0.72,
                             ),
                             borderRadius: BorderRadius.circular(999),
                             boxShadow: <BoxShadow>[
                               BoxShadow(
-                                color: const Color(0xFF66E0C2).withValues(
+                                color: _kPitchLabAccent.withValues(
                                   alpha: _dragging ? 0.42 : 0.18,
                                 ),
                                 blurRadius: _dragging ? 12 : 8,
@@ -2082,7 +2153,7 @@ class _PitchBlobGridPainter extends CustomPainter {
       final x = keyboardWidth + ph * pixelsPerBeat;
       final paint = Paint()
         ..color =
-            (isPlaying ? const Color(0xFF66E0C2) : const Color(0xFFFFCE5C))
+            (isPlaying ? _kPitchLabAccent : const Color(0xFFFFCE5C))
                 .withValues(alpha: 0.88)
         ..strokeWidth = 2;
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
