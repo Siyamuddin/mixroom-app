@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import '../../helpers/timeline_tempo_mapping.dart';
+import '../../helpers/midi_pitch_ranges.dart';
 import '../../models/mixing_result.dart';
 import 'package:uuid/uuid.dart';
 import 'ai_v3_context.dart';
@@ -173,6 +174,15 @@ class AiV3CommandPreparer {
         (context.data['instruments'] as List? ?? const <Object>[])
             .map((value) => value.toString())
             .toSet();
+    final playablePitchRangesByInstrumentId = <String, List<Map<String, int>>>{
+      for (final raw
+          in (context.data['instrument_catalog'] as List? ?? const <Object>[])
+              .whereType<Map>())
+        if ((raw['instrument_id']?.toString().trim() ?? '').isNotEmpty)
+          raw['instrument_id'].toString().trim(): normalizeMidiPitchRanges(
+            raw['playable_pitch_ranges'],
+          ),
+    };
     final effects = (context.data['effects'] as List? ?? const <Object>[])
         .whereType<Map>()
         .map((value) => Map<String, dynamic>.from(value))
@@ -351,6 +361,20 @@ class AiV3CommandPreparer {
     final actions = <AssistantAction>[];
     final receipts = <Map<String, dynamic>>[];
     final previewLines = <String>[];
+
+    void validateInstrumentPitches(String? instrumentId, Iterable<Map> notes) {
+      final ranges =
+          playablePitchRangesByInstrumentId[instrumentId?.trim() ?? ''];
+      if (ranges == null || ranges.isEmpty) return;
+      for (final note in notes) {
+        final pitch = note['pitch'];
+        if (pitch is! int || !midiPitchRangesContain(ranges, pitch)) {
+          throw const AiV3PreparationException(
+            'v3_midi_instrument_pitch_unavailable',
+          );
+        }
+      }
+    }
 
     Map<String, dynamic> rowTarget(int rowId) {
       final row = rowById[rowId];
@@ -3278,6 +3302,7 @@ class AiV3CommandPreparer {
                       rowById[(args['destination']
                           as Map)['row_id']]?['instrument_id'])
                   ?.toString();
+          validateInstrumentPitches(instrumentId, notes);
           commandActions.add(
             AssistantAction(
               type: 'midi_compose',
@@ -3330,6 +3355,17 @@ class AiV3CommandPreparer {
                   'resource_ref': clipRef.toJson(),
                 };
           final clip = clipId == null ? null : clipById[clipId];
+          final targetInstrumentId =
+              symbolic?.instrumentId ??
+              clip?['instrument_id']?.toString() ??
+              rowById[clip?['row_id']]?['instrument_id']?.toString();
+          if (command.type == 'midi.replace_notes' ||
+              command.type == 'midi.append_notes') {
+            validateInstrumentPitches(
+              targetInstrumentId,
+              (args['notes'] as List).whereType<Map>(),
+            );
+          }
           final runtimeAuthoritativeNotes =
               symbolic?.midiNotesRuntimeAuthoritative == true;
           final runtimeAuthoritativeBounds =

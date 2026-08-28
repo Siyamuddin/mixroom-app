@@ -1,0 +1,140 @@
+//+ Name: Spanish classical guitar
+//+ Date: 2019-06-18
+//+ URL: http://freepats.zenvoid.org/Guitar/acoustic-guitar.html
+
+<global>
+ //+ Instrument: Classical guitar
+ ampeg_release=1.5
+
+<group>
+ loop_mode=no_loop
+<region>
+ key=40
+ sample=samples/E2.mp3
+<region>
+ key=41
+ sample=samples/F2.mp3
+<region>
+ lokey=42
+ hikey=43
+ pitch_keycenter=43
+ sample=samples/G2.mp3
+<region>
+ lokey=44
+ hikey=45
+ pitch_keycenter=45
+ sample=samples/A2.mp3
+<region>
+ lokey=46
+ hikey=47
+ pitch_keycenter=47
+ sample=samples/B2.mp3
+<region>
+ key=48
+ sample=samples/C3.mp3
+<region>
+ lokey=49
+ hikey=50
+ pitch_keycenter=50
+ sample=samples/D3.mp3
+<region>
+ lokey=51
+ hikey=52
+ pitch_keycenter=52
+ sample=samples/E3.mp3
+<region>
+ key=53
+ sample=samples/F3.mp3
+<region>
+ key=54
+ sample=samples/F#3.mp3
+<region>
+ key=55
+ sample=samples/G3.mp3
+<region>
+ key=56
+ sample=samples/G#3.mp3
+<region>
+ key=57
+ sample=samples/A3.mp3
+<region>
+ key=58
+ sample=samples/A#3.mp3
+<region>
+ key=59
+ sample=samples/B3.mp3
+<region>
+ key=60
+ sample=samples/C4.mp3
+<region>
+ key=61
+ sample=samples/C#4.mp3
+<region>
+ key=62
+ sample=samples/D4.mp3
+<region>
+ key=63
+ sample=samples/D#4.mp3
+<region>
+ key=64
+ sample=samples/E4.mp3
+<region>
+ key=65
+ sample=samples/F4.mp3
+<region>
+ key=66
+ sample=samples/F#4.mp3
+<region>
+ key=67
+ sample=samples/G4.mp3
+<region>
+ lokey=68
+ hikey=69
+ pitch_keycenter=69
+ sample=samples/A4.mp3
+<region>
+ key=70
+ sample=samples/A#4.mp3
+<region>
+ key=71
+ sample=samples/B4.mp3
+<region>
+ key=72
+ sample=samples/C5.mp3
+<region>
+ key=73
+ sample=samples/C#5.mp3
+<region>
+ key=74
+ sample=samples/D5.mp3
+<region>
+ key=75
+ sample=samples/D#5.mp3
+<region>
+ key=76
+ sample=samples/E5.mp3
+<region>
+ key=77
+ sample=samples/F5.mp3
+<region>
+ key=78
+ sample=samples/F#5.mp3
+<region>
+ key=79
+ sample=samples/G5.mp3
+<region>
+ key=80
+ sample=samples/G#5.mp3
+<region>
+ key=81
+ sample=samples/A5.mp3
+<region>
+ key=82
+ sample=samples/A#5.mp3
+<region>
+ key=83
+ sample=samples/B5.mp3
+<region>
+ lokey=84 hikey=84
+ pitch_keycenter=84
+ sample=samples/C6.mp3

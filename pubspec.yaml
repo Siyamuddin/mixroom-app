@@ -182,6 +182,10 @@ flutter:
     - assets/demo_projects/
     - assets/magnet-solid-full.svg
     - assets/instruments/
+    - assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/
+    - assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/samples/
+    - assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/
+    - assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/samples/
     - assets/instruments/VSCO-2-CE-1.1.0/
     - assets/instruments/VSCO-2-CE-1.1.0/Brass/Trumpet/stac/
     - assets/instruments/VSCO-2-CE-1.1.0/Brass/Tuba/stac/

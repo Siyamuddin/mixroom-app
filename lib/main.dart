@@ -60,6 +60,29 @@ const List<_BundledLicenseNotice> _bundledLicenseNotices =
     licenseAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/LICENSE',
     noticeAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/NOTICE.md',
   ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Acoustic Guitar',
+      'FreePats Spanish Classical Guitar',
+      'Roberto, FreePats',
+    ],
+    licenseAssetPath:
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/LICENSE',
+    noticeAssetPath:
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/NOTICE.md',
+  ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Electric Guitar',
+      'Karoryfer Black And Green Guitars',
+      'Karoryfer Lecolds',
+      'Brian Wood',
+    ],
+    licenseAssetPath:
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/LICENSE',
+    noticeAssetPath:
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/NOTICE.md',
+  ),
 ];
 
 Future<void> _registerBundledThirdPartyLicenses() async {
