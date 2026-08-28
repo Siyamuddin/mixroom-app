@@ -9,6 +9,7 @@ import '../../helpers/midi_pitch_ranges.dart';
 import '../../models/models.dart';
 import '../../models/project_state.dart';
 import 'ai_v3_audio_facts.dart';
+import 'ai_v3_automation_targets.dart';
 
 const String aiV3PlanningSnapshotSchemaVersion =
     'planning_snapshot_v3_shadow_1';
@@ -82,36 +83,35 @@ class PlanningSnapshotV3 {
   String get canonicalJson => jsonEncode(data);
 
   Map<String, dynamic> get safeMetadata => <String, dynamic>{
-        'status': 'captured',
-        'schema_version': aiV3PlanningSnapshotSchemaVersion,
-        'snapshot_id': snapshotId,
-        'captured_at': capturedAtUtc.toIso8601String(),
-        if ((projectId ?? '').isNotEmpty) 'project_id': projectId,
-        'state_digest': stateDigest,
-        'content_digest': contentDigest,
-        'serialized_bytes': utf8.encode(canonicalJson).length,
-        'counts': <String, int>{
-          'rows': rowById.length,
-          'clips': clipById.length,
-          'groups': groupById.length,
-          'effect_instances': effectInstanceById.length,
-          'library_assets': libraryAssetById.length,
-          'midi_notes': clipById.values.fold<int>(
-            0,
-            (count, clip) =>
-                count +
-                (clip['midi_notes'] as List? ?? const <Object>[]).length,
-          ),
-        },
-      };
+    'status': 'captured',
+    'schema_version': aiV3PlanningSnapshotSchemaVersion,
+    'snapshot_id': snapshotId,
+    'captured_at': capturedAtUtc.toIso8601String(),
+    if ((projectId ?? '').isNotEmpty) 'project_id': projectId,
+    'state_digest': stateDigest,
+    'content_digest': contentDigest,
+    'serialized_bytes': utf8.encode(canonicalJson).length,
+    'counts': <String, int>{
+      'rows': rowById.length,
+      'clips': clipById.length,
+      'groups': groupById.length,
+      'effect_instances': effectInstanceById.length,
+      'library_assets': libraryAssetById.length,
+      'midi_notes': clipById.values.fold<int>(
+        0,
+        (count, clip) =>
+            count + (clip['midi_notes'] as List? ?? const <Object>[]).length,
+      ),
+    },
+  };
 }
 
 class AiV3PlanningSnapshotBuilder {
   AiV3PlanningSnapshotBuilder({
     String Function()? idFactory,
     DateTime Function()? clock,
-  })  : _idFactory = idFactory ?? const Uuid().v4,
-        _clock = clock ?? DateTime.now;
+  }) : _idFactory = idFactory ?? const Uuid().v4,
+       _clock = clock ?? DateTime.now;
 
   final String Function() _idFactory;
   final DateTime Function() _clock;
@@ -132,17 +132,17 @@ class AiV3PlanningSnapshotBuilder {
     final stateDigest =
         validationState['client_state_digest']?.toString().trim() ?? '';
     if (snapshotId.isEmpty) {
-      throw const AiV3PlanningSnapshotException(
-        'planning_snapshot_id_missing',
-      );
+      throw const AiV3PlanningSnapshotException('planning_snapshot_id_missing');
     }
     if (stateDigest.isEmpty) {
       throw const AiV3PlanningSnapshotException(
         'planning_snapshot_state_digest_missing',
       );
     }
-    if (!const <String>{'new_request', 'modify_pending_plan'}
-        .contains(requestMode)) {
+    if (!const <String>{
+      'new_request',
+      'modify_pending_plan',
+    }.contains(requestMode)) {
       throw const AiV3PlanningSnapshotException(
         'planning_snapshot_request_mode_invalid',
       );
@@ -245,10 +245,12 @@ class AiV3PlanningSnapshotBuilder {
         'alignment_offset_ms': clip.alignmentOffsetMs,
         'audio_enhancement_preset': clip.audioEnhancementPreset,
         'volume_automation': clip.volumeAutomation
-            .map((point) => <String, dynamic>{
-                  'time_ms': point.x,
-                  'value': point.volume,
-                })
+            .map(
+              (point) => <String, dynamic>{
+                'time_ms': point.x,
+                'value': point.volume,
+              },
+            )
             .toList(growable: false),
         if (clip.instrumentId.trim().isNotEmpty)
           'instrument_id': clip.instrumentId.trim(),
@@ -260,13 +262,15 @@ class AiV3PlanningSnapshotBuilder {
           ),
         if (clip.midiNotes.isNotEmpty)
           'midi_notes': clip.midiNotes
-              .map((note) => <String, dynamic>{
-                    'note_id': note.id,
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'note_id': note.id,
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false),
       });
     }
@@ -360,24 +364,26 @@ class AiV3PlanningSnapshotBuilder {
           'planning_snapshot_row_index_incomplete',
         );
       }
-      final effects = row.effects.map((effect) {
-        final instanceId = effect.instanceId.trim();
-        if (instanceId.isNotEmpty && !effectInstanceIds.add(instanceId)) {
-          throw const AiV3PlanningSnapshotException(
-            'planning_snapshot_effect_instance_id_duplicate',
-          );
-        }
-        return <String, dynamic>{
-          'effect_index': effect.effectIndex,
-          if (instanceId.isNotEmpty) 'effect_instance_id': instanceId,
-          'effect_id': effect.effectId,
-          'name': effect.name,
-          'bypassed': effect.isBypassed,
-          'parameters': effect.parameters
-              .map((parameter) => parameter.toJson())
-              .toList(growable: false),
-        };
-      }).toList(growable: false);
+      final effects = row.effects
+          .map((effect) {
+            final instanceId = effect.instanceId.trim();
+            if (instanceId.isNotEmpty && !effectInstanceIds.add(instanceId)) {
+              throw const AiV3PlanningSnapshotException(
+                'planning_snapshot_effect_instance_id_duplicate',
+              );
+            }
+            return <String, dynamic>{
+              'effect_index': effect.effectIndex,
+              if (instanceId.isNotEmpty) 'effect_instance_id': instanceId,
+              'effect_id': effect.effectId,
+              'name': effect.name,
+              'bypassed': effect.isBypassed,
+              'parameters': effect.parameters
+                  .map((parameter) => parameter.toJson())
+                  .toList(growable: false),
+            };
+          })
+          .toList(growable: false);
       final audioFacts = AiV3AudioFacts.fromAnalysis(
         mixProcessingSupported:
             row.hasAudio || (clipIdsByRow[row.rowId]?.isNotEmpty ?? false),
@@ -421,27 +427,35 @@ class AiV3PlanningSnapshotBuilder {
         },
         'effects': effects,
         'volume_automation': row.volumeAutomation
-            .map((point) => <String, dynamic>{
-                  'time_ms': point.x,
-                  'value': point.volume,
-                })
+            .map(
+              (point) => <String, dynamic>{
+                'time_ms': point.x,
+                'value': point.volume,
+              },
+            )
             .toList(growable: false),
         'automation_points': <String, dynamic>{
-          'volume': (automationByRow[row.rowId]?['volume'] ??
+          'volume':
+              (automationByRow[row.rowId]?['volume'] ??
               row.volumeAutomation
-                  .map((point) => <String, dynamic>{
-                        'time_ms': point.x,
-                        'value': point.volume,
-                      })
+                  .map(
+                    (point) => <String, dynamic>{
+                      'time_ms': point.x,
+                      'value': point.volume,
+                    },
+                  )
                   .toList(growable: false)),
-          for (final entry in (automationByRow[row.rowId] ??
-                  const <String, List<Map<String, dynamic>>>{})
-              .entries)
+          for (final entry
+              in (automationByRow[row.rowId] ??
+                      const <String, List<Map<String, dynamic>>>{})
+                  .entries)
             if (entry.key != 'volume') entry.key: entry.value,
         },
-        'automation_targets': _canonicalRowAutomationTargets(
-          row.rowId,
-          validation['automation_targets'],
+        'automation_targets': aiV3EnsureRowMixAutomationTargets(
+          _canonicalRowAutomationTargets(
+            row.rowId,
+            validation['automation_targets'],
+          ),
         ),
       });
     }
@@ -499,17 +513,21 @@ class AiV3PlanningSnapshotBuilder {
         'soloed': group.soloed,
         'collapsed': group.collapsed,
         'effects': group.effects
-            .map((effect) => <String, dynamic>{
-                  'effect_id': effect.effectId,
-                  'name': effect.displayName,
-                  'bypassed': effect.bypassed,
-                  'parameters': _copyJson(effect.params),
-                })
+            .map(
+              (effect) => <String, dynamic>{
+                'effect_id': effect.effectId,
+                'name': effect.displayName,
+                'bypassed': effect.bypassed,
+                'parameters': _copyJson(effect.params),
+              },
+            )
             .toList(growable: false),
       });
     }
-    groups.sort((left, right) =>
-        left['group_id'].toString().compareTo(right['group_id'].toString()));
+    groups.sort(
+      (left, right) =>
+          left['group_id'].toString().compareTo(right['group_id'].toString()),
+    );
 
     final selection = _selection(
       validationState['selection'],
@@ -517,8 +535,10 @@ class AiV3PlanningSnapshotBuilder {
       clips: clips,
     );
     final libraryAssets = _maps(clientContext['ai_v3_library_assets']);
-    libraryAssets.sort((left, right) =>
-        left['asset_id'].toString().compareTo(right['asset_id'].toString()));
+    libraryAssets.sort(
+      (left, right) =>
+          left['asset_id'].toString().compareTo(right['asset_id'].toString()),
+    );
     _mutableIndexBy<String>(
       libraryAssets,
       'asset_id',
@@ -532,12 +552,14 @@ class AiV3PlanningSnapshotBuilder {
     );
     final effectNames = _stringList(clientContext['allowed_builtin_effects']);
     final effectCatalog = effectNames
-        .map((name) => <String, dynamic>{
-              'effect_id': name,
-              'parameter_ids': List<String>.from(
-                kExposedEffectParameterNames[name] ?? const <String>[],
-              )..sort(),
-            })
+        .map(
+          (name) => <String, dynamic>{
+            'effect_id': name,
+            'parameter_ids': List<String>.from(
+              kExposedEffectParameterNames[name] ?? const <String>[],
+            )..sort(),
+          },
+        )
         .toList(growable: false);
 
     final rawMaster = validationState['master'];
@@ -626,23 +648,27 @@ class AiV3PlanningSnapshotBuilder {
         'gain_ui': project.masterGain0to3,
         'pan_01': project.masterPan0to1,
         'effects': project.masterEffects
-            .map((effect) => <String, dynamic>{
-                  'effect_index': effect.effectIndex,
-                  if (effect.instanceId.trim().isNotEmpty)
-                    'effect_instance_id': effect.instanceId.trim(),
-                  'effect_id': effect.effectId,
-                  'name': effect.name,
-                  'bypassed': effect.isBypassed,
-                  'parameters': effect.parameters
-                      .map((parameter) => parameter.toJson())
-                      .toList(growable: false),
-                })
+            .map(
+              (effect) => <String, dynamic>{
+                'effect_index': effect.effectIndex,
+                if (effect.instanceId.trim().isNotEmpty)
+                  'effect_instance_id': effect.instanceId.trim(),
+                'effect_id': effect.effectId,
+                'name': effect.name,
+                'bypassed': effect.isBypassed,
+                'parameters': effect.parameters
+                    .map((parameter) => parameter.toJson())
+                    .toList(growable: false),
+              },
+            )
             .toList(growable: false),
-        'automation_targets':
-            _copyJson(rawMaster['automation_targets'] ?? const <Object>[]),
+        'automation_targets': _copyJson(
+          rawMaster['automation_targets'] ?? const <Object>[],
+        ),
       },
-      'automation_clips':
-          _copyJson(validationState['automation_clips'] ?? const <Object>[]),
+      'automation_clips': _copyJson(
+        validationState['automation_clips'] ?? const <Object>[],
+      ),
       'catalogs': <String, dynamic>{
         'instrument_ids': instruments,
         'instrument_catalog': instrumentCatalog,
@@ -657,8 +683,9 @@ class AiV3PlanningSnapshotBuilder {
       },
     };
     final canonicalContent = _canonicalJson(content);
-    final contentDigest =
-        crypto.sha256.convert(utf8.encode(canonicalContent)).toString();
+    final contentDigest = crypto.sha256
+        .convert(utf8.encode(canonicalContent))
+        .toString();
     final capturedAtUtc = _clock().toUtc();
     return PlanningSnapshotV3._(
       snapshotId: snapshotId,
@@ -684,8 +711,9 @@ Map<String, dynamic> _selection(
   required List<Map<String, dynamic>> rows,
   required List<Map<String, dynamic>> clips,
 }) {
-  final selection =
-      raw is Map ? Map<String, dynamic>.from(raw) : const <String, dynamic>{};
+  final selection = raw is Map
+      ? Map<String, dynamic>.from(raw)
+      : const <String, dynamic>{};
   final rowByIndex = <int, int>{
     for (final row in rows) row['display_index'] as int: row['row_id'] as int,
   };
@@ -694,40 +722,32 @@ Map<String, dynamic> _selection(
       clip['display_index'] as int: clip['clip_id'] as String,
   };
   final selectedRowIndex = selection['selected_row_index'];
-  if (selectedRowIndex != null &&
-      (selectedRowIndex is! int || !rowByIndex.containsKey(selectedRowIndex))) {
-    throw const AiV3PlanningSnapshotException(
-      'planning_snapshot_selection_invalid',
-    );
-  }
+  final validSelectedRow =
+      selectedRowIndex is int && rowByIndex.containsKey(selectedRowIndex)
+      ? selectedRowIndex
+      : null;
   final rawSelectedClips =
       selection['selected_clip_indices'] as List? ?? const <Object>[];
-  if (rawSelectedClips.any(
-    (value) => value is! int || !clipByIndex.containsKey(value),
-  )) {
-    throw const AiV3PlanningSnapshotException(
-      'planning_snapshot_selection_invalid',
-    );
-  }
+  final validSelectedClips = rawSelectedClips
+      .whereType<int>()
+      .where(clipByIndex.containsKey)
+      .toList(growable: false);
   final primaryIndex = selection['primary_selected_clip_index'];
-  if (primaryIndex != null &&
-      (primaryIndex is! int || !clipByIndex.containsKey(primaryIndex))) {
-    throw const AiV3PlanningSnapshotException(
-      'planning_snapshot_selection_invalid',
-    );
-  }
+  final validPrimaryIndex =
+      primaryIndex is int && clipByIndex.containsKey(primaryIndex)
+      ? primaryIndex
+      : null;
   return <String, dynamic>{
-    if (selectedRowIndex is int) ...<String, dynamic>{
-      'selected_row_id': rowByIndex[selectedRowIndex],
-      'selected_row_display_index': selectedRowIndex,
+    if (validSelectedRow != null) ...<String, dynamic>{
+      'selected_row_id': rowByIndex[validSelectedRow],
+      'selected_row_display_index': validSelectedRow,
     },
-    'selected_clip_ids': rawSelectedClips
-        .whereType<int>()
-        .map((index) => clipByIndex[index]!)
-        .toList(growable: false),
-    if (primaryIndex is int) ...<String, dynamic>{
-      'primary_selected_clip_id': clipByIndex[primaryIndex],
-      'primary_selected_clip_display_index': primaryIndex,
+    'selected_clip_ids': [
+      for (final index in validSelectedClips) clipByIndex[index]!,
+    ],
+    if (validPrimaryIndex != null) ...<String, dynamic>{
+      'primary_selected_clip_id': clipByIndex[validPrimaryIndex],
+      'primary_selected_clip_display_index': validPrimaryIndex,
     },
   };
 }
@@ -752,12 +772,13 @@ List<String> _stringList(Object? raw) {
       'planning_snapshot_source_malformed',
     );
   }
-  final values = raw
-      .map((value) => value.toString().trim())
-      .where((value) => value.isNotEmpty)
-      .toSet()
-      .toList(growable: false)
-    ..sort();
+  final values =
+      raw
+          .map((value) => value.toString().trim())
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .toList(growable: false)
+        ..sort();
   return values;
 }
 
@@ -797,9 +818,11 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
     };
   }
   final result = byId.values.toList(growable: false)
-    ..sort((left, right) => left['instrument_id']
-        .toString()
-        .compareTo(right['instrument_id'].toString()));
+    ..sort(
+      (left, right) => left['instrument_id'].toString().compareTo(
+        right['instrument_id'].toString(),
+      ),
+    );
   return result;
 }
 
@@ -864,18 +887,19 @@ List<Map<String, dynamic>> _canonicalRowAutomationTargets(
   Object? raw,
 ) {
   final prefix = 'row:$rowId:';
-  return (raw as List? ?? const <Object>[]).whereType<Map>().map((value) {
-    final target = Map<String, dynamic>.from(
-      _copyJson(value) as Map,
-    );
-    for (final key in const <String>['target_id', 'id']) {
-      final id = target[key]?.toString().trim();
-      if (id != null && id.startsWith(prefix)) {
-        target[key] = id.substring(prefix.length);
-      }
-    }
-    return target;
-  }).toList(growable: false);
+  return (raw as List? ?? const <Object>[])
+      .whereType<Map>()
+      .map((value) {
+        final target = Map<String, dynamic>.from(_copyJson(value) as Map);
+        for (final key in const <String>['target_id', 'id']) {
+          final id = target[key]?.toString().trim();
+          if (id != null && id.startsWith(prefix)) {
+            target[key] = id.substring(prefix.length);
+          }
+        }
+        return target;
+      })
+      .toList(growable: false);
 }
 
 String _canonicalJson(Object? value) => jsonEncode(_canonicalize(value));

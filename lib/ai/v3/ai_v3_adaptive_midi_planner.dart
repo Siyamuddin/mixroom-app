@@ -10,12 +10,14 @@ import 'ai_v3_planner_request.dart';
 import 'ai_v3_planning_snapshot.dart';
 import 'ai_v3_retrieval.dart';
 import 'ai_v3_resources.dart';
+import 'ai_v3_style_compiler.dart';
 import 'ai_v3_user_facing_text.dart';
 
 const String aiV3AdaptiveArchitecture = 'v3_adaptive_shadow';
 const String aiV3AdaptiveSurfaceRevision = 'full_commands_fact_retrieval_v1';
 
-const String aiV3AdaptiveFirstTurnInstructions = '''
+const String aiV3AdaptiveFirstTurnInstructions =
+    '''
 You are Mixroom's sole semantic and musical planner.
 $aiV3CustomerLanguageInstructions
 Preserve the complete original request and its explicit constraints. Treat
@@ -36,7 +38,8 @@ execution. Never claim unexecuted work was applied. Match the language of the
 latest user request.
 ''';
 
-const String aiV3AdaptiveContinuationInstructions = '''
+const String aiV3AdaptiveContinuationInstructions =
+    '''
 You are Mixroom's sole semantic and musical planner on the final continuation.
 $aiV3CustomerLanguageInstructions
 Use the unchanged original request, compact context, exact retrieval request,
@@ -95,17 +98,16 @@ class AiV3AdaptivePlannerResult {
   int get callCount => secondRawResponse == null ? 1 : 2;
 
   Map<String, dynamic> toCaptureJson() => <String, dynamic>{
-        'plan': plan.toJson(),
-        'first_request_body': firstRequestBody,
-        'first_raw_output': firstRawResponse,
-        if (retrievalRequest != null)
-          'retrieval_request': retrievalRequest!.toJson(),
-        if (retrievalResult != null)
-          'retrieval_result': retrievalResult!.toJson(),
-        if (secondRequestBody != null) 'second_request_body': secondRequestBody,
-        if (secondRawResponse != null) 'second_raw_output': secondRawResponse,
-        'metrics': meta,
-      };
+    'plan': plan.toJson(),
+    'first_request_body': firstRequestBody,
+    'first_raw_output': firstRawResponse,
+    if (retrievalRequest != null)
+      'retrieval_request': retrievalRequest!.toJson(),
+    if (retrievalResult != null) 'retrieval_result': retrievalResult!.toJson(),
+    if (secondRequestBody != null) 'second_request_body': secondRequestBody,
+    if (secondRawResponse != null) 'second_raw_output': secondRawResponse,
+    'metrics': meta,
+  };
 }
 
 abstract interface class AiV3AdaptivePlanner {
@@ -157,9 +159,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
     }
     if (compactCore.data['snapshot_id'] != snapshot.snapshotId ||
         compactCore.data['state_digest'] != snapshot.stateDigest) {
-      throw const AiV3AdaptivePlannerException(
-        'v3_adaptive_snapshot_mismatch',
-      );
+      throw const AiV3AdaptivePlannerException('v3_adaptive_snapshot_mismatch');
     }
     final totalStopwatch = Stopwatch()..start();
     final firstBody = buildAiV3AdaptiveFirstRequestBody(
@@ -226,9 +226,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
       throw AiV3AdaptivePlannerException(
         'v3_adaptive_retrieval_failed',
         error.code,
-        <String, dynamic>{
-          'retrieval_request': retrievalRequest.toJson(),
-        },
+        <String, dynamic>{'retrieval_request': retrievalRequest.toJson()},
       );
     }
     retrievalStopwatch.stop();
@@ -245,9 +243,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
     final second = await _post(secondBody, stage: 'continuation');
     final secondCall = _singleFunctionCall(second.response);
     if (secondCall.name == 'get_context_domains') {
-      throw const AiV3AdaptivePlannerException(
-        'adaptive_third_call_forbidden',
-      );
+      throw const AiV3AdaptivePlannerException('adaptive_third_call_forbidden');
     }
     if (secondCall.name != 'submit_plan_v3') {
       throw AiV3AdaptivePlannerException(
@@ -260,8 +256,9 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
       allowedCommands: aiV3CommandTypes,
       resourceRefsEnabled: resourceRefsEnabled,
     );
-    final requestedDomains =
-        retrievalRequest.requests.map((query) => query.domain).toSet();
+    final requestedDomains = retrievalRequest.requests
+        .map((query) => query.domain)
+        .toSet();
     if (requestedDomains.contains('clip_advanced')) {
       _requireRetrievedAdvancedClipTargets(plan, retrievalResult);
     }
@@ -316,10 +313,7 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
           )
           .timeout(requestTimeout);
     } on TimeoutException {
-      throw AiV3AdaptivePlannerException(
-        'v3_adaptive_planner_timeout',
-        stage,
-      );
+      throw AiV3AdaptivePlannerException('v3_adaptive_planner_timeout', stage);
     } finally {
       stopwatch.stop();
     }
@@ -339,8 +333,10 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
       final error = decoded['error'];
       final code = error is Map ? error['code']?.toString() ?? '' : '';
       final message = error is Map ? error['message']?.toString() ?? '' : '';
-      final safeMessage =
-          message.replaceAll(RegExp(r'\bsk-[A-Za-z0-9_-]+\b'), '[redacted]');
+      final safeMessage = message.replaceAll(
+        RegExp(r'\bsk-[A-Za-z0-9_-]+\b'),
+        '[redacted]',
+      );
       throw AiV3AdaptivePlannerException(
         'v3_adaptive_http_error',
         '$stage:${response.statusCode}:${code.isEmpty ? 'unknown' : code}',
@@ -378,8 +374,8 @@ class AiV3AdaptivePlannerService implements AiV3AdaptivePlanner {
     int token(String key) => (first.usage[key] as num?)?.toInt() ?? 0;
     int secondToken(String key) => (second?.usage[key] as num?)?.toInt() ?? 0;
     final firstCost = (first.cost?['estimated_cost_usd'] as num?)?.toDouble();
-    final secondCost =
-        (second?.cost?['estimated_cost_usd'] as num?)?.toDouble();
+    final secondCost = (second?.cost?['estimated_cost_usd'] as num?)
+        ?.toDouble();
     return <String, dynamic>{
       'architecture': aiV3AdaptiveArchitecture,
       'surface_revision': resourceRefsEnabled
@@ -536,20 +532,20 @@ void _requireRetrievedEffectFacts(
       final returnedParameters = returnedParametersByEffectId[effectId];
       final rawParameters = command.arguments['parameters'];
       final parameterIds = rawParameters is List
-          ? rawParameters
-              .whereType<Map>()
-              .map((parameter) => parameter['parameter_id']?.toString() ?? '')
+          ? rawParameters.whereType<Map>().map(
+              (parameter) => parameter['parameter_id']?.toString() ?? '',
+            )
           : const Iterable<String>.empty();
       final resolvedParameterIds = returnedParameters == null
           ? const <String?>[]
           : parameterIds
-              .map(
-                (parameterId) => _canonicalRetrievedEffectParameterId(
-                  parameterId,
-                  returnedParameters,
-                ),
-              )
-              .toList(growable: false);
+                .map(
+                  (parameterId) => _canonicalRetrievedEffectParameterId(
+                    parameterId,
+                    returnedParameters,
+                  ),
+                )
+                .toList(growable: false);
       if (rowId is! int ||
           !returnedRowIds.contains(rowId) ||
           returnedParameters == null ||
@@ -607,15 +603,16 @@ void _requireRetrievedAdvancedClipTargets(
     if (command.type == 'clip.glue') {
       final clipIds = command.arguments['sources'] is List
           ? (command.arguments['sources'] as List)
-              .whereType<Map>()
-              .map((source) => source['clip_id'])
-              .whereType<String>()
-              .toList(growable: false)
+                .whereType<Map>()
+                .map((source) => source['clip_id'])
+                .whereType<String>()
+                .toList(growable: false)
           : (command.arguments['clip_ids'] as List? ?? const [])
-          .map((value) => value.toString())
-          .toList(growable: false);
-      final missing =
-          clipIds.where((clipId) => !returnedClipIds.contains(clipId));
+                .map((value) => value.toString())
+                .toList(growable: false);
+      final missing = clipIds.where(
+        (clipId) => !returnedClipIds.contains(clipId),
+      );
       if (missing.isNotEmpty) {
         throw AiV3AdaptivePlannerException(
           'v3_adaptive_clip_target_not_retrieved',
@@ -763,34 +760,34 @@ Map<String, dynamic> buildAiV3AdaptiveFirstRequestBody({
   required String reasoningEffort,
   String? promptTraceId,
   bool resourceRefsEnabled = false,
-}) =>
-    _baseRequest(
-      instructions: <String>[
-        aiV3AdaptiveFirstTurnInstructions,
-        if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
-      ].join('\n'),
-      content: <Map<String, dynamic>>[
-        _inputText('ORIGINAL_REQUEST_VERBATIM', originalRequest),
-        _inputJson('COMPACT_CORE_V3_JSON', compactCore),
-      ],
-      tools: <Map<String, dynamic>>[
-        aiV3SubmitPlanTool(
-          commandTypes: aiV3CommandTypes,
-          includeCommandSemantics: true,
-          includeResourceRefs: resourceRefsEnabled,
-          resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
-        ),
-        aiV3GetContextDomainsTool(),
-      ],
-      forcedSubmit: false,
-      model: model,
-      reasoningEffort: reasoningEffort,
-      promptTraceId: promptTraceId,
-      stage: 'first',
-      surfaceRevision: resourceRefsEnabled
-          ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
-          : aiV3AdaptiveSurfaceRevision,
-    );
+}) => _baseRequest(
+  instructions: <String>[
+    aiV3AdaptiveFirstTurnInstructions,
+    aiV3MusicalDimensionCompilerInstructions.trim(),
+    if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
+  ].join('\n'),
+  content: <Map<String, dynamic>>[
+    _inputText('ORIGINAL_REQUEST_VERBATIM', originalRequest),
+    _inputJson('COMPACT_CORE_V3_JSON', compactCore),
+  ],
+  tools: <Map<String, dynamic>>[
+    aiV3SubmitPlanTool(
+      commandTypes: aiV3CommandTypes,
+      includeCommandSemantics: true,
+      includeResourceRefs: resourceRefsEnabled,
+      resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+    ),
+    aiV3GetContextDomainsTool(),
+  ],
+  forcedSubmit: false,
+  model: model,
+  reasoningEffort: reasoningEffort,
+  promptTraceId: promptTraceId,
+  stage: 'first',
+  surfaceRevision: resourceRefsEnabled
+      ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
+      : aiV3AdaptiveSurfaceRevision,
+);
 
 Map<String, dynamic> buildAiV3AdaptiveContinuationRequestBody({
   required Map<String, dynamic> compactCore,
@@ -801,35 +798,35 @@ Map<String, dynamic> buildAiV3AdaptiveContinuationRequestBody({
   required String reasoningEffort,
   String? promptTraceId,
   bool resourceRefsEnabled = false,
-}) =>
-    _baseRequest(
-      instructions: <String>[
-        aiV3AdaptiveContinuationInstructions,
-        if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
-      ].join('\n'),
-      content: <Map<String, dynamic>>[
-        _inputText('ORIGINAL_REQUEST_VERBATIM', originalRequest),
-        _inputJson('COMPACT_CORE_V3_JSON', compactCore),
-        _inputJson('TYPED_RETRIEVAL_REQUEST_JSON', retrievalRequest),
-        _inputJson('TYPED_RETRIEVAL_RESULTS_JSON', retrievalResult),
-      ],
-      tools: <Map<String, dynamic>>[
-        aiV3SubmitPlanTool(
-          commandTypes: aiV3CommandTypes,
-          includeCommandSemantics: true,
-          includeResourceRefs: resourceRefsEnabled,
-          resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
-        ),
-      ],
-      forcedSubmit: true,
-      model: model,
-      reasoningEffort: reasoningEffort,
-      promptTraceId: promptTraceId,
-      stage: 'continuation',
-      surfaceRevision: resourceRefsEnabled
-          ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
-          : aiV3AdaptiveSurfaceRevision,
-    );
+}) => _baseRequest(
+  instructions: <String>[
+    aiV3AdaptiveContinuationInstructions,
+    aiV3MusicalDimensionCompilerInstructions.trim(),
+    if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
+  ].join('\n'),
+  content: <Map<String, dynamic>>[
+    _inputText('ORIGINAL_REQUEST_VERBATIM', originalRequest),
+    _inputJson('COMPACT_CORE_V3_JSON', compactCore),
+    _inputJson('TYPED_RETRIEVAL_REQUEST_JSON', retrievalRequest),
+    _inputJson('TYPED_RETRIEVAL_RESULTS_JSON', retrievalResult),
+  ],
+  tools: <Map<String, dynamic>>[
+    aiV3SubmitPlanTool(
+      commandTypes: aiV3CommandTypes,
+      includeCommandSemantics: true,
+      includeResourceRefs: resourceRefsEnabled,
+      resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
+    ),
+  ],
+  forcedSubmit: true,
+  model: model,
+  reasoningEffort: reasoningEffort,
+  promptTraceId: promptTraceId,
+  stage: 'continuation',
+  surfaceRevision: resourceRefsEnabled
+      ? '$aiV3AdaptiveSurfaceRevision+$aiV3ResourceRefSurfaceRevision'
+      : aiV3AdaptiveSurfaceRevision,
+);
 
 Map<String, dynamic> _baseRequest({
   required String instructions,
@@ -859,8 +856,10 @@ Map<String, dynamic> _baseRequest({
     'store': false,
     if (trace.isNotEmpty)
       'metadata': <String, String>{
-        'prompt_trace_id':
-            trace.substring(0, trace.length > 64 ? 64 : trace.length),
+        'prompt_trace_id': trace.substring(
+          0,
+          trace.length > 64 ? 64 : trace.length,
+        ),
         'architecture': aiV3AdaptiveArchitecture,
         'surface_revision': surfaceRevision,
         'stage': stage,
@@ -885,11 +884,10 @@ AiV3Plan _parsePlan(
       allowResourceRefs: resourceRefsEnabled,
       resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes,
     );
-    if (plan.commands
-        .any((command) => !allowedCommands.contains(command.type))) {
-      throw const AiV3ContractException(
-        'v3_planner_command_outside_surface',
-      );
+    if (plan.commands.any(
+      (command) => !allowedCommands.contains(command.type),
+    )) {
+      throw const AiV3ContractException('v3_planner_command_outside_surface');
     }
     return plan;
   } on AiV3ContractException catch (error) {
@@ -904,9 +902,7 @@ AiV3Plan _parsePlan(
 _FunctionCall _singleFunctionCall(Map<String, dynamic> response) {
   final output = response['output'];
   if (output is! List) {
-    throw const AiV3AdaptivePlannerException(
-      'v3_adaptive_tool_call_missing',
-    );
+    throw const AiV3AdaptivePlannerException('v3_adaptive_tool_call_missing');
   }
   final calls = output
       .whereType<Map>()
@@ -934,9 +930,7 @@ _FunctionCall _singleFunctionCall(Map<String, dynamic> response) {
       );
     }
   } else {
-    throw const AiV3AdaptivePlannerException(
-      'v3_adaptive_arguments_invalid',
-    );
+    throw const AiV3AdaptivePlannerException('v3_adaptive_arguments_invalid');
   }
   return _FunctionCall(name: name, arguments: arguments);
 }

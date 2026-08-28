@@ -9,6 +9,7 @@ import '../../helpers/midi_pitch_ranges.dart';
 import '../../models/models.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_audio_facts.dart';
+import 'ai_v3_automation_targets.dart';
 
 enum AiV3ContextProfile { essential, enriched, rich }
 
@@ -90,8 +91,10 @@ class AiV3CoreContextBuilder {
     if (rawRows.length > maxRows) {
       throw const AiV3ContextException('prototype_context_row_limit');
     }
-    if (!const <String>{'new_request', 'modify_pending_plan'}
-            .contains(requestMode) ||
+    if (!const <String>{
+          'new_request',
+          'modify_pending_plan',
+        }.contains(requestMode) ||
         (requestMode == 'modify_pending_plan' &&
             (pendingPlan == null ||
                 (modificationRequest ?? '').trim().isEmpty))) {
@@ -226,7 +229,8 @@ class AiV3CoreContextBuilder {
           ? Map<Object?, Object?>.from(source['audio_analysis'] as Map)
           : const <Object?, Object?>{};
       final audioFacts = AiV3AudioFacts.fromAnalysis(
-        mixProcessingSupported: source['has_audio'] == true ||
+        mixProcessingSupported:
+            source['has_audio'] == true ||
             (clipIdsByRow[rowId]?.isNotEmpty ?? false),
         hasAudio: source['has_audio'] == true,
         approxRms: (source['approx_rms'] as num?)?.toDouble() ?? 0.0,
@@ -255,7 +259,10 @@ class AiV3CoreContextBuilder {
         ),
         'clip_ids': (<String>[...?clipIdsByRow[rowId]]..sort()),
         'effects': rowEffects,
-        'automation_targets': source['automation_targets'] ?? const <Object>[],
+        'automation_targets': aiV3EnsureRowMixAutomationTargets(
+          source['automation_targets'] as Iterable<Object?>? ??
+              const <Object>[],
+        ),
       };
       if (profile != AiV3ContextProfile.essential) {
         row.addAll(<String, dynamic>{
@@ -275,17 +282,21 @@ class AiV3CoreContextBuilder {
       }
       rows.add(_withoutNulls(row));
     }
-    rows.sort((a, b) => ((a['display_index'] as num?)?.toInt() ?? 0)
-        .compareTo((b['display_index'] as num?)?.toInt() ?? 0));
+    rows.sort(
+      (a, b) => ((a['display_index'] as num?)?.toInt() ?? 0).compareTo(
+        (b['display_index'] as num?)?.toInt() ?? 0,
+      ),
+    );
     if (rowStateById.keys.toSet().difference(rowIds).isNotEmpty ||
         rowIds.difference(rowStateById.keys.toSet()).isNotEmpty) {
       throw const AiV3ContextException('prototype_context_row_state_missing');
     }
 
     final clips = <Map<String, dynamic>>[];
-    final sourceAvailability = (clientContext['ai_v3_clip_source_available']
-                as Map?)
-            ?.map((key, value) => MapEntry(key.toString(), value == true)) ??
+    final sourceAvailability =
+        (clientContext['ai_v3_clip_source_available'] as Map?)?.map(
+          (key, value) => MapEntry(key.toString(), value == true),
+        ) ??
         const <String, bool>{};
     final validationClipIds = <String>{};
     final clipIndexes = <int>{};
@@ -342,12 +353,14 @@ class AiV3CoreContextBuilder {
         'pitch_semitones': source['pitch_semitones'],
         if (runtime.midiNotes.isNotEmpty)
           'midi_notes': runtime.midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false),
       };
       if (profile != AiV3ContextProfile.essential) {
@@ -358,26 +371,36 @@ class AiV3CoreContextBuilder {
     }
     if (validationClipIds.length != clipById.length) {
       throw const AiV3ContextException(
-          'prototype_context_clip_index_incomplete');
+        'prototype_context_clip_index_incomplete',
+      );
     }
-    clips.sort((a, b) => ((a['display_index'] as num?)?.toInt() ?? 0)
-        .compareTo((b['display_index'] as num?)?.toInt() ?? 0));
+    clips.sort(
+      (a, b) => ((a['display_index'] as num?)?.toInt() ?? 0).compareTo(
+        (b['display_index'] as num?)?.toInt() ?? 0,
+      ),
+    );
 
     final history = conversation
         .where((entry) => entry['role'] != null && entry['content'] != null)
         .toList(growable: false);
-    final recentHistory =
-        history.length <= 8 ? history : history.sublist(history.length - 8);
-    final stateDigest =
-        validationState['client_state_digest']?.toString().trim();
+    final recentHistory = history.length <= 8
+        ? history
+        : history.sublist(history.length - 8);
+    final stateDigest = validationState['client_state_digest']
+        ?.toString()
+        .trim();
     final computedDigest = (stateDigest == null || stateDigest.isEmpty)
         ? crypto.sha256
-            .convert(utf8.encode(jsonEncode(<String, dynamic>{
-              'rows': rows,
-              'clips': clips,
-              'project': validationState['project'],
-            })))
-            .toString()
+              .convert(
+                utf8.encode(
+                  jsonEncode(<String, dynamic>{
+                    'rows': rows,
+                    'clips': clips,
+                    'project': validationState['project'],
+                  }),
+                ),
+              )
+              .toString()
         : stateDigest;
     final playheadMs = clientContext['ai_v3_playhead_ms'];
     if (playheadMs is! num || !playheadMs.isFinite || playheadMs < 0) {
@@ -414,7 +437,8 @@ class AiV3CoreContextBuilder {
         configuredCurrentRows is! int ||
         configuredCurrentRows != rows.length) {
       throw const AiV3ContextException(
-          'prototype_context_row_capacity_missing');
+        'prototype_context_row_capacity_missing',
+      );
     }
     final effectiveMaxRows = math.min(maxRows, configuredMaxRows);
     final rowCreationPolicy =
@@ -438,9 +462,9 @@ class AiV3CoreContextBuilder {
           !groupIds.add(groupId) ||
           memberIndices is! List ||
           memberIndices.any((value) => value is! int) ||
-          memberIndices
-              .whereType<int>()
-              .any((index) => !rowIdByIndex.containsKey(index))) {
+          memberIndices.whereType<int>().any(
+            (index) => !rowIdByIndex.containsKey(index),
+          )) {
         throw const AiV3ContextException('prototype_context_group_invalid');
       }
       final gainUi = (source['gain'] as num?)?.toDouble() ?? 2.0;
@@ -459,17 +483,20 @@ class AiV3CoreContextBuilder {
         'collapsed': source['collapsed'] == true,
         'effects': (source['effects'] as List? ?? const <Object>[])
             .whereType<Map>()
-            .map((effect) => <String, dynamic>{
-                  'effect_index': effect['effect_index'],
-                  'effect_id': effect['effect_id'] ?? effect['name'],
-                  'name': effect['name'] ?? effect['effect_id'],
-                  'bypassed': effect['bypassed'] == true,
-                })
+            .map(
+              (effect) => <String, dynamic>{
+                'effect_index': effect['effect_index'],
+                'effect_id': effect['effect_id'] ?? effect['name'],
+                'name': effect['name'] ?? effect['effect_id'],
+                'bypassed': effect['bypassed'] == true,
+              },
+            )
             .toList(growable: false),
       });
     }
     groups.sort(
-        (a, b) => a['group_id'].toString().compareTo(b['group_id'].toString()));
+      (a, b) => a['group_id'].toString().compareTo(b['group_id'].toString()),
+    );
     final rawMaster = validationState['master'];
     if (rawMaster is! Map) {
       throw const AiV3ContextException('prototype_context_master_missing');
@@ -482,11 +509,13 @@ class AiV3CoreContextBuilder {
       'pan_signed': (masterPan01.clamp(0.0, 1.0) * 2.0) - 1.0,
       'effects': (masterSource['effects'] as List? ?? const <Object>[])
           .whereType<Map>()
-          .map((effect) => <String, dynamic>{
-                'effect_index': effect['effect_index'],
-                'name': effect['name'],
-                'bypassed': effect['bypassed'] == true,
-              })
+          .map(
+            (effect) => <String, dynamic>{
+              'effect_index': effect['effect_index'],
+              'name': effect['name'],
+              'bypassed': effect['bypassed'] == true,
+            },
+          )
           .toList(growable: false),
     };
 
@@ -525,32 +554,36 @@ class AiV3CoreContextBuilder {
       'groups': groups,
       'master': master,
       'clips': clips,
-      'instruments':
-          _sortedUniqueStrings(clientContext['allowed_instrument_ids']),
+      'instruments': _sortedUniqueStrings(
+        clientContext['allowed_instrument_ids'],
+      ),
       'instrument_catalog': _instrumentCatalogFacts(clientContext),
       'effects': _effectCatalog(clientContext, profile),
-      'library_assets': libraryAssets.map((asset) {
-        if (profile == AiV3ContextProfile.essential) {
-          return <String, dynamic>{
-            'asset_id': asset['asset_id'],
-            'path': asset['path'],
-            'role': asset['role'],
-          };
-        }
-        if (profile == AiV3ContextProfile.enriched) {
-          return <String, dynamic>{
-            'asset_id': asset['asset_id'],
-            'path': asset['path'],
-            'role': asset['role'],
-            'bpm': asset['bpm'],
-          };
-        }
-        return asset;
-      }).toList(growable: false),
+      'library_assets': libraryAssets
+          .map((asset) {
+            if (profile == AiV3ContextProfile.essential) {
+              return <String, dynamic>{
+                'asset_id': asset['asset_id'],
+                'path': asset['path'],
+                'role': asset['role'],
+              };
+            }
+            if (profile == AiV3ContextProfile.enriched) {
+              return <String, dynamic>{
+                'asset_id': asset['asset_id'],
+                'path': asset['path'],
+                'role': asset['role'],
+                'bpm': asset['bpm'],
+              };
+            }
+            return asset;
+          })
+          .toList(growable: false),
       'conversation': recentHistory,
       'capabilities': aiV3CommandTypes.toList()..sort(),
-      'runtime_capabilities':
-          _sortedUniqueStrings(clientContext['ai_capabilities']),
+      'runtime_capabilities': _sortedUniqueStrings(
+        clientContext['ai_capabilities'],
+      ),
       if (pendingPlan != null) 'pending_plan': pendingPlan,
     };
     return AiV3CoreContext(
@@ -582,12 +615,15 @@ List<Map<String, dynamic>> _libraryAssets(Map<String, dynamic> context) {
   final out = raw
       .whereType<Map>()
       .map((value) => _withoutNulls(Map<String, dynamic>.from(value)))
-      .where((value) =>
-          value['asset_id']?.toString().trim().isNotEmpty == true &&
-          value['path']?.toString().trim().isNotEmpty == true)
+      .where(
+        (value) =>
+            value['asset_id']?.toString().trim().isNotEmpty == true &&
+            value['path']?.toString().trim().isNotEmpty == true,
+      )
       .toList(growable: false);
   out.sort(
-      (a, b) => a['asset_id'].toString().compareTo(b['asset_id'].toString()));
+    (a, b) => a['asset_id'].toString().compareTo(b['asset_id'].toString()),
+  );
   return out;
 }
 
@@ -596,37 +632,44 @@ List<Map<String, dynamic>> _effectCatalog(
   AiV3ContextProfile profile,
 ) {
   final names = _sortedUniqueStrings(context['allowed_builtin_effects']);
-  return names.map((name) {
-    final parameters = kExposedEffectParameterNames[name] ?? const <String>[];
-    return <String, dynamic>{
-      'effect_id': name,
-      'parameters': parameters
-          .map((parameter) => <String, dynamic>{
-                'parameter_id': parameter,
-                'range': <double>[0, 1],
-                if (profile == AiV3ContextProfile.rich)
-                  'description': 'Normalized exposed $parameter control',
-              })
-          .toList(growable: false),
-    };
-  }).toList(growable: false);
+  return names
+      .map((name) {
+        final parameters =
+            kExposedEffectParameterNames[name] ?? const <String>[];
+        return <String, dynamic>{
+          'effect_id': name,
+          'parameters': parameters
+              .map(
+                (parameter) => <String, dynamic>{
+                  'parameter_id': parameter,
+                  'range': <double>[0, 1],
+                  if (profile == AiV3ContextProfile.rich)
+                    'description': 'Normalized exposed $parameter control',
+                },
+              )
+              .toList(growable: false),
+        };
+      })
+      .toList(growable: false);
 }
 
 List<String> _sortedUniqueStrings(Object? raw) {
-  final values = (raw as List? ?? const <Object>[])
-      .map((value) => value.toString().trim())
-      .where((value) => value.isNotEmpty)
-      .toSet()
-      .toList()
-    ..sort();
+  final values =
+      (raw as List? ?? const <Object>[])
+          .map((value) => value.toString().trim())
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
   return values;
 }
 
 List<Map<String, dynamic>> _instrumentCatalogFacts(
   Map<String, dynamic> context,
 ) {
-  final allowedIds =
-      _sortedUniqueStrings(context['allowed_instrument_ids']).toSet();
+  final allowedIds = _sortedUniqueStrings(
+    context['allowed_instrument_ids'],
+  ).toSet();
   final raw = context['ai_v3_instrument_catalog'];
   if (raw == null) return const <Map<String, dynamic>>[];
   if (raw is! List || raw.any((value) => value is! Map)) {
@@ -658,9 +701,11 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
     };
   }
   final result = byId.values.toList(growable: false)
-    ..sort((left, right) => left['instrument_id']
-        .toString()
-        .compareTo(right['instrument_id'].toString()));
+    ..sort(
+      (left, right) => left['instrument_id'].toString().compareTo(
+        right['instrument_id'].toString(),
+      ),
+    );
   return result.take(_aiV3MaxInstrumentCatalogFacts).toList(growable: false);
 }
 
@@ -693,8 +738,9 @@ Map<String, dynamic> _selectionWithStableIds(
         .map((index) => clipByIndex[index])
         .whereType<String>()
         .toList(),
-    'primary_selected_clip_id':
-        primaryIndex is int ? clipByIndex[primaryIndex] : null,
+    'primary_selected_clip_id': primaryIndex is int
+        ? clipByIndex[primaryIndex]
+        : null,
   });
 }
 
