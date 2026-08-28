@@ -240,10 +240,15 @@ class MainFlutterWindow: NSWindow {
       return nil
     }
     let locationInView = view.convert(sender.draggingLocation, from: nil)
-    // AppKit origin is bottom-left; Flutter logical coords are top-left.
+    // Flutter's macOS view is flipped on current embeddings, while AppKit's
+    // traditional views are not. Convert only when necessary so Finder drops
+    // retain the cursor's actual row instead of vertically mirroring it.
+    let flutterY = view.isFlipped
+      ? locationInView.y
+      : view.bounds.height - locationInView.y
     return [
       "x": Double(locationInView.x),
-      "y": Double(view.bounds.height - locationInView.y)
+      "y": Double(flutterY)
     ]
   }
 

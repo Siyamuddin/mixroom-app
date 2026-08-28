@@ -6,6 +6,7 @@ Stacks:
 
 - `topic_stack.yaml`: creates the Seoul SNS topic that CloudWatch alarms publish to.
 - `slack_config_stack.yaml`: creates the Slack channel configuration after the Slack workspace is authorized.
+- `billing_success_topic_stack.yaml`: sends only verified successful purchases to `#development`.
 
 Recommended flow:
 
@@ -16,8 +17,14 @@ Recommended flow:
 
    ```bash
    AWS_PROFILE=andrew-admin AWS_DEFAULT_REGION=ap-northeast-2 \
-     ops/prod_alerts/verify_prod_alerts.sh
+    ops/prod_alerts/verify_prod_alerts.sh
    ```
+
+Successful-purchase notifications use their own SNS topic so CloudWatch alerts
+do not mix with commercial activity. Deploy `billing_success_topic_stack.yaml`
+with the Slack workspace and `#development` channel IDs, then pass its
+`BillingSuccessTopicArn` output to the app API stack's `BillingSuccessTopicArn`
+parameter.
 
 Low-cost scope:
 

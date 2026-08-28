@@ -1,8 +1,8 @@
 import Cocoa
 import FlutterMacOS
 import AuthenticationServices
+import juce_audio_engine
 
-@main
 @objcMembers
 class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextProviding {
   private let channelName = "mixroom/open_file"
@@ -18,6 +18,16 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
   @objc(applicationDidFinishLaunching:)
   dynamic override func applicationDidFinishLaunching(_ notification: Notification) {
     bindChannelsIfNeeded()
+  }
+
+  @objc(applicationWillTerminate:)
+  dynamic override func applicationWillTerminate(_ notification: Notification) {
+    JuceAudioEnginePluginSwift.shutdownForApplicationTermination()
+  }
+
+  @objc(applicationDidResignActive:)
+  dynamic override func applicationDidResignActive(_ notification: Notification) {
+    JuceAudioEnginePluginSwift.panicLiveMidiNotesForApplicationDeactivation()
   }
 
   @objc(application:openFiles:)

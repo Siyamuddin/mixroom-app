@@ -979,8 +979,8 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
         reserve_call = self.fake_usage_repo.reserve_calls[0]
         self.assertEqual(reserve_call["reserved_prompts"], 1)
-        self.assertEqual(reserve_call["daily_prompt_limit"], 200)
-        self.assertEqual(reserve_call["weekly_prompt_limit"], 600)
+        self.assertEqual(reserve_call["daily_prompt_limit"], 100)
+        self.assertEqual(reserve_call["weekly_prompt_limit"], 400)
         self.assertEqual(self.fake_usage_repo.log_calls[-1]["status"], "rate_limited")
         payload = json.loads(result["body"])
         self.assertEqual(payload["error"], "prompt_rate_limit_hit")

@@ -522,6 +522,13 @@ paths:
       responses:
         '200':
           description: AI prompt limit settings updated
+    delete:
+      summary: Remove the free prompt-limit override and use deployed defaults
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: AI prompt-limit override removed
   /v1/internal/admin/settings/ai-runtime:
     get:
       summary: Get internal admin AI runtime settings

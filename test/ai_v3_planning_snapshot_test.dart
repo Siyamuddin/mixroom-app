@@ -319,7 +319,13 @@ Future<_Fixture> _fixture({
     'row_creation_policy': 'Rows may be created up to the app row limit.',
     'allowed_instrument_ids': <String>['piano', 'bass'],
     'ai_v3_instrument_catalog': <Map<String, dynamic>>[
-      <String, dynamic>{'instrument_id': 'piano', 'name': 'Piano'},
+      <String, dynamic>{
+        'instrument_id': 'piano',
+        'name': 'Piano',
+        'playable_pitch_ranges': <Map<String, int>>[
+          <String, int>{'low': 21, 'high': 108},
+        ],
+      },
       <String, dynamic>{'instrument_id': 'bass', 'name': 'Bass'},
     ],
     'allowed_builtin_effects': <String>['Reverb', 'Limiter'],

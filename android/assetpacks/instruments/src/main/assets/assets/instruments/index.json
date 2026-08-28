@@ -2,6 +2,38 @@
   "pack": "VSCO-2-CE-1.1.0",
   "presets": [
     {
+      "id": "sfz.guitar.steel_acoustic",
+      "pack": "FreePats-Spanish-Classical-Guitar-2019-06-18",
+      "category": "Guitars",
+      "name": "Acoustic Guitar",
+      "preset": "AcousticGuitar.sfz",
+      "default_path": "samples/",
+      "source_project": "FreePats Spanish Classical Guitar",
+      "source_license": "CC0 1.0 Universal",
+      "sample_count": 39,
+      "copied_new_samples": 39,
+      "copied_new_megabytes": 1.317,
+      "outputGain": 1.0,
+      "attackMs": 2.0,
+      "releaseMs": 350.0
+    },
+    {
+      "id": "sfz.guitar.clean_electric",
+      "pack": "Karoryfer-Black-And-Green-Guitars-1.000",
+      "category": "Guitars",
+      "name": "Electric Guitar",
+      "preset": "ElectricGuitar.sfz",
+      "default_path": "samples/",
+      "source_project": "Karoryfer Black And Green Guitars",
+      "source_license": "CC0 1.0 Universal",
+      "sample_count": 78,
+      "copied_new_samples": 78,
+      "copied_new_megabytes": 3.518,
+      "outputGain": 2.0,
+      "attackMs": 2.0,
+      "releaseMs": 250.0
+    },
+    {
       "category": "Keys",
       "preset": "OrganQuiet.sfz",
       "default_path": "Keys/Organ/Quiet/",

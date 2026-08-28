@@ -29,6 +29,42 @@ Future<AudioTrack> _midiClip() => AudioTrack.create(
     );
 
 void main() {
+  test('guitar IDs, names, parameters, and notes serialize unchanged',
+      () async {
+    for (final guitar in <Map<String, Object>>[
+      <String, Object>{
+        'id': 'sfz.guitar.steel_acoustic',
+        'name': 'Acoustic Guitar',
+        'params': <String, double>{
+          'outputGain': 1.0,
+          'attackMs': 2.0,
+          'releaseMs': 350.0,
+        },
+      },
+      <String, Object>{
+        'id': 'sfz.guitar.clean_electric',
+        'name': 'Electric Guitar',
+        'params': <String, double>{
+          'outputGain': 2.0,
+          'attackMs': 2.0,
+          'releaseMs': 250.0,
+        },
+      },
+    ]) {
+      final clip = await _midiClip()
+        ..instrumentId = guitar['id']! as String
+        ..instrumentName = guitar['name']! as String
+        ..instrumentParams = Map<String, double>.from(
+          guitar['params']! as Map,
+        );
+      final json = clip.toJson('guitar.mid');
+      expect(json['instrumentId'], guitar['id']);
+      expect(json['instrumentName'], guitar['name']);
+      expect(json['instrumentParams'], guitar['params']);
+      expect((json['midiNotes'] as List).single['pitch'], 60);
+    }
+  });
+
   group('instrument-derived MIDI clip labels', () {
     test('empty and default instrument labels follow an instrument swap', () {
       expect(
@@ -203,9 +239,13 @@ void main() {
       oldInstrumentName: clip.instrumentName,
       oldInstrumentParams: const <String, double>{},
       oldHostedInstrumentStateBase64: 'old-state',
-      newInstrumentId: 'mixroom.bass',
-      newInstrumentName: 'Bass',
-      newInstrumentParams: const <String, double>{'tone': 0.4},
+      newInstrumentId: 'sfz.guitar.clean_electric',
+      newInstrumentName: 'Electric Guitar',
+      newInstrumentParams: const <String, double>{
+        'outputGain': 2.0,
+        'attackMs': 2.0,
+        'releaseMs': 250.0,
+      },
       newHostedInstrumentStateBase64: '',
       applyToClip:
           (
@@ -226,9 +266,13 @@ void main() {
     );
 
     await action.redo();
-    expect(clip.instrumentId, 'mixroom.bass');
-    expect(clip.instrumentName, 'Bass');
-    expect(clip.instrumentParams, <String, double>{'tone': 0.4});
+    expect(clip.instrumentId, 'sfz.guitar.clean_electric');
+    expect(clip.instrumentName, 'Electric Guitar');
+    expect(clip.instrumentParams, <String, double>{
+      'outputGain': 2.0,
+      'attackMs': 2.0,
+      'releaseMs': 250.0,
+    });
     expect(clip.midiNotes.single.id, 'old');
     expect(clip.trimStart, Duration.zero);
     expect(clip.trimEnd, const Duration(seconds: 4));
@@ -249,7 +293,7 @@ void main() {
     expect(clip.tempoWarpMode, 'repitch');
 
     await action.redo();
-    expect(clip.instrumentId, 'mixroom.bass');
+    expect(clip.instrumentId, 'sfz.guitar.clean_electric');
   });
 
   test('MIDI edit restores all command-owned tempo state exactly', () async {

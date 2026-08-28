@@ -3638,7 +3638,8 @@ public:
     void prepare(double inputSampleRate, int maxBlockSize)
     {
         sampleRate = inputSampleRate > 0.0 ? inputSampleRate : 44100.0;
-        ensureCapacity(maxBlockSize);
+        juce::ignoreUnused(maxBlockSize);
+        prepareRingBuffersForCurrentSampleRate();
         reset();
     }
 
@@ -3655,11 +3656,11 @@ public:
     void process(juce::AudioBuffer<float> &buffer)
     {
         const int n = buffer.getNumSamples();
-        if (!ensureCapacity(n))
+        if (n <= 0 || !isPreparedForCurrentSampleRate())
             return;
 
         const int channels = juce::jmin(numOutputs, buffer.getNumChannels());
-        if (n <= 0 || channels <= 0 || ringSize <= 2)
+        if (channels <= 0 || ringSize <= 2)
             return;
 
         const float ratio = std::pow(2.0f, params.semitones / 12.0f);
@@ -3721,9 +3722,8 @@ public:
     }
 
 private:
-    bool ensureCapacity(int blockSize)
+    static int requiredRingSizeForSampleRate(double rate) noexcept
     {
-        juce::ignoreUnused(blockSize);
         // Android hardware callbacks can arrive in very large chunks
         // (for example 1920 frames at 48 kHz). Basing the shifter window on
         // callback size turns the wet path into an audible echo. Keep the
@@ -3732,18 +3732,37 @@ private:
         const int minDelay = juce::jlimit(
             512,
             1024,
-            (int)std::lround(sampleRate * 0.02));
-        const int requiredRingSize = minDelay + 2;
-        if (requiredRingSize <= ringSize)
-            return true;
+            (int)std::lround(rate * 0.02));
+        return minDelay + 2;
+    }
 
-        if (ringSize > 0)
-            return mixroomEffectScratchAvailable(requiredRingSize, ringSize);
+    void prepareRingBuffersForCurrentSampleRate()
+    {
+        const int requiredRingSize =
+            requiredRingSizeForSampleRate(sampleRate);
+        bool needsResize = ringSize != requiredRingSize;
+        for (const auto &ring : ringBuffers)
+            needsResize = needsResize ||
+                (int)ring.size() != requiredRingSize;
 
-        ringSize = requiredRingSize;
-        for (int ch = 0; ch < numOutputs; ++ch)
-            ringBuffers[ch].assign((size_t)ringSize, 0.0f);
-        reset();
+        if (needsResize)
+        {
+            ringSize = requiredRingSize;
+            for (auto &ring : ringBuffers)
+                ring.assign((size_t)ringSize, 0.0f);
+        }
+    }
+
+    bool isPreparedForCurrentSampleRate() const noexcept
+    {
+        const int requiredRingSize =
+            requiredRingSizeForSampleRate(sampleRate);
+        if (ringSize != requiredRingSize)
+            return false;
+
+        for (const auto &ring : ringBuffers)
+            if ((int)ring.size() != requiredRingSize)
+                return false;
         return true;
     }
 

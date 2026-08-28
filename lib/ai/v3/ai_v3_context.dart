@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart' as crypto;
 
 import '../ai_gain_units.dart';
 import '../../helpers/effect_parameter_exposure.dart';
+import '../../helpers/midi_pitch_ranges.dart';
 import '../../models/models.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_audio_facts.dart';
@@ -684,9 +685,19 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
         byId.containsKey(instrumentId)) {
       throw const AiV3ContextException('prototype_instrument_catalog_invalid');
     }
+    late final List<Map<String, int>> playablePitchRanges;
+    try {
+      playablePitchRanges = normalizeMidiPitchRanges(
+        value['playable_pitch_ranges'],
+      );
+    } on FormatException {
+      throw const AiV3ContextException('prototype_instrument_catalog_invalid');
+    }
     byId[instrumentId] = <String, dynamic>{
       'instrument_id': instrumentId,
       'name': name,
+      if (playablePitchRanges.isNotEmpty)
+        'playable_pitch_ranges': playablePitchRanges,
     };
   }
   final result = byId.values.toList(growable: false)

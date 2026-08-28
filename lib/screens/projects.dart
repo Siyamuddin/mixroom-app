@@ -18,6 +18,7 @@ import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
@@ -68,6 +69,20 @@ const double _kProjectLibrarySideRailInset = 8;
 enum _ProjectSortMode { recent, alphabetical }
 
 enum _ProjectLibraryTab { yourProjects, cloudProjects, demoProjects }
+
+class _LocalCloudStatusPresentation {
+  const _LocalCloudStatusPresentation({
+    required this.label,
+    required this.statusLabel,
+    required this.icon,
+    required this.color,
+  });
+
+  final String label;
+  final String statusLabel;
+  final IconData icon;
+  final Color color;
+}
 
 class _ProjectListEntry {
   const _ProjectListEntry.project(this.project)
@@ -474,7 +489,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (local == null) continue;
       final currentCloudProjectId = (local.cloudProjectId ?? '').trim();
       if (currentCloudProjectId == cloud.projectId &&
-          local.cloudDocumentRevision == cloud.documentRevision) {
+          local.cloudDocumentRevision == cloud.documentRevision &&
+          (local.cloudSourceFingerprint ?? '').trim().isNotEmpty) {
         continue;
       }
       try {
@@ -489,7 +505,20 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             ? rawJsonCloudRevision.toInt()
             : int.tryParse((rawJsonCloudRevision ?? '').toString().trim());
         if (jsonCloudProjectId == cloud.projectId &&
-            jsonCloudRevision == cloud.documentRevision) {
+            jsonCloudRevision == cloud.documentRevision &&
+            (json['cloudSourceFingerprint'] ?? '')
+                .toString()
+                .trim()
+                .isNotEmpty) {
+          continue;
+        }
+        // A cloud-list refresh only discovers that a newer revision exists.
+        // It must not mark an older local bundle as current without first
+        // downloading that bundle. Doing so can make a mobile opener select
+        // stale plugin source instead of its compatible audio projection.
+        if (jsonCloudProjectId == cloud.projectId &&
+            jsonCloudRevision != null &&
+            jsonCloudRevision != cloud.documentRevision) {
           continue;
         }
         json['cloudProjectId'] = cloud.projectId;
@@ -497,6 +526,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         json['cloudSyncedAt'] = (cloud.updatedAt ?? DateTime.now())
             .toUtc()
             .toIso8601String();
+        json['cloudSourceFingerprint'] =
+            ProjectCompatibilityService.sourceFingerprint(json);
         await ProjectManager.writeProjectJson(local.dir, json);
       } catch (error) {
         debugPrint('Failed to persist local cloud project link: $error');
@@ -1309,13 +1340,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         _cloudProjectForLocal(meta) != null;
   }
 
-  bool _hasMultipleCloudDestinations() {
-    return _availableCloudDestinations(
-          context.read<EntitlementService>(),
-        ).length >
-        1;
-  }
-
   String _workspaceIdForLocalCloudProject(
     ProjectMeta meta, {
     CloudProjectAccessItem? cloud,
@@ -1345,24 +1369,61 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     ProjectMeta meta,
     CloudProjectAccessItem? cloud,
   ) {
-    if (!_hasMultipleCloudDestinations() || !_hasCloudReference(meta)) {
-      return null;
-    }
+    if (!_hasCloudReference(meta)) return null;
     return _cloudLocationLabelForWorkspaceId(
       _workspaceIdForLocalCloudProject(meta, cloud: cloud),
       cloud: cloud,
     );
   }
 
-  String _localCloudSyncedLabel(
+  _LocalCloudStatusPresentation _localCloudStatus(
     ProjectMeta meta,
     CloudProjectAccessItem? cloud,
   ) {
     final location = _localCloudLocationLabel(meta, cloud);
-    final synced = L10n.translate(context, 'Cloud synced');
-    if (location == null || location.isEmpty) return synced;
-    return '$synced • $location';
+    final freshness = resolveProjectCloudFreshness(
+      project: meta,
+      cloudStatusAvailable: cloud != null,
+      latestCloudRevision: cloud?.documentRevision,
+    );
+    late final String baseLabel;
+    late final IconData icon;
+    late final Color color;
+    switch (freshness) {
+      case ProjectCloudFreshness.diverged:
+        baseLabel = L10n.translate(context, 'Not synced');
+        icon = Icons.cloud_outlined;
+        color = const Color(0xFFC7B8FF);
+      case ProjectCloudFreshness.cloudAhead:
+        baseLabel = L10n.translate(context, 'Cloud update available');
+        icon = Icons.cloud_download_rounded;
+        color = const Color(0xFFFFC56E);
+      case ProjectCloudFreshness.localChanges:
+        baseLabel = L10n.translate(context, 'Not synced');
+        icon = Icons.cloud_outlined;
+        color = const Color(0xFFC7B8FF);
+      case ProjectCloudFreshness.linkedUnknown:
+        baseLabel = L10n.translate(context, 'Not synced');
+        icon = Icons.cloud_outlined;
+        color = const Color(0xFFC7B8FF);
+      case ProjectCloudFreshness.synced:
+        baseLabel = L10n.translate(context, 'Cloud synced');
+        icon = Icons.cloud_done_rounded;
+        color = const Color(0xFFA4C2FF);
+    }
+    final label = location == null || location.isEmpty
+        ? baseLabel
+        : '$baseLabel • $location';
+    return _LocalCloudStatusPresentation(
+      label: label,
+      statusLabel: baseLabel,
+      icon: icon,
+      color: color,
+    );
   }
+
+  Widget _buildLocalCloudStatusIcon(_LocalCloudStatusPresentation status) =>
+      Icon(status.icon, color: status.color, size: 18);
 
   bool _cloudScopedDisplayNameAllowed({
     required ProjectMeta original,
@@ -1889,6 +1950,142 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       },
     );
     return result == true;
+  }
+
+  Future<bool> _showReplaceCloudVersionDialog() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(107, 184, 255, 0.16),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.cloud_upload_outlined,
+                          color: Color(0xFF8CC8FF),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          L10n.translate(
+                            dialogContext,
+                            'Replace cloud version?',
+                          ),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    L10n.translate(
+                      dialogContext,
+                      'The cloud copy changed on another device or account. Replace it with this device\'s version?',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.84),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(false),
+                          style: TextButton.styleFrom(
+                            foregroundColor: const Color(0xFFF4F4F4),
+                            backgroundColor: const Color.fromRGBO(
+                              244,
+                              244,
+                              244,
+                              0.08,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.10),
+                              ),
+                            ),
+                          ),
+                          child: Text(L10n.translate(dialogContext, 'Cancel')),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(true),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF397DB5),
+                            foregroundColor: const Color(0xFFF4F9FF),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(L10n.translate(dialogContext, 'Replace')),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    return result == true;
+  }
+
+  bool _isCloudRevisionConflict(Object error) {
+    if (error is CloudProjectApiException) {
+      final detail = '${error.message} ${error.body}'.toLowerCase();
+      return detail.contains('revision conflict') ||
+          (error.statusCode == 409 && detail.contains('revision'));
+    }
+    return error.toString().toLowerCase().contains('revision conflict');
   }
 
   Future<BundleAudioMode?> _chooseProjectBundleAudioMode() {
@@ -2633,6 +2830,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       final bundlePath = await ProjectBundle.exportMixroomBundle(
         projectDir: meta.dir,
         audioMode: BundleAudioMode.flacLossless,
+        requireCurrentCompatibility: false,
       );
       final bundleFile = File(bundlePath);
       final quotaError = _syncQuotaErrorForBundle(
@@ -2681,31 +2879,88 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       final preservesExistingCloudLocation =
           existingCloud != null && existingWorkspaceId == selectedWorkspaceId;
       final fallbackPersonalCloudProjectId = (meta.cloudProjectId ?? '').trim();
-      final canReuseFallbackPersonalCloudProject =
+      final hasStaleUnlistedPersonalLink =
           existingCloud == null &&
           selectedWorkspaceId.isEmpty &&
           fallbackPersonalCloudProjectId.isNotEmpty &&
           existingWorkspaceId.isEmpty;
+      if (hasStaleUnlistedPersonalLink) {
+        final json = await ProjectManager.readProjectJson(meta.dir);
+        ProjectManager.stripCloudSyncMetadata(json);
+        await ProjectManager.writeProjectJson(meta.dir, json);
+        debugPrint(
+          'Manual cloud sync detached stale cloud link '
+          '$fallbackPersonalCloudProjectId before publishing.',
+        );
+      }
       final uploadCloudProjectId = preservesExistingCloudLocation
           ? existingCloud.projectId
-          : canReuseFallbackPersonalCloudProject
-          ? fallbackPersonalCloudProjectId
           : null;
       final expectedRevision = uploadCloudProjectId == null
           ? null
           : meta.cloudDocumentRevision;
-      final result = await _cloudProjectService.uploadBundle(
-        auth: auth,
-        bundleFile: bundleFile,
-        projectId: projectId,
-        name: meta.name,
-        cloudProjectId: uploadCloudProjectId,
-        workspaceId: destination.isPersonal ? null : destination.workspaceId,
-        organizationId: destination.isPersonal
-            ? null
-            : destination.organizationId,
-        expectedRevision: expectedRevision,
-      );
+      CloudProjectUploadResult result;
+      try {
+        result = await _cloudProjectService.uploadBundle(
+          auth: auth,
+          bundleFile: bundleFile,
+          projectId: projectId,
+          name: meta.name,
+          cloudProjectId: uploadCloudProjectId,
+          workspaceId: destination.isPersonal ? null : destination.workspaceId,
+          organizationId: destination.isPersonal
+              ? null
+              : destination.organizationId,
+          expectedRevision: expectedRevision,
+        );
+      } catch (error) {
+        if (uploadCloudProjectId == null || !_isCloudRevisionConflict(error)) {
+          rethrow;
+        }
+        if (mounted && loadingOpen && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+          loadingOpen = false;
+        }
+        if (!mounted) return;
+        final replaceCloudVersion = await _showReplaceCloudVersionDialog();
+        if (!replaceCloudVersion || !mounted) return;
+
+        showLoadingDialog(
+          context,
+          message: L10n.translate(context, 'Syncing to cloud…'),
+        );
+        loadingOpen = true;
+        final latestSnapshot = await _cloudProjectService.listProjects(
+          auth: auth,
+        );
+        CloudProjectAccessItem? latestCloud;
+        for (final cloud in latestSnapshot.cloudProjects) {
+          if (cloud.projectId == uploadCloudProjectId) {
+            latestCloud = cloud;
+            break;
+          }
+        }
+        if (latestCloud == null) {
+          throw StateError(
+            'The cloud project is no longer available. Refresh and try again.',
+          );
+        }
+        if (!latestCloud.canWrite) {
+          throw StateError('This cloud project is now read-only.');
+        }
+        result = await _cloudProjectService.uploadBundle(
+          auth: auth,
+          bundleFile: bundleFile,
+          projectId: projectId,
+          name: meta.name,
+          cloudProjectId: uploadCloudProjectId,
+          workspaceId: destination.isPersonal ? null : destination.workspaceId,
+          organizationId: destination.isPersonal
+              ? null
+              : destination.organizationId,
+          expectedRevision: latestCloud.documentRevision,
+        );
+      }
       final json = await ProjectManager.readProjectJson(meta.dir);
       json['cloudProjectId'] = result.project.projectId;
       if (result.project.workspaceId.trim().isNotEmpty) {
@@ -2720,6 +2975,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       }
       json['cloudDocumentRevision'] = result.project.documentRevision;
       json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+      json['cloudSourceFingerprint'] =
+          ProjectCompatibilityService.sourceFingerprint(json);
       await ProjectManager.writeProjectJson(meta.dir, json);
       await entitlement.refreshAccountSurface(force: true);
       await _refresh(includeCloud: true);
@@ -2758,7 +3015,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       return;
     }
     final local = _localProjectForCloud(cloud);
-    if (local != null) {
+    if (local != null &&
+        local.cloudDocumentRevision == cloud.documentRevision) {
       await _openProject(local.dir);
       return;
     }
@@ -2769,6 +3027,25 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (!canCreate) {
       _showProjectLimitDialog();
       return;
+    }
+
+    // Preserve an out-of-date local copy as an unlinked local project rather
+    // than silently overwriting user work. The freshly downloaded revision
+    // becomes the cloud-linked copy opened below.
+    if (local != null) {
+      try {
+        final staleJson = await ProjectManager.readProjectJson(local.dir);
+        staleJson.remove('cloudProjectId');
+        staleJson.remove('cloud_project_id');
+        staleJson.remove('cloudWorkspaceId');
+        staleJson.remove('cloudOrganizationId');
+        staleJson.remove('cloudDocumentRevision');
+        staleJson.remove('cloud_document_revision');
+        staleJson.remove('cloudSyncedAt');
+        await ProjectManager.writeProjectJson(local.dir, staleJson);
+      } catch (error) {
+        debugPrint('Failed to detach stale local cloud project: $error');
+      }
     }
     final auth = context.read<AuthService>();
     if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
@@ -2805,7 +3082,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       }
       json['cloudDocumentRevision'] = cloud.documentRevision;
       json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+      json['cloudSourceFingerprint'] =
+          ProjectCompatibilityService.sourceFingerprint(json);
       await ProjectManager.writeProjectJson(newDir, json);
+      // The cloud library assigns a local display name after bundle import.
+      // Keep the copied compatibility manifest and projection anchored to the
+      // final canonical project JSON before the editor chooses its variant.
+      await ProjectCompatibilityService.rebaseForImportedProject(
+        projectDir: newDir,
+        sourceProject: json,
+      );
       if (!mounted) return;
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
       await Navigator.push(
@@ -4429,6 +4715,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final local = _localProjectForCloud(
                                             cloud,
                                           );
+                                          final localCloudStatus = local == null
+                                              ? null
+                                              : _localCloudStatus(local, cloud);
                                           final inFlight =
                                               _cloudProjectsInFlight.contains(
                                                 cloud.projectId,
@@ -4471,14 +4760,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                 context,
                                                 'Read-only',
                                               ),
+                                            if (localCloudStatus != null)
+                                              localCloudStatus.statusLabel,
                                             attributionLine ??
-                                                '$availabilityLabel • $locationLabel',
+                                                (localCloudStatus == null
+                                                    ? '$availabilityLabel • $locationLabel'
+                                                    : locationLabel),
                                           ].join(' • ');
                                           return Semantics(
                                             button: true,
                                             enabled: !inFlight,
                                             label:
-                                                'Open cloud project ${cloud.name}',
+                                                'Open cloud project ${cloud.name}, $secondaryDetailLine',
                                             child: ExcludeSemantics(
                                               child: Material(
                                                 color: Colors.transparent,
@@ -4552,28 +4845,33 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                                   const SizedBox(
                                                                     width: 8,
                                                                   ),
-                                                                  Icon(
-                                                                    !cloud.canWrite
-                                                                        ? Icons
-                                                                              .lock_rounded
-                                                                        : local !=
-                                                                              null
-                                                                        ? Icons
-                                                                              .cloud_done_rounded
-                                                                        : Icons
-                                                                              .cloud_download_rounded,
-                                                                    color:
-                                                                        !cloud
-                                                                            .canWrite
-                                                                        ? Colors.white.withValues(
+                                                                  if (!cloud
+                                                                      .canWrite)
+                                                                    Icon(
+                                                                      Icons
+                                                                          .lock_rounded,
+                                                                      color: Colors
+                                                                          .white
+                                                                          .withValues(
                                                                             alpha:
                                                                                 0.64,
-                                                                          )
-                                                                        : const Color(
-                                                                            0xFFA4C2FF,
                                                                           ),
-                                                                    size: 18,
-                                                                  ),
+                                                                      size: 18,
+                                                                    )
+                                                                  else if (localCloudStatus !=
+                                                                      null)
+                                                                    _buildLocalCloudStatusIcon(
+                                                                      localCloudStatus,
+                                                                    )
+                                                                  else
+                                                                    const Icon(
+                                                                      Icons
+                                                                          .cloud_download_rounded,
+                                                                      color: Color(
+                                                                        0xFFA4C2FF,
+                                                                      ),
+                                                                      size: 18,
+                                                                    ),
                                                                 ],
                                                               ),
                                                               const SizedBox(
@@ -4705,6 +5003,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                             (project.cloudProjectId ?? '')
                                                 .trim()
                                                 .isNotEmpty;
+                                        final cloudStatus = cloudLinked
+                                            ? _localCloudStatus(project, cloud)
+                                            : null;
                                         final cloudInFlight =
                                             _localCloudSyncInFlight(
                                               project,
@@ -4720,7 +5021,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           button: true,
                                           enabled: true,
                                           label:
-                                              'Open project ${project.name}, $localSubtitle',
+                                              'Open project ${project.name}, $localSubtitle${cloudLinked ? ', ${cloudStatus!.label}' : ''}',
                                           child: ExcludeSemantics(
                                             child: Material(
                                               color: Colors.transparent,
@@ -4836,20 +5137,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                                   const SizedBox(
                                                                     width: 8,
                                                                   ),
-                                                                  Tooltip(
-                                                                    message:
-                                                                        _localCloudSyncedLabel(
-                                                                          project,
-                                                                          cloud,
-                                                                        ),
-                                                                    child: Icon(
-                                                                      Icons
-                                                                          .cloud_done_rounded,
-                                                                      color: const Color(
-                                                                        0xFFA4C2FF,
-                                                                      ),
-                                                                      size: 18,
-                                                                    ),
+                                                                  _buildLocalCloudStatusIcon(
+                                                                    cloudStatus!,
                                                                   ),
                                                                 ],
                                                               ],
@@ -4869,9 +5158,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                               height: 8,
                                                             ),
                                                             Text(
-                                                              cloudLinked
-                                                                  ? '$localSubtitle • ${_localCloudSyncedLabel(project, cloud)}'
-                                                                  : localSubtitle,
+                                                              localSubtitle,
                                                               maxLines: 1,
                                                               overflow:
                                                                   TextOverflow
@@ -4889,6 +5176,29 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                                 height: 22 / 12,
                                                               ),
                                                             ),
+                                                            if (cloudLinked) ...[
+                                                              const SizedBox(
+                                                                height: 2,
+                                                              ),
+                                                              Text(
+                                                                cloudStatus!
+                                                                    .label,
+                                                                softWrap: true,
+                                                                style: TextStyle(
+                                                                  fontFamily:
+                                                                      'Pretendard',
+                                                                  color: Colors
+                                                                      .white
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.62,
+                                                                      ),
+                                                                  fontSize: 11,
+                                                                  height:
+                                                                      17 / 11,
+                                                                ),
+                                                              ),
+                                                            ],
                                                           ],
                                                         ),
                                                       ),

@@ -56,6 +56,55 @@ class ProjectorTests(unittest.TestCase):
         detail = json.loads(self.eventbridge.entries[0]["Detail"])
         self.assertEqual(detail["revision"], 1)
 
+    def test_completed_purchase_emits_success_event_with_money(self):
+        result = module._apply_projection(
+            {
+                "event_id": "toss:confirmed-payment",
+                "provider": "toss",
+                "event_type": "toss_payment_confirmed",
+                "user_id": "user-1",
+                "occurred_at": "2026-03-20T00:00:00+00:00",
+                "created_at": "2026-03-20T00:00:01+00:00",
+                "normalized": {
+                    "provider": "toss",
+                    "subscription_id": "toss-sub-1",
+                    "status": "active",
+                    "plan_code": "producer",
+                    "product_code": "producer_monthly",
+                    "billing_amount": 12900,
+                    "billing_currency": "krw",
+                },
+            }
+        )
+
+        self.assertEqual(result, "projected")
+        self.assertEqual(len(self.eventbridge.entries), 2)
+        self.assertEqual(self.eventbridge.entries[1]["DetailType"], "billing.purchase_completed")
+        detail = json.loads(self.eventbridge.entries[1]["Detail"])
+        self.assertEqual(detail["provider"], "toss")
+        self.assertEqual(detail["amount"], 12900)
+        self.assertEqual(detail["currency"], "KRW")
+
+    def test_refund_never_emits_purchase_success_event(self):
+        module._apply_projection(
+            {
+                "event_id": "paddle:refunded",
+                "provider": "paddle",
+                "event_type": "transaction.refunded",
+                "user_id": "user-1",
+                "occurred_at": "2026-03-20T00:00:00+00:00",
+                "created_at": "2026-03-20T00:00:01+00:00",
+                "normalized": {
+                    "provider": "paddle",
+                    "subscription_id": "sub-1",
+                    "status": "refunded",
+                    "plan_code": "producer",
+                },
+            }
+        )
+
+        self.assertEqual(self.eventbridge.entries, [])
+
     def test_studio_projection_syncs_linked_organization_lifecycle(self):
         result = module._apply_projection(
             {

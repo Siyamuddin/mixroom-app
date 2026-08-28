@@ -6,9 +6,13 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <vector>
 #import "JuceBridge.h"
 #import "JuceEngine.h"
+#if JUCE_IOS
+#include "MixroomIOSAudioSessionPolicy.h"
+#endif
 #include "InstrumentRenderers.h"
 #include "JuceHeader.h"
 #import "JuceAudioEnginePlugin.h" // To access debugLogChannel
@@ -19,6 +23,7 @@
 #import <FlutterMacOS/FlutterMacOS.h>
 #endif
 #if TARGET_OS_OSX
+#import <AudioUnit/AudioUnit.h>
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
@@ -2339,6 +2344,431 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 
 @end
 
+#if TARGET_OS_OSX
+namespace
+{
+class MixroomMacInputProbe final
+{
+public:
+    ~MixroomMacInputProbe()
+    {
+        stop();
+    }
+
+    bool start(AudioDeviceID requestedDevice)
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        stopLocked();
+
+        const auto failStart = [this](const char *stage, OSStatus status)
+        {
+            juce::Logger::writeToLog(
+                "[MacV2Input] start failed stage=" + juce::String(stage) +
+                " status=" + juce::String(static_cast<int>(status)));
+            stopLocked();
+            return false;
+        };
+
+        if (requestedDevice == kAudioObjectUnknown)
+            return failStart("missingDevice", kAudio_ParamError);
+
+        Float64 requestedSampleRate = 0.0;
+        UInt32 propertySize = sizeof(requestedSampleRate);
+        AudioObjectPropertyAddress sampleRateAddress{
+            kAudioDevicePropertyNominalSampleRate,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        };
+        OSStatus status = AudioObjectGetPropertyData(requestedDevice,
+                                                     &sampleRateAddress,
+                                                     0,
+                                                     nullptr,
+                                                     &propertySize,
+                                                     &requestedSampleRate);
+        if (status != noErr || requestedSampleRate <= 1000.0)
+            return failStart("readSampleRate",
+                             status != noErr ? status : kAudio_ParamError);
+
+        UInt32 requestedBufferFrames = 0;
+        propertySize = sizeof(requestedBufferFrames);
+        AudioObjectPropertyAddress bufferAddress{
+            kAudioDevicePropertyBufferFrameSize,
+            kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain,
+        };
+        status = AudioObjectGetPropertyData(requestedDevice,
+                                            &bufferAddress,
+                                            0,
+                                            nullptr,
+                                            &propertySize,
+                                            &requestedBufferFrames);
+        if (status != noErr || requestedBufferFrames == 0)
+            return failStart("readBuffer",
+                             status != noErr ? status : kAudio_ParamError);
+
+        AudioComponentDescription description{};
+        description.componentType = kAudioUnitType_Output;
+        description.componentSubType = kAudioUnitSubType_HALOutput;
+        description.componentManufacturer = kAudioUnitManufacturer_Apple;
+        AudioComponent component = AudioComponentFindNext(nullptr, &description);
+        if (component == nullptr)
+            return failStart("findComponent", kAudio_ParamError);
+        status = AudioComponentInstanceNew(component, &unit);
+        if (status != noErr || unit == nullptr)
+            return failStart("createInstance",
+                             status != noErr ? status : kAudio_ParamError);
+
+        UInt32 enabled = 1;
+        UInt32 disabled = 0;
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_EnableIO,
+                                      kAudioUnitScope_Input,
+                                      1,
+                                      &enabled,
+                                      sizeof(enabled));
+        if (status != noErr)
+            return failStart("enableInput", status);
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_EnableIO,
+                                      kAudioUnitScope_Output,
+                                      0,
+                                      &disabled,
+                                      sizeof(disabled));
+        if (status != noErr)
+            return failStart("disableOutput", status);
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_CurrentDevice,
+                                      kAudioUnitScope_Global,
+                                      0,
+                                      &requestedDevice,
+                                      sizeof(requestedDevice));
+        if (status != noErr)
+            return failStart("selectDevice", status);
+
+        AudioStreamBasicDescription clientFormat{};
+        clientFormat.mSampleRate = requestedSampleRate;
+        clientFormat.mFormatID = kAudioFormatLinearPCM;
+        clientFormat.mFormatFlags = kAudioFormatFlagIsFloat |
+            kAudioFormatFlagIsPacked |
+            kAudioFormatFlagsNativeEndian;
+        clientFormat.mBytesPerPacket = sizeof(float);
+        clientFormat.mFramesPerPacket = 1;
+        clientFormat.mBytesPerFrame = sizeof(float);
+        clientFormat.mChannelsPerFrame = 1;
+        clientFormat.mBitsPerChannel = 8 * sizeof(float);
+        status = AudioUnitSetProperty(unit,
+                                      kAudioUnitProperty_StreamFormat,
+                                      kAudioUnitScope_Output,
+                                      1,
+                                      &clientFormat,
+                                      sizeof(clientFormat));
+        if (status != noErr)
+            return failStart("setClientFormat", status);
+
+        UInt32 unitMaximumFrames = 0;
+        propertySize = sizeof(unitMaximumFrames);
+        if (AudioUnitGetProperty(unit,
+                                 kAudioUnitProperty_MaximumFramesPerSlice,
+                                 kAudioUnitScope_Global,
+                                 0,
+                                 &unitMaximumFrames,
+                                 &propertySize) != noErr)
+            unitMaximumFrames = 0;
+        capacityFrames = std::max(requestedBufferFrames, unitMaximumFrames);
+        if (capacityFrames == 0)
+            return failStart("resolveCapacity", kAudio_ParamError);
+        scratch.assign(capacityFrames, 0.0f);
+
+        AURenderCallbackStruct callback{};
+        callback.inputProc = renderCallback;
+        callback.inputProcRefCon = this;
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_SetInputCallback,
+                                      kAudioUnitScope_Global,
+                                      0,
+                                      &callback,
+                                      sizeof(callback));
+        if (status != noErr)
+            return failStart("setInputCallback", status);
+        status = AudioUnitInitialize(unit);
+        if (status != noErr)
+            return failStart("initialize", status);
+
+        deviceID.store(requestedDevice, std::memory_order_release);
+        sampleRate.store(requestedSampleRate, std::memory_order_release);
+        bufferFrames.store(requestedBufferFrames, std::memory_order_release);
+        callbackCount.store(0, std::memory_order_release);
+        invalidCallbackCount.store(0, std::memory_order_release);
+        lastFrames.store(0, std::memory_order_release);
+        lastStatus.store(noErr, std::memory_order_release);
+        callbackReady.store(false, std::memory_order_release);
+        cancelled.store(false, std::memory_order_release);
+        callbackEvent.reset();
+        active.store(true, std::memory_order_release);
+
+        status = AudioOutputUnitStart(unit);
+        if (status != noErr)
+        {
+            active.store(false, std::memory_order_release);
+            return failStart("start", status);
+        }
+        running.store(true, std::memory_order_release);
+        return true;
+    }
+
+    bool waitForValidCallback(int timeoutMilliseconds) noexcept
+    {
+        if (callbackReady.load(std::memory_order_acquire))
+            return true;
+        if (!active.load(std::memory_order_acquire) ||
+            cancelled.load(std::memory_order_acquire))
+            return false;
+        callbackEvent.wait(juce::jmax(0, timeoutMilliseconds));
+        return callbackReady.load(std::memory_order_acquire) &&
+            !cancelled.load(std::memory_order_acquire);
+    }
+
+    void cancelWait() noexcept
+    {
+        cancelled.store(true, std::memory_order_release);
+        callbackEvent.signal();
+    }
+
+    void stop()
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        stopLocked();
+    }
+
+    AudioDeviceID getDeviceID() const noexcept
+    {
+        return deviceID.load(std::memory_order_acquire);
+    }
+
+    double getSampleRate() const noexcept
+    {
+        return sampleRate.load(std::memory_order_acquire);
+    }
+
+    UInt32 getBufferFrames() const noexcept
+    {
+        return bufferFrames.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t getCallbackCount() const noexcept
+    {
+        return callbackCount.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t getInvalidCallbackCount() const noexcept
+    {
+        return invalidCallbackCount.load(std::memory_order_acquire);
+    }
+
+    UInt32 getLastFrames() const noexcept
+    {
+        return lastFrames.load(std::memory_order_acquire);
+    }
+
+    OSStatus getLastStatus() const noexcept
+    {
+        return lastStatus.load(std::memory_order_acquire);
+    }
+
+    OSStatus getFirstRenderErrorStatus() const noexcept
+    {
+        return firstRenderErrorStatus.load(std::memory_order_acquire);
+    }
+
+    OSStatus getLastRenderErrorStatus() const noexcept
+    {
+        return lastRenderErrorStatus.load(std::memory_order_acquire);
+    }
+
+    bool isRunning() const noexcept
+    {
+        return running.load(std::memory_order_acquire);
+    }
+
+    bool startCapture(const juce::File &file)
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        if (!running.load(std::memory_order_acquire) ||
+            !callbackReady.load(std::memory_order_acquire) ||
+            cancelled.load(std::memory_order_acquire) ||
+            captureEnabled.load(std::memory_order_acquire))
+            return false;
+
+        if (!JuceEngine::get().startIndependentInputRecordingToWav(
+                file, sampleRate.load(std::memory_order_acquire)))
+            return false;
+
+        captureEnabled.store(true, std::memory_order_release);
+        return true;
+    }
+
+    RealtimeWavCapture::StopResult stopCapture()
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        if (!captureEnabled.exchange(false, std::memory_order_acq_rel))
+            return {};
+        return JuceEngine::get().stopRecording();
+    }
+
+    void discardCapture()
+    {
+        const std::lock_guard<std::mutex> lock(controlMutex);
+        captureEnabled.store(false, std::memory_order_release);
+        JuceEngine::get().discardRecordingCapture();
+    }
+
+    bool isCaptureActive() const noexcept
+    {
+        return captureEnabled.load(std::memory_order_acquire) &&
+            JuceEngine::get().isRecording();
+    }
+
+    juce::NamedValueSet getCaptureFacts() const
+    {
+        return JuceEngine::get().getIndependentInputCaptureFacts();
+    }
+
+private:
+    static OSStatus renderCallback(void *context,
+                                   AudioUnitRenderActionFlags *flags,
+                                   const AudioTimeStamp *timestamp,
+                                   UInt32 busNumber,
+                                   UInt32 numberFrames,
+                                   AudioBufferList *data) noexcept
+    {
+        juce::ignoreUnused(busNumber, data);
+        return static_cast<MixroomMacInputProbe *>(context)->render(
+            flags, timestamp, numberFrames);
+    }
+
+    OSStatus render(AudioUnitRenderActionFlags *flags,
+                    const AudioTimeStamp *timestamp,
+                    UInt32 numberFrames) noexcept
+    {
+        if (!active.load(std::memory_order_acquire) ||
+            cancelled.load(std::memory_order_acquire))
+            return noErr;
+
+        if (numberFrames == 0 || numberFrames > capacityFrames || unit == nullptr)
+        {
+            invalidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+            recordRenderError(kAudio_ParamError);
+            if (captureEnabled.load(std::memory_order_acquire))
+                JuceEngine::get().captureIndependentInput(
+                    nullptr, static_cast<int>(numberFrames));
+            lastFrames.store(numberFrames, std::memory_order_relaxed);
+            lastStatus.store(kAudio_ParamError, std::memory_order_relaxed);
+            callbackEvent.signal();
+            return kAudio_ParamError;
+        }
+
+        AudioBufferList bufferList{};
+        bufferList.mNumberBuffers = 1;
+        bufferList.mBuffers[0].mNumberChannels = 1;
+        bufferList.mBuffers[0].mDataByteSize = numberFrames * sizeof(float);
+        bufferList.mBuffers[0].mData = scratch.data();
+        const OSStatus status = AudioUnitRender(unit,
+                                                flags,
+                                                timestamp,
+                                                1,
+                                                numberFrames,
+                                                &bufferList);
+        lastFrames.store(numberFrames, std::memory_order_relaxed);
+        lastStatus.store(status, std::memory_order_relaxed);
+        if (status == noErr)
+        {
+            callbackCount.fetch_add(1, std::memory_order_relaxed);
+            callbackReady.store(true, std::memory_order_release);
+            if (captureEnabled.load(std::memory_order_acquire))
+                JuceEngine::get().captureIndependentInput(
+                    scratch.data(), static_cast<int>(numberFrames));
+        }
+        else
+        {
+            invalidCallbackCount.fetch_add(1, std::memory_order_relaxed);
+            recordRenderError(status);
+            if (captureEnabled.load(std::memory_order_acquire))
+                JuceEngine::get().captureIndependentInput(
+                    nullptr, static_cast<int>(numberFrames));
+        }
+        callbackEvent.signal();
+        return status;
+    }
+
+    void recordRenderError(OSStatus status) noexcept
+    {
+        OSStatus expected = noErr;
+        firstRenderErrorStatus.compare_exchange_strong(
+            expected,
+            status,
+            std::memory_order_release,
+            std::memory_order_relaxed);
+        lastRenderErrorStatus.store(status, std::memory_order_release);
+    }
+
+    void stopLocked()
+    {
+        if (captureEnabled.exchange(false, std::memory_order_acq_rel))
+            JuceEngine::get().discardRecordingCapture();
+        cancelled.store(true, std::memory_order_release);
+        active.store(false, std::memory_order_release);
+        callbackEvent.signal();
+        if (unit != nullptr)
+        {
+            if (running.exchange(false, std::memory_order_acq_rel))
+                AudioOutputUnitStop(unit);
+            AudioUnitUninitialize(unit);
+            AudioComponentInstanceDispose(unit);
+            unit = nullptr;
+        }
+        scratch.clear();
+        capacityFrames = 0;
+        deviceID.store(kAudioObjectUnknown, std::memory_order_release);
+        sampleRate.store(0.0, std::memory_order_release);
+        bufferFrames.store(0, std::memory_order_release);
+        callbackCount.store(0, std::memory_order_release);
+        invalidCallbackCount.store(0, std::memory_order_release);
+        lastFrames.store(0, std::memory_order_release);
+        lastStatus.store(noErr, std::memory_order_release);
+        firstRenderErrorStatus.store(noErr, std::memory_order_release);
+        lastRenderErrorStatus.store(noErr, std::memory_order_release);
+        callbackReady.store(false, std::memory_order_release);
+    }
+
+    std::mutex controlMutex;
+    AudioUnit unit = nullptr;
+    std::vector<float> scratch;
+    UInt32 capacityFrames = 0;
+    juce::WaitableEvent callbackEvent;
+    std::atomic<AudioDeviceID> deviceID{kAudioObjectUnknown};
+    std::atomic<double> sampleRate{0.0};
+    std::atomic<UInt32> bufferFrames{0};
+    std::atomic<std::uint64_t> callbackCount{0};
+    std::atomic<std::uint64_t> invalidCallbackCount{0};
+    std::atomic<UInt32> lastFrames{0};
+    std::atomic<OSStatus> lastStatus{noErr};
+    std::atomic<OSStatus> firstRenderErrorStatus{noErr};
+    std::atomic<OSStatus> lastRenderErrorStatus{noErr};
+    std::atomic<bool> callbackReady{false};
+    std::atomic<bool> cancelled{false};
+    std::atomic<bool> active{false};
+    std::atomic<bool> running{false};
+    std::atomic<bool> captureEnabled{false};
+};
+
+MixroomMacInputProbe &mixroomMacInputProbeV2()
+{
+    static MixroomMacInputProbe probe;
+    return probe;
+}
+}
+#endif
+
 @implementation JuceBridge
 
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath
@@ -2366,6 +2796,382 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     // }).detach();
 }
 
++ (BOOL)initialisePlaybackV2ObjC:(NSString *)outputDeviceName
+{
+    return JuceEngine::get().initialisePlaybackV2(
+        juceStringFromNSString(outputDeviceName));
+}
+
+#if TARGET_OS_OSX
++ (BOOL)initialiseMacPlaybackV2ObjC:(NSString *)outputDeviceName
+                         sampleRate:(double)sampleRate
+                       bufferFrames:(NSInteger)bufferFrames
+{
+    return JuceEngine::get().initialisePlaybackV2(
+        juceStringFromNSString(outputDeviceName),
+        sampleRate,
+        static_cast<int>(bufferFrames));
+}
+#endif
+
++ (BOOL)pausePlaybackForRouteChangeV2ObjC
+{
+    return JuceEngine::get().pausePlaybackForRouteChangeV2();
+}
+
++ (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice
+{
+#if TARGET_OS_OSX
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+#else
+    return JuceEngine::get().quiescePlaybackRouteV2(closeRemovedDevice);
+#endif
+}
+
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString *)outputDeviceName
+{
+#if TARGET_OS_OSX
+    const auto name = juceStringFromNSString(outputDeviceName);
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().reconfigurePlaybackRouteV2(name);
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+#else
+    return JuceEngine::get().reconfigurePlaybackRouteV2(
+        juceStringFromNSString(outputDeviceName));
+#endif
+}
+
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString *)outputDeviceName
+                            sampleRate:(double)sampleRate
+                          bufferFrames:(NSInteger)bufferFrames
+{
+#if TARGET_OS_OSX
+    juce::ignoreUnused(outputDeviceName, sampleRate, bufferFrames);
+    return NO;
+#else
+    return JuceEngine::get().reconfigurePlaybackRouteV2(
+        juceStringFromNSString(outputDeviceName),
+        sampleRate,
+        static_cast<int>(bufferFrames));
+#endif
+}
+
+#if TARGET_OS_OSX
++ (BOOL)reconfigureMacPlaybackRouteV2ObjC:(NSString *)outputDeviceName
+                              sampleRate:(double)sampleRate
+                            bufferFrames:(NSInteger)bufferFrames
+{
+    const auto name = juceStringFromNSString(outputDeviceName);
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().reconfigureMacPlaybackRouteV2(
+            name,
+            sampleRate,
+            static_cast<int>(bufferFrames));
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+}
+
++ (void)beginMacOutputCallbackProofV2ObjC
+{
+    JuceEngine::get().beginMacOutputCallbackProofV2();
+}
+
++ (BOOL)waitForMacOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return JuceEngine::get().waitForMacOutputCallbackProofV2(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (void)cancelMacOutputCallbackProofV2ObjC
+{
+    JuceEngine::get().cancelMacOutputCallbackProofV2();
+}
+
++ (NSNumber *)getMacOutputCallbackProofCountV2ObjC
+{
+    return @((unsigned long long)
+        JuceEngine::get().getMacOutputCallbackProofCountV2());
+}
+
++ (NSNumber *)getMacOutputCallbackProofFramesV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofFramesV2());
+}
+
++ (NSNumber *)getMacOutputCallbackProofSampleRateV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofSampleRateV2());
+}
+
++ (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID
+{
+    return mixroomMacInputProbeV2().start((AudioDeviceID)deviceID);
+}
+
++ (BOOL)waitForMacInputProbeCallbackV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return mixroomMacInputProbeV2().waitForValidCallback(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (void)cancelMacInputProbeWaitV2ObjC
+{
+    mixroomMacInputProbeV2().cancelWait();
+}
+
++ (NSDictionary<NSString *, id> *)getMacInputProbeFactsV2ObjC
+{
+    const auto &probe = mixroomMacInputProbeV2();
+    return @{
+        @"deviceID": @((uint32_t)probe.getDeviceID()),
+        @"sampleRateHz": @(probe.getSampleRate()),
+        @"bufferFrames": @(probe.getBufferFrames()),
+        @"callbackCount": @((unsigned long long)probe.getCallbackCount()),
+        @"invalidCallbackCount": @((unsigned long long)
+            probe.getInvalidCallbackCount()),
+        @"lastFrames": @(probe.getLastFrames()),
+        @"lastStatus": @(probe.getLastStatus()),
+        @"firstRenderErrorStatus": @(probe.getFirstRenderErrorStatus()),
+        @"lastRenderErrorStatus": @(probe.getLastRenderErrorStatus()),
+        @"running": @(probe.isRunning()),
+    };
+}
+
++ (void)stopMacInputProbeV2ObjC
+{
+    mixroomMacInputProbeV2().stop();
+}
+
++ (BOOL)startMacInputRecordingV2ObjC:(NSString *)path
+{
+    return mixroomMacInputProbeV2().startCapture(juceFileFromNSString(path));
+}
+
++ (NSDictionary<NSString *, id> *)stopMacInputRecordingV2ObjC
+{
+    const auto &probe = mixroomMacInputProbeV2();
+    const auto inputCallbackCount = probe.getCallbackCount();
+    const auto inputInvalidCallbackCount = probe.getInvalidCallbackCount();
+    const auto firstRenderErrorStatus = probe.getFirstRenderErrorStatus();
+    const auto lastRenderErrorStatus = probe.getLastRenderErrorStatus();
+    const auto result = mixroomMacInputProbeV2().stopCapture();
+    return @{
+        @"success": @(result.success),
+        @"diagnosticCode":
+            [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()]
+                ?: @"writer_finalize_failed",
+        @"attemptedSamples": @(result.attemptedSamples),
+        @"acceptedSamples": @(result.acceptedSamples),
+        @"droppedSamples": @(result.droppedSamples),
+        @"invalidBlockCount": @(result.invalidBlockCount),
+        @"actualSampleRate": @(result.actualSampleRate),
+        @"channelCount": @(result.channelCount),
+        @"inputCallbackCount": @((unsigned long long)inputCallbackCount),
+        @"inputInvalidCallbackCount":
+            @((unsigned long long)inputInvalidCallbackCount),
+        @"firstRenderErrorStatus": @(firstRenderErrorStatus),
+        @"lastRenderErrorStatus": @(lastRenderErrorStatus),
+    };
+}
+
++ (void)discardMacInputRecordingV2ObjC
+{
+    mixroomMacInputProbeV2().discardCapture();
+}
+
++ (BOOL)isMacInputRecordingV2ObjC
+{
+    return mixroomMacInputProbeV2().isCaptureActive();
+}
+
++ (NSDictionary<NSString *, id> *)getMacInputCaptureFactsV2ObjC
+{
+    return namedValueStatsToNSDictionary(
+        mixroomMacInputProbeV2().getCaptureFacts());
+}
+
+#endif
+
++ (void)beginOutputCallbackProofV2ObjC
+{
+    JuceEngine::get().beginMacOutputCallbackProofV2();
+}
+
++ (BOOL)waitForOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return JuceEngine::get().waitForMacOutputCallbackProofV2(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (NSNumber *)getOutputCallbackProofCountV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofCountV2());
+}
+
++ (NSNumber *)getOutputCallbackProofFramesV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofFramesV2());
+}
+
++ (NSNumber *)getOutputCallbackProofSampleRateV2ObjC
+{
+    return @(JuceEngine::get().getMacOutputCallbackProofSampleRateV2());
+}
+
++ (BOOL)reconfigureRecordingRouteV2ObjC:(NSString *)outputDeviceName
+                              inputName:(NSString *)inputDeviceName
+{
+    return JuceEngine::get().reconfigureRecordingRouteV2(
+        juceStringFromNSString(outputDeviceName),
+        juceStringFromNSString(inputDeviceName));
+}
+
++ (BOOL)reconfigureBluetoothDuplexRouteV2ObjC
+{
+    return JuceEngine::get().reconfigureBluetoothDuplexRouteV2();
+}
+
++ (BOOL)prepareBluetoothDuplexSessionV2ObjC
+{
+    return JuceEngine::get().prepareBluetoothDuplexSessionV2();
+}
+
++ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds
+{
+    return JuceEngine::get().openPreparedBluetoothDuplexRouteV2(
+        static_cast<int>(timeoutMilliseconds));
+}
+
++ (BOOL)prepareSystemSelectedDuplexSessionV2ObjC
+{
+    return JuceEngine::get().prepareSystemSelectedDuplexSessionV2();
+}
+
++ (BOOL)openPreparedSystemSelectedDuplexRouteV2ObjC:
+            (NSInteger)timeoutMilliseconds
+                                      outputChannels:(NSInteger)outputChannels
+{
+    return JuceEngine::get().openPreparedSystemSelectedDuplexRouteV2(
+        static_cast<int>(timeoutMilliseconds),
+        static_cast<int>(outputChannels));
+}
+
++ (BOOL)validateRecordingRouteV2ObjC
+{
+    return JuceEngine::get().validateRecordingRouteV2();
+}
+
++ (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC
+{
+    return JuceEngine::get().isBluetoothDuplexProjectCallbackReadyV2();
+}
+
++ (void)beginIOSIntentOperationV2ObjC
+{
+    JuceEngine::get().beginIOSIntentOperationV2();
+}
+
++ (void)endIOSIntentOperationV2ObjC
+{
+    JuceEngine::get().endIOSIntentOperationV2();
+}
+
++ (void)markIOSIntentRouteInvalidatedV2ObjC
+{
+    JuceEngine::get().markIOSIntentRouteInvalidatedV2();
+}
+
++ (BOOL)isIOSIntentRouteInvalidatedV2ObjC
+{
+    return JuceEngine::get().isIOSIntentRouteInvalidatedV2();
+}
+
++ (NSDictionary<NSString *, id> * _Nonnull)getIOSAudioSessionPolicyFactsObjC
+{
+#if JUCE_IOS
+    const auto facts = mixroomIOSGetAudioSessionPolicyFacts();
+    NSString *policy = @"legacyManaged";
+    switch (facts.policy)
+    {
+    case MixroomIOSAudioSessionPolicy::v2PlaybackOnly:
+        policy = @"v2PlaybackOnly";
+        break;
+    case MixroomIOSAudioSessionPolicy::v2BuiltInDuplex:
+        policy = @"v2BuiltInDuplex";
+        break;
+    case MixroomIOSAudioSessionPolicy::v2BluetoothHfpDuplex:
+        policy = @"v2BluetoothHfpDuplex";
+        break;
+    case MixroomIOSAudioSessionPolicy::v2SystemSelectedDuplex:
+        policy = @"v2SystemSelectedDuplex";
+        break;
+    case MixroomIOSAudioSessionPolicy::legacyManaged:
+        break;
+    }
+
+    NSString *diagnosticCode = @"ok";
+    switch (facts.status)
+    {
+    case MixroomIOSAudioSessionPolicyStatus::noInput:
+        diagnosticCode = @"no_input";
+        break;
+    case MixroomIOSAudioSessionPolicyStatus::sessionConfigurationFailed:
+    case MixroomIOSAudioSessionPolicyStatus::sessionActivationFailed:
+    case MixroomIOSAudioSessionPolicyStatus::ambiguousInput:
+    case MixroomIOSAudioSessionPolicyStatus::preferredInputFailed:
+        diagnosticCode = @"actual_state_unavailable";
+        break;
+    case MixroomIOSAudioSessionPolicyStatus::ok:
+        break;
+    }
+    return @{
+        @"policy": policy,
+        @"diagnosticCode": diagnosticCode,
+        @"activationCount": @(facts.activationCount),
+        @"sessionMutationElapsedMs": @(facts.mutationElapsedMilliseconds),
+    };
+#else
+    return @{};
+#endif
+}
+
++ (NSString *)getAudioRouteImplementationObjC
+{
+    const auto value = JuceEngine::get().getAudioRouteImplementationName();
+    return [NSString stringWithUTF8String:value.toRawUTF8()];
+}
+
 + (void)initializeMessageManager
 {
     static bool initialized = false;
@@ -2379,7 +3185,6 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 + (void)shutdownEngineObjC
 {
     // juceLogToFlutter("🔻 JuceBridge: shutdownEngineObjC called");
-#if JUCE_MAC && !JUCE_IOS
     if (auto *messageManager = juce::MessageManager::getInstance())
     {
         if (messageManager->isThisTheMessageThread())
@@ -2391,9 +3196,28 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     {
         JuceEngine::get().shutdownEngine();
     }
-#else
-    juce::MessageManager::callAsync([] { JuceEngine::get().shutdownEngine(); });
-#endif
+}
+
++ (void)shutdownForApplicationTerminationObjC
+{
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            JuceEngine::get().shutdownForApplicationTermination();
+        else
+            messageManager->callSync([] {
+                JuceEngine::get().shutdownForApplicationTermination();
+            });
+    }
+    else
+    {
+        JuceEngine::get().shutdownForApplicationTermination();
+    }
+}
+
++ (void)panicLiveMidiNotesForApplicationDeactivationObjC
+{
+    JuceEngine::get().panicLiveMidiNotesForApplicationDeactivation();
 }
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
@@ -2411,10 +3235,26 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     JuceEngine::get().loadTrack((int)idx, juce::File(jucePath)); // CALL DIRECTLY!
 }
 
-+ (void)playObjC
++ (BOOL)playObjC
 {
-    juce::MessageManager::callAsync([]
-                                    { JuceEngine::get().play(); });
+    BOOL started = NO;
+    auto play = [&]
+    {
+        started = JuceEngine::get().play();
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            play();
+        else
+            messageManager->callSync(play);
+    }
+    return started;
+}
+
++ (BOOL)isTransportPlayingObjC
+{
+    return JuceEngine::get().isTransportPlaying();
 }
 
 + (void)pauseObjC
@@ -2784,23 +3624,41 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     NSNumber *dryClipRender = settings[@"dryClipRender"];
     if ([dryClipRender isKindOfClass:[NSNumber class]])
         options.dryClipRender = [dryClipRender boolValue];
+    NSNumber *bypassMasterProcessing = settings[@"bypassMasterProcessing"];
+    if ([bypassMasterProcessing isKindOfClass:[NSNumber class]])
+        options.bypassMasterProcessing = [bypassMasterProcessing boolValue];
+    NSNumber *bypassGroupProcessing = settings[@"bypassGroupProcessing"];
+    if ([bypassGroupProcessing isKindOfClass:[NSNumber class]])
+        options.bypassGroupProcessing = [bypassGroupProcessing boolValue];
+    NSNumber *preserveRealtimePlayback = settings[@"preserveRealtimePlayback"];
+    if ([preserveRealtimePlayback isKindOfClass:[NSNumber class]])
+        options.preserveRealtimePlayback = [preserveRealtimePlayback boolValue];
+    NSNumber *timelineStartSeconds = settings[@"timelineStartSeconds"];
+    if ([timelineStartSeconds isKindOfClass:[NSNumber class]])
+        options.timelineStartSeconds = [timelineStartSeconds doubleValue];
     NSString *clipSnapshotJson = settings[@"clipSnapshotJson"];
     if ([clipSnapshotJson isKindOfClass:[NSString class]] && clipSnapshotJson.length > 0)
         options.clipSnapshotJson = juceStringFromNSString(clipSnapshotJson);
-    juce::String result;
-
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { result = JuceEngine::get().exportMix(juce::File(jucePath), options); });
+    NSArray *audibleClipIds = settings[@"audibleClipIds"];
+    if ([audibleClipIds isKindOfClass:[NSArray class]])
+    {
+        options.restrictToAudibleClipIds = true;
+        for (id rawClipId in audibleClipIds)
+            if ([rawClipId isKindOfClass:[NSNumber class]])
+                options.audibleClipIds.add([(NSNumber *)rawClipId intValue]);
+    }
+    // The Flutter plug-in already invokes exports on a user-initiated worker
+    // queue. JuceEngine marshals only plug-in graph construction back to the
+    // message thread, leaving the long offline render loop on this worker.
+    const juce::String result =
+        JuceEngine::get().exportMix(juce::File(jucePath), options);
 
     return [NSString stringWithUTF8String:result.toRawUTF8()];
 }
 
 + (double)getExportProgressObjC
 {
-    double progress = 0.0;
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { progress = JuceEngine::get().getExportProgress(); });
-    return progress;
+    return JuceEngine::get().getExportProgress();
 }
 
 + (NSString *)exportTrackObjC:(NSInteger)track outPath:(NSString *)outPath settings:(NSDictionary *)settings
@@ -3053,6 +3911,11 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         resultArray = [NSMutableArray array];
 
     return resultArray;
+}
+
++ (void)cancelPluginScanObjC
+{
+    JuceEngine::get().cancelPluginScan();
 }
 
 + (NSArray<NSDictionary *> *)getQuarantinedPluginsObjC
@@ -3316,19 +4179,29 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
-#if JUCE_MAC && !JUCE_IOS
-    applied = JuceEngine::get().setTrackEffectStateBase64(
-        (int)trackRow,
-        (int)effectIndex,
-        state,
-        (bool)forceIndividualRow);
-#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
-        mm->callSync([trackRow, effectIndex, forceIndividualRow, &applied, state]
-                     { applied = JuceEngine::get().setTrackEffectStateBase64((int)trackRow, (int)effectIndex, state, (bool)forceIndividualRow); });
+        const auto apply = [trackRow, effectIndex, forceIndividualRow, &applied, state]
+        {
+            applied = JuceEngine::get().setTrackEffectStateBase64(
+                (int)trackRow,
+                (int)effectIndex,
+                state,
+                (bool)forceIndividualRow);
+        };
+        if (mm->isThisTheMessageThread())
+            apply();
+        else
+            mm->callSync(apply);
     }
-#endif
+    else
+    {
+        applied = JuceEngine::get().setTrackEffectStateBase64(
+            (int)trackRow,
+            (int)effectIndex,
+            state,
+            (bool)forceIndividualRow);
+    }
     return (BOOL)applied;
 }
 
@@ -3536,17 +4409,25 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
 {
     bool applied = false;
     const juce::String state = juceStringFromNSString(stateBase64 ?: @"");
-#if JUCE_MAC && !JUCE_IOS
-    applied = JuceEngine::get().setMasterEffectStateBase64(
-        (int)effectIndex,
-        state);
-#else
     if (auto *mm = juce::MessageManager::getInstance())
     {
-        mm->callSync([effectIndex, &applied, state]
-                     { applied = JuceEngine::get().setMasterEffectStateBase64((int)effectIndex, state); });
+        const auto apply = [effectIndex, &applied, state]
+        {
+            applied = JuceEngine::get().setMasterEffectStateBase64(
+                (int)effectIndex,
+                state);
+        };
+        if (mm->isThisTheMessageThread())
+            apply();
+        else
+            mm->callSync(apply);
     }
-#endif
+    else
+    {
+        applied = JuceEngine::get().setMasterEffectStateBase64(
+            (int)effectIndex,
+            state);
+    }
     return (BOOL)applied;
 }
 
@@ -3760,6 +4641,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return (BOOL)supported;
 }
 
++ (BOOL)isBuiltInMidiInstrumentObjC:(NSString *)instrumentId
+{
+    const juce::String iid =
+        instrumentId != nil ? juceStringFromNSString(instrumentId)
+                            : juce::String();
+    return (BOOL)JuceEngine::isBuiltInMidiInstrumentIdentifier(iid);
+}
+
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
             instrumentId:(NSString *)instrumentId
@@ -3770,6 +4659,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
          inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId
 {
     const juce::String iid =
         instrumentId != nil ? juceStringFromNSString(instrumentId)
@@ -3779,6 +4669,43 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                               : juce::String();
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
+
+    if (JuceEngine::isBuiltInMidiInstrumentIdentifier(iid))
+    {
+        auto prepared = JuceEngine::get().prepareBuiltInMidiClipLoad(
+            (int)clipIndex,
+            (int)rowId,
+            iid,
+            iname,
+            parsedNotes,
+            parsedParams,
+            sourceTempoBpm,
+            startSec,
+            lengthSec,
+            inFileOffsetSec,
+            (std::int64_t)loadRequestId);
+        if (prepared == nullptr)
+            return NO;
+
+        bool ok = false;
+        auto installPreparedMidiClip = [&]
+        {
+            ok = JuceEngine::get().installPreparedMidiClipLoad(
+                prepared);
+        };
+        if (auto *mm = juce::MessageManager::getInstance())
+        {
+            if (mm->isThisTheMessageThread())
+                installPreparedMidiClip();
+            else
+                mm->callSync(installPreparedMidiClip);
+        }
+        else
+        {
+            installPreparedMidiClip();
+        }
+        return (BOOL)ok;
+    }
 
     if (!JuceEngine::get().prepareMidiClipSampleAssets(iid, iname, parsedNotes))
         return NO;
@@ -3795,7 +4722,8 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
                                             sourceTempoBpm,
                                             startSec,
                                             lengthSec,
-                                            inFileOffsetSec);
+                                            inFileOffsetSec,
+                                            (std::int64_t)loadRequestId);
     };
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -3811,6 +4739,14 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     }
 
     return (BOOL)ok;
+}
+
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                     requestId:(int64_t)loadRequestId
+{
+    return (BOOL)JuceEngine::get().cancelMidiClipLoad(
+        (int)clipIndex,
+        (std::int64_t)loadRequestId);
 }
 
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex
@@ -3968,14 +4904,25 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         stateBase64 != nil ? juceStringFromNSString(stateBase64)
                            : juce::String();
     bool applied = false;
-#if JUCE_MAC && !JUCE_IOS
-    applied = JuceEngine::get().setMidiClipPluginStateBase64(
-        (int)clipIndex,
-        state);
-#else
-    juce::MessageManager::getInstance()->callSync([&]
-                                                  { applied = JuceEngine::get().setMidiClipPluginStateBase64((int)clipIndex, state); });
-#endif
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        const auto apply = [clipIndex, &applied, state]
+        {
+            applied = JuceEngine::get().setMidiClipPluginStateBase64(
+                (int)clipIndex,
+                state);
+        };
+        if (mm->isThisTheMessageThread())
+            apply();
+        else
+            mm->callSync(apply);
+    }
+    else
+    {
+        applied = JuceEngine::get().setMidiClipPluginStateBase64(
+            (int)clipIndex,
+            state);
+    }
     return (BOOL)applied;
 }
 
@@ -4771,6 +5718,12 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return JuceEngine::get().preparePlaybackRoute(why);
 }
 
++ (BOOL)preparePlaybackGraphObjC:(NSString *)reason
+{
+    const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
+    return JuceEngine::get().preparePlaybackGraph(why);
+}
+
 + (void)refreshAudioRouteObjC:(NSString *)reason
 {
     const auto why = reason == nil ? juce::String("dart") : juceStringFromNSString(reason);
@@ -4823,9 +5776,24 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
     return @(JuceEngine::get().getRecordingPeak());
 }
 
-+ (void)stopRecordingObjC
++ (NSDictionary<NSString *, id> *)stopRecordingObjC
 {
-    JuceEngine::get().stopRecording();
+    const auto result = JuceEngine::get().stopRecording();
+    return @{
+        @"success" : @(result.success),
+        @"diagnosticCode" : [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()] ?: @"writer_finalize_failed",
+        @"attemptedSamples" : @(result.attemptedSamples),
+        @"acceptedSamples" : @(result.acceptedSamples),
+        @"droppedSamples" : @(result.droppedSamples),
+        @"invalidBlockCount" : @(result.invalidBlockCount),
+        @"actualSampleRate" : @(result.actualSampleRate),
+        @"channelCount" : @(result.channelCount),
+    };
+}
+
++ (void)discardRecordingCaptureObjC
+{
+    JuceEngine::get().discardRecordingCapture();
 }
 
 + (BOOL)isRecordingObjC

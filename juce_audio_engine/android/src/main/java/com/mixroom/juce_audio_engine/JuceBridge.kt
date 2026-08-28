@@ -12,10 +12,31 @@ object JuceBridge {
 
     // Engine lifecycle
     @JvmStatic external fun initialiseEngineJNI()
+    @JvmStatic external fun initialisePlaybackV2JNI(): Boolean
+    @JvmStatic external fun quiescePlaybackV2JNI(closeDevice: Boolean): Boolean
+    @JvmStatic external fun reconfigurePlaybackV2JNI(): Boolean
+    @JvmStatic external fun prepareRecordingV2JNI(): Boolean
+    @JvmStatic external fun prepareSystemSelectedMediaDuplexV2JNI(): Boolean
+    @JvmStatic external fun prepareBluetoothDuplexV2JNI(): Boolean
+    @JvmStatic external fun waitForV2CallbackReadyJNI(timeoutMs: Int): Boolean
+    @JvmStatic external fun beginBluetoothMediaRouteMigrationV2JNI(): Long
+    @JvmStatic external fun waitForBluetoothMediaRouteMigrationV2JNI(
+        token: Long,
+        timeoutMs: Int,
+    ): Boolean
+    @JvmStatic external fun finishBluetoothMediaRouteMigrationV2JNI(token: Long)
+    @JvmStatic external fun setBluetoothMediaPlaybackPolicyV2JNI(enabled: Boolean)
+    @JvmStatic external fun setAndroidStreamPolicyV2JNI(policy: Int)
+    @JvmStatic external fun resetPlaybackPolicyV2JNI()
+    @JvmStatic external fun getOboeOutputStreamFactsV2JNI(): HashMap<String, Any>
+    @JvmStatic external fun getOboeInputStreamFactsV2JNI(): HashMap<String, Any>
     @JvmStatic external fun shutdownEngineJNI()
+    @JvmStatic external fun shutdownEngineSynchronouslyJNI()
+    @JvmStatic external fun discardRecordingCaptureV2JNI()
 
     // Playback control
     @JvmStatic external fun playJNI()
+    @JvmStatic external fun playPlaybackV2JNI(): Boolean
     @JvmStatic external fun pauseJNI()
 
     // Legacy track/clip API
@@ -86,6 +107,12 @@ object JuceBridge {
         startSec: Double,
         lengthSec: Double,
         inFileOffsetSec: Double,
+        loadRequestId: Long,
+    ): Boolean
+
+    @JvmStatic external fun cancelMidiClipLoadJNI(
+        clipIndex: Int,
+        loadRequestId: Long,
     ): Boolean
 
     @JvmStatic external fun updateMidiClipEventsJNI(
@@ -253,8 +280,8 @@ object JuceBridge {
     @JvmStatic external fun getCurrentOutputDeviceNameJNI(): String
     @JvmStatic external fun setLiveInputMonitoringEnabledJNI(enabled: Boolean)
     @JvmStatic external fun startRecordingJNI(path: String, channelStart: Int, channelCount: Int): Boolean
-    @JvmStatic external fun stopRecordingJNI()
-    @JvmStatic external fun stopRecordingWithoutPlaybackRestoreJNI()
+    @JvmStatic external fun stopRecordingJNI(): HashMap<String, Any>
+    @JvmStatic external fun stopRecordingWithoutPlaybackRestoreJNI(): HashMap<String, Any>
     @JvmStatic external fun isRecordingJNI(): Boolean
 
     // Meters and analysis

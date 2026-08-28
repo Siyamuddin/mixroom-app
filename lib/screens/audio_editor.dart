@@ -19,7 +19,11 @@ import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
+import 'package:mixroom/helpers/midi_pitch_ranges.dart';
+import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
 import 'package:mixroom/helpers/midi_preview_readiness.dart';
+import 'package:mixroom/helpers/sfz_definition_loader.dart';
+import 'package:mixroom/helpers/timed_native_operation.dart';
 import 'package:mixroom/helpers/automation_clip_overlap.dart';
 import 'package:mixroom/helpers/automation_point_sanitizer.dart';
 import 'package:mixroom/helpers/automation_target_labels.dart';
@@ -36,6 +40,7 @@ import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:mixroom/helpers/export_progress_ui.dart';
 import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/project_telemetry_service.dart';
+import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_chat_history.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/top_bar_visualizer_mode.dart';
@@ -58,6 +63,7 @@ import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/magnitude_predictor.dart';
 import 'package:mixroom/ai/magnitude_predictor_flags.dart';
+import 'package:mixroom/ai/one_button_mix_profiles.dart';
 import 'package:mixroom/ai/onnx_magnitude_predictor.dart';
 import 'package:mixroom/ai/producer_data_collector.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
@@ -125,7 +131,10 @@ import 'package:fftea/fftea.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:juce_audio_engine/audio_route_coordinator_v2.dart';
+import 'package:juce_audio_engine/audio_route_v2.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
+import 'package:mixroom/helpers/bluetooth_implementation_session_v2.dart';
 import 'package:mixroom/models/entitlement_models.dart';
 import 'package:mixroom/models/feedback_models.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -194,6 +203,34 @@ const String kBundledSamplePackManifestFileName =
 const String kUserSampleDropFolderName = 'Mixroom Samples';
 
 const List<Map<String, dynamic>> kBundledSfzFallbackCatalog = [
+  {
+    'id': 'sfz.guitar.steel_acoustic',
+    'name': 'Acoustic Guitar',
+    'category': 'instrument',
+    'pickerCategory': 'Guitars',
+    'sourceProject': 'FreePats Spanish Classical Guitar',
+    'sourceLicense': 'CC0 1.0 Universal',
+    'isSampled': true,
+    'sfzAssetPath':
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/AcousticGuitar.sfz',
+    'outputGain': 1.0,
+    'attackMs': 2.0,
+    'releaseMs': 350.0,
+  },
+  {
+    'id': 'sfz.guitar.clean_electric',
+    'name': 'Electric Guitar',
+    'category': 'instrument',
+    'pickerCategory': 'Guitars',
+    'sourceProject': 'Karoryfer Black And Green Guitars',
+    'sourceLicense': 'CC0 1.0 Universal',
+    'isSampled': true,
+    'sfzAssetPath':
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/ElectricGuitar.sfz',
+    'outputGain': 2.0,
+    'attackMs': 2.0,
+    'releaseMs': 250.0,
+  },
   {
     'id': 'sfz.vsco.mixroom_acoustic_drum_kit',
     'name': 'Mixroom Acoustic Drum Kit',
@@ -511,72 +548,6 @@ const Set<String> kBlockedInstrumentNameFragments = <String>{
 };
 
 const String kPitchLabToolInstrumentId = 'mixroom.vocal_pitch_lab';
-
-class _SfzRegion {
-  const _SfzRegion({
-    required this.sampleAssetPath,
-    required this.loKey,
-    required this.hiKey,
-    required this.keyCenter,
-    required this.loVel,
-    required this.hiVel,
-    required this.gainLinear,
-    required this.attackSec,
-    required this.releaseSec,
-    required this.pitchKeytrack,
-    required this.pitchOffsetSemitones,
-    required this.sampleStartFrame,
-    required this.sampleEndFrameExclusive,
-    required this.oneShot,
-    required this.seqLength,
-    required this.seqPosition,
-    required this.loRand,
-    required this.hiRand,
-  });
-
-  final String sampleAssetPath;
-  final int loKey;
-  final int hiKey;
-  final int keyCenter;
-  final int loVel;
-  final int hiVel;
-  final double gainLinear;
-  final double attackSec;
-  final double releaseSec;
-  final double pitchKeytrack;
-  final double pitchOffsetSemitones;
-  final int sampleStartFrame;
-  final int sampleEndFrameExclusive;
-  final bool oneShot;
-  final int seqLength;
-  final int seqPosition;
-  final double loRand;
-  final double hiRand;
-}
-
-class _SfzDefinition {
-  const _SfzDefinition({
-    required this.sfzAssetPath,
-    required this.regions,
-    required this.defaultAttackSec,
-    required this.defaultReleaseSec,
-  });
-
-  final String sfzAssetPath;
-  final List<_SfzRegion> regions;
-  final double defaultAttackSec;
-  final double defaultReleaseSec;
-}
-
-class _SfzParsedLine {
-  const _SfzParsedLine({
-    this.blockTag,
-    this.opcodes = const <String, String>{},
-  });
-
-  final String? blockTag;
-  final Map<String, String> opcodes;
-}
 
 class _DecodedStereoPcm {
   const _DecodedStereoPcm({
@@ -4275,8 +4246,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     'project_settings_close_button',
   );
   static const double _kTransportBarHeight = 88.0;
-  static const double _kIosSnackBarExtraLift = 16.0;
   static const double _kChatBarStackHeight = 68.0;
+  // Keep floating notices close to the control dock they describe. The dock
+  // already owns the iOS safe area, so adding another platform lift here
+  // creates an unnecessarily large gap above the chat bar.
+  static const double _kSnackBarDockGap = 10.0;
   static const double _kChatHistoryHeight = 380.0;
   static const double _kDesktopChatHistoryMinHeight = 300.0;
   static const double _kDesktopChatHistoryMaxHeight = 620.0;
@@ -4522,7 +4496,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _cloudWorkspaceId = '';
   String _cloudOrganizationId = '';
   int? _cloudDocumentRevision;
+  String _cloudSourceFingerprint = '';
   String _cloudSyncedAt = '';
+  Future<void>? _compatibilityRenderInFlight;
+  bool _compatibilityAudioRequired = false;
+  bool _compatibilityAudioCurrent = false;
+  bool _compatibilityPreparationActive = false;
+  double _compatibilityPreparationProgress = 0.0;
+  String _compatibilityAudioError = '';
   CloudSyncMode _cloudSyncMode = CloudSyncMode.auto;
   Timer? _cloudAutoSyncTimer;
   bool _cloudAutoSyncDirty = false;
@@ -4531,6 +4512,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _cloudAutoSyncFailureCount = 0;
   DateTime? _cloudAutoSyncBackoffUntil;
   bool _requiresProjectNaming = false;
+  bool _usingCompatibilityAudio = false;
+  Map<String, dynamic> _compatibilityProjectionMetadata =
+      const <String, dynamic>{};
+  Map<int, List<String>> _frozenPluginNamesByRow = const <int, List<String>>{};
+  bool _compatibilityOpenNoticeQueued = false;
+  bool _compatibilityForkInFlight = false;
   int _projectCreatedAtMs = 0;
   bool _loadedOnce = false;
   Future<String>? _bundledSamplePackRefreshTokenFuture;
@@ -4704,24 +4691,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     resampleQuality: _ExportResampleQuality.best,
   );
   _AudioExportSettings? _activeAudioExportSettings;
-  static const List<String> _kOneButtonMixProfiles = <String>[
-    'Mixroom Producer',
-  ];
   static const Color _kOneButtonMixAccentColor = Color.fromRGBO(
     0,
     149,
     255,
     0.60,
   );
-  String _selectedOneButtonMixProfile = 'Mixroom Producer';
+  String _selectedOneButtonMixProfileId = OneButtonMixProfiles.producerId;
 
-  String _localizedOneButtonMixProfile(BuildContext context, String profile) {
-    switch (profile) {
-      case 'Mixroom Producer':
-        return L10n.translate(context, 'Mixroom Producer');
-      default:
-        return profile;
-    }
+  String _localizedOneButtonMixProfile(BuildContext context, String profileId) {
+    return L10n.translate(
+      context,
+      OneButtonMixProfiles.byId(profileId).label,
+    );
   }
 
   List<int> _exportSampleRatesForFormat(_ExportAudioFormat format) {
@@ -5578,7 +5560,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _isMidiClipRecording = false;
   double _recordingStartMs = 0; // project time where the recording starts
   String? _recordingFilePath; // temp recorded file (m4a/wav/etc)
+  String? _pendingUnpublishedRecordingPath;
   Timer? _recordingPeakTimer;
+  int _recordingPeakGeneration = 0;
+  bool _recordingPeakPollBusy = false;
   Timer? _midiInputPollTimer;
   Timer? _midiHeldNoteRefreshTimer;
   int? _midiRecordingClipEngineId;
@@ -5596,6 +5581,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   // for live preview waveform
   List<double> _recordingPeaks = []; // 0..1 peaks while recording
+  final List<double> _recordingPeakTimesMs = <double>[];
   StreamSubscription<Amplitude>? _amplitudeSub;
 
   // so keeping this local state might be unnecessary (and cause a factor of drift from source of truth which is JUCE) (maybe consider removing?)
@@ -5667,9 +5653,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, DesktopEditorWindowLayout> _desktopWindowLayouts =
       <String, DesktopEditorWindowLayout>{};
   int _lastLiveMidiInputTargetClipId = -2;
+  final MidiPreviewNoteCoordinator _pianoRollPreviewNotes =
+      MidiPreviewNoteCoordinator();
+  bool _closingPianoRollPreview = false;
   final Set<LogicalKeyboardKey> _desktopMidiHeldKeys = <LogicalKeyboardKey>{};
   Timer? _midiDevicePollTimer;
   StreamSubscription<Map<String, dynamic>>? _juceEngineEventSubscription;
+  AudioRouteCoordinatorV2? _audioRouteCoordinatorV2;
+  bool _bluetoothRecordingQualityNoticeShown = false;
+  bool _macBluetoothCommunicationQualityNoticeShown = false;
+  bool _v2AudioSessionInvalidated = false;
+  bool _v2AudioSessionRecoveryInProgress = false;
+  bool _androidV2ForegroundRecoveryPending = false;
+  bool _iosV2ForegroundRecoveryPending = false;
+  Future<void>? _v2AudioSessionRecoveryFuture;
+  Future<void>? _audioEngineShutdownFuture;
+  static Future<void>? _processAudioEngineShutdownFuture;
+  String _v2AudioSessionInvalidationNotice =
+      'Audio output changed during recording. Reopen the audio editor to continue.';
   StreamSubscription<DesktopFileDragEvent>? _desktopFinderDropSub;
   SampleDragData? _finderSampleDragData;
   String? _finderSampleDragDurationPath;
@@ -5678,6 +5679,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<int, int> _midiClipEngineRefreshTokens = <int, int>{};
   final Map<int, Future<void>> _midiClipEngineRefreshChains =
       <int, Future<void>>{};
+  static int _nextMidiClipLoadRequestId = DateTime.now().microsecondsSinceEpoch;
   final Set<int> _deferredHostedInstrumentEngineClipIds = <int>{};
   final Map<int, String> _restoredHostedInstrumentStateByClipId =
       <int, String>{};
@@ -5769,9 +5771,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   MediaDeviceInfo? _selectedOutput;
   final List<TrackGroup> _trackGroups = <TrackGroup>[];
   String? _androidOutputRouteName;
+  List<String> _macInputDevices = const <String>[];
+  String? _macInputDeviceName;
   List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
+  bool _macV2InputSelectionInFlight = false;
   AudioRouteInfo _audioRouteInfo = AudioRouteInfo.unknown;
+  static const BluetoothImplementationSessionResolverV2
+  _bluetoothImplementationSessionResolverV2 =
+      BluetoothImplementationSessionResolverV2();
+  BluetoothImplementationSessionV2? _bluetoothImplementationSessionV2;
+
+  bool get _isBluetoothV2Session =>
+      _bluetoothImplementationSessionV2?.active == BluetoothImplementationV2.v2;
+
+  bool get _supportsV2AudioRecording =>
+      Platform.isAndroid || Platform.isIOS || Platform.isMacOS;
 
   List<String> _inputDevices = [];
   List<AudioInputDeviceInfo> _inputDeviceInfos = const <AudioInputDeviceInfo>[];
@@ -5787,6 +5802,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _preferredDawBufferSize = 512;
   int _midiInputChannelFilter = 0;
   bool _audioEngineSettingsApplying = false;
+  bool _v2HardwareSettingsApplicationPending = false;
   String? _lastPreparedRecordingDevice;
   int? _lastPreparedRecordingInputOpenChannels;
   bool _recordingInputPrewarmInFlight = false;
@@ -5961,12 +5977,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<String, Set<AudioTrack>> _waveformPendingTracksByPath =
       <String, Set<AudioTrack>>{};
   final Map<String, int> _waveformFailureCountByPath = <String, int>{};
+  Future<void> _waveformExtractionLane = Future<void>.value();
   static const int _maxWaveformExtractionAttempts = 3;
   String _aiLibrarySnapshotCache = '';
   String? _aiLibrarySnapshotCacheKey;
   final Map<String, String> _aiLibrarySamplePathIndex = <String, String>{};
   final Map<String, List<String>> _aiLibraryRolePathIndex =
       <String, List<String>>{};
+  final Map<String, List<Map<String, int>>>
+  _aiPlayablePitchRangesByInstrumentId =
+      <String, List<Map<String, int>>>{};
   late final ja.AudioPlayer _samplePreviewPlayer;
   StreamSubscription<ja.PlayerState>? _samplePreviewStateSub;
   String? _auditioningSamplePath;
@@ -5985,11 +6005,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Set<String> _desktopFavoritePluginIds = <String>{};
   Set<String> _desktopHiddenPluginIds = <String>{};
   List<String> _desktopPluginSearchPaths = <String>[];
-  bool _desktopHostedPluginWindowsDetached = false;
   int? _desktopLastPluginRescanAtMs;
   final List<_ProjectLoadIssue> _projectLoadIssues = <_ProjectLoadIssue>[];
-  final Map<String, _SfzDefinition> _sfzDefinitionCache =
-      <String, _SfzDefinition>{};
+  final SfzDefinitionLoader _sfzDefinitionLoader = SfzDefinitionLoader();
+  static final Set<int> _allMidiPitches = Set<int>.unmodifiable(
+    <int>{for (var pitch = 0; pitch <= 127; pitch++) pitch},
+  );
+  final Set<String> _sfzRangeDetectionFailuresLogged = <String>{};
   final LinkedHashMap<String, _DecodedStereoPcm> _sfzSampleCache =
       LinkedHashMap<String, _DecodedStereoPcm>();
   static const int _kMaxSfzSampleCacheEntries = 10;
@@ -7825,17 +7847,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final trimmed = pluginId.trim();
     if (trimmed.isEmpty) return false;
     for (final plugin in _desktopScannedPlugins) {
-      if ((plugin['id'] as String?)?.trim() == trimmed) {
+      if ((plugin['id'] as String?)?.trim().toLowerCase() ==
+          trimmed.toLowerCase()) {
         return true;
       }
     }
-    if (_looksLikeDesktopHostedPluginId(trimmed)) {
-      if (trimmed.toLowerCase().endsWith('.vst3') ||
-          trimmed.contains('/') ||
-          trimmed.contains(r'\')) {
-        return File(trimmed).existsSync();
-      }
-      return true;
+    if (trimmed.toLowerCase().endsWith('.vst3') ||
+        trimmed.contains('/') ||
+        trimmed.contains(r'\')) {
+      return File(trimmed).existsSync();
     }
     return false;
   }
@@ -8006,6 +8026,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final map = entry.cast<String, dynamic>();
         final presetFile = (map['preset'] as String?)?.trim() ?? '';
         if (presetFile.isEmpty) continue;
+        final entryPack = (map['pack'] as String?)?.trim().isNotEmpty == true
+            ? (map['pack'] as String).trim()
+            : pack ?? '';
         final categoryRaw = (map['category'] as String?) ?? '';
         final pickerCategory = _normalizePickerCategory(categoryRaw);
         final displayName = (map['name'] as String?)?.trim().isNotEmpty == true
@@ -8016,17 +8039,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final defaultReleaseMs = pickerCategory == 'Drums' ? 320.0 : 520.0;
         final explicitId = (map['id'] as String?)?.trim() ?? '';
         final idToken = _sanitizeInstrumentIdToken(
-          '${pack ?? 'sfz'}_${presetFile.replaceAll('.sfz', '')}',
+          '${entryPack.isEmpty ? 'sfz' : entryPack}_${presetFile.replaceAll('.sfz', '')}',
         );
+        final sourceProject =
+            (map['source_project'] as String?)?.trim().isNotEmpty == true
+                ? (map['source_project'] as String).trim()
+                : entryPack.isEmpty
+                    ? 'Bundled SFZ'
+                    : entryPack;
+        final sourceLicense =
+            (map['source_license'] as String?)?.trim().isNotEmpty == true
+                ? (map['source_license'] as String).trim()
+                : 'See bundled LICENSE';
         loaded.add(<String, dynamic>{
           'id': explicitId.isNotEmpty ? explicitId : 'sfz.$idToken',
           'name': displayName,
           'category': 'instrument',
           'pickerCategory': pickerCategory,
-          'sourceProject': pack ?? 'Bundled SFZ',
-          'sourceLicense': 'See bundled LICENSE',
+          'sourceProject': sourceProject,
+          'sourceLicense': sourceLicense,
           'isSampled': true,
-          'sfzAssetPath': 'assets/instruments/${pack ?? ''}/$presetFile',
+          'sfzAssetPath': 'assets/instruments/$entryPack/$presetFile',
           'outputGain':
               ((map['outputGain'] as num?)?.toDouble() ?? defaultOutputGain)
                   .clamp(0.2, 2.0),
@@ -9203,16 +9236,85 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // _startMeterPolling();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await JuceAudioEngine.initialise();
-      JuceAudioEngine.initialiseEventListeners();
+      final bluetoothSession = await _bluetoothImplementationSessionResolverV2
+          .loadSession();
+      if (!mounted) return;
+      setState(() {
+        _bluetoothImplementationSessionV2 = bluetoothSession;
+      });
+      while (true) {
+        final priorShutdown = _processAudioEngineShutdownFuture;
+        if (priorShutdown == null) break;
+        try {
+          await priorShutdown;
+        } catch (_) {
+          if (!mounted) return;
+          _showSmallNotice('Audio output is not available yet.');
+          setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+        if (!mounted) return;
+        final latestShutdown = _processAudioEngineShutdownFuture;
+        if (latestShutdown == null ||
+            identical(latestShutdown, priorShutdown)) {
+          break;
+        }
+      }
+      if (!mounted) return;
+      final engineInitialised =
+          await JuceAudioEngine.initialiseForImplementation(
+            bluetoothSession.active,
+          );
+      if (!mounted) return;
+      if (!engineInitialised) {
+        _showSmallNotice('Audio output is not available yet.');
+        setState(() => _isLoadingNextScreen = false);
+        return;
+      }
+      if (Platform.isMacOS &&
+          JuceAudioEngine.v2BluetoothCommunicationQualityReduced) {
+        _macBluetoothCommunicationQualityNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone selected. Playback quality is reduced. Select another microphone for stereo audio.',
+        );
+      }
       _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
         _handleJuceEngineEvent,
       );
+      if (_isBluetoothV2Session &&
+          _usesLiveAudioRouteCoordinatorV2 &&
+          !Platform.isIOS) {
+        final coordinator = AudioRouteCoordinatorV2(
+          adapter: const MethodChannelAudioRouteAdapterV2(),
+          allowRecoveryGenerationSupersession: Platform.isMacOS,
+          onStateChanged: _handleAudioRouteCoordinatorStateV2,
+          onTransition: _handleAudioRouteTransitionV2,
+          onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
+        );
+        _audioRouteCoordinatorV2 = coordinator;
+        final initialRoute = await coordinator.start();
+        if (!mounted) {
+          await _shutdownAudioEngineV2Aware();
+          return;
+        }
+        if (initialRoute.captureConsistency ==
+            AudioRouteCaptureConsistencyV2.unavailable) {
+          await _shutdownAudioEngineV2Aware();
+          _showSmallNotice('Audio output monitoring is unavailable.');
+          setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+        if (Platform.isMacOS) {
+          await _loadMacV2AudioDevices();
+        }
+      }
       await _refreshPlatformCapabilities();
-      await _refreshMicrophonePermissionState();
-      await _maybePromptMicrophonePermissionOnDawEntry();
-      await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
-      await _refreshAudioRouteInfo();
+      if (!_isBluetoothV2Session) {
+        await _refreshMicrophonePermissionState();
+        await _maybePromptMicrophonePermissionOnDawEntry();
+        await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
+        await _refreshAudioRouteInfo();
+      }
       await _loadBundledInstrumentCatalog();
       final engineSupportsLiveMidi =
           await JuceAudioEngine.supportsLiveMidiClipPlayback();
@@ -9230,7 +9332,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshProducerCaptureUiAllowlistAccess();
       await _sampleBrowserPreferencesFuture;
       await _loadProjectIfAny();
-      _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
+      if (!mounted) {
+        await _shutdownAudioEngineV2Aware();
+        return;
+      }
+      if (_isBluetoothV2Session && Platform.isIOS) {
+        final coordinator = AudioRouteCoordinatorV2(
+          adapter: const MethodChannelAudioRouteAdapterV2(),
+          onStateChanged: _handleAudioRouteCoordinatorStateV2,
+          onTransition: _handleAudioRouteTransitionV2,
+          onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
+        );
+        _audioRouteCoordinatorV2 = coordinator;
+        final initialRoute = await coordinator.start();
+        if (!mounted) {
+          await _shutdownAudioEngineV2Aware();
+          return;
+        }
+        if (initialRoute.captureConsistency ==
+            AudioRouteCaptureConsistencyV2.unavailable) {
+          await _shutdownAudioEngineV2Aware();
+          _showSmallNotice('Audio output monitoring is unavailable.');
+          setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+        if (_v2HardwareSettingsApplicationPending) {
+          _v2HardwareSettingsApplicationPending = false;
+          await _applyAudioEngineSettingsToNative(
+            reason: 'projectLoadDeferred',
+            notifyOnFailure: false,
+          );
+        }
+      }
+      if (!_isBluetoothV2Session) {
+        _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
+      }
       await _flushPendingDesktopFinderDrops();
       setState(() => _isLoadingNextScreen = false);
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
@@ -9413,7 +9549,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _desktopPluginCatalogLoadAttempted =
           _desktopScannedPlugins.isNotEmpty ||
           pluginPrefs.lastRescanAtMs != null;
-      _desktopHostedPluginWindowsDetached = false;
       _desktopLastPluginRescanAtMs = pluginPrefs.lastRescanAtMs;
       _sampleBrowserRoots
         ..clear()
@@ -9533,20 +9668,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         hiddenPluginIds: _desktopHiddenPluginIds,
         scanPaths: _desktopPluginSearchPaths,
         cachedPlugins: _desktopScannedPlugins,
-        hostedWindowsDetached: _desktopHostedPluginWindowsDetached,
+        // Retain the legacy preference key as false so older installs migrate
+        // away from the removed global window-mode control.
+        hostedWindowsDetached: false,
         lastRescanAtMs: _desktopLastPluginRescanAtMs,
       ),
     );
-  }
-
-  Future<void> _setDesktopHostedPluginWindowsDetached(bool detached) async {
-    if (!PlatformCapabilities.current.isDesktop) return;
-    if (_desktopHostedPluginWindowsDetached == detached) return;
-    setState(() {
-      _desktopHostedPluginWindowsDetached = detached;
-    });
-    await _persistDesktopPluginPrefs();
-    await JuceAudioEngine.setHostedPluginWindowsDetached(detached);
   }
 
   DesktopEditorWindowLayout _defaultDesktopWindowLayout(String panelId) {
@@ -12304,6 +12431,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     WidgetsBinding.instance.removeObserver(this);
     _undoManager.removeListener(_handleUndoHistoryChanged);
     _amplitudeSub?.cancel();
+    _stopRecordingPeakPolling(clearSamples: true);
     _micRecorder.dispose();
     unawaited(_spleeterStemSeparator.dispose());
     unawaited(_classifier.dispose());
@@ -12378,7 +12506,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _deferredHostedInstrumentEngineClipIds.clear();
     _restoredHostedInstrumentStateByClipId.clear();
     _hostedPluginRestoreEntries.clear();
-    _sfzDefinitionCache.clear();
+    _sfzDefinitionLoader.clear();
     _sfzSampleCache.clear();
 
     _stopMeterPolling(decayToZero: false);
@@ -12388,8 +12516,70 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meters.dispose();
     _transportClock.dispose();
     _timelineController.dispose();
-    unawaited(JuceAudioEngine.shutdown());
+    unawaited(_shutdownAudioEngineV2Aware());
     super.dispose();
+  }
+
+  Future<void> _shutdownAudioEngineV2Aware() {
+    _androidV2ForegroundRecoveryPending = false;
+    final existing = _audioEngineShutdownFuture;
+    if (existing != null) return existing;
+    final priorShutdown = _processAudioEngineShutdownFuture;
+    final shutdown = (() async {
+      if (priorShutdown != null) {
+        try {
+          await priorShutdown;
+        } catch (_) {
+          // This editor must still close its own coordinator and engine.
+        }
+      }
+      await _performAudioEngineShutdownV2Aware();
+    })();
+    _audioEngineShutdownFuture = shutdown;
+    _processAudioEngineShutdownFuture = shutdown;
+    unawaited(
+      shutdown.then<void>(
+        (_) {
+          if (identical(_processAudioEngineShutdownFuture, shutdown)) {
+            _processAudioEngineShutdownFuture = null;
+          }
+        },
+        onError: (Object _, StackTrace __) {
+          if (identical(_processAudioEngineShutdownFuture, shutdown)) {
+            _processAudioEngineShutdownFuture = null;
+          }
+        },
+      ),
+    );
+    return shutdown;
+  }
+
+  Future<void> _performAudioEngineShutdownV2Aware() async {
+    final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
+    try {
+      final routeRecovery = _v2AudioSessionRecoveryFuture;
+      _audioRouteCoordinatorV2?.cancelPendingRecoveryForShutdown();
+      if (routeRecovery != null) {
+        try {
+          await routeRecovery;
+        } catch (_) {
+          // Shutdown must still close the coordinator and engine if recovery fails.
+        }
+      }
+      final coordinator = _audioRouteCoordinatorV2;
+      _audioRouteCoordinatorV2 = null;
+      if (_isBluetoothV2Session &&
+          _supportsV2AudioRecording &&
+          coordinator?.intent != AudioRouteIntentV2.playbackOnly) {
+        await JuceAudioEngine.abortRecordingV2();
+      }
+      await coordinator?.dispose();
+      await JuceAudioEngine.shutdown();
+    } finally {
+      if (unpublishedRecordingPath != null) {
+        await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+      }
+    }
   }
 
   @override
@@ -12398,30 +12588,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (state == AppLifecycleState.resumed) {
         debugPrint("App Resumed on Android - Re-initializing.");
         unawaited(_handleAndroidEditorResumed());
-      } else if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.inactive ||
-          state == AppLifecycleState.hidden ||
-          state == AppLifecycleState.detached) {
+      } else if (_isEditorBackgroundState(state) ||
+          (state == AppLifecycleState.inactive && !_isBluetoothV2Session)) {
         _markProjectDirty(immediate: true);
         _scheduleCloudAutoSync(reason: 'background', immediate: true);
         _flushAndRequestLocalVersionSnapshot(
           reason: ProjectVersionReason.background,
           minInterval: const Duration(minutes: 10),
         );
-        debugPrint("App Paused or Inactive on Android - Disposing.");
-        unawaited(_pausePlayback());
-        setState(() {
-          _isPlaying = false;
-        });
+        final coordinator = _audioRouteCoordinatorV2;
+        final v2RecordingActive =
+            _isBluetoothV2Session &&
+            _supportsV2AudioRecording &&
+            coordinator != null &&
+            (_isRecording ||
+                _recordStartVisualPending ||
+                coordinator.intent != AudioRouteIntentV2.playbackOnly);
+        if (v2RecordingActive) {
+          unawaited(_handleAndroidV2EditorBackgrounded());
+        } else {
+          debugPrint('App Backgrounded on Android - Pausing playback.');
+          unawaited(_pausePlayback());
+          setState(() {
+            _isPlaying = false;
+          });
+        }
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        unawaited(_refreshMicrophonePermissionAndInputs());
-        unawaited(_refreshAudioRouteInfo());
-      } else if (state == AppLifecycleState.paused ||
-          state == AppLifecycleState.inactive ||
-          state == AppLifecycleState.hidden ||
-          state == AppLifecycleState.detached) {
+        if (_isBluetoothV2Session) {
+          unawaited(_resumeIOSV2AudioAfterForeground());
+        } else if (_bluetoothImplementationSessionV2 != null &&
+            !_isBluetoothV2Session) {
+          unawaited(_refreshMicrophonePermissionAndInputs());
+          unawaited(_refreshAudioRouteInfo());
+        }
+      } else if (_isEditorBackgroundState(state) ||
+          (state == AppLifecycleState.inactive && !_isBluetoothV2Session)) {
         _markProjectDirty(immediate: true);
         _scheduleCloudAutoSync(reason: 'background', immediate: true);
         _flushAndRequestLocalVersionSnapshot(
@@ -12432,8 +12635,64 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         setState(() {
           _isPlaying = false;
         });
+        if (_isBluetoothV2Session &&
+            (state == AppLifecycleState.paused ||
+                state == AppLifecycleState.hidden)) {
+          unawaited(_handleIOSV2EditorBackgrounded());
+        }
       }
     }
+  }
+
+  bool _isEditorBackgroundState(AppLifecycleState state) =>
+      state == AppLifecycleState.paused ||
+      state == AppLifecycleState.hidden ||
+      state == AppLifecycleState.detached;
+
+  Future<void> _handleAndroidV2EditorBackgrounded() async {
+    if (!mounted ||
+        !_isBluetoothV2Session ||
+        _audioRouteCoordinatorV2 == null) {
+      return;
+    }
+    _androidV2ForegroundRecoveryPending = true;
+    if (_v2AudioSessionInvalidated) return;
+    _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
+    final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
+      notice: 'Recording stopped because Mixroom went to the background.',
+    );
+    final cleanup = _cleanupV2InterruptedAudio(
+      unpublishedRecordingPath: unpublishedRecordingPath,
+    );
+    _trackV2AudioSessionRecovery(cleanup);
+    await cleanup;
+  }
+
+  Future<void> _handleIOSV2EditorBackgrounded() async {
+    if (!mounted ||
+        !_isBluetoothV2Session ||
+        _audioRouteCoordinatorV2 == null ||
+        _v2AudioSessionInvalidated) {
+      return;
+    }
+    _iosV2ForegroundRecoveryPending = true;
+    _audioRouteCoordinatorV2?.beginLocalInvalidationEpisode();
+    final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
+      notice: 'Audio is temporarily unavailable.',
+    );
+    final cleanup = _cleanupV2InterruptedAudio(
+      unpublishedRecordingPath: unpublishedRecordingPath,
+    );
+    _trackV2AudioSessionRecovery(cleanup);
+    await cleanup;
+  }
+
+  Future<void> _resumeIOSV2AudioAfterForeground() async {
+    if (!_iosV2ForegroundRecoveryPending || !mounted) return;
+    final cleanup = _v2AudioSessionRecoveryFuture;
+    if (cleanup != null) await cleanup;
+    // UIApplicationDidBecomeActiveNotification emits the single native
+    // foreground-reconciliation event. Its coordinator callback owns reopen.
   }
 
   bool get _shouldDeferAndroidRouteRefresh =>
@@ -12464,6 +12723,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _requestAndroidRouteRefresh({required String reason}) async {
+    if (_isBluetoothV2Session) return;
     if (defaultTargetPlatform != TargetPlatform.android) {
       await JuceAudioEngine.refreshAudioRoute(reason: reason);
       return;
@@ -12490,6 +12750,50 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _ensurePlaybackRouteReady({required String reason}) async {
+    if (_isBluetoothV2Session) {
+      if (_v2AudioSessionInvalidated) {
+        if (mounted) {
+          _showSmallNotice(_v2AudioSessionInvalidationNotice);
+        }
+        return false;
+      }
+      if (_v2AudioSessionRecoveryInProgress) {
+        if (mounted) {
+          _showSmallNotice('Audio output is changing. Please wait.');
+        }
+        return false;
+      }
+      final coordinator = _audioRouteCoordinatorV2;
+      if (_usesLiveAudioRouteCoordinatorV2 &&
+          coordinator != null &&
+          coordinator.state != AudioRouteCoordinatorStateV2.stable) {
+        if (mounted) {
+          _showSmallNotice(
+            coordinator.state == AudioRouteCoordinatorStateV2.failed
+                ? 'Audio output is unavailable. Reopen the audio editor.'
+                : 'Audio output is changing. Please wait.',
+          );
+        }
+        return false;
+      }
+      final macIndependentInputRecording =
+          Platform.isMacOS &&
+          coordinator?.intent == AudioRouteIntentV2.recording;
+      final ready =
+          macIndependentInputRecording ||
+          await JuceAudioEngine.validatePlaybackV2();
+      if (!ready && mounted) {
+        _showSmallNotice(
+          Platform.isAndroid
+              ? 'Audio output could not be restored. Reopen the audio editor.'
+              : Platform.isIOS
+              ? 'Audio output is unavailable. Check the iOS audio output.'
+              : 'Audio output could not be restored. Reopen the audio editor.',
+        );
+      }
+      if (!ready) return false;
+      return JuceAudioEngine.preparePlaybackGraph(reason: reason);
+    }
     var ok = false;
     try {
       ok = await JuceAudioEngine.preparePlaybackRoute(
@@ -12508,7 +12812,272 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return ok;
   }
 
+  void _handleAudioRouteIntentInvalidatedV2(AudioRouteChangeEventV2 event) {
+    if (!mounted || !_supportsV2AudioRecording || !_isBluetoothV2Session) {
+      return;
+    }
+    if (_v2AudioSessionInvalidated) {
+      final foregroundRecoveryEvent =
+          Platform.isIOS &&
+          _iosV2ForegroundRecoveryPending &&
+          event.cause == 'audioInterruptionEnded';
+      if (foregroundRecoveryEvent) {
+        _iosV2ForegroundRecoveryPending = false;
+        final cleanup = _v2AudioSessionRecoveryFuture;
+        final recovery = () async {
+          if (cleanup != null) await cleanup;
+          await _recoverV2PlaybackAfterAudioSessionInvalidation(
+            shouldAttemptSystemOutputRecovery: true,
+            unpublishedRecordingPath: null,
+            successNotice: 'Audio is ready. Press Play to continue.',
+          );
+        }();
+        _trackV2AudioSessionRecovery(recovery);
+      }
+      return;
+    }
+    final interruption =
+        event.cause == 'audioInterruptionBegan' ||
+        event.cause == 'audioInterruptionEnded' ||
+        event.cause == 'audioInterrupted';
+    final shouldAttemptSystemOutputRecovery =
+        (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) &&
+        event.cause != 'shutdown';
+    final recordingWasActive =
+        _isRecording ||
+        _recordStartVisualPending ||
+        _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly;
+    final pendingNotice = interruption
+        ? (recordingWasActive
+              ? 'Audio was interrupted. Recording stopped.'
+              : 'Audio is temporarily unavailable.')
+        : (shouldAttemptSystemOutputRecovery
+              ? 'Audio output is changing. Please wait.'
+              : 'Audio output changed during recording. Reopen the audio editor to continue.');
+    final unpublishedRecordingPath = _enterV2AudioSessionSafetyBoundary(
+      notice: pendingNotice,
+    );
+    if (interruption) _showSmallNotice(pendingNotice);
+    final recoverySuccessNotice = interruption
+        ? 'Audio is ready. Press Play to continue.'
+        : recordingWasActive
+        ? 'Recording stopped because the audio device changed. Press Play to continue.'
+        : 'Audio output changed. Press Play to continue.';
+    final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
+      shouldAttemptSystemOutputRecovery: shouldAttemptSystemOutputRecovery,
+      unpublishedRecordingPath: unpublishedRecordingPath,
+      cleanupBeforeRecovery: interruption || Platform.isAndroid,
+      successNotice: recoverySuccessNotice,
+    );
+    _trackV2AudioSessionRecovery(recovery);
+  }
+
+  String? _enterV2AudioSessionSafetyBoundary({required String notice}) {
+    final pausedPosition = _isPlaying
+        ? _estimateTransportClockFromSample()
+        : _globalAudioClock;
+    final unpublishedRecordingPath = _detachPendingUnpublishedRecordingPath();
+    _v2AudioSessionInvalidationNotice = notice;
+    _v2AudioSessionInvalidated = true;
+    _v2AudioSessionRecoveryInProgress = true;
+    _recordStartCancelRequested = true;
+    _transportDesiredPlaying = false;
+    ++_transportCommandSerial;
+    _transportTicker?.stop();
+    _stopRecordingPeakPolling(clearSamples: true);
+    _stopMeterPolling();
+    setState(() {
+      _isPlaying = false;
+      _isRecording = false;
+      _recordStartVisualPending = false;
+      _recordingFilePath = null;
+      _syncTransportClock(pausedPosition, playing: false);
+    });
+    return unpublishedRecordingPath;
+  }
+
+  void _trackV2AudioSessionRecovery(Future<void> recovery) {
+    _v2AudioSessionRecoveryFuture = recovery;
+    unawaited(
+      recovery.whenComplete(() {
+        if (identical(_v2AudioSessionRecoveryFuture, recovery)) {
+          _v2AudioSessionRecoveryFuture = null;
+        }
+      }),
+    );
+  }
+
+  Future<void> _cleanupV2InterruptedAudio({
+    required String? unpublishedRecordingPath,
+  }) async {
+    await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+    if (unpublishedRecordingPath != null) {
+      await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+    }
+  }
+
+  Future<void> _recoverV2PlaybackAfterAudioSessionInvalidation({
+    required bool shouldAttemptSystemOutputRecovery,
+    required String? unpublishedRecordingPath,
+    bool cleanupBeforeRecovery = false,
+    required String successNotice,
+  }) async {
+    if (cleanupBeforeRecovery) {
+      await _cleanupV2InterruptedAudio(
+        unpublishedRecordingPath: unpublishedRecordingPath,
+      );
+      unpublishedRecordingPath = null;
+    }
+    if (_shouldDeferAndroidV2RecoveryUntilForeground) return;
+    AudioRouteTransitionResultV2? recoveryResult;
+    if (shouldAttemptSystemOutputRecovery) {
+      recoveryResult = await _audioRouteCoordinatorV2
+          ?.recoverPlaybackAfterIntentInvalidation();
+    }
+    if (_shouldDeferAndroidV2RecoveryUntilForeground) return;
+    if (recoveryResult != null && recoveryResult.succeeded) {
+      if (unpublishedRecordingPath != null) {
+        await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+      if (!mounted) return;
+      final recoveredJuceName =
+          recoveryResult.snapshot.juce.outputDeviceName?.trim() ?? '';
+      final recoveredEndpointName = recoveryResult.snapshot.outputs.isEmpty
+          ? ''
+          : recoveryResult.snapshot.outputs.first.name.trim();
+      final recoveredOutputName = recoveredJuceName.isNotEmpty
+          ? recoveredJuceName
+          : recoveredEndpointName;
+      setState(() {
+        _v2AudioSessionInvalidated = false;
+        _v2AudioSessionRecoveryInProgress = false;
+        _v2AudioSessionInvalidationNotice = successNotice;
+        if (Platform.isMacOS && recoveredOutputName.isNotEmpty) {
+          _macOutputDeviceName = recoveredOutputName;
+        }
+      });
+      if (Platform.isMacOS) unawaited(_loadMacV2AudioDevices());
+      _showSmallNotice(_v2AudioSessionInvalidationNotice);
+      return;
+    }
+
+    await JuceAudioEngine.abortRecordingV2(restorePlayback: false);
+    final coordinator = _audioRouteCoordinatorV2;
+    _audioRouteCoordinatorV2 = null;
+    await coordinator?.dispose();
+    await JuceAudioEngine.shutdown();
+    if (unpublishedRecordingPath != null) {
+      await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
+    }
+    if (!mounted) return;
+    setState(() {
+      _v2AudioSessionRecoveryInProgress = false;
+      _v2AudioSessionInvalidationNotice =
+          'Audio output could not be restored. Reopen the audio editor.';
+    });
+    _showSmallNotice(_v2AudioSessionInvalidationNotice);
+  }
+
+  Future<void> _synchronizeIOSRouteSafetyPositionV2({
+    required int commandSerial,
+  }) async {
+    await _pauseAudio(
+      _safeAudioEditorStateSetter,
+      commandSerial: commandSerial,
+    );
+    if (!mounted || commandSerial != _transportCommandSerial) return;
+    _syncTransportClock(_globalAudioClock, playing: false);
+  }
+
+  void _handleAudioRouteCoordinatorStateV2(AudioRouteCoordinatorStateV2 state) {
+    if (!mounted || state != AudioRouteCoordinatorStateV2.reconfiguring) {
+      return;
+    }
+    final pausedPosition = _isPlaying
+        ? _estimateTransportClockFromSample()
+        : _globalAudioClock;
+    _transportDesiredPlaying = false;
+    final commandSerial = ++_transportCommandSerial;
+    _transportTicker?.stop();
+    setState(() {
+      _isPlaying = false;
+      _syncTransportClock(pausedPosition, playing: false);
+    });
+    _stopMeterPolling();
+    if (Platform.isIOS) {
+      unawaited(
+        _synchronizeIOSRouteSafetyPositionV2(commandSerial: commandSerial),
+      );
+    }
+  }
+
+  void _handleAudioRouteTransitionV2(AudioRouteTransitionResultV2 result) {
+    if (!mounted) return;
+    if (!result.succeeded) {
+      _showSmallNotice(
+        Platform.isAndroid
+            ? 'Audio output is unavailable. Choose an output in Android.'
+            : Platform.isIOS
+            ? 'Audio output is unavailable. Check the iOS audio output.'
+            : result.diagnosticCode == 'output_selection_unavailable'
+            ? L10n.translate(
+                context,
+                'Selected output device is not available.',
+              )
+            : 'Audio output is unavailable. Choose an output in macOS.',
+      );
+      return;
+    }
+
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    final juceName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
+    final endpointName = result.snapshot.outputs.isEmpty
+        ? ''
+        : result.snapshot.outputs.first.name.trim();
+    if (Platform.isMacOS) {
+      final outputName = juceName.isNotEmpty ? juceName : endpointName;
+      if (outputName.isNotEmpty) {
+        _setStateAndRefreshProjectSettings(() {
+          _macOutputDeviceName = outputName;
+        });
+      }
+      unawaited(_loadMacV2AudioDevices());
+      if (result.bluetoothCommunicationQualityReduced &&
+          !_macBluetoothCommunicationQualityNoticeShown) {
+        _macBluetoothCommunicationQualityNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone selected. Playback quality is reduced. Select another microphone for stereo audio.',
+        );
+        return;
+      }
+      if (!result.bluetoothCommunicationQualityReduced) {
+        _macBluetoothCommunicationQualityNoticeShown = false;
+      }
+    }
+    if (result.status == AudioRouteTransitionStatusV2.fallback) {
+      _showSmallNotice(
+        'Bluetooth disconnected. Audio output changed. Press Play to continue.',
+      );
+      return;
+    }
+
+    if (Platform.isAndroid) {
+      _showSmallNotice('Audio output changed. Press Play to continue.');
+    } else if (Platform.isIOS) {
+      _showSmallNotice('Audio output changed. Press Play to continue.');
+    } else {
+      final outputName = juceName.isNotEmpty
+          ? juceName
+          : (endpointName.isNotEmpty ? endpointName : 'Mac output');
+      _showSmallNotice(
+        'Audio output changed to $outputName. Press Play to continue.',
+      );
+    }
+  }
+
   Future<void> _flushDeferredAndroidRouteRefreshIfNeeded() async {
+    if (_isBluetoothV2Session) return;
     if (defaultTargetPlatform != TargetPlatform.android) return;
     if (!_pendingAndroidRouteRefresh ||
         _androidRouteRefreshInFlight ||
@@ -12524,10 +13093,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleAndroidEditorResumed() async {
-    await _requestAndroidRouteRefresh(reason: 'appResumed');
+    if (_isBluetoothV2Session) {
+      await _resumeAndroidV2AudioAfterForeground();
+    } else {
+      await _requestAndroidRouteRefresh(reason: 'appResumed');
+    }
+    if (!mounted) return;
     await _refreshMicrophonePermissionAndInputs();
     await _refreshAudioRouteInfo(refreshNativeRoute: false);
   }
+
+  Future<void> _resumeAndroidV2AudioAfterForeground() async {
+    if (!_androidV2ForegroundRecoveryPending || !mounted) return;
+    final cleanup = _v2AudioSessionRecoveryFuture;
+    if (cleanup != null) await cleanup;
+    if (!mounted ||
+        !_androidV2ForegroundRecoveryPending ||
+        WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    _androidV2ForegroundRecoveryPending = false;
+    final coordinator = _audioRouteCoordinatorV2;
+    if (!_v2AudioSessionInvalidated || coordinator == null) return;
+    coordinator.beginLocalInvalidationEpisode();
+    final recovery = _recoverV2PlaybackAfterAudioSessionInvalidation(
+      shouldAttemptSystemOutputRecovery: true,
+      unpublishedRecordingPath: null,
+      successNotice:
+          'Recording stopped because Mixroom went to the background.',
+    );
+    _trackV2AudioSessionRecovery(recovery);
+    await recovery;
+  }
+
+  bool get _shouldDeferAndroidV2RecoveryUntilForeground =>
+      defaultTargetPlatform == TargetPlatform.android &&
+      _androidV2ForegroundRecoveryPending;
 
   Uri _producerCaptureUiAccessUri() {
     final base = AppApiConfig.apiBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
@@ -12763,7 +13364,44 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final loadResult = await _projectPersistence.loadProjectState(
         _projectDir,
       );
-      final json = loadResult.projectState;
+      // Project opening is never allowed to scan every third-party plug-in
+      // installed on the machine. It uses the persisted catalog only; a full
+      // scan is an explicit Plug-in Settings action. This keeps an unrelated
+      // unhealthy VST from preventing a project from opening.
+      final compatibilityOpen =
+          await ProjectCompatibilityService.resolveForOpen(
+            projectDir: _projectDir,
+            sourceProject: loadResult.projectState,
+            canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
+            hasPlugin: _isKnownDesktopPluginId,
+          );
+      final json = compatibilityOpen.projectState;
+      _usingCompatibilityAudio = compatibilityOpen.usingCompatibleAudio;
+      _compatibilityAudioRequired =
+          !_usingCompatibilityAudio &&
+          ProjectCompatibilityService.inspect(
+            loadResult.projectState,
+          ).needsPluginAudio;
+      _compatibilityAudioCurrent =
+          _compatibilityAudioRequired &&
+          await ProjectCompatibilityService.isCurrent(_projectDir);
+      _compatibilityAudioError = '';
+      _compatibilityProjectionMetadata = json['compatibility'] is Map
+          ? Map<String, dynamic>.from(json['compatibility'] as Map)
+          : const <String, dynamic>{};
+      _frozenPluginNamesByRow = const <int, List<String>>{};
+      if (_usingCompatibilityAudio) {
+        final manifest = await ProjectCompatibilityService.readManifest(
+          _projectDir,
+        );
+        if (manifest != null) {
+          _frozenPluginNamesByRow =
+              ProjectCompatibilityService.frozenPluginNamesByRow(
+                manifest: manifest,
+                projection: json,
+              );
+        }
+      }
       if (loadResult.warningMessage?.trim().isNotEmpty == true) {
         _projectLoadIssues.add(
           _ProjectLoadIssue(
@@ -12812,6 +13450,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _cloudDocumentRevision = rawCloudDocumentRevision is num
           ? rawCloudDocumentRevision.toInt()
           : int.tryParse((rawCloudDocumentRevision ?? '').toString().trim());
+      _cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+          .toString()
+          .trim();
       _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
           .toString()
           .trim();
@@ -13105,8 +13746,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               )
               .toList();
 
-          final audioFile = File(
-            p.join(ProjectManager.audioDir(_projectDir).path, fileName),
+          final audioFile = ProjectCompatibilityService.resolveAudioFile(
+            _projectDir,
+            fileName,
           );
           if (!audioFile.existsSync()) {
             if (clipKind == ClipKind.midi) {
@@ -13531,14 +14173,166 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
       }
+      if (mounted && _usingCompatibilityAudio) {
+        _queueCompatibilityAudioOpenNotice();
+      }
     } catch (e) {
       debugPrint("Project load failed: $e");
     } finally {
       _isProjectLoading = false;
-      if (projectLoadedSuccessfully) {
+      if (projectLoadedSuccessfully && !_usingCompatibilityAudio) {
         _scheduleProjectAutosave(debounce: const Duration(seconds: 3));
       }
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
+    }
+  }
+
+  void _queueCompatibilityAudioOpenNotice() {
+    if (_compatibilityOpenNoticeQueued) return;
+    _compatibilityOpenNoticeQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_usingCompatibilityAudio) return;
+      unawaited(
+        showAppMessageDialog(
+          context: context,
+          title: 'Plugin audio included',
+          message:
+              'This project contains plugins not available on this device. '
+              'Any edits made will create a clone of this project.\n\n'
+              'Rows containing unavailable plugins have been stemmed out to audio files.',
+          icon: Icons.graphic_eq_rounded,
+        ),
+      );
+    });
+  }
+
+  String? _frozenRowDescription(int row) {
+    if (!_usingCompatibilityAudio) return null;
+    final names = _frozenPluginNamesByRow[row] ?? const <String>[];
+    if (names.isEmpty) return null;
+    final plugins = names.join(', ');
+    return 'This row was stemmed to audio because this device does not have: $plugins.';
+  }
+
+  Future<void> _showFrozenRowInfo(int row) async {
+    final detail = _frozenRowDescription(row);
+    if (detail == null || !mounted) return;
+    await showAppMessageDialog(
+      context: context,
+      title: 'Plugin audio',
+      message: detail,
+      icon: Icons.graphic_eq_rounded,
+    );
+  }
+
+  Future<void> _remapCompatibilityForkAudioPaths({
+    required Directory oldProjectDir,
+    required Directory newProjectDir,
+  }) async {
+    final oldPath = p.normalize(oldProjectDir.path);
+    final promoted =
+        await ProjectCompatibilityService.promoteAudioForEditedCopy(
+          sourceProjectDir: oldProjectDir,
+          editedProjectDir: newProjectDir,
+          audioFiles: <File>[
+            for (final track in _audioTracks) ...<File>[
+              track.file,
+              track.originalFile,
+            ],
+          ],
+        );
+    for (final track in _audioTracks) {
+      final paths = <File>[track.file, track.originalFile];
+      for (var index = 0; index < paths.length; index++) {
+        final file = paths[index];
+        final normalized = p.normalize(file.path);
+        final remapped =
+            promoted[normalized] ??
+            (p.isWithin(oldPath, normalized)
+                ? File(
+                    p.join(
+                      newProjectDir.path,
+                      p.relative(normalized, from: oldPath),
+                    ),
+                  )
+                : file);
+        if (index == 0) {
+          track.file = remapped;
+        } else {
+          track.originalFile = remapped;
+        }
+      }
+    }
+  }
+
+  Future<bool> _promoteCompatibilityAudioIntoCurrentProject() async {
+    final promoted =
+        await ProjectCompatibilityService.promoteAudioForEditedCopy(
+          sourceProjectDir: _projectDir,
+          editedProjectDir: _projectDir,
+          audioFiles: <File>[
+            for (final track in _audioTracks) ...<File>[
+              track.file,
+              track.originalFile,
+            ],
+          ],
+        );
+    if (promoted.isEmpty) return false;
+    for (final track in _audioTracks) {
+      track.file = promoted[p.normalize(track.file.path)] ?? track.file;
+      track.originalFile =
+          promoted[p.normalize(track.originalFile.path)] ?? track.originalFile;
+    }
+    return true;
+  }
+
+  Future<void> _forkCompatibilityProjectForEdits() async {
+    if (!_usingCompatibilityAudio || _compatibilityForkInFlight) return;
+    _compatibilityForkInFlight = true;
+    try {
+      final oldProjectDir = _projectDir;
+      final duplicated = await ProjectManager.duplicateProject(oldProjectDir);
+      final forkDir = await ProjectManager.renameProject(
+        duplicated,
+        _projectName,
+      );
+      final forkJson = await ProjectManager.readProjectJson(forkDir);
+      await _remapCompatibilityForkAudioPaths(
+        oldProjectDir: oldProjectDir,
+        newProjectDir: forkDir,
+      );
+      _projectDir = forkDir;
+      _projectName = (forkJson['name'] ?? p.basename(forkDir.path))
+          .toString()
+          .trim();
+      _projectId = ProjectManager.ensureProjectIdInJson(forkJson);
+      _projectCreatedAtMs =
+          (forkJson['createdAt'] as num?)?.toInt() ??
+          DateTime.now().millisecondsSinceEpoch;
+      _cloudProjectId = '';
+      _cloudWorkspaceId = '';
+      _cloudOrganizationId = '';
+      _cloudDocumentRevision = null;
+      _cloudSyncedAt = '';
+      _cloudSourceFingerprint = '';
+      _cloudAutoSyncConflict = false;
+      _usingCompatibilityAudio = false;
+      _compatibilityProjectionMetadata = const <String, dynamic>{};
+      _frozenPluginNamesByRow = const <int, List<String>>{};
+      _undoManager.clear();
+      ProjectManager.notifyProjectLibraryChanged();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Editing ${_projectName.isEmpty ? 'a new project' : _projectName}',
+            ),
+          ),
+        );
+      }
+    } finally {
+      _compatibilityForkInFlight = false;
     }
   }
 
@@ -13907,7 +14701,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _canAttemptAutoCloudSync() {
     if (!_cloudProjectsFeatureEnabled) return false;
     if (_cloudSyncMode != CloudSyncMode.auto) return false;
+    // The compatible projection is a local, plugin-free view of a canonical
+    // desktop project. Opening or autosaving that view must never publish it
+    // as a competing cloud revision and overwrite the source plugin state.
+    if (_usingCompatibilityAudio) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
+    // Compatibility renders take a live graph snapshot. Do not start that
+    // work in the middle of transport playback. The autosave remains dirty
+    // and publishes after playback stops.
+    if (_isPlaying) return false;
     if (_isRecording ||
         _recordStartVisualPending ||
         _isMidiClipRecording ||
@@ -13924,8 +14726,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration debounce = const Duration(seconds: 60),
     bool immediate = false,
   }) {
-    if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncDirty = true;
+    // Saving while transport is running deliberately defers the expensive
+    // compatibility snapshot. Keep the dirty bit first so stopping transport
+    // can pick that save up instead of silently losing the auto-sync request.
+    if (!_canAttemptAutoCloudSync()) return;
     if (_cloudAutoSyncInFlight) return;
 
     final now = DateTime.now();
@@ -13944,8 +14749,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _requestCloudAutoSyncNow(String reason) {
-    if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncDirty = true;
+    if (!_canAttemptAutoCloudSync()) return;
     _cloudAutoSyncTimer?.cancel();
     _cloudAutoSyncTimer = null;
     unawaited(_runCloudAutoSync(reason: reason));
@@ -13958,6 +14763,117 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         raw.contains('limit reached') ||
         raw.contains('storage limit') ||
         raw.contains('(403)');
+  }
+
+  /// Optimistic cloud writes must use the exact revision that was opened.
+  /// A revision-only difference is rebased when the canonical source inside
+  /// the current cloud bundle is identical to this local source.
+  Future<bool> _hasCurrentCloudRevisionForAutoSync(AuthService auth) async {
+    final cloudProjectId = _cloudProjectId.trim();
+    if (cloudProjectId.isEmpty) return true;
+
+    final service = CloudProjectService();
+    try {
+      final snapshot = await service.listProjects(auth: auth);
+      CloudProjectAccessItem? remote;
+      for (final project in snapshot.cloudProjects) {
+        if (project.projectId == cloudProjectId) {
+          remote = project;
+          break;
+        }
+      }
+      // A locally remembered cloud ID that is absent from a successful cloud
+      // listing is stale. Clear it before upload so the service can create or
+      // reactivate the deterministic personal project for this local project
+      // ID without sending an obsolete expected_revision token.
+      if (remote == null) {
+        _cloudProjectId = '';
+        _cloudWorkspaceId = '';
+        _cloudOrganizationId = '';
+        _cloudDocumentRevision = null;
+        _cloudSourceFingerprint = '';
+        _cloudAutoSyncConflict = false;
+        final localProject = await ProjectManager.readProjectJson(_projectDir);
+        ProjectManager.stripCloudSyncMetadata(localProject);
+        await ProjectManager.writeProjectJson(_projectDir, localProject);
+        debugPrint(
+          'Cloud auto sync detached a stale local cloud link and will '
+          'publish a fresh personal project.',
+        );
+        return true;
+      }
+
+      if (_cloudDocumentRevision != remote.documentRevision) {
+        File? downloadedBundle;
+        Map<String, dynamic>? localProject;
+        try {
+          final downloaded = await service.downloadBundle(
+            auth: auth,
+            project: remote,
+          );
+          downloadedBundle = downloaded.file;
+          final remoteProject =
+              await ProjectBundle.readCanonicalProjectJsonFromBundle(
+                downloaded.file,
+              );
+          localProject = await ProjectManager.readProjectJson(_projectDir);
+          if (remoteProject != null &&
+              ProjectCompatibilityService.sourceFingerprint(remoteProject) ==
+                  ProjectCompatibilityService.sourceFingerprint(localProject)) {
+            _cloudDocumentRevision = remote.documentRevision;
+            _cloudAutoSyncConflict = false;
+            debugPrint(
+              'Cloud auto sync rebased from revision-only change to '
+              'cloud revision ${remote.documentRevision}.',
+            );
+            return true;
+          }
+        } catch (error) {
+          debugPrint('Cloud revision content check skipped: $error');
+        } finally {
+          if (downloadedBundle != null) {
+            try {
+              await downloadedBundle.delete();
+            } catch (_) {}
+          }
+        }
+        // A personal project that depends on external plugins has one
+        // authoritative editable source: a capable desktop. Mobile only ever
+        // opens its derived audio copy, so it must not permanently strand the
+        // desktop source behind a revision produced by that fallback path.
+        final localSource =
+            localProject ?? await ProjectManager.readProjectJson(_projectDir);
+        final isPersonalProject = remote.workspaceId.trim().isEmpty;
+        final localNeedsDesktopPlugins =
+            _platformCapabilities.externalPluginHosting &&
+            ProjectCompatibilityService.inspect(localSource).needsPluginAudio;
+        if (isPersonalProject && localNeedsDesktopPlugins) {
+          _cloudDocumentRevision = remote.documentRevision;
+          _cloudAutoSyncConflict = false;
+          debugPrint(
+            'Cloud auto sync restored the authoritative desktop plugin '
+            'source at cloud revision ${remote.documentRevision}.',
+          );
+          return true;
+        }
+        _cloudAutoSyncConflict = true;
+        _cloudAutoSyncDirty = true;
+        debugPrint(
+          'Cloud auto sync paused: local revision '
+          '${_cloudDocumentRevision ?? 'unknown'} is behind cloud revision '
+          '${remote.documentRevision}.',
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      // Preserve the existing upload error handling for network/list errors.
+      // This preflight only prevents known stale optimistic writes.
+      debugPrint('Cloud revision preflight skipped: $error');
+      return true;
+    } finally {
+      service.close();
+    }
   }
 
   Duration _nextCloudAutoSyncBackoff() {
@@ -13982,8 +14898,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration? retryDelay;
     try {
       await _projectAutosaveCoordinator.flush();
-      if (!_canAttemptAutoCloudSync()) return;
+      if (!_canAttemptAutoCloudSync()) {
+        _cloudAutoSyncDirty = true;
+        return;
+      }
+      final sourceBeforePublish = await ProjectManager.readProjectJson(
+        _projectDir,
+      );
+      final sourceFingerprintBeforePreparation =
+          ProjectCompatibilityService.sourceFingerprint(sourceBeforePublish);
+      if (_cloudSourceFingerprint == sourceFingerprintBeforePreparation) {
+        return;
+      }
+      if (!await _hasCurrentCloudRevisionForAutoSync(auth)) return;
+      if (!_canAttemptAutoCloudSync()) {
+        _cloudAutoSyncDirty = true;
+        return;
+      }
 
+      // An autosave can complete while a previous compatibility render is
+      // running. Only package a revision after the source we are about to
+      // upload and its frozen audio have been verified as the same revision.
+      final sourceForPublish = await ProjectManager.readProjectJson(
+        _projectDir,
+      );
+      final sourceFingerprint = ProjectCompatibilityService.sourceFingerprint(
+        sourceForPublish,
+      );
       final projectId = _projectId.trim().isNotEmpty
           ? _projectId.trim()
           : await ProjectManager.ensureProjectId(_projectDir);
@@ -13992,6 +14933,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final bundlePath = await ProjectBundle.exportMixroomBundle(
         projectDir: _projectDir,
         audioMode: BundleAudioMode.flacLossless,
+        requireCurrentCompatibility: false,
       );
       final bundleFile = File(bundlePath);
       if (!await bundleFile.exists() || await bundleFile.length() <= 0) {
@@ -14045,6 +14987,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _cloudOrganizationId = result.project.organizationId.trim();
         _cloudDocumentRevision = result.project.documentRevision;
         _cloudSyncedAt = syncedAt;
+        _cloudSourceFingerprint = sourceFingerprint;
         _cloudAutoSyncFailureCount = 0;
         _cloudAutoSyncBackoffUntil = null;
         _cloudAutoSyncConflict = false;
@@ -14063,6 +15006,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         json['cloudDocumentRevision'] = _cloudDocumentRevision;
         json['cloudSyncedAt'] = _cloudSyncedAt;
+        json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
         await ProjectManager.writeProjectJson(_projectDir, json);
         ProjectManager.notifyProjectLibraryChanged();
       } finally {
@@ -14091,6 +15035,459 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _cloudAutoSyncTimer = null;
           unawaited(_runCloudAutoSync(reason: 'retry:$reason'));
         });
+      } else if (_cloudAutoSyncDirty && _canAttemptAutoCloudSync()) {
+        // Do not lose an edit made while the preceding upload was in flight.
+        // The follow-up run re-reads the canonical source before publishing.
+        _cloudAutoSyncTimer?.cancel();
+        _cloudAutoSyncTimer = Timer(Duration.zero, () {
+          _cloudAutoSyncTimer = null;
+          unawaited(_runCloudAutoSync(reason: 'latest:$reason'));
+        });
+      }
+    }
+  }
+
+  Future<void> _ensureCompatibilityAudioForPublish({
+    ValueChanged<double>? onProgress,
+  }) async {
+    if (!_platformCapabilities.externalPluginHosting) return;
+    final inFlight = _compatibilityRenderInFlight;
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final task = () async {
+      onProgress?.call(0.03);
+      final source = await ProjectManager.readProjectJson(_projectDir);
+      final inspected = ProjectCompatibilityService.inspect(source);
+      if (!inspected.needsPluginAudio ||
+          await ProjectCompatibilityService.isCurrent(_projectDir)) {
+        onProgress?.call(1.0);
+        return;
+      }
+      final prefs = await SharedPreferences.getInstance();
+      const noticeKey = 'third_party_plugin_audio_notice_seen_v1';
+      if (prefs.getBool(noticeKey) != true) {
+        await prefs.setBool(noticeKey, true);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Third-party plugins will be included as audio when you share, so collaborators can open this project without the same plugins.',
+              ),
+            ),
+          );
+        }
+      }
+
+      await _prepareNativeEngineStateForExport((_) {});
+      onProgress?.call(0.08);
+      final clipSnapshotJson = _buildNativeExportClipSnapshotJson();
+      await ProjectCompatibilityService.audioDirectoryFor(
+        _projectDir,
+      ).create(recursive: true);
+      final existingManifest = await ProjectCompatibilityService.readManifest(
+        _projectDir,
+      );
+      final reusableArtifacts = <String, ProjectCompatibilityArtifact>{};
+      if (existingManifest != null) {
+        for (final dependency in inspected.dependencies) {
+          for (final artifact in existingManifest.artifacts) {
+            if (artifact.dependencyKey != dependency.key ||
+                artifact.fingerprint !=
+                    ProjectCompatibilityService.artifactFingerprint(
+                      source,
+                      dependency,
+                    ) ||
+                !await File(
+                  p.join(_projectDir.path, artifact.fileName),
+                ).exists()) {
+              continue;
+            }
+            reusableArtifacts[dependency.key] = artifact;
+            break;
+          }
+        }
+      }
+      final artifacts = <ProjectCompatibilityArtifact>[
+        ...reusableArtifacts.values,
+      ];
+      final rows = (source['rows'] as List?) ?? const <Object?>[];
+      final rowIndexById = <int, int>{
+        for (var i = 0; i < rows.length; i++)
+          if (rows[i] is Map && (rows[i] as Map)['rowId'] is num)
+            ((rows[i] as Map)['rowId'] as num).toInt(): i,
+      };
+      final dependenciesByRow = <int, List<ProjectCompatibilityDependency>>{};
+      for (final dependency in inspected.dependencies) {
+        if (!reusableArtifacts.containsKey(dependency.key) &&
+            (dependency.scope == ProjectCompatibilityScope.instrument ||
+                dependency.scope == ProjectCompatibilityScope.row) &&
+            dependency.row >= 0) {
+          dependenciesByRow
+              .putIfAbsent(
+                dependency.row,
+                () => <ProjectCompatibilityDependency>[],
+              )
+              .add(dependency);
+        }
+      }
+      final pendingGroupDependencies = inspected.dependencies
+          .where(
+            (item) =>
+                item.scope == ProjectCompatibilityScope.group &&
+                !reusableArtifacts.containsKey(item.key),
+          )
+          .toList(growable: false);
+      final pendingMasterDependencies = inspected.dependencies
+          .where(
+            (item) =>
+                item.scope == ProjectCompatibilityScope.master &&
+                !reusableArtifacts.containsKey(item.key),
+          )
+          .toList(growable: false);
+      final renderCount = math.max(
+        1,
+        dependenciesByRow.length +
+            pendingGroupDependencies.length +
+            (pendingMasterDependencies.isEmpty ? 0 : 1),
+      );
+      var completedRenders = 0;
+
+      Future<String> renderWithProgress(
+        Future<String> Function() startRender,
+      ) async {
+        final base = completedRenders / renderCount;
+        var pollingDone = false;
+        final renderFuture = startRender();
+
+        Future<void> poll() async {
+          while (!pollingDone) {
+            try {
+              final nativeProgress = await JuceAudioEngine.getExportProgress();
+              final overall =
+                  (base + nativeProgress.clamp(0.0, 1.0) / renderCount)
+                      .clamp(0.0, 1.0)
+                      .toDouble();
+              onProgress?.call(0.1 + overall * 0.82);
+            } catch (_) {}
+            await Future<void>.delayed(const Duration(milliseconds: 120));
+          }
+        }
+
+        final poller = poll();
+        try {
+          return await renderFuture;
+        } finally {
+          pollingDone = true;
+          await poller;
+          completedRenders++;
+          onProgress?.call(0.1 + (completedRenders / renderCount) * 0.82);
+        }
+      }
+
+      Future<void> renderBoundary({
+        required List<ProjectCompatibilityDependency> dependencies,
+        required List<int> boundaryRows,
+        required String outputName,
+      }) async {
+        final clipIds = _audioTracks
+            .where(
+              (clip) =>
+                  boundaryRows.contains(clip.rowIndex) &&
+                  clip.engineClipId >= 0,
+            )
+            .map((clip) => clip.engineClipId)
+            .toSet();
+        if (clipIds.isEmpty || boundaryRows.isEmpty) return;
+        // The offline renderer normally starts at project zero. A frozen
+        // row should instead be an ordinary audio clip beginning where its
+        // earliest contributing clip begins, otherwise its visible and
+        // audible placement drifts to the left in the compatible project.
+        final boundaryStartSeconds = _audioTracks
+            .where(
+              (clip) =>
+                  boundaryRows.contains(clip.rowIndex) &&
+                  clip.engineClipId >= 0,
+            )
+            .map((clip) => math.max(0.0, clip.offset))
+            .fold<double>(double.infinity, math.min);
+        if (!boundaryStartSeconds.isFinite) return;
+        final fileName = 'compatibility/audio/$outputName.wav';
+        final output = File(p.join(_projectDir.path, fileName));
+        // AudioFormatWriter overwrites an existing WAV but does not guarantee
+        // truncation when the replacement is shorter. Start from a fresh file
+        // so a compatibility artifact cannot retain stale audio or an invalid
+        // trailing data chunk from an earlier render.
+        if (await output.exists()) {
+          await output.delete();
+        }
+        final rendered = await renderWithProgress(
+          () => JuceAudioEngine.exportMix(
+            output.path,
+            format: 'wav',
+            sampleRate: _preferredDawSampleRate,
+            wavBitDepth: 32,
+            wavDithering: false,
+            // The Dart snapshot is the export authority for MIDI timing,
+            // resolved source tempo, and the latest hosted-instrument state.
+            // Omitting it can leave a newly-created offline plug-in instance
+            // with stale MIDI metadata and produce a silent frozen instrument.
+            clipSnapshotJson: clipSnapshotJson,
+            audibleClipIds: clipIds.toList(growable: false),
+            timelineStartSeconds: boundaryStartSeconds,
+            bypassMasterProcessing: true,
+            // Row and instrument artifacts remain routed through their source
+            // group in the compatible project. Leave group gain, pan, and FX
+            // out of this render so that retained group processing applies once.
+            bypassGroupProcessing: dependencies.every(
+              (dependency) =>
+                  dependency.scope != ProjectCompatibilityScope.group,
+            ),
+            preserveRealtimePlayback: true,
+          ),
+        );
+        if (rendered.isEmpty || !await output.exists()) {
+          throw StateError('Could not render third-party plugin audio.');
+        }
+        if (await output.length() <= 44) {
+          throw StateError('Third-party plugin audio render was empty.');
+        }
+        final fallback = <String, dynamic>{
+          'fileName': fileName,
+          'label': 'Frozen audio',
+          'clipType': 'audio',
+          'clipId': 'compatibility-$outputName',
+          'rowIndex': boundaryRows.first,
+          'rowId': _rowIdAt(boundaryRows.first),
+          'offset': boundaryStartSeconds,
+          // Mixroom's unity fader value is 2.0. The offline render already
+          // includes the source clip gain, so the replacement must be unity.
+          'gain': kDefaultGainUi,
+          'normalizeVolume': false,
+          'normalizeGain': 1.0,
+          'preNormalizeGain': kDefaultGainUi,
+          'trimStartMs': 0,
+        };
+        for (final dependency in dependencies) {
+          artifacts.add(
+            ProjectCompatibilityArtifact(
+              dependencyKey: dependency.key,
+              fileName: fileName,
+              fingerprint: ProjectCompatibilityService.artifactFingerprint(
+                source,
+                dependency,
+              ),
+              trackJson: fallback,
+              replacementRows: boundaryRows,
+            ),
+          );
+        }
+      }
+
+      for (final entry in dependenciesByRow.entries) {
+        await renderBoundary(
+          dependencies: entry.value,
+          boundaryRows: <int>[entry.key],
+          outputName: 'frozen_row_${entry.key}',
+        );
+      }
+      final groups = (source['trackGroups'] as List?) ?? const <Object?>[];
+      for (final dependency in pendingGroupDependencies) {
+        final group = groups.whereType<Map>().cast<Map>().firstWhere(
+          (item) => (item['id'] ?? '').toString() == dependency.groupId,
+          orElse: () => const <String, dynamic>{},
+        );
+        final groupRows = ((group['rowIds'] as List?) ?? const <Object?>[])
+            .whereType<num>()
+            .map((rowId) => rowIndexById[rowId.toInt()] ?? -1)
+            .where((row) => row >= 0)
+            .toList(growable: false);
+        final safeId = dependency.groupId.replaceAll(
+          RegExp(r'[^A-Za-z0-9_-]'),
+          '_',
+        );
+        await renderBoundary(
+          dependencies: <ProjectCompatibilityDependency>[dependency],
+          boundaryRows: groupRows,
+          outputName: 'frozen_group_$safeId',
+        );
+      }
+
+      String referenceMix = '';
+      final allMasterDependencies = inspected.dependencies
+          .where((item) => item.scope == ProjectCompatibilityScope.master)
+          .toList(growable: false);
+      final masterDependencies = pendingMasterDependencies;
+      if (masterDependencies.isEmpty && allMasterDependencies.isNotEmpty) {
+        referenceMix =
+            reusableArtifacts[allMasterDependencies.first.key]?.fileName ?? '';
+      }
+      if (masterDependencies.isNotEmpty) {
+        referenceMix = 'compatibility/audio/original_mix_reference.wav';
+        final reference = File(p.join(_projectDir.path, referenceMix));
+        if (await reference.exists()) {
+          await reference.delete();
+        }
+        final rendered = await renderWithProgress(
+          () => JuceAudioEngine.exportMix(
+            reference.path,
+            format: 'wav',
+            sampleRate: _preferredDawSampleRate,
+            wavBitDepth: 32,
+            wavDithering: false,
+            clipSnapshotJson: clipSnapshotJson,
+            preserveRealtimePlayback: true,
+          ),
+        );
+        if (rendered.isEmpty || !await reference.exists()) {
+          throw StateError('Could not render the original mix reference.');
+        }
+        for (final dependency in masterDependencies) {
+          artifacts.add(
+            ProjectCompatibilityArtifact(
+              dependencyKey: dependency.key,
+              fileName: referenceMix,
+              fingerprint: ProjectCompatibilityService.artifactFingerprint(
+                source,
+                dependency,
+              ),
+            ),
+          );
+        }
+      }
+      if (artifacts.length != inspected.dependencies.length) {
+        throw StateError('Could not render every third-party plugin path.');
+      }
+      await ProjectCompatibilityService.writeCompatibleCopy(
+        projectDir: _projectDir,
+        sourceProject: source,
+        artifacts: artifacts,
+        referenceMixFileName: referenceMix,
+      );
+      onProgress?.call(1.0);
+    }();
+    _compatibilityRenderInFlight = task;
+    try {
+      await task;
+    } finally {
+      if (identical(_compatibilityRenderInFlight, task)) {
+        _compatibilityRenderInFlight = null;
+      }
+    }
+  }
+
+  Future<void> _refreshCompatibilityAudioStatus({
+    Map<String, dynamic>? project,
+  }) async {
+    if (_usingCompatibilityAudio ||
+        !_platformCapabilities.externalPluginHosting) {
+      if (!mounted) return;
+      _setStateAndRefreshProjectSettings(() {
+        _compatibilityAudioRequired = false;
+        _compatibilityAudioCurrent = false;
+      });
+      return;
+    }
+    final source = project ?? await ProjectManager.readProjectJson(_projectDir);
+    final required = ProjectCompatibilityService.inspect(
+      source,
+    ).needsPluginAudio;
+    final current =
+        required && await ProjectCompatibilityService.isCurrent(_projectDir);
+    if (!mounted ||
+        (required == _compatibilityAudioRequired &&
+            current == _compatibilityAudioCurrent)) {
+      return;
+    }
+    _setStateAndRefreshProjectSettings(() {
+      _compatibilityAudioRequired = required;
+      _compatibilityAudioCurrent = current;
+    });
+  }
+
+  Future<void> _prepareCompatibilityAudioManually() async {
+    if (_compatibilityPreparationActive || _usingCompatibilityAudio) return;
+    if (_isPlaying ||
+        _isRecording ||
+        _recordStartVisualPending ||
+        _isMidiClipRecording ||
+        _recordTransitionInFlight) {
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Stop playback or recording before preparing a compatible version.',
+          tone: AppPopupTone.warning,
+        );
+      }
+      return;
+    }
+
+    _setStateAndRefreshProjectSettings(() {
+      _compatibilityPreparationActive = true;
+      _compatibilityPreparationProgress = 0.01;
+      _compatibilityAudioError = '';
+    });
+    try {
+      // Let the settings card paint its progress state before any native
+      // snapshot or plug-in work begins.
+      await WidgetsBinding.instance.endOfFrame;
+      await _projectAutosaveCoordinator.flush();
+      // Persist every hosted instrument's current state before reading the
+      // canonical source and constructing the offline export snapshot. The
+      // ordinary autosave path captures only the active MIDI instrument.
+      await _refreshHostedInstrumentStatesForPersistence();
+      _projectAutosaveCoordinator.markDirty();
+      await _projectAutosaveCoordinator.flush();
+      await _ensureCompatibilityAudioForPublish(
+        onProgress: (progress) {
+          if (!mounted) return;
+          final next = progress.clamp(0.0, 1.0).toDouble();
+          if (next <= _compatibilityPreparationProgress) return;
+          _setStateAndRefreshProjectSettings(() {
+            _compatibilityPreparationProgress = next;
+          });
+        },
+      );
+      await _refreshCompatibilityAudioStatus();
+      if (!_compatibilityAudioCurrent) {
+        throw StateError(
+          'The project changed while its compatible version was being prepared. Try again when the edit is stable.',
+        );
+      }
+      // A source-only cloud autosave may already have published this exact
+      // project revision. Force one follow-up upload to add the newly prepared
+      // portable audio without requiring another edit.
+      _cloudSourceFingerprint = '';
+      _requestCloudAutoSyncNow('compatible-version-ready');
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Compatible version is ready. Future edits will not re-render it automatically.',
+          tone: AppPopupTone.success,
+        );
+      }
+    } catch (error) {
+      final message = error.toString().replaceFirst('Bad state: ', '').trim();
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(() {
+          _compatibilityAudioError = message;
+        });
+        showAppSnackBar(
+          context,
+          'Could not prepare compatible version: $message',
+          tone: AppPopupTone.error,
+        );
+      }
+    } finally {
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(() {
+          _compatibilityPreparationActive = false;
+          _compatibilityPreparationProgress = 0.0;
+        });
+      } else {
+        _compatibilityPreparationActive = false;
+        _compatibilityPreparationProgress = 0.0;
       }
     }
   }
@@ -14573,7 +15970,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final tr = tracksForSave[trackIndex];
       final src = tr.file;
       if (!tr.isMidi && !src.existsSync()) continue;
-      final fileName = p.basename(src.path).trim();
+      final fileName = ProjectCompatibilityService.persistedAudioFileName(
+        projectDir: _projectDir,
+        audioFile: src,
+      ).trim();
       if (fileName.isEmpty) continue;
       final rowForTrack = _rowForClipFromRows(
         tr,
@@ -14737,29 +16137,59 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_cloudSyncedAt.isNotEmpty) {
       json["cloudSyncedAt"] = _cloudSyncedAt;
     }
+    if (_cloudSourceFingerprint.isNotEmpty) {
+      json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
+    }
     if (assistantChat != null) {
       json["assistantChat"] = assistantChat;
+    }
+    if (_usingCompatibilityAudio) {
+      json['compatibility'] = _compatibilityProjectionMetadata.isEmpty
+          ? const <String, dynamic>{'variant': 'audio'}
+          : _compatibilityProjectionMetadata;
     }
     return json;
   }
 
   Future<void> _performAutosaveWrite() async {
+    if (_usingCompatibilityAudio) {
+      await _forkCompatibilityProjectForEdits();
+    }
+    if (!_usingCompatibilityAudio) {
+      await _promoteCompatibilityAudioIntoCurrentProject();
+    }
     _syncEffectSnapshotCacheToCurrentRows();
     await _refreshHostedInstrumentStatesForPersistence(captureAll: false);
     final json = await _buildProjectJsonSnapshot();
     _attachPersistedUndoHistoryToProjectJson(json);
-    await _projectPersistence.saveProjectState(
-      projectDir: _projectDir,
-      projectState: json,
-      mode: AudioProjectSaveMode.autosave,
-    );
-    if (!_cloudAutoSyncInFlight) {
+    if (_usingCompatibilityAudio) {
+      await ProjectCompatibilityService.writeCompatibleProjection(
+        projectDir: _projectDir,
+        project: json,
+      );
+    } else {
+      await _projectPersistence.saveProjectState(
+        projectDir: _projectDir,
+        projectState: json,
+        mode: AudioProjectSaveMode.autosave,
+      );
+    }
+    if (!_usingCompatibilityAudio) {
+      await _refreshCompatibilityAudioStatus(project: json);
+    }
+    if (_isPlaying) {
+      // _scheduleCloudAutoSync intentionally does not run while playing.
+      // Retain the intent and schedule it when transport stops.
+      _cloudAutoSyncDirty = true;
+    } else if (!_cloudAutoSyncInFlight) {
       _scheduleCloudAutoSync(reason: 'autosave');
     }
-    _requestLocalVersionSnapshot(
-      reason: ProjectVersionReason.autosave,
-      minInterval: ProjectVersionStore.defaultPeriodicInterval,
-    );
+    if (!_usingCompatibilityAudio) {
+      _requestLocalVersionSnapshot(
+        reason: ProjectVersionReason.autosave,
+        minInterval: ProjectVersionStore.defaultPeriodicInterval,
+      );
+    }
     await _persistUndoHistory();
   }
 
@@ -16476,6 +17906,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required ProjectVersionReason reason,
     required Duration minInterval,
   }) {
+    if (_usingCompatibilityAudio) return;
     if (_localVersionSnapshotInFlight) return;
     _localVersionSnapshotInFlight = true;
     unawaited(() async {
@@ -16498,6 +17929,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required ProjectVersionReason reason,
     required Duration minInterval,
   }) {
+    if (_usingCompatibilityAudio) return;
     if (_localVersionSnapshotInFlight) return;
     _localVersionSnapshotInFlight = true;
     unawaited(() async {
@@ -16609,23 +18041,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _saveProject({bool showSnackBar = true}) async {
     try {
       await _projectAutosaveCoordinator.flush();
-      await _normalizeProjectAudioAssetsForCheckpoint();
+      if (!_usingCompatibilityAudio) {
+        await _promoteCompatibilityAudioIntoCurrentProject();
+        await _normalizeProjectAudioAssetsForCheckpoint();
+      }
       await _refreshAllPersistedEffectSnapshots();
       await _refreshHostedInstrumentStatesForPersistence();
       final json = await _buildProjectJsonSnapshot();
       _attachPersistedUndoHistoryToProjectJson(json);
-      await _projectPersistence.saveProjectState(
-        projectDir: _projectDir,
-        projectState: json,
-        mode: AudioProjectSaveMode.checkpoint,
-      );
+      if (_usingCompatibilityAudio) {
+        await ProjectCompatibilityService.writeCompatibleProjection(
+          projectDir: _projectDir,
+          project: json,
+        );
+      } else {
+        await _projectPersistence.saveProjectState(
+          projectDir: _projectDir,
+          projectState: json,
+          mode: AudioProjectSaveMode.checkpoint,
+        );
+      }
       _projectAutosaveCoordinator.clearDirty();
       await _uploadProjectTelemetrySnapshot(json);
       _requestCloudAutoSyncNow('save');
-      _requestLocalVersionSnapshot(
-        reason: ProjectVersionReason.manualSave,
-        minInterval: ProjectVersionStore.defaultSaveInterval,
-      );
+      if (!_usingCompatibilityAudio) {
+        _requestLocalVersionSnapshot(
+          reason: ProjectVersionReason.manualSave,
+          minInterval: ProjectVersionStore.defaultSaveInterval,
+        );
+      }
       await _persistUndoHistory();
 
       if (mounted && showSnackBar) {
@@ -16798,7 +18242,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       for (var track in _audioTracks) {
         track.audioStartTimer?.cancel();
       }
-      await JuceAudioEngine.shutdown();
+      await _shutdownAudioEngineV2Aware();
       Navigator.of(context).pop();
     }
   }
@@ -17083,6 +18527,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _syncTransportClock(currentVisualClock, playing: false);
     });
     _stopMeterPolling();
+    if (_cloudAutoSyncDirty) {
+      _scheduleCloudAutoSync(
+        reason: 'playbackStopped',
+        debounce: const Duration(seconds: 15),
+      );
+    }
   }
 
   Future<void> _drainTransportCommandQueue(StateSetter setLocalState) async {
@@ -17149,7 +18599,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     if (!commandIsCurrent()) return;
-    final playStarted = await JuceAudioEngine.play();
+    var playStarted = await JuceAudioEngine.play();
+    if (!playStarted &&
+        Platform.isMacOS &&
+        _isBluetoothV2Session &&
+        commandIsCurrent() &&
+        !_v2AudioSessionInvalidated &&
+        !_v2AudioSessionRecoveryInProgress) {
+      final recoveryResult = await _audioRouteCoordinatorV2?.transitionIntent(
+        AudioRouteIntentV2.playbackOnly,
+      );
+      if (recoveryResult != null && recoveryResult.succeeded) {
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+        if (commandIsCurrent()) {
+          playStarted = await JuceAudioEngine.play();
+        }
+      }
+    }
     if (!playStarted) {
       _transportDesiredPlaying = false;
       _transportTicker?.stop();
@@ -17158,6 +18624,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _syncTransportClock(resumeStartPoint, playing: false);
       });
       _stopMeterPolling();
+      if (mounted && commandIsCurrent()) {
+        _showSmallNotice('Audio output is unavailable. Please try again.');
+      }
       return;
     }
     if (!commandIsCurrent()) return;
@@ -19822,15 +21291,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        final liveReady = await _ensureLiveMidiClipReadyForPreview(clip);
-        if (!liveReady) return;
-        final sent = await JuceAudioEngine.sendLiveMidiInputEvent(
-          noteOn: true,
+        final key = MidiPreviewNoteKey(
+          clipId: clip.engineClipId,
           channel: 1,
-          pitch: pitch,
-          velocity: velocity,
+          pitch: pitch.clamp(0, 127).toInt(),
         );
-        if (sent) return;
+        final result = await _pianoRollPreviewNotes.noteOn(
+          key: key,
+          prepare: () => _ensureLiveMidiClipReadyForPreview(clip),
+          sendNoteOn: () => JuceAudioEngine.sendLiveMidiInputEvent(
+            noteOn: true,
+            channel: key.channel,
+            pitch: key.pitch,
+            velocity: velocity,
+          ),
+          sendNoteOff: () => _sendPianoRollPreviewNoteOff(key),
+        );
+        if (result == MidiPreviewNoteOnResult.delivered ||
+            result == MidiPreviewNoteOnResult.cancelled) {
+          return;
+        }
       }
       await _previewPianoRollNote(pitch, velocity);
       return;
@@ -19878,18 +21358,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
-        final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
-          clip.engineClipId,
-          clearPendingEvents: false,
+        final key = MidiPreviewNoteKey(
+          clipId: clip.engineClipId,
+          channel: 1,
+          pitch: pitch.clamp(0, 127).toInt(),
         );
-        if (targetReady) {
-          await JuceAudioEngine.sendLiveMidiInputEvent(
-            noteOn: false,
-            channel: 1,
-            pitch: pitch,
-            velocity: 0.0,
-          );
+        if (_closingPianoRollPreview) {
+          return;
         }
+        await _pianoRollPreviewNotes.noteOff(
+          key: key,
+          sendNoteOff: () => _sendPianoRollPreviewNoteOff(key),
+        );
       }
       return;
     }
@@ -19917,6 +21397,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {});
     }
   }
+
+  Future<bool> _sendPianoRollPreviewNoteOff(MidiPreviewNoteKey key) async {
+    final targetReady = await _setLiveMidiInputTargetClipIfNeeded(
+      key.clipId,
+      clearPendingEvents: false,
+    );
+    if (!targetReady) return false;
+    return JuceAudioEngine.sendLiveMidiInputEvent(
+      noteOn: false,
+      channel: key.channel,
+      pitch: key.pitch,
+      velocity: 0.0,
+    );
+  }
+
+  Future<void> _releaseAllPianoRollPreviewNotes() => _pianoRollPreviewNotes
+      .releaseAll(sendNoteOff: _sendPianoRollPreviewNoteOff);
 
   bool _extendMidiClipForBeat(AudioTrack clip, double endBeat) {
     final sourceTempo = _resolvedClipSourceTempoBpm(clip);
@@ -20220,12 +21717,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
 
+    _stopRecordingPeakPolling(clearSamples: true);
     setState(() {
       _activeMidiClipEngineId = clip.engineClipId;
       _activeMidiClipIndex = clipIndex;
       _selectedRow = clip.rowIndex.clamp(0, math.max(0, _rowCount - 1)).toInt();
       _recordingFilePath = null;
-      _recordingPeaks.clear();
       _isRecording = true;
       _isMidiClipRecording = true;
       _midiRecordingClipEngineId = clip.engineClipId;
@@ -20253,9 +21750,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _lastMidiRecordTransportSec =
         _globalAudioClock.inMilliseconds.toDouble() / 1000.0;
     _midiRecordHasChanges = false;
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer = null;
-
     _midiInputPollTimer?.cancel();
     _midiInputPollTimer = liveTargetOk
         ? Timer.periodic(const Duration(milliseconds: 40), (_) {
@@ -20278,8 +21772,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _stopMidiClipRecording({bool keepPlaying = true}) async {
-    _recordingPeakTimer?.cancel();
-    _recordingPeakTimer = null;
+    _stopRecordingPeakPolling(clearSamples: true);
     _midiInputPollTimer?.cancel();
     _midiInputPollTimer = null;
     _midiHeldNoteRefreshTimer?.cancel();
@@ -20326,7 +21819,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     setState(() {
       _isRecording = false;
-      _recordingPeaks.clear();
       _recordingFilePath = null;
     });
 
@@ -20339,6 +21831,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _startRecordingJuce() async {
+    if (_isBluetoothV2Session) {
+      if (!_supportsV2AudioRecording) {
+        _showSmallNotice(
+          'Recording is unavailable for the current audio route.',
+        );
+        return;
+      }
+      if (_selectedRow < 0 ||
+          _selectedRow >= _rows.length ||
+          _rows[_selectedRow].kind == TimelineRowKind.instrument) {
+        _showSmallNotice('Select an audio row to record.');
+        return;
+      }
+      await _startAudioRecordingJuce();
+      return;
+    }
     final midiClipIndex =
         _activeMidiRecordingClipIndex() ??
         await _ensureSelectedInstrumentLaneMidiRecordingClip();
@@ -20358,9 +21866,177 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  void _stopRecordingPeakPolling({required bool clearSamples}) {
+    _recordingPeakTimer?.cancel();
+    _recordingPeakTimer = null;
+    ++_recordingPeakGeneration;
+    _recordingPeakPollBusy = false;
+    if (clearSamples) {
+      _recordingPeaks.clear();
+      _recordingPeakTimesMs.clear();
+    }
+  }
+
+  void _startRecordingPeakPolling() {
+    _stopRecordingPeakPolling(clearSamples: true);
+    final peakGeneration = _recordingPeakGeneration;
+    _recordingPeakTimer = Timer.periodic(const Duration(milliseconds: 50), (
+      _,
+    ) async {
+      if (!_isRecording ||
+          peakGeneration != _recordingPeakGeneration ||
+          _recordingPeakPollBusy) {
+        return;
+      }
+
+      _recordingPeakPollBusy = true;
+      try {
+        final peak = await JuceAudioEngine.getRecordingPeak();
+        if (!mounted ||
+            !_isRecording ||
+            peakGeneration != _recordingPeakGeneration) {
+          return;
+        }
+        final acceptedElapsedMs = math.max(
+          0.0,
+          _globalAudioClock.inMicroseconds.toDouble() / 1000.0 -
+              _recordingStartMs,
+        );
+        final elapsedMs = _recordingPeakTimesMs.isEmpty
+            ? acceptedElapsedMs
+            : math.max(_recordingPeakTimesMs.last, acceptedElapsedMs);
+        setState(() {
+          _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
+          _recordingPeakTimesMs.add(elapsedMs);
+        });
+      } finally {
+        if (peakGeneration == _recordingPeakGeneration) {
+          _recordingPeakPollBusy = false;
+        }
+      }
+    });
+  }
+
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    var v2IntentOperation = AudioRouteIntentOperationV2.standard;
+    if (_isBluetoothV2Session && Platform.isMacOS) {
+      v2IntentOperation = AudioRouteIntentOperationV2.systemSelectedRecording;
+    }
+    if (_isBluetoothV2Session && Platform.isAndroid) {
+      final coordinator = _audioRouteCoordinatorV2;
+      if (_v2AudioSessionInvalidated ||
+          coordinator == null ||
+          coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+          coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+        _showSmallNotice('Audio output is changing. Please wait.');
+        return false;
+      }
+      final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
+      final sourceOutput = source.outputs.length == 1
+          ? source.outputs.single
+          : null;
+      if (source.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
+          source.intent != AudioRouteIntentV2.playbackOnly ||
+          source.inputs.isNotEmpty ||
+          source.juce.activeInputChannels != 0 ||
+          sourceOutput == null) {
+        _showSmallNotice(
+          'Recording is unavailable for the current Android audio route.',
+        );
+        return false;
+      }
+      switch (sourceOutput.normalizedKind) {
+        case AudioRouteKindV2.builtIn:
+          break;
+        case AudioRouteKindV2.bluetoothMedia:
+          v2IntentOperation =
+              AudioRouteIntentOperationV2.systemSelectedRecording;
+          break;
+        default:
+          _showSmallNotice(
+            'Recording is unavailable for the current Android audio route.',
+          );
+          return false;
+      }
+    }
     if (!await _ensureMicrophonePermissionForRecording()) {
       return false;
+    }
+
+    if (_isBluetoothV2Session) {
+      if (!_supportsV2AudioRecording || _v2AudioSessionInvalidated) {
+        return false;
+      }
+      final coordinator = _audioRouteCoordinatorV2;
+      if (coordinator == null ||
+          coordinator.state != AudioRouteCoordinatorStateV2.stable ||
+          coordinator.intent != AudioRouteIntentV2.playbackOnly) {
+        _showSmallNotice(
+          coordinator?.state == AudioRouteCoordinatorStateV2.failed
+              ? 'Audio output is unavailable. Reopen the audio editor.'
+              : 'Audio output is changing. Please wait.',
+        );
+        return false;
+      }
+      if (_isPlaying) {
+        _transportDesiredPlaying = false;
+        ++_transportCommandSerial;
+        await _pausePlayback();
+        if (!mounted) return false;
+        setState(() {
+          _isPlaying = false;
+          _syncTransportClock(_globalAudioClock, playing: false);
+        });
+      }
+      final result = await coordinator.transitionIntent(
+        AudioRouteIntentV2.preparingRecording,
+        operation: Platform.isIOS || Platform.isMacOS
+            ? AudioRouteIntentOperationV2.systemSelectedRecording
+            : v2IntentOperation,
+      );
+      if (_recordStartCancelRequested) return false;
+      if (!result.succeeded) {
+        if (mounted) {
+          final macRouteRemoved =
+              Platform.isMacOS &&
+              result.snapshot.duplexProbe?.validationStage ==
+                  'physicalRouteInvalidation';
+          if (!macRouteRemoved) {
+            _showSmallNotice(
+              Platform.isIOS
+                  ? 'Recording is unavailable for the current iOS audio route.'
+                  : Platform.isMacOS
+                  ? 'Recording is unavailable for the current macOS audio route.'
+                  : v2IntentOperation ==
+                        AudioRouteIntentOperationV2.systemSelectedRecording
+                  ? 'Recording is unavailable for the current Android audio route.'
+                  : result.diagnosticCode == 'bluetooth_input_forbidden'
+                  ? 'Bluetooth microphones are not supported. Use the built-in device microphone.'
+                  : 'Recording with the built-in device microphone is unavailable for the current output.',
+            );
+          }
+        }
+        return false;
+      }
+      JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+      _selectedChannelStart = 0;
+      _selectedChannelCount = 1;
+      final verifiedInput = result.snapshot.inputs.length == 1
+          ? result.snapshot.inputs.single
+          : null;
+      final verifiedOutput = result.snapshot.outputs.length == 1
+          ? result.snapshot.outputs.single
+          : null;
+      final usingBluetoothDuplex =
+          verifiedInput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex &&
+          verifiedOutput?.normalizedKind == AudioRouteKindV2.bluetoothDuplex;
+      if (usingBluetoothDuplex && !_bluetoothRecordingQualityNoticeShown) {
+        _bluetoothRecordingQualityNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone in use. Playback quality is reduced while recording.',
+        );
+      }
+      return true;
     }
 
     if (Platform.isAndroid || Platform.isIOS) {
@@ -20472,19 +22148,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_recordStartCancelRequested) return;
 
-      // 2) Determine where in the project we start recording (UNCHANGED)
-      _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      // V2 input preparation can pause for a route transition, so its take
+      // starts from the settled position. Other recording paths retain their
+      // established preflight timing.
+      final captureStartAfterRoutePreparation =
+          _isBluetoothV2Session && _supportsV2AudioRecording;
+      if (!captureStartAfterRoutePreparation) {
+        _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      }
 
       if (!await _prepareAudioRecordingStartPreflight()) {
         return;
       }
       if (_recordStartCancelRequested) return;
+      if (captureStartAfterRoutePreparation) {
+        _recordingStartMs = _globalAudioClock.inMilliseconds.toDouble();
+      }
 
-      final startPlaybackAfterRecorder = Platform.isIOS;
+      final startPlaybackAfterRecorder =
+          Platform.isIOS || _isBluetoothV2Session;
 
-      // 3) Keep Android's working order: start transport before arming the native
-      // recorder. iOS uses the opposite order to avoid route churn between input
-      // arm and recorder start.
+      // Legacy Android retains its established transport-first order. V2 starts
+      // capture only after the prepared route is verified.
       if (!startPlaybackAfterRecorder && !_isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       }
@@ -20507,25 +22192,51 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         audioDir.path,
         'mixroom_rec_${DateTime.now().millisecondsSinceEpoch}.wav',
       );
+      _claimPendingUnpublishedRecordingPath(filePath);
 
       // 5) Arm the native recorder.
       final ok = await JuceAudioEngine.startRecording(
         filePath,
-        _selectedChannelStart,
-        _selectedChannelCount,
+        _isBluetoothV2Session ? 0 : _selectedChannelStart,
+        _isBluetoothV2Session ? 1 : _selectedChannelCount,
       );
 
       if (!ok) {
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
+        if (_isBluetoothV2Session && _supportsV2AudioRecording) {
+          await _restoreV2PlaybackOnlyAfterRecording();
+        }
         _liveInputMonitoringEffective = null;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(L10n.translate(context, 'Failed to start recording')),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(context, 'Failed to start recording'),
+              ),
+            ),
+          );
+        }
         return;
+      }
+      if (_isBluetoothV2Session && _supportsV2AudioRecording) {
+        final coordinator = _audioRouteCoordinatorV2;
+        final recordingResult = await coordinator?.transitionIntent(
+          AudioRouteIntentV2.recording,
+        );
+        if (recordingResult == null || !recordingResult.succeeded) {
+          await JuceAudioEngine.stopRecording();
+          await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
+          await _restoreV2PlaybackOnlyAfterRecording();
+          if (mounted) {
+            _showSmallNotice('Failed to verify the recording input.');
+          }
+          return;
+        }
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recordingResult);
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -20544,8 +22255,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (startPlaybackAfterRecorder && !_isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       }
+      if (startPlaybackAfterRecorder && !_isPlaying) {
+        await JuceAudioEngine.stopRecording();
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
+        if (_isBluetoothV2Session && _supportsV2AudioRecording) {
+          await _restoreV2PlaybackOnlyAfterRecording();
+        }
+        if (mounted) {
+          _showSmallNotice(
+            'Recording stopped because playback could not start.',
+          );
+        }
+        return;
+      }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         _lastPreparedRecordingDevice = null;
         _lastPreparedRecordingInputOpenChannels = null;
         if (_isPlaying) {
@@ -20556,6 +22281,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             });
           }
         }
+        return;
+      }
+
+      if (!mounted) {
+        await JuceAudioEngine.stopRecording();
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
         return;
       }
 
@@ -20570,19 +22301,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _midiRecordingLiveInputArmed = false;
       });
 
-      _recordingPeaks.clear();
-
-      _recordingPeakTimer?.cancel();
-      _recordingPeakTimer = Timer.periodic(const Duration(milliseconds: 50), (
-        _,
-      ) async {
-        if (!_isRecording) return;
-
-        final peak = await JuceAudioEngine.getRecordingPeak();
-        setState(() {
-          _recordingPeaks.add(peak.clamp(0.0, 1.0).toDouble());
-        });
-      });
+      _startRecordingPeakPolling();
       _startRecordingRoutePolicyPolling();
     } finally {
       if (mounted && !_isRecording && _recordStartVisualPending) {
@@ -20590,9 +22309,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _recordStartVisualPending = false;
         });
       }
+      if (mounted &&
+          _isBluetoothV2Session &&
+          _supportsV2AudioRecording &&
+          !_isRecording &&
+          !_v2AudioSessionInvalidated &&
+          _audioRouteCoordinatorV2?.intent != AudioRouteIntentV2.playbackOnly) {
+        await _restoreV2PlaybackOnlyAfterRecording();
+      }
+      if (!_isRecording) {
+        await _discardPendingUnpublishedRecordingFile();
+      }
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
     }
+  }
+
+  Future<bool> _restoreV2PlaybackOnlyAfterRecording() async {
+    final coordinator = _audioRouteCoordinatorV2;
+    if (coordinator == null || _v2AudioSessionInvalidated) return false;
+    final result = await coordinator.transitionIntent(
+      AudioRouteIntentV2.playbackOnly,
+    );
+    if (!result.succeeded) {
+      await JuceAudioEngine.abortRecordingV2();
+      return false;
+    }
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    return true;
   }
 
   Future<bool> _ensureMicrophonePermissionForRecording() async {
@@ -20620,7 +22364,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
 
     if (granted) {
-      unawaited(_loadInputDevicesFromJuce());
+      if (!_isBluetoothV2Session) {
+        unawaited(_loadInputDevicesFromJuce());
+      }
       return true;
     }
 
@@ -20656,6 +22402,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _stopAudioRecordingJuce(keepPlaying: keepPlaying);
   }
 
+  void _claimPendingUnpublishedRecordingPath(String path) {
+    final normalized = path.trim();
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'Recording path is empty');
+    }
+    final existing = _pendingUnpublishedRecordingPath;
+    if (existing != null && existing != normalized) {
+      throw StateError('pending_recording_path_already_owned');
+    }
+    _pendingUnpublishedRecordingPath = normalized;
+    _recordingFilePath = normalized;
+  }
+
+  String? _detachPendingUnpublishedRecordingPath({String? expectedPath}) {
+    final pending = _pendingUnpublishedRecordingPath;
+    if (pending == null || (expectedPath != null && pending != expectedPath)) {
+      return null;
+    }
+    _pendingUnpublishedRecordingPath = null;
+    if (_recordingFilePath == pending) _recordingFilePath = null;
+    return pending;
+  }
+
+  bool _ownsPendingUnpublishedRecordingPath(String path) =>
+      _pendingUnpublishedRecordingPath == path;
+
+  void _releasePendingRecordingForPublication(String path) {
+    final detached = _detachPendingUnpublishedRecordingPath(expectedPath: path);
+    if (detached == null) {
+      throw StateError('pending_recording_path_not_owned');
+    }
+  }
+
+  Future<void> _discardPendingUnpublishedRecordingFile({
+    String? expectedPath,
+  }) async {
+    final path = _detachPendingUnpublishedRecordingPath(
+      expectedPath: expectedPath,
+    );
+    if (path != null) await _deleteUncommittedRecordingFile(path);
+  }
+
+  Future<void> _deleteUncommittedRecordingFile(String path) async {
+    final file = File(path);
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // The take was never published. Project cleanup may retry if the OS still
+      // holds the just-finalized file briefly.
+    }
+  }
+
   Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {
     if (!_isRecording || _recordTransitionInFlight) return;
     _recordTransitionInFlight = true;
@@ -20668,11 +22466,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final resumePlaybackAfterStop = keepPlaying && _isPlaying;
       final hadBluetoothInputRoute = _audioRouteInfo.inputIsBluetoothHeadset;
       final needsBluetoothStopRecovery =
-          Platform.isAndroid && hadBluetoothInputRoute;
+          !_isBluetoothV2Session &&
+          Platform.isAndroid &&
+          hadBluetoothInputRoute;
       Future<void>? deferredBluetoothRestore;
 
-      _recordingPeakTimer?.cancel();
-      _recordingPeakTimer = null;
+      _stopRecordingPeakPolling(clearSamples: true);
       _stopRecordingRoutePolicyPolling();
       _liveInputMonitoringEffective = null;
 
@@ -20700,10 +22499,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       // 1) Stop JUCE recorder
+      final RecordingCaptureResult captureResult;
       if (needsBluetoothStopRecovery && Platform.isAndroid) {
-        await JuceAudioEngine.stopRecordingWithoutPlaybackRestore();
+        captureResult =
+            await JuceAudioEngine.stopRecordingWithoutPlaybackRestore();
       } else {
-        await JuceAudioEngine.stopRecording();
+        captureResult = await JuceAudioEngine.stopRecording();
+      }
+      if (_isBluetoothV2Session && _supportsV2AudioRecording) {
+        final restored = await _restoreV2PlaybackOnlyAfterRecording();
+        if (!restored) {
+          _v2AudioSessionInvalidated = true;
+          if (mounted) {
+            _showSmallNotice(
+              'Recording stopped, but audio output could not be restored. Reopen the audio editor.',
+            );
+          }
+        }
       }
       _lastPreparedRecordingDevice = null;
       _lastPreparedRecordingInputOpenChannels = null;
@@ -20724,24 +22536,46 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await _refreshAudioRouteInfo(refreshNativeRoute: false);
       }
 
-      if (_recordingFilePath == null ||
-          !File(_recordingFilePath!).existsSync()) {
-        setState(() {
-          _isRecording = false;
-          _isMidiClipRecording = false;
-          _midiRecordingClipEngineId = null;
-          _midiRecordingClipIndex = null;
-          _midiRecordingLiveInputArmed = false;
-          _recordingFilePath = null;
-        });
+      if (!captureResult.success) {
+        if (deferredBluetoothRestore != null) {
+          await deferredBluetoothRestore;
+        }
+        await _discardPendingUnpublishedRecordingFile();
+        if (mounted) {
+          setState(() {
+            _recordingFilePath = null;
+          });
+          _showSmallNotice(
+            'Recording could not be saved reliably. Please try again.',
+          );
+        }
+        return;
+      }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              L10n.translate(context, 'Recording failed or no data captured.'),
+      final recordingPath = _recordingFilePath;
+      if (recordingPath == null || !File(recordingPath).existsSync()) {
+        _detachPendingUnpublishedRecordingPath(expectedPath: recordingPath);
+        if (mounted) {
+          setState(() {
+            _isRecording = false;
+            _isMidiClipRecording = false;
+            _midiRecordingClipEngineId = null;
+            _midiRecordingClipIndex = null;
+            _midiRecordingLiveInputArmed = false;
+            _recordingFilePath = null;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(
+                  context,
+                  'Recording failed or no data captured.',
+                ),
+              ),
             ),
-          ),
-        );
+          );
+        }
         return;
       }
 
@@ -20753,8 +22587,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           await JuceAudioEngine.getEstimatedRecordingLatencyMs();
       final compensatedStartMs = math.max(0.0, startMs - recordingLatencyMs);
       final appliedAlignmentOffsetMs = compensatedStartMs - startMs;
+      if (!mounted) {
+        await _discardPendingUnpublishedRecordingFile(
+          expectedPath: recordingPath,
+        );
+        return;
+      }
+
+      if (_v2AudioSessionInvalidated ||
+          !_ownsPendingUnpublishedRecordingPath(recordingPath)) {
+        // A route-safety episode that overlaps Stop owns disposal of this take.
+        // Never publish it after recovery, even if native finalization happened
+        // to finish successfully before the invalidation was observed.
+        await _discardPendingUnpublishedRecordingFile(
+          expectedPath: recordingPath,
+        );
+        return;
+      }
+
+      // A route-safety episode during asynchronous publication owns transport
+      // state. It may recover the output, but playback must remain paused until
+      // the user explicitly resumes it.
+      final publicationTransportSerial = _transportCommandSerial;
 
       // 2) Insert recorded clip (UNCHANGED)
+      // Capture recovery no longer owns the finalized file once publication
+      // begins. Route invalidation may run concurrently with the async clip
+      // insert, but it must never delete a file that the timeline can adopt.
+      _releasePendingRecordingForPublication(recordingPath);
+      var recordingPublished = false;
       try {
         await _undoManager.execute(
           AddAudioTrackAction(
@@ -20776,21 +22637,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
             tracks: _audioTracks,
             restoreTrack: _addClipFromUndoPayload,
-            file: File(_recordingFilePath!),
+            file: File(recordingPath),
             row: row,
             timeMs: compensatedStartMs,
             onRemove: _syncRemovedClipFadesAfterUndo,
           ),
         );
+        recordingPublished = _audioTracks.any(
+          (track) => track.file.path == recordingPath,
+        );
       } catch (e) {
         debugPrint("Error adding recorded track: $e");
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              L10n.translate(context, 'Failed to add recorded track.'),
-            ),
-          ),
+        recordingPublished = _audioTracks.any(
+          (track) => track.file.path == recordingPath,
         );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(context, 'Failed to add recorded track.'),
+              ),
+            ),
+          );
+        }
+      }
+      if (!recordingPublished) {
+        await _deleteUncommittedRecordingFile(recordingPath);
       }
 
       // 3) Restore the intended playback state after the clip is inserted.
@@ -20798,7 +22670,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           (resumePlaybackAfterStop || Platform.isIOS)) {
         await deferredBluetoothRestore;
       }
-      if (resumePlaybackAfterStop && mounted && !_isPlaying) {
+      if (resumePlaybackAfterStop &&
+          mounted &&
+          !_isPlaying &&
+          publicationTransportSerial == _transportCommandSerial &&
+          !_v2AudioSessionInvalidated &&
+          !_v2AudioSessionRecoveryInProgress) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
       } else if (!keepPlaying && _isPlaying) {
         await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
@@ -20837,6 +22714,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     if (pausePlaybackBeforeInsert && _isPlaying) {
       await _pausePlayback();
+    }
+    // A Finder drop can arrive immediately after the app regains focus, before
+    // the audio device has reattached. Prime the same route used by first
+    // playback before asking JUCE to install the clip, so importing audio does
+    // not depend on the user pressing Play once.
+    if (!_isBluetoothV2Session) {
+      await JuceAudioEngine.initialise();
+    }
+    if (PlatformCapabilities.current.isDesktop || Platform.isIOS) {
+      await _ensurePlaybackRouteReady(reason: 'audioImport');
     }
     await _ensureRowIndexExists(row);
     await _ensureRowExistsForClipInsertion();
@@ -22763,178 +24650,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return File(path);
   }
 
-  Map<String, String> _parseSfzOpcodes(String line) {
-    final out = <String, String>{};
-    final trimmed = line.split('//').first.trim();
-    if (trimmed.isEmpty) return out;
-    final matches = RegExp(
-      r'([A-Za-z_][A-Za-z0-9_]*)=',
-    ).allMatches(trimmed).toList();
-    if (matches.isEmpty) return out;
-    for (int i = 0; i < matches.length; i++) {
-      final m = matches[i];
-      final key = (m.group(1) ?? '').trim().toLowerCase();
-      final valueStart = m.end;
-      final valueEnd = i + 1 < matches.length
-          ? matches[i + 1].start
-          : trimmed.length;
-      final value = trimmed.substring(valueStart, valueEnd).trim();
-      if (key.isEmpty || value.isEmpty) continue;
-      out[key] = value;
-    }
-    return out;
-  }
-
-  String _stripSfzQuotes(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.length >= 2 &&
-        ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-            (trimmed.startsWith('\'') && trimmed.endsWith('\'')))) {
-      return trimmed.substring(1, trimmed.length - 1).trim();
-    }
-    return trimmed;
-  }
-
-  double? _parseSfzNumberOrNote(String raw) {
-    final token = _stripSfzQuotes(raw);
-    final numeric = double.tryParse(token);
-    if (numeric != null) return numeric;
-
-    final match = RegExp(r'^([A-Ga-g])([#b]?)(-?\d+)$').firstMatch(token);
-    if (match == null) return null;
-    final step = (match.group(1) ?? '').toUpperCase();
-    final accidental = match.group(2) ?? '';
-    final octave = int.tryParse(match.group(3) ?? '');
-    if (octave == null) return null;
-
-    const semitones = <String, int>{
-      'C': 0,
-      'D': 2,
-      'E': 4,
-      'F': 5,
-      'G': 7,
-      'A': 9,
-      'B': 11,
-    };
-    var semitone = semitones[step];
-    if (semitone == null) return null;
-    if (accidental == '#') semitone += 1;
-    if (accidental == 'b') semitone -= 1;
-
-    final midi = ((octave + 1) * 12) + semitone;
-    return midi.toDouble();
-  }
-
-  _SfzParsedLine _parseSfzLine(String rawLine) {
-    final line = rawLine.split('//').first.trim();
-    if (line.isEmpty) return const _SfzParsedLine();
-
-    String? blockTag;
-    var remainder = line;
-    final tagMatch = RegExp(r'^<\s*([A-Za-z0-9_]+)\s*>').firstMatch(line);
-    if (tagMatch != null) {
-      blockTag = (tagMatch.group(1) ?? '').trim().toLowerCase();
-      remainder = line.substring(tagMatch.end).trim();
-    }
-    final opcodes = remainder.isEmpty
-        ? const <String, String>{}
-        : _parseSfzOpcodes(remainder);
-    return _SfzParsedLine(blockTag: blockTag, opcodes: opcodes);
-  }
-
-  Future<List<String>> _loadSfzExpandedLines(
-    String sfzAssetPath, {
-    Set<String>? includeStack,
-    Map<String, String>? defines,
-  }) async {
-    final normalizedPath = p.normalize(sfzAssetPath);
-    final stack = includeStack ?? <String>{};
-    if (stack.contains(normalizedPath)) return const <String>[];
-    stack.add(normalizedPath);
-
-    try {
-      final text = File(normalizedPath).existsSync()
-          ? await File(normalizedPath).readAsString()
-          : await rootBundle.loadString(p.posix.normalize(normalizedPath));
-      final dir = File(normalizedPath).existsSync()
-          ? p.dirname(normalizedPath)
-          : p.posix.dirname(normalizedPath);
-      final macroMap = defines ?? <String, String>{};
-      final out = <String>[];
-
-      for (final rawLine in const LineSplitter().convert(text)) {
-        final line = rawLine.split('//').first.trim();
-        if (line.isEmpty) continue;
-
-        final includeMatch = RegExp(
-          r'''^#include\s+["']([^"']+)["']''',
-          caseSensitive: false,
-        ).firstMatch(line);
-        if (includeMatch != null) {
-          final includeRaw = _stripSfzQuotes(
-            (includeMatch.group(1) ?? '').trim(),
-          );
-          if (includeRaw.isNotEmpty) {
-            final includePath = File(normalizedPath).existsSync()
-                ? p.normalize(p.join(dir, includeRaw.replaceAll('\\', '/')))
-                : p.posix.normalize(
-                    p.posix.join(dir, includeRaw.replaceAll('\\', '/')),
-                  );
-            final includeLines = await _loadSfzExpandedLines(
-              includePath,
-              includeStack: stack,
-              defines: macroMap,
-            );
-            out.addAll(includeLines);
-          }
-          continue;
-        }
-
-        final defineMatch = RegExp(
-          r'^#define\s+\$?([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$',
-        ).firstMatch(line);
-        if (defineMatch != null) {
-          final key = (defineMatch.group(1) ?? '').trim();
-          final value = (defineMatch.group(2) ?? '').trim();
-          if (key.isNotEmpty && value.isNotEmpty) {
-            macroMap[key] = value;
-          }
-          continue;
-        }
-
-        var expandedLine = rawLine;
-        if (macroMap.isNotEmpty) {
-          for (final entry in macroMap.entries) {
-            expandedLine = expandedLine.replaceAll(
-              '\$${entry.key}',
-              entry.value,
-            );
-          }
-        }
-        out.add(expandedLine);
-      }
-      return out;
-    } catch (_) {
-      return const <String>[];
-    } finally {
-      stack.remove(normalizedPath);
-    }
-  }
-
-  String _resolveSfzSampleAssetPath({
-    required String sfzAssetPath,
-    required String defaultPathRaw,
-    required String samplePathRaw,
-  }) {
-    final sfzDir = p.posix.dirname(sfzAssetPath);
-    final defaultPath = _stripSfzQuotes(defaultPathRaw).replaceAll('\\', '/');
-    final samplePath = _stripSfzQuotes(samplePathRaw).replaceAll('\\', '/');
-    if (samplePath.startsWith('assets/')) {
-      return p.posix.normalize(samplePath);
-    }
-    return p.posix.normalize(p.posix.join(sfzDir, defaultPath, samplePath));
-  }
-
   String? _sampledAliasAssetPathForInstrumentId(String instrumentId) {
     switch (instrumentId.trim().toLowerCase()) {
       case 'mixroom.drum_808_starter':
@@ -22994,203 +24709,63 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  double _readSfzNumeric(
-    Map<String, String> values,
-    String key,
-    double fallback,
-  ) {
-    final raw = values[key];
-    if (raw == null) return fallback;
-    return _parseSfzNumberOrNote(raw) ?? fallback;
-  }
-
-  Future<_SfzDefinition?> _sfzDefinitionForInstrument(
+  Future<SfzDefinition?> _sfzDefinitionForInstrument(
     String instrumentId,
   ) async {
     final spec = _instrumentSpecById(instrumentId);
-    if (!_isSampledInstrumentSpec(spec)) return null;
-    final sfzAssetPath = (spec['sfzAssetPath'] as String?)?.trim() ?? '';
+    final aliasPath = _sampledAliasAssetPathForInstrumentId(instrumentId);
+    if (!_isSampledInstrumentSpec(spec) && aliasPath == null) return null;
+    final sfzAssetPath = aliasPath ??
+        ((spec['sfzAssetPath'] as String?)?.trim() ?? '');
     if (sfzAssetPath.isEmpty) return null;
-
-    final cached = _sfzDefinitionCache[sfzAssetPath];
-    if (cached != null) return cached;
-
-    try {
-      final sfzLines = await _loadSfzExpandedLines(sfzAssetPath);
-      if (sfzLines.isEmpty) return null;
-      final control = <String, String>{};
-      final global = <String, String>{};
-      final master = <String, String>{};
-      final group = <String, String>{};
-      Map<String, String>? region;
-      String currentBlock = '';
-
-      final regions = <Map<String, String>>[];
-      for (final rawLine in sfzLines) {
-        final parsed = _parseSfzLine(rawLine);
-        final tag = parsed.blockTag;
-        if (tag != null && tag.isNotEmpty) {
-          currentBlock = tag;
-          if (tag == 'group') {
-            group.clear();
-          } else if (tag == 'master') {
-            master.clear();
-          } else if (tag == 'region') {
-            region = <String, String>{}
-              ..addAll(control)
-              ..addAll(global)
-              ..addAll(master)
-              ..addAll(group);
-            regions.add(region);
-          }
-        }
-
-        final opcodes = parsed.opcodes;
-        if (opcodes.isEmpty) continue;
-        switch (currentBlock) {
-          case 'control':
-            control.addAll(opcodes);
-            break;
-          case 'global':
-            global.addAll(opcodes);
-            break;
-          case 'master':
-            master.addAll(opcodes);
-            break;
-          case 'group':
-            group.addAll(opcodes);
-            break;
-          case 'region':
-            region ??= <String, String>{}
-              ..addAll(control)
-              ..addAll(global)
-              ..addAll(master)
-              ..addAll(group);
-            region.addAll(opcodes);
-            break;
-          default:
-            break;
-        }
-      }
-
-      final defaultPathRaw = control['default_path'] ?? '';
-      final globalAttackSec = _readSfzNumeric(global, 'ampeg_attack', 0.005);
-      final globalReleaseSec = _readSfzNumeric(global, 'ampeg_release', 0.35);
-      final globalVol = _readSfzNumeric(global, 'volume', 0.0);
-
-      final parsedRegions = <_SfzRegion>[];
-      for (final r in regions) {
-        final sampleRaw = r['sample'] ?? '';
-        if (sampleRaw.isEmpty) continue;
-        final sampleAssetPath = _resolveSfzSampleAssetPath(
-          sfzAssetPath: sfzAssetPath,
-          defaultPathRaw: r['default_path'] ?? defaultPathRaw,
-          samplePathRaw: sampleRaw,
-        );
-        final loKey = _readSfzNumeric(r, 'lokey', 0).round().clamp(0, 127);
-        final hiKey = _readSfzNumeric(r, 'hikey', 127).round().clamp(0, 127);
-        final keyCenter = _readSfzNumeric(
-          r,
-          'pitch_keycenter',
-          _readSfzNumeric(r, 'key', ((loKey + hiKey) / 2.0).roundToDouble()),
-        ).round().clamp(0, 127);
-        final loVel = _readSfzNumeric(r, 'lovel', 0).round().clamp(0, 127);
-        final hiVel = _readSfzNumeric(r, 'hivel', 127).round().clamp(0, 127);
-        final regionVolDb = _readSfzNumeric(r, 'volume', globalVol);
-        final gainLinear = math
-            .pow(10.0, (regionVolDb.clamp(-24.0, 12.0)) / 20.0)
-            .toDouble();
-        final attackSec = _readSfzNumeric(
-          r,
-          'ampeg_attack',
-          globalAttackSec,
-        ).clamp(0.0, 4.0).toDouble();
-        final releaseSec = _readSfzNumeric(
-          r,
-          'ampeg_release',
-          globalReleaseSec,
-        ).clamp(0.02, 12.0).toDouble();
-        final pitchKeytrack = _readSfzNumeric(
-          r,
-          'pitch_keytrack',
-          100.0,
-        ).clamp(-1200.0, 1200.0).toDouble();
-        final pitchOffsetSemitones =
-            (_readSfzNumeric(r, 'transpose', 0.0) +
-                    (_readSfzNumeric(r, 'tune', 0.0) / 100.0))
-                .clamp(-48.0, 48.0)
-                .toDouble();
-        final sampleStartFrame = math.max(
-          0,
-          _readSfzNumeric(r, 'offset', 0.0).round(),
-        );
-        final sampleEndFrameExclusive = math.max(
-          0,
-          _readSfzNumeric(r, 'end', -1.0).round() + 1,
-        );
-        final loopMode = (r['loop_mode'] ?? '').trim().toLowerCase();
-        final oneShot = loopMode == 'one_shot';
-        final seqLength = math.max(
-          1,
-          _readSfzNumeric(r, 'seq_length', 1.0).round(),
-        );
-        final rawSeqPosition = _readSfzNumeric(r, 'seq_position', 1.0).round();
-        final seqPosition = rawSeqPosition.clamp(1, seqLength);
-        final loRand = _readSfzNumeric(
-          r,
-          'lorand',
-          0.0,
-        ).clamp(0.0, 1.0).toDouble();
-        final hiRand = _readSfzNumeric(
-          r,
-          'hirand',
-          1.0,
-        ).clamp(loRand, 1.0).toDouble();
-        parsedRegions.add(
-          _SfzRegion(
-            sampleAssetPath: sampleAssetPath,
-            loKey: loKey,
-            hiKey: hiKey,
-            keyCenter: keyCenter,
-            loVel: loVel,
-            hiVel: hiVel,
-            gainLinear: gainLinear,
-            attackSec: attackSec,
-            releaseSec: releaseSec,
-            pitchKeytrack: pitchKeytrack,
-            pitchOffsetSemitones: pitchOffsetSemitones,
-            sampleStartFrame: sampleStartFrame,
-            sampleEndFrameExclusive: sampleEndFrameExclusive,
-            oneShot: oneShot,
-            seqLength: seqLength,
-            seqPosition: seqPosition,
-            loRand: loRand,
-            hiRand: hiRand,
-          ),
-        );
-      }
-
-      if (parsedRegions.isEmpty) return null;
-      final definition = _SfzDefinition(
-        sfzAssetPath: sfzAssetPath,
-        regions: parsedRegions,
-        defaultAttackSec: globalAttackSec.clamp(0.0, 4.0),
-        defaultReleaseSec: globalReleaseSec.clamp(0.02, 12.0),
-      );
-      _sfzDefinitionCache[sfzAssetPath] = definition;
-      return definition;
-    } catch (_) {
-      return null;
-    }
+    return _sfzDefinitionLoader.load(sfzAssetPath);
   }
 
-  _SfzRegion? _pickSfzRegion(
-    _SfzDefinition definition,
+  Future<Set<int>> _playableMidiPitchesForInstrument(
+    String instrumentId,
+    Map<String, double> params,
+  ) async {
+    final spec = _findInstrumentSpecById(instrumentId);
+    if (spec != null && _isExternalPluginInstrumentSpec(spec)) {
+      return _allMidiPitches;
+    }
+    final aliasPath = _sampledAliasAssetPathForInstrumentId(instrumentId);
+    final sampled = aliasPath != null ||
+        (spec != null && _isSampledInstrumentSpec(spec));
+    if (!sampled) return _allMidiPitches;
+
+    final definition = await _sfzDefinitionForInstrument(instrumentId);
+    if (definition == null) {
+      final failureKey = aliasPath ??
+          (spec?['sfzAssetPath'] as String?)?.trim() ??
+          instrumentId.trim();
+      if (_sfzRangeDetectionFailuresLogged.add(failureKey)) {
+        debugPrint(
+          '[PianoRollRange] Unable to parse $failureKey; enabling MIDI 0-127.',
+        );
+      }
+      return _allMidiPitches;
+    }
+
+    final sampleLowKey =
+        (params['sampleLowKey'] ?? 0.0).round().clamp(0, 127);
+    final sampleHighKey = (params['sampleHighKey'] ?? 127.0)
+        .round()
+        .clamp(sampleLowKey, 127);
+    return definition.playableInputPitches(
+      remapPitch: (pitch) => _remapSampledMidiPitch(instrumentId, pitch),
+      sampleLowKey: sampleLowKey,
+      sampleHighKey: sampleHighKey,
+    );
+  }
+
+  SfzRegion? _pickSfzRegion(
+    SfzDefinition definition,
     int pitch,
     int velocity, {
     int sequenceStep = 0,
   }) {
-    double random01For(_SfzRegion region) {
+    double random01For(SfzRegion region) {
       var seed = 0x45d9f3b;
       seed ^= pitch * 1009;
       seed ^= velocity * 9176;
@@ -23426,7 +25001,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   double _sfzPlaybackRate({
     required _DecodedStereoPcm sample,
-    required _SfzRegion region,
+    required SfzRegion region,
     required int notePitch,
     required double outputSampleRate,
   }) {
@@ -23437,7 +25012,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (sample.sampleRate / outputSampleRate);
   }
 
-  int _sfzRegionFrameLimit(_SfzRegion region, _DecodedStereoPcm sample) {
+  int _sfzRegionFrameLimit(SfzRegion region, _DecodedStereoPcm sample) {
     final requestedEnd = region.sampleEndFrameExclusive > 0
         ? region.sampleEndFrameExclusive
         : sample.frameCount;
@@ -24358,8 +25933,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentId,
       instrumentParams,
     );
-    final loaded = await _runProjectPluginRestoreStep<bool>(
-      'MIDI instrument load $liveInstrumentId clip=$engineClipId',
+    final loadRequestId = ++_nextMidiClipLoadRequestId;
+    final loaded = await runTimedNativeOperation<bool>(
+      'MIDI instrument load $liveInstrumentId '
+      'clip=$engineClipId request=$loadRequestId',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.loadMidiClip(
           engineClipId,
@@ -24372,9 +25949,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           startSec: startSec,
           lengthSec: math.max(0.0, lengthSec),
           inFileOffsetSec: math.max(0.0, inFileOffsetSec),
+          loadRequestId: loadRequestId,
         ),
       ),
       timeout: _kProjectPluginInstanceRestoreTimeout,
+      onTimeout: () {
+        // Cancellation must not extend the user-visible timeout if the native
+        // message thread is the component that is stalled.
+        unawaited(
+          JuceAudioEngine.cancelMidiClipLoad(
+            clipIndex: engineClipId,
+            loadRequestId: loadRequestId,
+          ),
+        );
+      },
     );
     return loaded ?? false;
   }
@@ -24545,7 +26133,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
 
-    final applied = await _runProjectPluginRestoreStep<bool>(
+    final applied = await runTimedNativeOperation<bool>(
       'MIDI instrument state ${clip.instrumentId} clip=${clip.engineClipId}',
       () => _runWithAndroidEngineCriticalSection(
         () => JuceAudioEngine.setMidiClipPluginState(
@@ -25868,7 +27456,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _clipFadeRowIdByEngineId.remove(clip.engineClipId);
   }
 
-  String _buildNativeExportClipSnapshotJson() {
+  String _buildNativeExportClipSnapshotJson({Set<int>? audibleClipIds}) {
     final snapshots = <Map<String, dynamic>>[];
     final fadeByClipId = _resolvedClipFadesByEngineId();
 
@@ -25913,7 +27501,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         'fadeInSec': fades.fadeInSec,
         'fadeOutSec': fades.fadeOutSec,
         'fadeCurve': fades.fadeCurve,
-        'muted': false,
+        'muted':
+            audibleClipIds != null && !audibleClipIds.contains(engineClipId),
         'isMidi': exportUsesLiveMidiPath,
         if (clip.file.path.isNotEmpty) 'sourceFilePath': clip.file.path,
       };
@@ -27464,6 +29053,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String inputPath, {
     required double durSec,
     required int target,
+  }) {
+    final result = Completer<List<double>?>();
+    final previous = _waveformExtractionLane;
+    _waveformExtractionLane = () async {
+      try {
+        await previous;
+      } catch (_) {
+        // A failed job must not poison the lane for later clips.
+      }
+      try {
+        result.complete(
+          await _extractWaveformDataNow(
+            inputPath,
+            durSec: durSec,
+            target: target,
+          ),
+        );
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      }
+    }();
+    return result.future;
+  }
+
+  Future<List<double>?> _extractWaveformDataNow(
+    String inputPath, {
+    required double durSec,
+    required int target,
   }) async {
     const int pcmRate = 8000;
     final tmpDir = await getTemporaryDirectory();
@@ -28249,6 +29866,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _refreshMicrophonePermissionAndInputs() async {
+    if (!(_bluetoothImplementationSessionV2?.allowsLegacyInputLifecycle ??
+        true)) {
+      return;
+    }
     await _refreshMicrophonePermissionState();
     if (!mounted) return;
     await _loadInputDevicesFromJuce();
@@ -28905,6 +30526,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _aiLibrarySnapshotCacheKey = null;
     _aiLibrarySamplePathIndex.clear();
     _aiLibraryRolePathIndex.clear();
+    _aiPlayablePitchRangesByInstrumentId.clear();
   }
 
   Future<List<String>> _collectAiLibraryAudioEntriesForRoot(
@@ -29070,9 +30692,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final roots = _sampleBrowserRoots.map(p.normalize).toList(growable: false)
       ..sort();
     final cacheKey = jsonEncode(<String, dynamic>{
-      'instrument_ids': catalog
-          .map((spec) => (spec['id'] as String? ?? '').trim())
-          .where((id) => id.isNotEmpty)
+      'instruments': catalog
+          .map(
+            (spec) => <String, String>{
+              'id': (spec['id'] as String? ?? '').trim(),
+              'name': (spec['name'] as String? ?? '').trim(),
+              'category': _instrumentPickerCategory(spec).trim(),
+            },
+          )
+          .where((entry) => entry['id']!.isNotEmpty)
           .toList(growable: false),
       'sample_roots': roots,
     });
@@ -29081,16 +30709,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return _aiLibrarySnapshotCache;
     }
 
+    final pitchRangeEntries = await Future.wait(
+      catalog.map((spec) async {
+        final instrumentId = (spec['id'] as String? ?? '').trim();
+        if (instrumentId.isEmpty) {
+          return null;
+        }
+        final playable = await _playableMidiPitchesForInstrument(
+          instrumentId,
+          _instrumentParamsFromSpec(spec),
+        );
+        return MapEntry<String, List<Map<String, int>>>(
+          instrumentId,
+          compactMidiPitchRanges(playable),
+        );
+      }),
+    );
+    _aiPlayablePitchRangesByInstrumentId
+      ..clear()
+      ..addEntries(
+        pitchRangeEntries
+            .whereType<MapEntry<String, List<Map<String, int>>>>(),
+      );
+
     final lines = <String>[];
     final instrumentsByCategory = <String, List<String>>{};
     for (final spec in catalog) {
       final instrumentId = (spec['id'] as String? ?? '').trim();
       if (instrumentId.isEmpty) continue;
+      final instrumentName = (spec['name'] as String? ?? '').trim();
       final category = _instrumentPickerCategory(spec).trim();
       final bucket = category.isEmpty ? 'Other' : category;
+      final playableRangeText = formatMidiPitchRanges(
+        _aiPlayablePitchRangesByInstrumentId[instrumentId] ??
+            const <Map<String, int>>[],
+      );
+      final catalogEntry = instrumentName.isEmpty
+          ? instrumentId
+          : '$instrumentName<$instrumentId>';
       instrumentsByCategory
           .putIfAbsent(bucket, () => <String>[])
-          .add(instrumentId);
+          .add('$catalogEntry{playable_midi=$playableRangeText}');
     }
     lines.add('built_in_instruments:');
     if (instrumentsByCategory.isEmpty) {
@@ -29317,6 +30976,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (spec) => <String, dynamic>{
                 'instrument_id': (spec['id'] as String? ?? '').trim(),
                 'name': (spec['name'] as String? ?? '').trim(),
+                'playable_pitch_ranges':
+                    _aiPlayablePitchRangesByInstrumentId[
+                      (spec['id'] as String? ?? '').trim()
+                    ] ??
+                    const <Map<String, int>>[],
               },
             )
             .where(
@@ -29845,14 +31509,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleSampleDragExitedBrowserPanel() {
-    if (!mounted || !_sampleBrowserVisible) return;
-    setState(() {
-      _reopenSampleBrowserAfterDrag = true;
-      _reopenSampleBrowserExpanded = _sampleBrowserExpanded;
-      _sampleBrowserVisible = false;
-      _sampleBrowserExpanded = false;
-    });
-    _setDawPanelVisible('sample_browser', false);
+    // Keep the drag source mounted until DragTarget accepts or cancels the
+    // operation. Removing the sample-browser panel during hover disposes the
+    // Draggable and can cancel an otherwise valid timeline drop.
   }
 
   Future<Duration?> _resolveSampleDuration(String filePath) async {
@@ -29956,7 +31615,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _auditioningSamplePath = filePath;
         _samplePreviewPlaying = true;
       });
-      await JuceAudioEngine.preparePlaybackRoute(reason: 'samplePreview');
+      if (!await _ensurePlaybackRouteReady(reason: 'samplePreview')) {
+        if (mounted) {
+          setState(() {
+            _auditioningSamplePath = null;
+            _samplePreviewPlaying = false;
+          });
+        }
+        return;
+      }
       await _startSecurityScopedAccessForFile(filePath);
       await _samplePreviewPlayer.stop();
       await _samplePreviewPlayer.setFilePath(filePath);
@@ -30104,6 +31771,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return const Color(0xFF7CCBFF);
       case 'Keys':
         return const Color(0xFF53A8FF);
+      case 'Guitars':
+        return const Color(0xFF67A6FF);
       case 'Strings':
         return const Color(0xFF67A6FF);
       case 'Woodwinds':
@@ -30137,6 +31806,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return Icons.developer_board_rounded;
       case 'Keys':
         return Icons.piano_outlined;
+      case 'Guitars':
+        return CupertinoIcons.guitars;
       case 'Strings':
         return Icons.multitrack_audio_rounded;
       case 'Woodwinds':
@@ -38472,6 +40143,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     onPreviewNote: _previewPianoRollNote,
                     onKeyboardNoteDown: _handlePianoRollKeyboardNoteDown,
                     onKeyboardNoteUp: _handlePianoRollKeyboardNoteUp,
+                    resolvePlayablePitches:
+                        _playableMidiPitchesForInstrument,
                     highlightedPitches: _desktopMidiHeldPitchesForPianoRoll(
                       clip,
                     ),
@@ -38801,6 +40474,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(() async {
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted || !_isProjectSettingsOpen) return;
+      if (_isBluetoothV2Session) {
+        if (Platform.isMacOS) {
+          await _loadMacV2AudioDevices();
+        } else if (showAudioRouting && (Platform.isAndroid || Platform.isIOS)) {
+          await _refreshSystemSelectedRouteInfoV2();
+        }
+        return;
+      }
       if (!showAudioRouting) return;
       await _refreshMicrophonePermissionState();
       if (_inputDevices.isEmpty && !_loadingDevices) {
@@ -38907,6 +40588,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 ),
                               ),
                               const SizedBox(height: 10),
+                              if (PlatformCapabilities.current.isDesktop &&
+                                  _compatibilityAudioRequired &&
+                                  !_compatibilityAudioCurrent) ...[
+                                _buildCompatibilityVersionLauncher(),
+                                const SizedBox(height: 10),
+                              ],
                               if (showAudioRoutingLauncher) ...[
                                 _buildAudioRoutingLauncher(),
                                 const SizedBox(height: 10),
@@ -38941,7 +40628,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               const SizedBox(height: 10),
                               if (showInlineAudioRouting) ...[
                                 _buildInputSelector(),
-                                if (_shouldShowInputChannelRouteSelector()) ...[
+                                if (!_isBluetoothV2Session &&
+                                    _shouldShowInputChannelRouteSelector()) ...[
                                   const SizedBox(height: 9),
                                   _buildInputChannelRouteSelector(),
                                 ],
@@ -39755,6 +41443,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String query = '';
     var filter = _DesktopPluginBrowserFilter.all;
     var rescanning = false;
+    var scanFailureCount = 0;
 
     List<Map<String, dynamic>> filteredPlugins() {
       return currentPlugins
@@ -39831,8 +41520,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               rescanning
                                   ? 'Scanning Audio Unit and VST3 folders'
                                   : _desktopLastPluginRescanAtMs == null
-                                  ? '${currentPlugins.length} cached plug-ins'
-                                  : '${currentPlugins.length} cached plug-ins - Last rescan ${DateTime.fromMillisecondsSinceEpoch(_desktopLastPluginRescanAtMs!).toLocal()}',
+                                  ? '${currentPlugins.length} cached plug-ins${scanFailureCount > 0 ? ' - $scanFailureCount failed validation' : ''}'
+                                  : '${currentPlugins.length} cached plug-ins${scanFailureCount > 0 ? ' - $scanFailureCount failed validation' : ''} - Last rescan ${DateTime.fromMillisecondsSinceEpoch(_desktopLastPluginRescanAtMs!).toLocal()}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -39846,7 +41535,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       const SizedBox(width: 14),
                       TextButton.icon(
                         onPressed: rescanning
-                            ? null
+                            ? () => JuceAudioEngine.cancelPluginScan()
                             : () async {
                                 setModalState(() => rescanning = true);
                                 try {
@@ -39855,20 +41544,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                     includeHidden: true,
                                   );
                                   if (!mounted) return;
+                                  final diagnostics =
+                                      await JuceAudioEngine.getEngineDiagnostics();
+                                  if (!mounted || !context.mounted) return;
                                   setModalState(() {
                                     currentPlugins = rescanned;
+                                    scanFailureCount =
+                                        diagnostics.pluginScanFailureCount;
                                   });
                                   await _refreshDesktopHostedInstrumentCatalog();
                                 } finally {
-                                  if (mounted) {
+                                  if (mounted && context.mounted) {
                                     setModalState(() => rescanning = false);
                                   }
                                 }
                               },
-                        icon: const Icon(Icons.refresh_rounded),
+                        icon: Icon(
+                          rescanning
+                              ? Icons.stop_circle_outlined
+                              : Icons.refresh_rounded,
+                        ),
                         label: Text(
                           rescanning
-                              ? 'Scanning...'
+                              ? 'Cancel'
                               : currentPlugins.isEmpty
                               ? 'Discover'
                               : 'Rescan',
@@ -40070,52 +41768,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         alpha: 0.68,
                                       ),
                                       size: 18,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Tooltip(
-                              message:
-                                  'Open hosted plugin editors in separate desktop windows instead of inside Mixroom.',
-                              waitDuration: const Duration(milliseconds: 450),
-                              child: Container(
-                                height: 40,
-                                padding: const EdgeInsets.only(left: 10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.045),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.08),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      'Detached',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.72,
-                                        ),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    Transform.scale(
-                                      scale: 0.78,
-                                      child: Switch.adaptive(
-                                        value:
-                                            _desktopHostedPluginWindowsDetached,
-                                        onChanged: (value) async {
-                                          await _setDesktopHostedPluginWindowsDetached(
-                                            value,
-                                          );
-                                          if (!mounted) return;
-                                          setModalState(() {});
-                                        },
-                                      ),
                                     ),
                                   ],
                                 ),
@@ -40413,6 +42065,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
     );
   }
+
+  bool get _usesLiveAudioRouteCoordinatorV2 =>
+      Platform.isMacOS || Platform.isAndroid || Platform.isIOS;
 
   Future<void> _showDesktopDiagnosticsDialog() async {
     if (!mounted || !PlatformCapabilities.current.isDesktop) return;
@@ -40907,6 +42562,260 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<void> _showCompatibilityVersionInfo() async {
+    if (!mounted) return;
+
+    Widget detailRow(IconData icon, String title, String text) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 13),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1),
+              child: Icon(icon, size: 17, color: const Color(0xFF9BC9F4)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(context, title),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF0F5FA),
+                      fontSize: 13.2,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    L10n.translate(context, text),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.70),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.38,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: MixroomShellSurface(
+              radius: 24,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color(
+                            0xFF78B5EE,
+                          ).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.offline_pin_outlined,
+                          color: Color(0xFF9BC9F4),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          L10n.translate(context, 'Compatible version'),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            color: Color(0xFFF4F4F4),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            height: 1.15,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: L10n.translate(context, 'Close'),
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Color(0xFFD8E0E8),
+                          size: 20,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.72),
+                      fontSize: 13.2,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  detailRow(
+                    Icons.tune_rounded,
+                    'Your original stays editable',
+                    'The editable project and its plug-in settings stay bundled and unchanged.',
+                  ),
+                  detailRow(
+                    Icons.graphic_eq_rounded,
+                    'Rendered audio keeps the sound',
+                    'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.',
+                  ),
+                  detailRow(
+                    Icons.call_split_rounded,
+                    'Edits stay separate',
+                    'Editing the compatible version creates a separate normal project.',
+                  ),
+                  Text(
+                    L10n.translate(
+                      context,
+                      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.62),
+                      fontSize: 12.2,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCompatibilityVersionLauncher() {
+    final active = _compatibilityPreparationActive;
+    final progress = (_compatibilityPreparationProgress * 100).round();
+    return Material(
+      color: const Color(0xFF2D6C9B).withValues(alpha: 0.88),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: const Color(0xFF9BC9F4).withValues(alpha: 0.38),
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Row(
+        children: [
+          Expanded(
+            child: Semantics(
+              identifier: 'daw.prepare_compatible_version',
+              label: active
+                  ? 'Preparing compatible version, $progress percent'
+                  : 'Prepare compatible version',
+              button: true,
+              child: TextButton.icon(
+                onPressed: active
+                    ? null
+                    : () => unawaited(_prepareCompatibilityAudioManually()),
+                icon: active
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Color(0xFFE6F2FC),
+                        ),
+                      )
+                    : const Icon(Icons.offline_pin_outlined, size: 18),
+                label: Text(
+                  active
+                      ? '${L10n.translate(context, 'Preparing…')} $progress%'
+                      : L10n.translate(context, 'Prepare compatible version'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFFF0F7FD),
+                  disabledForegroundColor: const Color(0xFFDCECF9),
+                  backgroundColor: Colors.transparent,
+                  minimumSize: const Size(0, 42),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  textStyle: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 13.2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  shape: const RoundedRectangleBorder(),
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: 1,
+            height: 22,
+            color: Colors.white.withValues(alpha: 0.18),
+          ),
+          Semantics(
+            label: L10n.translate(context, 'About compatible versions'),
+            button: true,
+            child: Tooltip(
+              message: L10n.translate(context, 'About compatible versions'),
+              child: InkWell(
+                onTap: () => unawaited(_showCompatibilityVersionInfo()),
+                child: const SizedBox(
+                  width: 42,
+                  height: 42,
+                  child: Icon(
+                    Icons.info_outline_rounded,
+                    color: Color(0xFFDCECF9),
+                    size: 19,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDesktopDiagnosticsLauncher() {
     return _buildProjectSettingsActionCard(
       title: 'Desktop Diagnostics',
@@ -41049,6 +42958,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _selectMacOutputDevice(String name) async {
+    if (_isBluetoothV2Session) {
+      final trimmed = name.trim();
+      final coordinator = _audioRouteCoordinatorV2;
+      if (trimmed.isEmpty) return;
+      if (!_macV2OutputSelectionEnabled || coordinator == null) {
+        _showSmallNotice('Audio output is changing. Please wait.');
+        return;
+      }
+      final result = await coordinator.selectPlaybackOutput(trimmed);
+      if (!mounted) return;
+      if (!result.succeeded) {
+        await _loadMacV2AudioDevices();
+        return;
+      }
+      final verifiedName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
+      _setStateAndRefreshProjectSettings(() {
+        _macOutputDeviceName = verifiedName.isEmpty ? trimmed : verifiedName;
+      });
+      return;
+    }
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
 
@@ -41067,6 +42996,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
     await _refreshAudioRouteInfo();
     await _ensurePlaybackRouteReady(reason: 'selectMacOutputDevice');
+  }
+
+  Future<void> _selectMacV2InputDevice(String? name) async {
+    final coordinator = _audioRouteCoordinatorV2;
+    if (!_macV2InputSelectionEnabled || coordinator == null) {
+      _showSmallNotice('Audio input selection is not ready yet.');
+      return;
+    }
+    final selection = name?.trim();
+    _setStateAndRefreshProjectSettings(
+      () => _macV2InputSelectionInFlight = true,
+    );
+    try {
+      final result = await coordinator.selectRecordingInput(
+        selection == null || selection.isEmpty ? null : selection,
+      );
+      if (!mounted) return;
+      if (!result.succeeded) {
+        _showSmallNotice(
+          L10n.translate(context, 'Selected input device is not available.'),
+        );
+        await _loadMacV2AudioDevices();
+        return;
+      }
+      _setStateAndRefreshProjectSettings(() {
+        _macInputDeviceName = selection == null || selection.isEmpty
+            ? null
+            : selection;
+      });
+    } finally {
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(
+          () => _macV2InputSelectionInFlight = false,
+        );
+      }
+    }
   }
 
   List<_InputChannelRouteOption> _buildInputChannelRouteOptions(
@@ -41378,6 +43343,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     AudioRouteInfo? info,
     bool force = false,
   }) async {
+    if (_isBluetoothV2Session) return;
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     final routeInfo = info ?? _audioRouteInfo;
     final shouldEnable = _shouldEnableLiveInputMonitoring(routeInfo);
@@ -41389,6 +43355,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _refreshAudioRouteInfo({bool refreshNativeRoute = false}) async {
+    if (_isBluetoothV2Session) return;
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     if (refreshNativeRoute) {
       await _requestAndroidRouteRefresh(reason: 'editorRouteInfo');
@@ -41421,9 +43388,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _refreshSystemSelectedRouteInfoV2() async {
+    if (!_isBluetoothV2Session || (!Platform.isAndroid && !Platform.isIOS)) {
+      return;
+    }
+    final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    if (!mounted) return;
+
+    final output = snapshot.outputs.length == 1
+        ? snapshot.outputs.single
+        : null;
+    final input = snapshot.inputs.length == 1 ? snapshot.inputs.single : null;
+    final outputName = (output?.name ?? '').trim();
+    final inputName = (input?.name ?? '').trim();
+    final outputKind = switch (output?.normalizedKind) {
+      AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
+      AudioRouteKindV2.wired => AudioRouteKind.wired,
+      AudioRouteKindV2.external => AudioRouteKind.usb,
+      AudioRouteKindV2.bluetooth ||
+      AudioRouteKindV2.bluetoothMedia ||
+      AudioRouteKindV2.bluetoothDuplex ||
+      AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
+      _ => AudioRouteKind.unknown,
+    };
+    final inputIsBluetooth = switch (input?.normalizedKind) {
+      AudioRouteKindV2.bluetooth ||
+      AudioRouteKindV2.bluetoothDuplex ||
+      AudioRouteKindV2.bluetoothLe => true,
+      _ => false,
+    };
+    final info = AudioRouteInfo(
+      outputRouteKind: outputKind,
+      outputRouteName: outputName,
+      inputDeviceName: inputName,
+      inputIsBluetoothHeadset: inputIsBluetooth,
+    );
+    _setStateAndRefreshProjectSettings(() {
+      _audioRouteInfo = info;
+      if (Platform.isAndroid) {
+        _androidOutputRouteName = outputName.isEmpty ? null : outputName;
+      }
+    });
+  }
+
   Future<void> _refreshAndroidOutputRouteLabel({
     bool refreshNativeRoute = false,
   }) async {
+    if (_isBluetoothV2Session) {
+      await _refreshSystemSelectedRouteInfoV2();
+      return;
+    }
     await _refreshAudioRouteInfo(refreshNativeRoute: refreshNativeRoute);
   }
 
@@ -41567,6 +43581,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _startRecordingRoutePolicyPolling() {
     _recordingRoutePolicyTimer?.cancel();
+    if (_isBluetoothV2Session) return;
     if (!_supportsNativeBluetoothMonitorPolicy()) return;
     _recordingRoutePolicyTimer = Timer.periodic(const Duration(seconds: 1), (
       _,
@@ -41617,6 +43632,61 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     try {
       await JuceAudioEngine.setMidiInputChannelFilter(_midiInputChannelFilter);
+
+      if (_isBluetoothV2Session) {
+        if (!Platform.isMacOS && !Platform.isIOS) {
+          return true;
+        }
+        final coordinator = _audioRouteCoordinatorV2;
+        if (coordinator == null) {
+          // iOS deliberately starts its route coordinator after project load.
+          // Retain the loaded project preference and apply it once that
+          // existing startup boundary is ready.
+          _v2HardwareSettingsApplicationPending = true;
+          return true;
+        }
+        final result = await coordinator.configurePlaybackHardware(
+          preferredSampleRateHz: _preferredDawSampleRate,
+          preferredBufferFrames: _preferredDawBufferSize,
+        );
+        if (!result.succeeded) {
+          if (notifyOnFailure && mounted) {
+            _showSmallNotice(
+              L10n.translate(context, 'Could not apply audio device settings'),
+            );
+          }
+          return false;
+        }
+
+        JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+        final outputKind = result.snapshot.outputs.length == 1
+            ? result.snapshot.outputs.first.normalizedKind
+            : AudioRouteKindV2.unknown;
+        final bluetoothRoute =
+            outputKind == AudioRouteKindV2.bluetooth ||
+            outputKind == AudioRouteKindV2.bluetoothMedia ||
+            outputKind == AudioRouteKindV2.bluetoothDuplex ||
+            outputKind == AudioRouteKindV2.bluetoothLe;
+        if (!bluetoothRoute) {
+          final actualSampleRate =
+              result.snapshot.juce.sampleRateHz?.round() ?? 0;
+          final actualBufferSize = result.snapshot.juce.bufferFrames ?? 0;
+          if ((_dawSampleRateOptions.contains(actualSampleRate) &&
+                  actualSampleRate != _preferredDawSampleRate) ||
+              (_dawBufferSizeOptions.contains(actualBufferSize) &&
+                  actualBufferSize != _preferredDawBufferSize)) {
+            _setStateAndRefreshProjectSettings(() {
+              if (_dawSampleRateOptions.contains(actualSampleRate)) {
+                _preferredDawSampleRate = actualSampleRate;
+              }
+              if (_dawBufferSizeOptions.contains(actualBufferSize)) {
+                _preferredDawBufferSize = actualBufferSize;
+              }
+            });
+          }
+        }
+        return true;
+      }
 
       if (_isRecording) {
         if (notifyOnFailure && mounted) {
@@ -41684,6 +43754,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String reason,
     bool rescheduleOnConfigChange = false,
   }) {
+    if (_isBluetoothV2Session) return Future<bool>.value(false);
     _recordingInputPrewarmInFlight = true;
 
     late final Future<bool> future;
@@ -41737,6 +43808,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _scheduleRecordingInputPrewarm({required String reason}) {
+    if (_isBluetoothV2Session) return;
     if (!mounted || _isRecording) return;
     final desiredInputChannels = _desiredRecordingInputOpenChannels();
     final selectedDevice = (_selectedDevice ?? '').trim();
@@ -41805,6 +43877,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _loadInputDevicesFromJuce({
     bool scheduleRecordingPrewarm = false,
   }) async {
+    if (_isBluetoothV2Session) {
+      if (Platform.isMacOS) await _loadMacV2AudioDevices();
+      return;
+    }
     if (_loadingDevices) return;
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
 
@@ -41925,6 +44001,71 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  bool get _macV2OutputSelectionEnabled {
+    if (!Platform.isMacOS || !_isBluetoothV2Session) return true;
+    final coordinator = _audioRouteCoordinatorV2;
+    return !_loadingDevices &&
+        !_macV2InputSelectionInFlight &&
+        !_v2AudioSessionInvalidated &&
+        !_isRecording &&
+        !_recordStartVisualPending &&
+        coordinator != null &&
+        coordinator.intent == AudioRouteIntentV2.playbackOnly &&
+        coordinator.state == AudioRouteCoordinatorStateV2.stable;
+  }
+
+  bool get _macV2InputSelectionEnabled {
+    if (!Platform.isMacOS || !_isBluetoothV2Session) return false;
+    final coordinator = _audioRouteCoordinatorV2;
+    return !_loadingDevices &&
+        !_macV2InputSelectionInFlight &&
+        !_v2AudioSessionInvalidated &&
+        !_isRecording &&
+        !_recordStartVisualPending &&
+        coordinator != null &&
+        coordinator.intent == AudioRouteIntentV2.playbackOnly &&
+        coordinator.state == AudioRouteCoordinatorStateV2.stable;
+  }
+
+  Future<void> _loadMacV2AudioDevices() async {
+    if (!Platform.isMacOS || !_isBluetoothV2Session || _loadingDevices) return;
+    _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
+    try {
+      final inputDevices = <String>[];
+      for (final info in await JuceAudioEngine.getInputDeviceInfos()) {
+        final name = info.name.trim();
+        if (name.isNotEmpty && !inputDevices.contains(name)) {
+          inputDevices.add(name);
+        }
+      }
+      final outputDevices = <String>[];
+      for (final rawName in await JuceAudioEngine.getOutputDevices()) {
+        final name = rawName.trim();
+        if (name.isNotEmpty && !outputDevices.contains(name)) {
+          outputDevices.add(name);
+        }
+      }
+      final currentOutput = (await JuceAudioEngine.getCurrentOutputDeviceName())
+          .trim();
+      if (!mounted) return;
+      _setStateAndRefreshProjectSettings(() {
+        _macInputDevices = inputDevices;
+        if (_macInputDeviceName != null &&
+            !inputDevices.contains(_macInputDeviceName)) {
+          _macInputDeviceName = null;
+        }
+        _macOutputDevices = outputDevices;
+        _macOutputDeviceName = currentOutput.isEmpty
+            ? _macOutputDeviceName
+            : currentOutput;
+        _loadingDevices = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      _setStateAndRefreshProjectSettings(() => _loadingDevices = false);
+    }
+  }
+
   Widget _buildMicrophonePermissionNotice() {
     final actionLabel =
         _microphonePermissionStatus.isPermanentlyDenied ||
@@ -42032,6 +44173,104 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildInputSelector() {
+    if (_isBluetoothV2Session && (Platform.isAndroid || Platform.isIOS)) {
+      final routeLabel = _audioRouteInfo.inputDeviceName.trim();
+      final effectiveLabel = routeLabel.isEmpty
+          ? L10n.translate(context, 'System Default')
+          : routeLabel;
+      return Semantics(
+        identifier: 'daw.input_device',
+        label: L10n.translate(context, 'Input Device'),
+        child: InputDecorator(
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Device'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh audio devices'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: () {
+                unawaited(_refreshSystemSelectedRouteInfoV2());
+              },
+            ),
+          ),
+          child: Text(
+            effectiveLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+    }
+    if (_isBluetoothV2Session && Platform.isMacOS) {
+      const systemDefaultValue = '';
+      final selectionEnabled = _macV2InputSelectionEnabled;
+      final selectedName = _macInputDeviceName?.trim();
+      final selectedValue =
+          selectedName != null &&
+              selectedName.isNotEmpty &&
+              _macInputDevices.contains(selectedName)
+          ? selectedName
+          : systemDefaultValue;
+      final values = <String>[systemDefaultValue, ..._macInputDevices];
+      return Semantics(
+        identifier: 'daw.input_device',
+        label: L10n.translate(context, 'Input Device'),
+        child: DropdownButtonFormField<String>(
+          key: ValueKey<String>('mac-v2-input-$selectedValue'),
+          initialValue: selectedValue,
+          isExpanded: true,
+          dropdownColor: kMixroomGlassDropdownMenuColor,
+          style: const TextStyle(color: Colors.white),
+          selectedItemBuilder: (context) => values
+              .map(
+                (value) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    value.isEmpty
+                        ? L10n.translate(context, 'System Default')
+                        : value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Device'),
+            suffixIcon: IconButton(
+              tooltip: L10n.translate(context, 'Refresh audio devices'),
+              icon: const Icon(Icons.refresh, color: Colors.white70),
+              onPressed: selectionEnabled
+                  ? () => unawaited(_loadMacV2AudioDevices())
+                  : null,
+            ),
+          ),
+          items: values
+              .map(
+                (value) => DropdownMenuItem<String>(
+                  value: value,
+                  child: Text(
+                    value.isEmpty
+                        ? L10n.translate(context, 'System Default')
+                        : value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: selectionEnabled
+              ? (value) => unawaited(
+                  _selectMacV2InputDevice(
+                    value == null || value.isEmpty ? null : value,
+                  ),
+                )
+              : null,
+        ),
+      );
+    }
     if (_loadingDevices) {
       return const Padding(
         padding: EdgeInsets.all(8),
@@ -42429,7 +44668,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               tooltip: L10n.translate(context, 'Refresh output route'),
               icon: const Icon(Icons.refresh, color: Colors.white70),
               onPressed: () {
-                unawaited(_refreshAudioRouteInfo());
+                unawaited(
+                  _isBluetoothV2Session
+                      ? _refreshSystemSelectedRouteInfoV2()
+                      : _refreshAudioRouteInfo(),
+                );
               },
             ),
           ),
@@ -42442,6 +44685,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (Platform.isMacOS) {
+      final outputSelectionEnabled = _macV2OutputSelectionEnabled;
       final routeLabel = _macOutputDeviceName?.trim();
       final outputValue =
           routeLabel != null &&
@@ -42462,12 +44706,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             suffixIcon: IconButton(
               tooltip: L10n.translate(context, 'Refresh output device'),
               icon: const Icon(Icons.refresh, color: Colors.white70),
-              onPressed: () {
-                unawaited(() async {
-                  await _loadInputDevicesFromJuce();
-                  await _ensurePlaybackRouteReady(reason: 'macOutputRefresh');
-                }());
-              },
+              onPressed: outputSelectionEnabled
+                  ? () {
+                      unawaited(() async {
+                        await _loadInputDevicesFromJuce();
+                        await _ensurePlaybackRouteReady(
+                          reason: 'macOutputRefresh',
+                        );
+                      }());
+                    }
+                  : null,
             ),
           ),
           child: Text(
@@ -42487,12 +44735,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           suffixIcon: IconButton(
             tooltip: L10n.translate(context, 'Refresh output device'),
             icon: const Icon(Icons.refresh, color: Colors.white70),
-            onPressed: () {
-              unawaited(() async {
-                await _loadInputDevicesFromJuce();
-                await _ensurePlaybackRouteReady(reason: 'macOutputRefresh');
-              }());
-            },
+            onPressed: outputSelectionEnabled
+                ? () {
+                    unawaited(() async {
+                      await _loadInputDevicesFromJuce();
+                      await _ensurePlaybackRouteReady(
+                        reason: 'macOutputRefresh',
+                      );
+                    }());
+                  }
+                : null,
           ),
         ),
         hint: Text(
@@ -42516,10 +44768,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
             })
             .toList(growable: false),
-        onChanged: (name) {
-          if (name == null) return;
-          unawaited(_selectMacOutputDevice(name));
-        },
+        onChanged: outputSelectionEnabled
+            ? (name) {
+                if (name == null) return;
+                unawaited(_selectMacOutputDevice(name));
+              }
+            : null,
       );
     }
 
@@ -42780,6 +45034,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _setRoutingSheetMonitoring(bool enabled) async {
+    if (_isBluetoothV2Session) {
+      _showSmallNotice(
+        'Monitoring is unavailable for the current audio route.',
+      );
+      return;
+    }
     if (_audioRouteInfo.isBluetoothOutput) {
       await _setAdvancedBluetoothMonitorOverride(enabled);
       return;
@@ -42790,11 +45050,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _showAudioRoutingSheet() async {
-    await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: false);
-    if (Platform.isAndroid) {
-      unawaited(_refreshAndroidOutputRouteLabel());
+    if (_isBluetoothV2Session) {
+      await _refreshSystemSelectedRouteInfoV2();
     } else {
-      unawaited(_refreshAudioRouteInfo());
+      await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: false);
+      if (Platform.isAndroid) {
+        unawaited(_refreshAndroidOutputRouteLabel());
+      } else {
+        unawaited(_refreshAudioRouteInfo());
+      }
     }
     if (!mounted) return;
 
@@ -42861,7 +45125,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         _buildInputMeterStrip(),
                         const SizedBox(height: 10),
                         _buildInputSelector(),
-                        if (_shouldShowInputChannelRouteSelector()) ...[
+                        if (!_isBluetoothV2Session &&
+                            _shouldShowInputChannelRouteSelector()) ...[
                           const SizedBox(height: 9),
                           _buildInputChannelRouteSelector(),
                         ],
@@ -43821,12 +46086,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
+    if (_isBluetoothV2Session) {
+      if (!_supportsV2AudioRecording) {
+        _showSmallNotice(
+          'Recording is unavailable for the current audio route.',
+        );
+        return;
+      }
+      if (_v2AudioSessionInvalidated) {
+        _showSmallNotice(_v2AudioSessionInvalidationNotice);
+        return;
+      }
+    }
     if (_recordStartVisualPending && !_isRecording) {
       _recordStartCancelRequested = true;
       if (mounted) {
         setState(() {
           _recordStartVisualPending = false;
         });
+      }
+      if (_isBluetoothV2Session &&
+          (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) &&
+          _audioRouteCoordinatorV2?.state ==
+              AudioRouteCoordinatorStateV2.preparingInput) {
+        await JuceAudioEngine.abortRecordingV2(cancelOnly: true);
       }
       return;
     }
@@ -55232,6 +57515,35 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           previousTargets[originalTargetId] ??
           _fallbackAutomationTargetMeta(originalTargetId);
       final parsed = _parseAutomationTargetId(originalTargetId);
+
+      // Hosted instrument parameters are not part of the row FX parameter
+      // discovery pass. Their target id deliberately contains the persisted
+      // clip id, so reconnect them directly to the newly assigned native clip
+      // id after a project reopen. Without this, valid VST/AU instrument
+      // automation is marked orphaned, hidden, and never sent back to JUCE.
+      if (parsed.scope == 'instrument') {
+        final clipId = parsed.effectKey.trim();
+        final paramId = parsed.paramId.trim();
+        final clip = _audioTracks.cast<AudioTrack?>().firstWhere(
+          (candidate) =>
+              candidate != null &&
+              candidate.isMidi &&
+              candidate.clipId == clipId &&
+              candidate.engineClipId >= 0,
+          orElse: () => null,
+        );
+        if (clip != null && paramId.isNotEmpty) {
+          return previousMeta.copyWith(
+            targetId: originalTargetId,
+            effectIndex: clip.engineClipId,
+            paramId: paramId,
+            isOrphan: false,
+            uiVisible: true,
+          );
+        }
+        return null;
+      }
+
       final normalizedParamId =
           (parsed.paramId.isNotEmpty ? parsed.paramId : previousMeta.paramId)
               .trim()
@@ -57000,6 +59312,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _handleJuceEngineEvent(Map<String, dynamic> event) {
     final eventType = (event['event'] ?? '').toString().trim();
     switch (eventType) {
+      case 'macV2InputPreferenceChanged':
+        if (Platform.isMacOS && _isBluetoothV2Session && mounted) {
+          _setStateAndRefreshProjectSettings(() {
+            _macInputDeviceName = null;
+          });
+          unawaited(_loadMacV2AudioDevices());
+        }
+        return;
       case 'pluginEditorSpacebar':
         if (_isEditorTextEntryActive()) return;
         unawaited(_handleMacSpacebarPlayPauseShortcut());
@@ -58903,6 +61223,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return kPreferredPianoInstrumentId;
   }
 
+  Future<bool> _validateAiGeneratedMidiPitches({
+    required Map<String, dynamic> actionData,
+    required String instrumentId,
+    required Map<String, double> instrumentParams,
+    required Iterable<MidiNote> notes,
+  }) async {
+    final playable = await _playableMidiPitchesForInstrument(
+      instrumentId,
+      instrumentParams,
+    );
+    final unavailable = notes
+        .map((note) => note.pitch)
+        .where((pitch) => !playable.contains(pitch))
+        .toSet()
+        .toList(growable: false)
+      ..sort();
+    if (unavailable.isEmpty) return true;
+
+    final instrumentName = _instrumentNameFromId(instrumentId);
+    final playableText = formatMidiPitchRanges(
+      compactMidiPitchRanges(playable),
+    );
+    final commandId = actionData['command_id']?.toString().trim() ?? '';
+    if (commandId.isNotEmpty || actionData['resource_consumer_type'] != null) {
+      throw StateError(
+        'v3_midi_instrument_pitch_unavailable:$instrumentId:'
+        '${unavailable.join(',')}',
+      );
+    }
+    _insertAssistantChatText(
+      "I didn't change the project because $instrumentName cannot play "
+      'MIDI ${unavailable.join(', ')}. Its playable MIDI pitches are '
+      '$playableText.',
+    );
+    return false;
+  }
+
   bool _shouldCreateFreshMidiClip(
     Map<String, dynamic> data,
     Map<String, dynamic> target,
@@ -59649,6 +62006,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   _instrumentNameFromId(instrumentId))
               .toString()
               .trim();
+      final instrumentParams = _instrumentParamsFromSpec(
+        _instrumentSpecById(instrumentId),
+      );
+      if (!await _validateAiGeneratedMidiPitches(
+        actionData: data,
+        instrumentId: instrumentId,
+        instrumentParams: instrumentParams,
+        notes: notes,
+      )) {
+        return;
+      }
       final startMs =
           _toActionDouble(data['start_ms'] ?? target['start_ms']) ??
           _globalAudioClock.inMilliseconds.toDouble();
@@ -59677,9 +62045,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         restoreTrack: _addClipFromUndoPayload,
         instrumentId: instrumentId,
         instrumentName: instrumentName.isEmpty ? instrumentId : instrumentName,
-        instrumentParams: _instrumentParamsFromSpec(
-          _instrumentSpecById(instrumentId),
-        ),
+        instrumentParams: instrumentParams,
         midiNotes: notes,
         row: row,
         timeMs: math.max(0.0, startMs),
@@ -59707,6 +62073,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) {
       _insertAssistantChatText('The selected clip is not a MIDI clip.');
+      return;
+    }
+    if (!await _validateAiGeneratedMidiPitches(
+      actionData: data,
+      instrumentId: clip.instrumentId,
+      instrumentParams: clip.instrumentParams,
+      notes: notes,
+    )) {
       return;
     }
 
@@ -59951,6 +62325,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _instrumentNameFromId(instrumentId))
             .toString()
             .trim();
+    final instrumentParams = _instrumentParamsFromSpec(
+      _instrumentSpecById(instrumentId),
+    );
+    if (!await _validateAiGeneratedMidiPitches(
+      actionData: data,
+      instrumentId: instrumentId,
+      instrumentParams: instrumentParams,
+      notes: notes,
+    )) {
+      return;
+    }
     final clipLabel = (data['label']?.toString().trim().isNotEmpty ?? false)
         ? data['label'].toString().trim()
         : sourceClip.label.trim().isEmpty
@@ -59984,9 +62369,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }) => _addMidiTrack(
             instrumentId: instrumentId,
             instrumentName: instrumentName,
-            instrumentParams: _instrumentParamsFromSpec(
-              _instrumentSpecById(instrumentId),
-            ),
+            instrumentParams: instrumentParams,
             midiNotes: midiNotes,
             row: row,
             timeMs: timeMs,
@@ -59999,9 +62382,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       instrumentName: instrumentName.isEmpty
           ? _instrumentNameFromId(instrumentId)
           : instrumentName,
-      instrumentParams: _instrumentParamsFromSpec(
-        _instrumentSpecById(instrumentId),
-      ),
+      instrumentParams: instrumentParams,
       midiNotes: notes,
       row: targetRow,
       timeMs: startMs,
@@ -72422,7 +74803,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _confirmOneButtonMix({BuildContext? anchorContext}) async {
-    var selectedProfile = _selectedOneButtonMixProfile;
+    var selectedProfile = _selectedOneButtonMixProfileId;
     final routeAnchorContext = anchorContext ?? context;
     final shouldRun = await showMixroomGlassDropdown<bool>(
       anchorContext: routeAnchorContext,
@@ -72458,7 +74839,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 _buildMixroomDropdownField<String>(
                   label: 'Profile',
                   value: selectedProfile,
-                  options: _kOneButtonMixProfiles,
+                  options: OneButtonMixProfiles.all
+                      .map((profile) => profile.id)
+                      .toList(growable: false),
                   textBuilder: (profile) =>
                       _localizedOneButtonMixProfile(context, profile),
                   onChanged: (value) {
@@ -72475,7 +74858,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 Text(
                   L10n.translate(
                     context,
-                    'Balance levels, reduce masking, and improve clarity.\nYou can undo everything after it runs.',
+                    OneButtonMixProfiles.byId(selectedProfile).description,
                   ),
                   style: TextStyle(
                     fontFamily: 'Pretendard',
@@ -72483,6 +74866,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     fontWeight: FontWeight.w400,
                     height: 1.4,
                     color: Colors.white.withValues(alpha: 0.86),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  L10n.translate(
+                    context,
+                    'You can undo everything after it runs.',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    height: 1.35,
+                    color: Colors.white.withValues(alpha: 0.66),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -72525,7 +74922,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     Expanded(
                       child: TextButton(
                         onPressed: () {
-                          _selectedOneButtonMixProfile = selectedProfile;
+                          _selectedOneButtonMixProfileId = selectedProfile;
                           Navigator.pop(context, true);
                         },
                         style: TextButton.styleFrom(
@@ -72795,11 +75192,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       persist: false,
     );
 
-    final prompt =
-        "Make this mix sound like a finished, professional release. "
-        "Balance levels, reduce masking, tame harshness, and set tasteful space. "
-        "Keep it natural and avoid extreme changes, and don't make it that quiet, prefer loud over soft. "
-        "This is not a proposal but an execution. You may proceed without my approval";
+    final selectedProfile =
+        OneButtonMixProfiles.byId(_selectedOneButtonMixProfileId);
+    final prompt = OneButtonMixProfiles.buildPrompt(selectedProfile.id);
     const aiFeature = 'one_button_mix';
     final promptTraceId = const Uuid().v4();
     final promptCycleStopwatch = Stopwatch()..start();
@@ -72875,6 +75270,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clientStateDigest: _freshAiV3StateFingerprint(),
         autoApplyProposals: true, // <-- key
         bypassLearnedMagnitudes: _producerDataMode,
+        oneButtonMixProfileId: selectedProfile.id,
       );
     } catch (error, stackTrace) {
       _reportAiChatFailure(error, stackTrace, stage: 'one_button_pipeline');
@@ -76821,6 +79217,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     _deferredClipTimelineSyncIndices.clear();
     await _syncClipFadesForRowsToEngine(affectedFadeRowIds);
+    // Clip moves change rendered-plugin timing. Persist the final model only
+    // after the native timeline batch has accepted the same move, so the
+    // compatibility render and cloud bundle cannot retain the old position.
+    _scheduleProjectAutosave();
     if (!mounted) return;
     setState(() {});
   }
@@ -77815,12 +80215,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _setDawPanelVisible('piano_roll', true);
     _syncMeterPollingForVisibility();
     if (_liveMidiEventPlaybackSupported && clip.engineClipId >= 0) {
+      // Prime the output route before the first audition. Processor readiness
+      // remains in the awaited key-preview path, avoiding concurrent reloads.
+      unawaited(_prepareLiveMidiPreviewRoute());
       unawaited(_syncLiveMidiInputTargetClip());
     }
   }
 
   void _closeMidiClipEditor() {
-    unawaited(_releaseAllDesktopMidiNotes());
+    _closingPianoRollPreview = true;
+    final desktopRelease = _releaseAllDesktopMidiNotes();
+    final pianoRollRelease = _releaseAllPianoRollPreviewNotes();
     setState(() {
       _showPianoRoll = false;
       _pianoRollFullscreen = false;
@@ -77829,9 +80234,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
     _setDawPanelVisible('piano_roll', false);
     _syncMeterPollingForVisibility();
-    if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
-      unawaited(_syncLiveMidiInputTargetClip());
-    }
+    unawaited(() async {
+      try {
+        await Future.wait(<Future<void>>[desktopRelease, pianoRollRelease]);
+        if (_liveMidiEventPlaybackSupported && !_isMidiClipRecording) {
+          await _syncLiveMidiInputTargetClip();
+        }
+      } finally {
+        _closingPianoRollPreview = false;
+      }
+    }());
   }
 
   void _openPitchLabEditor(int clipIndex) {
@@ -77939,21 +80351,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  Future<bool> _prepareLiveMidiPreviewRoute() {
-    if (!_liveMidiEventPlaybackSupported) return Future<bool>.value(false);
-    if (kIsWeb || !midiPreviewNeedsMobileRoute(defaultTargetPlatform)) {
-      return Future<bool>.value(true);
+  Future<bool> _prepareLiveMidiPreviewRoute() async {
+    if (!_liveMidiEventPlaybackSupported) return false;
+    if (kIsWeb) return true;
+    if (!midiPreviewNeedsPlaybackReadiness(
+      defaultTargetPlatform,
+      isBluetoothV2Session: _isBluetoothV2Session,
+    )) {
+      return true;
     }
     final pending = _liveMidiPreviewRoutePrepareFuture;
-    if (pending != null) return pending;
+    if (pending != null) return await pending;
 
     final next = _ensurePlaybackRouteReady(reason: 'midiPreview');
-    _liveMidiPreviewRoutePrepareFuture = next.whenComplete(() {
+    _liveMidiPreviewRoutePrepareFuture = next;
+    try {
+      return await next;
+    } finally {
       if (identical(_liveMidiPreviewRoutePrepareFuture, next)) {
         _liveMidiPreviewRoutePrepareFuture = null;
       }
-    });
-    return _liveMidiPreviewRoutePrepareFuture!;
+    }
   }
 
   Future<bool> _ensureLiveMidiClipReadyForPreview(AudioTrack clip) async {
@@ -79807,9 +82225,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final keyboardLift = usesTabletDawLayout
             ? rawKeyboardLift
             : math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
-        // The phone dock contains both the AI bar and transport controls.
-        // Reserving only the transport height positions a floating warning
-        // directly on top of the AI bar.
+        // Reserve the complete bottom control dock. This positions every
+        // ScaffoldMessenger snack bar just above the chat bar on phone and
+        // above the combined control row on tablet/desktop.
         final snackBottomInset = usesBottomControlRow
             ? _kChatBarStackHeight +
                   tabletDawBottomInset +
@@ -79817,7 +82235,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       ? _kProducerBannerHeightEstimate
                       : 0.0) +
                   keyboardLift +
-                  10.0
+                  _kSnackBarDockGap
             : _kChatBarStackHeight +
                   _kTransportBarHeight +
                   (_isProducerCaptureUiVisible
@@ -79825,8 +82243,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       : 0.0) +
                   _androidTransportBottomInset(context) +
                   (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
-                  (Platform.isIOS ? _kIosSnackBarExtraLift : 0.0) +
-                  18.0;
+                  _kSnackBarDockGap;
         final mediaSize = MediaQuery.of(context).size;
         final tabletSidePanelWidth =
             TabletDawPanelLayout.expandedLeftPanelWidth(
@@ -80019,6 +82436,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           transportClockListenable:
                                               _transportClock,
                                           rows: _rows,
+                                          frozenRowDescription:
+                                              _frozenRowDescription,
+                                          onFrozenRowInfoPressed: (row) {
+                                            unawaited(_showFrozenRowInfo(row));
+                                          },
                                           trackGroups: _trackGroups,
                                           clips: _audioTracks, // your list
                                           clipTopologyRevision:
@@ -81093,6 +83515,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           recordingStartMs: _recordingStartMs,
                                           recordingPeaks:
                                               _recordingPeaks, // TODO: FIX TO USE WITH JUCE
+                                          recordingPeakTimesMs:
+                                              _recordingPeakTimesMs,
                                           selectedClipIndex:
                                               _timelinePrimarySelectedClipIndex,
                                           selectedClipIndices:
@@ -82007,6 +84431,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _handlePianoRollKeyboardNoteDown,
                                           onKeyboardNoteUp:
                                               _handlePianoRollKeyboardNoteUp,
+                                          resolvePlayablePitches:
+                                              _playableMidiPitchesForInstrument,
                                           highlightedPitches:
                                               _desktopMidiHeldPitchesForPianoRoll(
                                                 clip,
@@ -90087,32 +92513,6 @@ class _EffectRestoreResult {
 const Duration _kProjectPluginInstanceRestoreTimeout = Duration(seconds: 18);
 const Duration _kProjectPluginStateRestoreTimeout = Duration(seconds: 12);
 
-Future<T?> _runProjectPluginRestoreStep<T>(
-  String label,
-  Future<T> Function() task, {
-  required Duration timeout,
-}) async {
-  final sw = Stopwatch()..start();
-  debugPrint('[PluginRestore] start $label');
-  try {
-    final result = await task().timeout(timeout);
-    debugPrint(
-      '[PluginRestore] done $label in ${sw.elapsedMilliseconds}ms result=$result',
-    );
-    return result;
-  } on TimeoutException {
-    debugPrint(
-      '[PluginRestore] timeout $label after ${sw.elapsedMilliseconds}ms',
-    );
-    return null;
-  } catch (e, st) {
-    debugPrint(
-      '[PluginRestore] failed $label after ${sw.elapsedMilliseconds}ms: $e\n$st',
-    );
-    return null;
-  }
-}
-
 Future<void> _waitUntilAsync(
   Future<bool> Function() predicate, {
   int maxAttempts = 30,
@@ -90250,7 +92650,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
         continue;
       }
       final insertAccepted =
-          await _runProjectPluginRestoreStep<bool>(
+          await runTimedNativeOperation<bool>(
             'Row ${snap.row + 1} FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertTrackEffect(snap.row, fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
@@ -90287,7 +92687,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
       var stateApplied = false;
       if (expectsState) {
         stateApplied =
-            await _runProjectPluginRestoreStep<bool>(
+            await runTimedNativeOperation<bool>(
               'Row ${snap.row + 1} FX state ${_effectSnapshotName(fx)}',
               () => JuceAudioEngine.setTrackEffectState(
                 snap.row,
@@ -90402,7 +92802,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
         continue;
       }
       final insertAccepted =
-          await _runProjectPluginRestoreStep<bool>(
+          await runTimedNativeOperation<bool>(
             'Master FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertMasterEffect(fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
@@ -90439,7 +92839,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
       var stateApplied = false;
       if (expectsState) {
         stateApplied =
-            await _runProjectPluginRestoreStep<bool>(
+            await runTimedNativeOperation<bool>(
               'Master FX state ${_effectSnapshotName(fx)}',
               () => JuceAudioEngine.setMasterEffectState(
                 insertedIndex,

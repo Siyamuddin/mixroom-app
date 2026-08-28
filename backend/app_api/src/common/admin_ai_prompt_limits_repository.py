@@ -11,8 +11,8 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
 from . import config
 
 _SETTING_KEY = "ai_prompt_limits"
-_DEFAULT_FREE_DAILY_PROMPT_LIMIT = 200
-_DEFAULT_FREE_WEEKLY_PROMPT_LIMIT = 600
+_DEFAULT_FREE_DAILY_PROMPT_LIMIT = 100
+_DEFAULT_FREE_WEEKLY_PROMPT_LIMIT = 400
 _MAX_PROMPT_LIMIT = 100000
 
 
@@ -41,6 +41,12 @@ class AdminAiPromptLimitsRepository:
     def get_prompt_limits(self) -> Dict[str, Any]:
         item = self._get_item()
         return self._serialize(item)
+
+    def get_default_prompt_limits(self) -> Dict[str, int]:
+        return {
+            "free_daily_prompt_limit": _DEFAULT_FREE_DAILY_PROMPT_LIMIT,
+            "free_weekly_prompt_limit": _DEFAULT_FREE_WEEKLY_PROMPT_LIMIT,
+        }
 
     def update_prompt_limits(
         self,
@@ -84,6 +90,12 @@ class AdminAiPromptLimitsRepository:
             ReturnValues="ALL_NEW",
         )
         return self._serialize(response.get("Attributes") or {})
+
+    def clear_prompt_limits(self) -> Dict[str, Any]:
+        if self._table is None:
+            raise RuntimeError("AI prompt limit settings table is not configured.")
+        self._table.delete_item(Key={"setting_key": _SETTING_KEY})
+        return self._serialize({})
 
     def _get_item(self) -> Dict[str, Any]:
         if self._table is None:

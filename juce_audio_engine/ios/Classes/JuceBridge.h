@@ -1,17 +1,76 @@
 #import <Foundation/Foundation.h>
+#import <TargetConditionals.h>
 
 @interface JuceBridge : NSObject
 
 + (void)initialiseEngineObjC;
+// "V2" denotes Mixroom's coordinator-owned, verified route lifecycle, not a
+// JUCE API version. These calls serialize route mutation and prove the native
+// device/callback state before playback or recording is admitted.
++ (BOOL)initialisePlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName;
++ (BOOL)pausePlaybackForRouteChangeV2ObjC;
++ (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice;
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName;
++ (BOOL)reconfigurePlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
+                            sampleRate:(double)sampleRate
+                          bufferFrames:(NSInteger)bufferFrames;
+#if TARGET_OS_OSX
++ (BOOL)initialiseMacPlaybackV2ObjC:(NSString * _Nonnull)outputDeviceName
+                         sampleRate:(double)sampleRate
+                       bufferFrames:(NSInteger)bufferFrames;
++ (BOOL)reconfigureMacPlaybackRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
+                              sampleRate:(double)sampleRate
+                            bufferFrames:(NSInteger)bufferFrames;
++ (void)beginMacOutputCallbackProofV2ObjC;
++ (BOOL)waitForMacOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds;
++ (void)cancelMacOutputCallbackProofV2ObjC;
++ (NSNumber * _Nonnull)getMacOutputCallbackProofCountV2ObjC;
++ (NSNumber * _Nonnull)getMacOutputCallbackProofFramesV2ObjC;
++ (NSNumber * _Nonnull)getMacOutputCallbackProofSampleRateV2ObjC;
++ (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID;
++ (BOOL)waitForMacInputProbeCallbackV2ObjC:(NSInteger)timeoutMilliseconds;
++ (void)cancelMacInputProbeWaitV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)getMacInputProbeFactsV2ObjC;
++ (void)stopMacInputProbeV2ObjC;
++ (BOOL)startMacInputRecordingV2ObjC:(NSString * _Nonnull)path;
++ (NSDictionary<NSString *, id> * _Nonnull)stopMacInputRecordingV2ObjC;
++ (void)discardMacInputRecordingV2ObjC;
++ (BOOL)isMacInputRecordingV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)getMacInputCaptureFactsV2ObjC;
+#endif
++ (void)beginOutputCallbackProofV2ObjC;
++ (BOOL)waitForOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds;
++ (NSNumber * _Nonnull)getOutputCallbackProofCountV2ObjC;
++ (NSNumber * _Nonnull)getOutputCallbackProofFramesV2ObjC;
++ (NSNumber * _Nonnull)getOutputCallbackProofSampleRateV2ObjC;
++ (BOOL)reconfigureRecordingRouteV2ObjC:(NSString * _Nonnull)outputDeviceName
+                              inputName:(NSString * _Nonnull)inputDeviceName;
++ (BOOL)prepareBluetoothDuplexSessionV2ObjC;
++ (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds;
++ (BOOL)prepareSystemSelectedDuplexSessionV2ObjC;
++ (BOOL)openPreparedSystemSelectedDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds
+                                      outputChannels:(NSInteger)outputChannels;
++ (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
++ (BOOL)validateRecordingRouteV2ObjC;
++ (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC;
++ (void)beginIOSIntentOperationV2ObjC;
++ (void)endIOSIntentOperationV2ObjC;
++ (void)markIOSIntentRouteInvalidatedV2ObjC;
++ (BOOL)isIOSIntentRouteInvalidatedV2ObjC;
++ (NSDictionary<NSString *, id> * _Nonnull)getIOSAudioSessionPolicyFactsObjC;
++ (NSString * _Nonnull)getAudioRouteImplementationObjC;
 + (void)initializeMessageManager;
 + (void)shutdownEngineObjC;
++ (void)shutdownForApplicationTerminationObjC;
++ (void)panicLiveMidiNotesForApplicationDeactivationObjC;
 + (void)setFlutterAssetRootObjC:(NSString *)rootPath;
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
 + (void)loadTrackObjC:(NSInteger)idx path:(NSString *)path;
 
-+ (void)playObjC;
++ (BOOL)playObjC;
 + (void)pauseObjC;
++ (BOOL)isTransportPlayingObjC;
 + (void)removeTrackObjC:(NSInteger)trackIndex;
 + (NSArray<NSString *> *)getTrackEffectsObjC:(NSInteger)trackIndex;
 + (void)removeEffectObjC:(NSInteger)trackIndex effectIndex:(NSInteger)effectIndex;
@@ -51,6 +110,7 @@
                              segments:(NSArray<NSDictionary *> *)segments;
 + (NSArray<NSDictionary *> *)scanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
 + (NSArray<NSDictionary *> *)rescanPluginsObjC:(NSArray<NSString *> * _Nullable)searchPaths;
++ (void)cancelPluginScanObjC;
 + (NSArray<NSDictionary *> *)getQuarantinedPluginsObjC;
 + (BOOL)isPluginQuarantinedObjC:(NSString *)pluginId;
 + (void)clearPluginQuarantineObjC:(NSString *)pluginId;
@@ -93,6 +153,7 @@
 + (void)beginGraphMutationBatchObjC;
 + (void)endGraphMutationBatchObjC;
 + (BOOL)supportsLiveMidiClipPlaybackObjC;
++ (BOOL)isBuiltInMidiInstrumentObjC:(NSString *)instrumentId;
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
             instrumentId:(NSString *)instrumentId
@@ -102,7 +163,10 @@
            sourceTempoBpm:(double)sourceTempoBpm
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
-         inFileOffsetSec:(double)inFileOffsetSec;
+         inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId;
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                 requestId:(int64_t)loadRequestId;
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex
               instrumentId:(NSString *)instrumentId
             instrumentName:(NSString *)instrumentName
@@ -303,6 +367,7 @@
               desiredInputChannels:(NSInteger)desiredInputChannels
                             reason:(NSString *)reason;
 + (BOOL)preparePlaybackRouteObjC:(NSString *)reason;
++ (BOOL)preparePlaybackGraphObjC:(NSString *)reason;
 + (void)refreshAudioRouteObjC:(NSString *)reason;
 + (void)setLiveInputMonitoringEnabledObjC:(BOOL)enabled;
 + (void)setMidiInputChannelFilterObjC:(NSInteger)channel;
@@ -314,7 +379,8 @@
 
 + (NSNumber *)getRecordingPeakObjC;
 
-+ (void)stopRecordingObjC;
++ (NSDictionary<NSString *, id> *)stopRecordingObjC;
++ (void)discardRecordingCaptureObjC;
 + (BOOL)isRecordingObjC;
 
 // ===============================

@@ -6,7 +6,7 @@
     <title>Mixroom Admin</title>
     <link rel="icon" type="image/png" href="./mixroom-app-icon.png" />
     <link rel="apple-touch-icon" href="./mixroom-app-icon.png" />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=admin-limits-full-count-20260813" />
     <script src="./config.js"></script>
     <script
       defer
@@ -921,6 +921,14 @@
                         data-i18n="action.savePromptLimits"
                       >
                         Save prompt limits
+                      </button>
+                      <button
+                        id="ai-prompt-limits-reset-button"
+                        class="button button-secondary"
+                        type="button"
+                        data-i18n="action.removePromptLimitsOverride"
+                      >
+                        Remove override
                       </button>
                     </div>
                   </form>
@@ -1967,6 +1975,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=payment-links-multi-item-20260715" type="module"></script>
+    <script src="./app.js?v=admin-limits-full-count-20260813" type="module"></script>
   </body>
 </html>

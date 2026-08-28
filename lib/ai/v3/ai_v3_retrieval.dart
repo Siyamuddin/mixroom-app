@@ -1402,6 +1402,11 @@ class AiV3MidiContextRetriever {
       byId[instrumentId] = <String, dynamic>{
         'instrument_id': instrumentId,
         'name': name,
+        if (raw['playable_pitch_ranges'] is List)
+          'playable_pitch_ranges': (raw['playable_pitch_ranges'] as List)
+              .whereType<Map>()
+              .map((range) => Map<String, dynamic>.from(range))
+              .toList(growable: false),
       };
     }
     for (final instrumentId in allowedIds) {

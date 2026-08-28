@@ -6,6 +6,7 @@ APP_NAME="Mixroom"
 APP_BUNDLE="$ROOT_DIR/build/macos/Build/Products/Release/$APP_NAME.app"
 DIST_DIR="$ROOT_DIR/build/distribution"
 ENTITLEMENTS_SRC="$ROOT_DIR/macos/Runner/Release.entitlements"
+HOMEBREW_BUNDLER="$ROOT_DIR/tool/bundle_macos_homebrew_dylibs.sh"
 GENERATED_ENTITLEMENTS="$ROOT_DIR/build/macos/Build/Intermediates.noindex/Runner.build/Release/Runner.build/$APP_NAME.app.xcent"
 TEAM_ID="${MACOS_TEAM_ID:-X8Y4B4222A}"
 BUNDLE_ID="${MACOS_BUNDLE_ID:-com.mixroom.mixroomapp}"
@@ -36,7 +37,7 @@ Optional:
   MACOS_KEEP_RESTRICTED_ENTITLEMENTS=1
                                   Keep profile-gated entitlements for diagnostic builds.
   MACOS_STRIP_KEYCHAIN_ACCESS_GROUPS=1
-                                  Strip keychain access groups for diagnostic builds.
+                                  Force-strip keychain access groups, including diagnostic builds.
 EOF
 }
 
@@ -81,6 +82,7 @@ expanded_entitlements_path() {
 
   if [[ "${MACOS_KEEP_RESTRICTED_ENTITLEMENTS:-0}" != "1" ]]; then
     /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.applesignin" "$entitlements_path" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$entitlements_path" >/dev/null 2>&1 || true
   fi
 
   if [[ "${MACOS_STRIP_KEYCHAIN_ACCESS_GROUPS:-0}" == "1" ]]; then
@@ -146,51 +148,8 @@ homebrew_dependencies_for() {
 }
 
 embed_homebrew_dylibs() {
-  local dylib_dir="$APP_BUNDLE/Contents/Frameworks/Homebrew"
-  local copied=1
-
-  /bin/mkdir -p "$dylib_dir"
-
-  while [[ "$copied" == "1" ]]; do
-    copied=0
-
-    while IFS= read -r dep; do
-      local resolved_dep
-      local basename
-      resolved_dep="$(resolve_homebrew_dependency "$dep")" || fail "Homebrew dylib dependency not found: $dep"
-      basename="$(/usr/bin/basename "$resolved_dep")"
-
-      if [[ ! -f "$dylib_dir/$basename" ]]; then
-        /bin/cp -L "$resolved_dep" "$dylib_dir/$basename"
-        /bin/chmod u+w "$dylib_dir/$basename"
-        copied=1
-      fi
-    done < <(
-      find_macho_files "$APP_BUNDLE" \
-        | while IFS= read -r binary; do
-          homebrew_dependencies_for "$binary"
-        done \
-        | /usr/bin/sort -u
-    )
-  done
-
-  find_macho_files "$APP_BUNDLE" | while IFS= read -r binary; do
-    while IFS= read -r dep; do
-      local resolved_dep
-      local basename
-      resolved_dep="$(resolve_homebrew_dependency "$dep")" || fail "Homebrew dylib dependency not found: $dep"
-      basename="$(/usr/bin/basename "$resolved_dep")"
-      /usr/bin/install_name_tool \
-        -change "$dep" "@executable_path/../Frameworks/Homebrew/$basename" \
-        "$binary"
-    done < <(homebrew_dependencies_for "$binary")
-  done
-
-  find_macho_files "$dylib_dir" | while IFS= read -r dylib; do
-    /usr/bin/install_name_tool \
-      -id "@executable_path/../Frameworks/Homebrew/$(/usr/bin/basename "$dylib")" \
-      "$dylib" || true
-  done
+  [[ -x "$HOMEBREW_BUNDLER" ]] || fail "Homebrew dependency bundler is missing or not executable: $HOMEBREW_BUNDLER"
+  "$HOMEBREW_BUNDLER" "$APP_BUNDLE"
 }
 
 verify_no_homebrew_references() {
@@ -254,6 +213,13 @@ verify_app_bundle() {
 
 build_app_bundle() {
   flutter build macos --release --config-only "$@"
+
+  /usr/bin/xcodebuild \
+    -workspace "$ROOT_DIR/macos/Runner.xcworkspace" \
+    -scheme Runner \
+    -configuration Release \
+    -derivedDataPath "$ROOT_DIR/build/macos" \
+    clean
 
   /usr/bin/xcodebuild \
     -resolvePackageDependencies \

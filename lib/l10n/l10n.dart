@@ -24,10 +24,7 @@ class L10n {
     }
 
     try {
-      final providerLocale = Provider.of<LocaleProvider>(
-        context,
-        listen: false,
-      ).locale;
+      final providerLocale = Provider.of<LocaleProvider>(context, listen: false).locale;
       if (providerLocale != null) {
         return LocaleConfig.resolveLocale(providerLocale);
       }
@@ -56,49 +53,38 @@ class L10n {
   static Map<String, Map<String, String>> get _translations => const {
     'en': {
       'Casual enthusiasts': 'Casual enthusiasts',
-      'Start on mobile, tablet, or desktop.':
-          'Start on mobile, tablet, or desktop.',
+      'Start on mobile, tablet, or desktop.': 'Start on mobile, tablet, or desktop.',
       'Aspiring producers': 'Aspiring producers',
-      'More room to arrange, export, and finish tracks.':
-          'More room to arrange, export, and finish tracks.',
+      'More room to arrange, export, and finish tracks.': 'More room to arrange, export, and finish tracks.',
       'Serious / Professional producers': 'Serious / Professional producers',
       'Full production stack with advanced AI and more storage.':
           'Full production stack with advanced AI and more storage.',
       'Teams · High-volume pros': 'Teams · High-volume pros',
-      'Producer for everyone on the team.':
-          'Producer for everyone on the team.',
-      'Large businesses · studios · labels':
-          'Large businesses · studios · labels',
+      'Producer for everyone on the team.': 'Producer for everyone on the team.',
+      'Large businesses · studios · labels': 'Large businesses · studios · labels',
       'Built for scale and compliance.': 'Built for scale and compliance.',
       'Schools · Teachers · Institutions': 'Schools · Teachers · Institutions',
-      'Classroom licensing with teacher tools.':
-          'Classroom licensing with teacher tools.',
-      '1 cloud project, sync across devices':
-          '1 cloud project, sync across devices',
-      '{projects} local projects, {tracks} tracks':
-          '{projects} local projects, {tracks} tracks',
+      'Classroom licensing with teacher tools.': 'Classroom licensing with teacher tools.',
+      '1 cloud project, sync across devices': '1 cloud project, sync across devices',
+      '{projects} local projects, {tracks} tracks': '{projects} local projects, {tracks} tracks',
       'Core effects and instruments': 'Core effects and instruments',
       'MP3 export': 'MP3 export',
       'Light AI usage': 'Light AI usage',
       'No free-tier track or project cap': 'No free-tier track or project cap',
       'All effects and instruments': 'All effects and instruments',
-      'High-quality export in WAV, MP3, and FLAC':
-          'High-quality export in WAV, MP3, and FLAC',
+      'High-quality export in WAV, MP3, and FLAC': 'High-quality export in WAV, MP3, and FLAC',
       '{storage} cloud storage': '{storage} cloud storage',
       '{count} seats included': '{count} seats included',
       '{storage} shared storage': '{storage} shared storage',
       'Producer DAW access for each seat': 'Producer DAW access for each seat',
-      'Team workspace and priority support':
-          'Team workspace and priority support',
+      'Team workspace and priority support': 'Team workspace and priority support',
       'Custom seats and storage': 'Custom seats and storage',
       'Custom AI usage': 'Custom AI usage',
       'Team workspace and admin controls': 'Team workspace and admin controls',
-      'Compliance controls + dedicated support':
-          'Compliance controls + dedicated support',
+      'Compliance controls + dedicated support': 'Compliance controls + dedicated support',
       'Starter DAW access per seat': 'Starter DAW access per seat',
       '{storage} storage per seat': '{storage} storage per seat',
-      'Education sandbox + visibility controls':
-          'Education sandbox + visibility controls',
+      'Education sandbox + visibility controls': 'Education sandbox + visibility controls',
       'Starter-level classroom seats': 'Starter-level classroom seats',
       '{storage} storage': '{storage} storage',
       '{seats} seat packages': '{seats} seat packages',
@@ -145,8 +131,7 @@ class L10n {
       'Export': 'Export',
       'EXPORT': 'EXPORT',
       'Exported file saved!': 'Exported file saved!',
-      'Your video was exported successfully!':
-          'Your video was exported successfully!',
+      'Your video was exported successfully!': 'Your video was exported successfully!',
       'Share directly to:': 'Share directly to:',
       'YouTube': 'YouTube',
       'Instagram': 'Instagram',
@@ -156,8 +141,7 @@ class L10n {
       'Audio Editor': 'Audio Editor',
       'SoundCloud': 'SoundCloud',
       'Export canceled or failed.': 'Export canceled or failed.',
-      'Your audio was exported successfully!':
-          'Your audio was exported successfully!',
+      'Your audio was exported successfully!': 'Your audio was exported successfully!',
       'Coming soon': 'Coming soon',
       'Coming Soon': 'Coming Soon',
       'Search feature coming soon!': 'Search feature coming soon!',
@@ -195,8 +179,7 @@ class L10n {
       'Offset cannot exceed 180 seconds.': 'Offset cannot exceed 180 seconds.',
       'Start from Now': 'Start from Now',
       'Delete track?': 'Delete track?',
-      'Are you sure you want to delete this audio track?':
-          'Are you sure you want to delete this audio track?',
+      'Are you sure you want to delete this audio track?': 'Are you sure you want to delete this audio track?',
       'Cancel': 'Cancel',
       'Something else…': 'Something else…',
       'Describe what you want': 'Describe what you want',
@@ -204,8 +187,7 @@ class L10n {
       'Delete': 'Delete',
       'Add Video Clip': 'Add Video Clip',
       'Pro Mode Feature': 'Pro Mode Feature',
-      'Upgrade to Pro mode to import more than 1 video.':
-          'Upgrade to Pro mode to import more than 1 video.',
+      'Upgrade to Pro mode to import more than 1 video.': 'Upgrade to Pro mode to import more than 1 video.',
       'Upgrade to Pro mode to import more than 3 audio tracks.':
           'Upgrade to Pro mode to import more than 3 audio tracks.',
       'Delete clip?': 'Delete clip?',
@@ -219,8 +201,7 @@ class L10n {
           'Automatically synchronizes all audio tracks to the video. Audio offset/trim may be adjusted.',
       'Audio Track Effects': 'Audio Track Effects',
       'Exporting...': 'Exporting...',
-      'Please don\'t close the app or lock your screen.':
-          'Please don\'t close the app or lock your screen.',
+      'Please don\'t close the app or lock your screen.': 'Please don\'t close the app or lock your screen.',
       'Track': 'Track',
       'Row': 'Row',
       'Add Row': 'Add Row',
@@ -267,38 +248,29 @@ class L10n {
       'Heavy Crunch': 'Heavy Crunch',
       'Applies wide reverb and subtle EQ to simulate a live concert space.':
           'Applies wide reverb and subtle EQ to simulate a live concert space.',
-      'Applies reverb and delay to give an echo effect.':
-          'Applies reverb and delay to give an echo effect.',
+      'Applies reverb and delay to give an echo effect.': 'Applies reverb and delay to give an echo effect.',
       'Applies filters and soft distortion for a vintage, relaxed vibe.':
           'Applies filters and soft distortion for a vintage, relaxed vibe.',
-      'Crushes sound with heavy distortion.':
-          'Crushes sound with heavy distortion.',
-      'This will replace your current effects with ':
-          'This will replace your current effects with ',
+      'Crushes sound with heavy distortion.': 'Crushes sound with heavy distortion.',
+      'This will replace your current effects with ': 'This will replace your current effects with ',
       'Add Effect': 'Add Effect',
       'Delete Effect?': 'Delete Effect?',
       'Parameters': 'Parameters',
       'Select ': 'Select ',
       'Close': 'Close',
-      'Export failed: Output file missing or too small.':
-          'Export failed: Output file missing or too small.',
+      'Export failed: Output file missing or too small.': 'Export failed: Output file missing or too small.',
       'Export failed! Check logs.': 'Export failed! Check logs.',
-      'AI Sync failed: Computed offset exceeds audio length.':
-          'AI Sync failed: Computed offset exceeds audio length.',
-      'AI Sync failed: Computed trim exceeds audio length.':
-          'AI Sync failed: Computed trim exceeds audio length.',
+      'AI Sync failed: Computed offset exceeds audio length.': 'AI Sync failed: Computed offset exceeds audio length.',
+      'AI Sync failed: Computed trim exceeds audio length.': 'AI Sync failed: Computed trim exceeds audio length.',
       'Done': 'Done',
       'Load Preset': 'Load Preset',
       'On Device': 'On Device',
       'Cloud Sync': 'Cloud Sync',
-      'Syncs projects to cloud storage automatically.':
-          'Syncs projects to cloud storage automatically.',
+      'Syncs projects to cloud storage automatically.': 'Syncs projects to cloud storage automatically.',
       'Uploads only when you choose "Sync to Cloud" in project settings.':
           'Uploads only when you choose "Sync to Cloud" in project settings.',
-      'Free Cloud Projects: {count} of {limit} used':
-          'Free Cloud Projects: {count} of {limit} used',
-      'Cloud projects: {count} of {limit} used':
-          'Cloud projects: {count} of {limit} used',
+      'Free Cloud Projects: {count} of {limit} used': 'Free Cloud Projects: {count} of {limit} used',
+      'Cloud projects: {count} of {limit} used': 'Cloud projects: {count} of {limit} used',
       'Cloud Location': 'Cloud Location',
       'Cloud Project Details': 'Cloud Project Details',
       'Read-only cloud storage': 'Read-only cloud storage',
@@ -318,22 +290,19 @@ class L10n {
       'Number of Revisions': 'Number of Revisions',
       'Unknown member': 'Unknown member',
       'Created and edited by {user}': 'Created and edited by {user}',
-      'Created by {owner} • Edited by {editor}':
-          'Created by {owner} • Edited by {editor}',
+      'Created by {owner} • Edited by {editor}': 'Created by {owner} • Edited by {editor}',
       'Auto': 'Auto',
       'Manual': 'Manual',
       'Notifications': 'Notifications',
       'No new notifications': 'No new notifications',
       'Welcome to Mixroom': 'Welcome to Mixroom',
       'Open Beta Version': 'Open Beta Version',
-      'There may be bugs or unexpected errors.':
-          'There may be bugs or unexpected errors.',
+      'There may be bugs or unexpected errors.': 'There may be bugs or unexpected errors.',
       'Language': 'Language',
       'Loading your account': 'Loading your account',
       'Checking your sign-in...': 'Checking your sign-in...',
       'Preparing your account...': 'Preparing your account...',
-      'We are getting everything ready for you.':
-          'We are getting everything ready for you.',
+      'We are getting everything ready for you.': 'We are getting everything ready for you.',
       'Finishing setup': 'Finishing setup',
       'Almost there...': 'Almost there...',
       'Sign out': 'Sign out',
@@ -341,8 +310,7 @@ class L10n {
       'Audio platform coming soon.': 'Audio platform coming soon.',
       'Video Projects': 'Video Projects',
       'Subscription required': 'Subscription required',
-      'Your current plan does not include video projects.':
-          'Your current plan does not include video projects.',
+      'Your current plan does not include video projects.': 'Your current plan does not include video projects.',
       'New Project': 'New Project',
       'Project limit reached': 'Project limit reached',
       'Upgrade for more projects': 'Upgrade for more projects',
@@ -383,8 +351,7 @@ class L10n {
       'Untitled Project': 'Untitled Project',
       'Untitled Video Project': 'Untitled Video Project',
       'Exporting…': 'Exporting…',
-      'Please select a .mixroom project file':
-          'Please select a .mixroom project file',
+      'Please select a .mixroom project file': 'Please select a .mixroom project file',
       'Importing…': 'Importing…',
       'Import failed': 'Import failed',
       'Projects are temporarily unavailable on this device. Please try again in a moment.':
@@ -395,8 +362,7 @@ class L10n {
           'We couldn\'t load your projects right now. Please try again.',
       'We couldn\'t load your video projects right now. Please try again.':
           'We couldn\'t load your video projects right now. Please try again.',
-      'Delete a project to create or import a new one.':
-          'Delete a project to create or import a new one.',
+      'Delete a project to create or import a new one.': 'Delete a project to create or import a new one.',
       'Last opened': 'Last opened',
       'Edit': 'Edit',
       'Rename': 'Rename',
@@ -409,8 +375,7 @@ class L10n {
           'Control project version history and local app preferences.',
       'Keep lightweight local project snapshots so older saves can be restored as copies.':
           'Keep lightweight local project snapshots so older saves can be restored as copies.',
-      'Cloud sync stores only the latest project.':
-          'Cloud sync stores only the latest project.',
+      'Cloud sync stores only the latest project.': 'Cloud sync stores only the latest project.',
       'Current project': 'Current project',
       'No versions yet.': 'No versions yet.',
       'Autosave': 'Autosave',
@@ -425,8 +390,7 @@ class L10n {
       'Export WAV': 'Export WAV',
       'Export MP3': 'Export MP3',
       'Piano Roll Quick Guide': 'Piano Roll Quick Guide',
-      'A few gestures that make editing faster.':
-          'A few gestures that make editing faster.',
+      'A few gestures that make editing faster.': 'A few gestures that make editing faster.',
       'Create + shape notes': 'Create + shape notes',
       'Tap empty grid to add. Drag to move. Pull right edge to resize.':
           'Tap empty grid to add. Drag to move. Pull right edge to resize.',
@@ -440,59 +404,40 @@ class L10n {
       'Duplicate, delete, and adjust length/velocity for selected notes.':
           'Duplicate, delete, and adjust length/velocity for selected notes.',
       'Got it': 'Got it',
-      'Matches the current piano roll grid.':
-          'Matches the current piano roll grid.',
+      'Matches the current piano roll grid.': 'Matches the current piano roll grid.',
       'Apply to selected notes.': 'Apply to selected notes.',
       'Apply to all notes.': 'Apply to all notes.',
-      'Selected notes already match that grid.':
-          'Selected notes already match that grid.',
+      'Selected notes already match that grid.': 'Selected notes already match that grid.',
       'Notes already match that grid.': 'Notes already match that grid.',
       'Piano Roll Tools': 'Piano Roll Tools',
       'Recording is active. Finish the take before running edit tools.':
           'Recording is active. Finish the take before running edit tools.',
-      'Fast cleanup tools for timing, rhythm, and pitch.':
-          'Fast cleanup tools for timing, rhythm, and pitch.',
+      'Fast cleanup tools for timing, rhythm, and pitch.': 'Fast cleanup tools for timing, rhythm, and pitch.',
       'Select All': 'Select All',
-      'Grab every note in the current clip.':
-          'Grab every note in the current clip.',
+      'Grab every note in the current clip.': 'Grab every note in the current clip.',
       'Quantize All Notes': 'Quantize All Notes',
-      'Snap note starts to a timing grid.':
-          'Snap note starts to a timing grid.',
-      'Choose the grid to snap note starts to.':
-          'Choose the grid to snap note starts to.',
+      'Snap note starts to a timing grid.': 'Snap note starts to a timing grid.',
+      'Choose the grid to snap note starts to.': 'Choose the grid to snap note starts to.',
       'Quantize Selected': 'Quantize Selected',
-      'Tighten only the notes you have selected.':
-          'Tighten only the notes you have selected.',
-      'Choose the grid for the selected notes.':
-          'Choose the grid for the selected notes.',
+      'Tighten only the notes you have selected.': 'Tighten only the notes you have selected.',
+      'Choose the grid for the selected notes.': 'Choose the grid for the selected notes.',
       'Chop All Notes': 'Chop All Notes',
-      'Split notes into repeated rhythmic slices.':
-          'Split notes into repeated rhythmic slices.',
-      'Choose the slice grid for the whole clip.':
-          'Choose the slice grid for the whole clip.',
+      'Split notes into repeated rhythmic slices.': 'Split notes into repeated rhythmic slices.',
+      'Choose the slice grid for the whole clip.': 'Choose the slice grid for the whole clip.',
       'Chop Selected': 'Chop Selected',
-      'Slice only the notes you selected.':
-          'Slice only the notes you selected.',
-      'Choose the slice grid for the selection.':
-          'Choose the slice grid for the selection.',
+      'Slice only the notes you selected.': 'Slice only the notes you selected.',
+      'Choose the slice grid for the selection.': 'Choose the slice grid for the selection.',
       'Humanize Velocity': 'Humanize Velocity',
-      'Add slight dynamics to the selected notes.':
-          'Add slight dynamics to the selected notes.',
-      'Add slight dynamics across the whole clip.':
-          'Add slight dynamics across the whole clip.',
+      'Add slight dynamics to the selected notes.': 'Add slight dynamics to the selected notes.',
+      'Add slight dynamics across the whole clip.': 'Add slight dynamics across the whole clip.',
       'No notes changed.': 'No notes changed.',
       'Octave Up': 'Octave Up',
-      'Move the selected notes up by 12 semitones.':
-          'Move the selected notes up by 12 semitones.',
-      'Selected notes are already at the top range.':
-          'Selected notes are already at the top range.',
+      'Move the selected notes up by 12 semitones.': 'Move the selected notes up by 12 semitones.',
+      'Selected notes are already at the top range.': 'Selected notes are already at the top range.',
       'Octave Down': 'Octave Down',
-      'Move the selected notes down by 12 semitones.':
-          'Move the selected notes down by 12 semitones.',
-      'Selected notes are already at the bottom range.':
-          'Selected notes are already at the bottom range.',
-      'Finish recording to use piano roll tools':
-          'Finish recording to use piano roll tools',
+      'Move the selected notes down by 12 semitones.': 'Move the selected notes down by 12 semitones.',
+      'Selected notes are already at the bottom range.': 'Selected notes are already at the bottom range.',
+      'Finish recording to use piano roll tools': 'Finish recording to use piano roll tools',
       'Piano roll tools': 'Piano roll tools',
       'Custom': 'Custom',
       'Resample quality': 'Resample quality',
@@ -500,8 +445,7 @@ class L10n {
       'Good': 'Good',
       'Best': 'Best',
       'Normalize': 'Normalize',
-      'Could not normalize this clip yet.':
-          'Could not normalize this clip yet.',
+      'Could not normalize this clip yet.': 'Could not normalize this clip yet.',
       'Normalize loudness': 'Normalize loudness',
       'Limiter ceiling (dBTP)': 'Limiter ceiling (dBTP)',
       'Bit depth': 'Bit depth',
@@ -543,26 +487,21 @@ class L10n {
       'YouTube QR Thumbnail': 'YouTube QR Thumbnail',
       'Your video has been uploaded!': 'Your video has been uploaded!',
       'Download QR Thumbnail': 'Download QR Thumbnail',
-      'Please enter a valid email address.':
-          'Please enter a valid email address.',
-      'Password should be at least 8 characters.':
-          'Password should be at least 8 characters.',
+      'Please enter a valid email address.': 'Please enter a valid email address.',
+      'Password should be at least 8 characters.': 'Password should be at least 8 characters.',
       'Passwords do not match.': 'Passwords do not match.',
       'Please enter your name.': 'Please enter your name.',
       'Please select your birthday.': 'Please select your birthday.',
       'Please enter your password.': 'Please enter your password.',
-      'Please choose what you use Mixroom for.':
-          'Please choose what you use Mixroom for.',
-      'Authentication is powered by Mixroom native auth.':
-          'Authentication is powered by Mixroom native auth.',
+      'Please choose what you use Mixroom for.': 'Please choose what you use Mixroom for.',
+      'Authentication is powered by Mixroom native auth.': 'Authentication is powered by Mixroom native auth.',
       'Welcome to': 'Welcome to',
       'Email or Username': 'Email or Username',
       'Email': 'Email',
       'Verify now': 'Verify now',
       'Refresh': 'Refresh',
       'You are': 'You are',
-      'Plan and billing management is coming soon.':
-          'Plan and billing management is coming soon.',
+      'Plan and billing management is coming soon.': 'Plan and billing management is coming soon.',
       'Subscription details refreshed.': 'Subscription details refreshed.',
       'Plan activated': 'Plan activated',
       'You are now on': 'You are now on',
@@ -579,8 +518,7 @@ class L10n {
       'This route is not configured yet.': 'This route is not configured yet.',
       'This route is invalid.': 'This route is invalid.',
       'Could not open your email app.': 'Could not open your email app.',
-      'Support contact is not configured yet.':
-          'Support contact is not configured yet.',
+      'Support contact is not configured yet.': 'Support contact is not configured yet.',
       'This store product is not configured for the current build yet.':
           'This store product is not configured for the current build yet.',
       'Current access': 'Current access',
@@ -589,16 +527,13 @@ class L10n {
       'Plan & Billing': 'Plan & Billing',
       'Plan': 'Plan',
       'Billing': 'Billing',
-      'Manage your current plan and available upgrades.':
-          'Manage your current plan and available upgrades.',
+      'Manage your current plan and available upgrades.': 'Manage your current plan and available upgrades.',
       'Personal plan': 'Personal plan',
       'Team access': 'Team access',
       'Available plans': 'Available plans',
       'Plans are loading.': 'Plans are loading.',
-      'No plans are currently available for this device.':
-          'No plans are currently available for this device.',
-      'Applies to your personal cloud and app upgrades':
-          'Applies to your personal cloud and app upgrades',
+      'No plans are currently available for this device.': 'No plans are currently available for this device.',
+      'Applies to your personal cloud and app upgrades': 'Applies to your personal cloud and app upgrades',
       'Education': 'Education',
       'Enterprise': 'Enterprise',
       'Owner': 'Owner',
@@ -613,8 +548,7 @@ class L10n {
           '{role} access to Education seat management and Starter-level student seats',
       '{role} access to enterprise workspace and shared cloud storage':
           '{role} access to enterprise workspace and shared cloud storage',
-      '{role} access to shared workspace and cloud storage':
-          '{role} access to shared workspace and cloud storage',
+      '{role} access to shared workspace and cloud storage': '{role} access to shared workspace and cloud storage',
       'Manage on web': 'Manage on web',
       'Contact sales': 'Contact sales',
       'Refreshing': 'Refreshing',
@@ -639,8 +573,7 @@ class L10n {
       'View Dashboard': 'View Dashboard',
       'Open the teacher dashboard to invite students, review student seat usage, and monitor class activity.':
           'Open the teacher dashboard to invite students, review student seat usage, and monitor class activity.',
-      'Teacher account is not counted as a student seat':
-          'Teacher account is not counted as a student seat',
+      'Teacher account is not counted as a student seat': 'Teacher account is not counted as a student seat',
       'Student seats only': 'Student seats only',
       '{used} / {limit} student seats': '{used} / {limit} student seats',
       '{count} student seats used': '{count} student seats used',
@@ -671,8 +604,7 @@ class L10n {
       'Student activity': 'Student activity',
       'Student seat utilization': 'Student seat utilization',
       'Activated students': 'Activated students',
-      'Average projects per active student':
-          'Average projects per active student',
+      'Average projects per active student': 'Average projects per active student',
       'Released student seats': 'Released student seats',
       'Invite student': 'Invite student',
       'student@example.com': 'student@example.com',
@@ -732,20 +664,16 @@ class L10n {
           'Invite created for {email}, but the email could not be sent. Copy the invite link from Students.',
       'Could not create invite. Check available student seats and try again.':
           'Could not create invite. Check available student seats and try again.',
-      'Paste a valid education invite link.':
-          'Paste a valid education invite link.',
+      'Paste a valid education invite link.': 'Paste a valid education invite link.',
       'Education student seat activated.': 'Education student seat activated.',
       'Could not accept this invite. It may have expired or already been used.':
           'Could not accept this invite. It may have expired or already been used.',
-      'Could not load education admin data.':
-          'Could not load education admin data.',
-      'Student seat restored for {student}.':
-          'Student seat restored for {student}.',
+      'Could not load education admin data.': 'Could not load education admin data.',
+      'Student seat restored for {student}.': 'Student seat restored for {student}.',
       'Removed {student}.': 'Removed {student}.',
       'Invite cancelled for {student}.': 'Invite cancelled for {student}.',
       'Student seat updated.': 'Student seat updated.',
-      'Could not update student seat. Try again.':
-          'Could not update student seat. Try again.',
+      'Could not update student seat. Try again.': 'Could not update student seat. Try again.',
       'Education 10 Student Seats': 'Education 10 Student Seats',
       'Education 20 Student Seats': 'Education 20 Student Seats',
       'Education 30 Student Seats': 'Education 30 Student Seats',
@@ -757,10 +685,8 @@ class L10n {
           'Education access for 20 student seats. Teacher/admin access is included separately.',
       'Education access for 30 student seats. Teacher/admin access is included separately.':
           'Education access for 30 student seats. Teacher/admin access is included separately.',
-      'Manual enterprise contract activation.':
-          'Manual enterprise contract activation.',
-      'Manual education contract activation.':
-          'Manual education contract activation.',
+      'Manual enterprise contract activation.': 'Manual enterprise contract activation.',
+      'Manual education contract activation.': 'Manual education contract activation.',
       'Starter Monthly': 'Starter Monthly',
       'Starter Yearly': 'Starter Yearly',
       'Producer Monthly': 'Producer Monthly',
@@ -771,10 +697,8 @@ class L10n {
       'Annual Starter access.': 'Annual Starter access.',
       'Monthly Producer access.': 'Monthly Producer access.',
       'Annual Producer access.': 'Annual Producer access.',
-      'Monthly Studio access for small teams.':
-          'Monthly Studio access for small teams.',
-      'Annual Studio access for small teams.':
-          'Annual Studio access for small teams.',
+      'Monthly Studio access for small teams.': 'Monthly Studio access for small teams.',
+      'Annual Studio access for small teams.': 'Annual Studio access for small teams.',
       'View plans': 'View plans',
       'Upgrade plan': 'Upgrade plan',
       'Upgrade to use {name}': 'Upgrade to use {name}',
@@ -789,8 +713,7 @@ class L10n {
       'Project exceeds Free track limit': 'Project exceeds Free track limit',
       'All {count} tracks were restored and will be preserved when you save. Free can add up to {limit} tracks per project; upgrade to add more.':
           'All {count} tracks were restored and will be preserved when you save. Free can add up to {limit} tracks per project; upgrade to add more.',
-      'Project includes plan-locked effects':
-          'Project includes plan-locked effects',
+      'Project includes plan-locked effects': 'Project includes plan-locked effects',
       'Restored effects: {effects}. They will be preserved when you save. Free cannot add these effects to a new chain.':
           'Restored effects: {effects}. They will be preserved when you save. Free cannot add these effects to a new chain.',
       'Upgrade to use this plugin': 'Upgrade to use this plugin',
@@ -815,16 +738,14 @@ class L10n {
       'Password': 'Password',
       'You sign in with': 'You sign in with',
       'using': 'using',
-      'You sign in with email and password.':
-          'You sign in with email and password.',
+      'You sign in with email and password.': 'You sign in with email and password.',
       'If you want to add a password later, sign out and use Forgot password from the sign-in screen.':
           'If you want to add a password later, sign out and use Forgot password from the sign-in screen.',
       'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.':
           'If you want to add a password later, sign out and use Forgot password with that email on the sign-in screen.',
       'Confirmation code': 'Confirmation code',
       'Confirmation code sent!': 'Confirmation code sent!',
-      'Confirmation code will be sent to your email inbox.':
-          'Confirmation code will be sent to your email inbox.',
+      'Confirmation code will be sent to your email inbox.': 'Confirmation code will be sent to your email inbox.',
       'Select one (optional)': 'Select one (optional)',
       'Not set': 'Not set',
       'Enter a valid password and confirmation first to send the code.':
@@ -838,13 +759,11 @@ class L10n {
       'Create Account': 'Create Account',
       'Create account': 'Create account',
       'Finish your account setup': 'Finish your account setup',
-      'Add the last few details to start using Mixroom.':
-          'Add the last few details to start using Mixroom.',
+      'Add the last few details to start using Mixroom.': 'Add the last few details to start using Mixroom.',
       'Username': 'Username',
       '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.':
           '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.',
-      'Available after the account backend is deployed.':
-          'Available after the account backend is deployed.',
+      'Available after the account backend is deployed.': 'Available after the account backend is deployed.',
       'Bio': 'Bio',
       'Tell listeners what you make.': 'Tell listeners what you make.',
       'Tell people a bit about yourself': 'Tell people a bit about yourself',
@@ -864,8 +783,7 @@ class L10n {
       'and': 'and',
       'Terms of Service': 'Terms of Service',
       'Privacy Policy': 'Privacy Policy',
-      'Receive marketing and update emails':
-          'Receive marketing and update emails',
+      'Receive marketing and update emails': 'Receive marketing and update emails',
       'chat_help_tooltip': 'AI help',
       'chat_help_title': 'What can Mixroom AI do?',
       'chat_help_intro': 'Mixroom AI is your production assistant.',
@@ -873,21 +791,16 @@ class L10n {
           'AI requests send your prompt, recent chat context, and project summary to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.',
       'chat_help_can': 'It can',
       'chat_help_can_mix': 'Adjust mix settings and match a reference track.',
-      'chat_help_can_edit':
-          'Edit clips, split stems, align tempo, and turn audio into MIDI.',
-      'chat_help_can_tools':
-          'Add starter-pack samples and generate MIDI ideas.',
+      'chat_help_can_edit': 'Edit clips, split stems, align tempo, and turn audio into MIDI.',
+      'chat_help_can_tools': 'Add starter-pack samples and generate MIDI ideas.',
       'chat_help_cannot': 'It will not',
-      'chat_help_cannot_generate':
-          'Generate brand-new audio, vocals, or instruments from scratch.',
-      'chat_help_cannot_empty':
-          'Generate a finished song from a single prompt.',
+      'chat_help_cannot_generate': 'Generate brand-new audio, vocals, or instruments from scratch.',
+      'chat_help_cannot_empty': 'Generate a finished song from a single prompt.',
       'chat_help_examples':
           'Try: “Mix my project like this reference track.” “Turn this into MIDI.” “Add house drums 128.”',
       'Please agree to the Terms of Service and Privacy Policy.':
           'Please agree to the Terms of Service and Privacy Policy.',
-      'Bio must be 160 characters or fewer.':
-          'Bio must be 160 characters or fewer.',
+      'Bio must be 160 characters or fewer.': 'Bio must be 160 characters or fewer.',
       'At least 8 characters': 'At least 8 characters',
       'Use at least 8 characters.': 'Use at least 8 characters.',
       'Confirm Password': 'Confirm Password',
@@ -904,34 +817,27 @@ class L10n {
       'Select one': 'Select one',
       'Enter a valid email address.': 'Enter a valid email address.',
       'Enter the verification code.': 'Enter the verification code.',
-      'Email verified. You are now signed in.':
-          'Email verified. You are now signed in.',
+      'Email verified. You are now signed in.': 'Email verified. You are now signed in.',
       'Verification code resent.': 'Verification code resent.',
       'Verify your email': 'Verify your email',
-      'Enter the verification code sent to your email.':
-          'Enter the verification code sent to your email.',
+      'Enter the verification code sent to your email.': 'Enter the verification code sent to your email.',
       'Verification Code': 'Verification Code',
       'Enter code': 'Enter code',
       'Resend code': 'Resend code',
       'Verifying...': 'Verifying...',
       'Verify Email': 'Verify Email',
       'Verification code sent.': 'Verification code sent.',
-      'Password updated. You can sign in now.':
-          'Password updated. You can sign in now.',
+      'Password updated. You can sign in now.': 'Password updated. You can sign in now.',
       'Reset your password': 'Reset your password',
       'Enter verification code': 'Enter verification code',
-      'We will send a verification code to your email.':
-          'We will send a verification code to your email.',
-      'Use the code from email and set a new password.':
-          'Use the code from email and set a new password.',
+      'We will send a verification code to your email.': 'We will send a verification code to your email.',
+      'Use the code from email and set a new password.': 'Use the code from email and set a new password.',
       'New Password': 'New Password',
       'Confirm New Password': 'Confirm New Password',
       'Send Reset Code': 'Send Reset Code',
       'Update Password': 'Update Password',
-      'Fast, AI-assisted music production.':
-          'Fast, AI-assisted music production.',
-      'Fast, AI-assisted music production':
-          'Fast, AI-assisted music production',
+      'Fast, AI-assisted music production.': 'Fast, AI-assisted music production.',
+      'Fast, AI-assisted music production': 'Fast, AI-assisted music production',
       'Or continue with': 'Or continue with',
       'Continue with Google': 'Continue with Google',
       'Continue with Apple': 'Continue with Apple',
@@ -939,8 +845,7 @@ class L10n {
       'Step {current} of {total}': 'Step {current} of {total}',
       'Change': 'Change',
       'Select birthday': 'Select birthday',
-      'You must be at least {age} years old to use Mixroom.':
-          'You must be at least {age} years old to use Mixroom.',
+      'You must be at least {age} years old to use Mixroom.': 'You must be at least {age} years old to use Mixroom.',
       'Log Out': 'Log Out',
       'Delete Account': 'Delete Account',
       'Delete account?': 'Delete account?',
@@ -953,8 +858,7 @@ class L10n {
       'Not provided': 'Not provided',
       'Save Changes': 'Save Changes',
       'Email not verified': 'Email not verified',
-      'Please verify your email for better account security.':
-          'Please verify your email for better account security.',
+      'Please verify your email for better account security.': 'Please verify your email for better account security.',
       'Sending...': 'Sending...',
       'Resend verification email': 'Resend verification email',
       'Birthday': 'Birthday',
@@ -971,15 +875,13 @@ class L10n {
       'For work': 'For work',
       'Songwriting': 'Songwriting',
       'Mix/master practice': 'Mix/master practice',
-      'Account data sync target: Mixroom account profile.':
-          'Account data sync target: Mixroom account profile.',
+      'Account data sync target: Mixroom account profile.': 'Account data sync target: Mixroom account profile.',
       'Feedback': 'Feedback',
       'Bug Report': 'Bug Report',
       'Feedback for': 'Feedback for',
       'Send Feedback': 'Send Feedback',
       'Submit': 'Submit',
-      'Please enter your feedback or bug report first.':
-          'Please enter your feedback or bug report first.',
+      'Please enter your feedback or bug report first.': 'Please enter your feedback or bug report first.',
       'Choose feedback or bug report, then describe it. You can also attach current editor context.':
           'Choose feedback or bug report, then describe it. You can also attach current editor context.',
       'Choose feedback or bug report, then describe it. Account details are attached automatically.':
@@ -991,18 +893,15 @@ class L10n {
       'Describe the bug, what you expected, and what happened.':
           'Describe the bug, what you expected, and what happened.',
       '{count} characters left': '{count} characters left',
-      'Allow Mixroom to respond by email.':
-          'Allow Mixroom to respond by email.',
+      'Allow Mixroom to respond by email.': 'Allow Mixroom to respond by email.',
       'Optional. We may follow up using your account email about this submission.':
           'Optional. We may follow up using your account email about this submission.',
       'Include with this report': 'Include with this report',
-      'Include AI chat history and project settings.':
-          'Include AI chat history and project settings.',
+      'Include AI chat history and project settings.': 'Include AI chat history and project settings.',
       'Attach recent assistant messages and current DAW settings.':
           'Attach recent assistant messages and current DAW settings.',
       'Include a DAW screenshot.': 'Include a DAW screenshot.',
-      'Mixroom captures the editor view with chat closed.':
-          'Mixroom captures the editor view with chat closed.',
+      'Mixroom captures the editor view with chat closed.': 'Mixroom captures the editor view with chat closed.',
       'Video projects are coming soon.': 'Video projects are coming soon.',
       'No matching projects.': 'No matching projects.',
       'Sort by recent': 'Sort by recent',
@@ -1027,18 +926,15 @@ class L10n {
       'Open': 'Open',
       'Legal & Privacy': 'Legal & Privacy',
       'Feedback / bug report': 'Feedback / bug report',
-      'Subscriptions are not enabled yet.':
-          'Subscriptions are not enabled yet.',
+      'Subscriptions are not enabled yet.': 'Subscriptions are not enabled yet.',
       'When billing opens, you will be able to upgrade and manage your plan from this screen.':
           'When billing opens, you will be able to upgrade and manage your plan from this screen.',
       'Change Password': 'Change Password',
       'Current Password': 'Current Password',
       'Enter current password': 'Enter current password',
       'Password updated successfully.': 'Password updated successfully.',
-      'Please enter your current password.':
-          'Please enter your current password.',
-      'New password must be different from current password.':
-          'New password must be different from current password.',
+      'Please enter your current password.': 'Please enter your current password.',
+      'New password must be different from current password.': 'New password must be different from current password.',
       'Updating...': 'Updating...',
       'This page shows your current sign-in method. More linking options can come later.':
           'This page shows your current sign-in method. More linking options can come later.',
@@ -1055,8 +951,7 @@ class L10n {
       'Prompt usage': 'Prompt usage',
       'Extra prompt credits are used first, before daily and weekly limits.':
           'Extra prompt credits are used first, before daily and weekly limits.',
-      'Daily and weekly prompt usage limits.':
-          'Daily and weekly prompt usage limits.',
+      'Daily and weekly prompt usage limits.': 'Daily and weekly prompt usage limits.',
       'Extra prompt bank': 'Extra prompt bank',
       'left': 'left',
       'Window': 'Window',
@@ -1083,8 +978,7 @@ class L10n {
           'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.',
       'This is an experimental feature in development. Output may be unexpected.':
           'This is an experimental feature in development. Output may be unexpected.',
-      'Ask Mixroom to create, edit, or mix your project.':
-          'Ask Mixroom to create, edit, or mix your project.',
+      'Ask Mixroom to create, edit, or mix your project.': 'Ask Mixroom to create, edit, or mix your project.',
       'Copied': 'Copied',
       'Copied chat log.': 'Copied chat log.',
       'Drop audio here': 'Drop audio here',
@@ -1096,15 +990,13 @@ class L10n {
       'Show prompt limits': 'Show prompt limits',
       'Extra bank': 'Extra bank',
       'used first': 'used first',
-      'Prompt limit reached. Tap to see reset time.':
-          'Prompt limit reached. Tap to see reset time.',
+      'Prompt limit reached. Tap to see reset time.': 'Prompt limit reached. Tap to see reset time.',
       'No copied clip to paint': 'No copied clip to paint',
       'MIDI Clip': 'MIDI Clip',
       'Audio Clip': 'Audio Clip',
       'Rename Clip': 'Rename Clip',
       'Clip name': 'Clip name',
-      'Tempo detection is only for audio clips.':
-          'Tempo detection is only for audio clips.',
+      'Tempo detection is only for audio clips.': 'Tempo detection is only for audio clips.',
       'Place clone': 'Place clone',
       'Clear clipboard': 'Clear clipboard',
       'Clipboard cleared': 'Clipboard cleared',
@@ -1140,21 +1032,34 @@ class L10n {
       'Save failed': 'Save failed',
       'Name Your Project': 'Name Your Project',
       'Unable to arm selected MIDI clip.': 'Unable to arm selected MIDI clip.',
-      'Select a track to record on first.':
-          'Select a track to record on first.',
+      'Select a track to record on first.': 'Select a track to record on first.',
       'Failed to start recording': 'Failed to start recording',
       'Microphone access is blocked. Open app settings to record audio.':
           'Microphone access is blocked. Open app settings to record audio.',
-      'Microphone access is required to record audio.':
-          'Microphone access is required to record audio.',
-      'Recording failed or no data captured.':
-          'Recording failed or no data captured.',
+      'Microphone access is required to record audio.': 'Microphone access is required to record audio.',
+      'Recording failed or no data captured.': 'Recording failed or no data captured.',
       'Failed to add recorded track.': 'Failed to add recorded track.',
       'File is unavailable.': 'File is unavailable.',
-      'Folder already loaded for this project.':
-          'Folder already loaded for this project.',
+      'Folder already loaded for this project.': 'Folder already loaded for this project.',
       'Failed to preview sample': 'Failed to preview sample',
       'Project Settings': 'Project Settings',
+      'Prepare compatible version': 'Prepare compatible version',
+      'Preparing…': 'Preparing…',
+      'Compatible version': 'Compatible version',
+      'About compatible versions': 'About compatible versions',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.',
+      'Your original stays editable': 'Your original stays editable',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          'The editable project and its plug-in settings stay bundled and unchanged.',
+      'Rendered audio keeps the sound': 'Rendered audio keeps the sound',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.',
+      'Edits stay separate': 'Edits stay separate',
+      'Editing the compatible version creates a separate normal project.':
+          'Editing the compatible version creates a separate normal project.',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.',
       'Project Name': 'Project Name',
       'Metronome': 'Metronome',
       'Metronome Volume': 'Metronome Volume',
@@ -1163,20 +1068,16 @@ class L10n {
       'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.':
           'Run the interactive DAW tutorial again to revisit the timeline, tracks, effects, automation, AI, and export flow.',
       'Show Producer Capture UI': 'Show Producer Capture UI',
-      'Use Computer Keyboard as MIDI Input':
-          'Use Computer Keyboard as MIDI Input',
+      'Use Computer Keyboard as MIDI Input': 'Use Computer Keyboard as MIDI Input',
       'Spacebar Stop Returns to Start': 'Spacebar Stop Returns to Start',
       'When stopping playback with Space, jump back to the point where playback started.':
           'When stopping playback with Space, jump back to the point where playback started.',
       'Keyboard Shortcuts': 'Keyboard Shortcuts',
-      'View, remap, and reset desktop shortcuts.':
-          'View, remap, and reset desktop shortcuts.',
+      'View, remap, and reset desktop shortcuts.': 'View, remap, and reset desktop shortcuts.',
       'Plugin Manager': 'Plugin Manager',
-      'Rescan, favorite, or hide desktop plugins.':
-          'Rescan, favorite, or hide desktop plugins.',
+      'Rescan, favorite, or hide desktop plugins.': 'Rescan, favorite, or hide desktop plugins.',
       'Desktop Diagnostics': 'Desktop Diagnostics',
-      'Check audio device, CPU, buffer, and scan state.':
-          'Check audio device, CPU, buffer, and scan state.',
+      'Check audio device, CPU, buffer, and scan state.': 'Check audio device, CPU, buffer, and scan state.',
       'Recovery & Missing Assets': 'Recovery & Missing Assets',
       'Review recovered backups and missing media/plugin notices.':
           'Review recovered backups and missing media/plugin notices.',
@@ -1189,16 +1090,14 @@ class L10n {
           'Bluetooth headset mic can reduce audio quality and increase latency. Use your built-in/default mic instead, or continue with this mic?',
       'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.':
           'Bluetooth microphones are disabled in this version. Mixroom is using the built-in/default mic instead.',
-      'Selected output device is not available.':
-          'Selected output device is not available.',
+      'Selected output device is not available.': 'Selected output device is not available.',
       'Use default mic': 'Use default mic',
       'Input Channel': 'Input Channel',
       'System default (speaker / Bluetooth / audio interface)':
           'System default (speaker / Bluetooth / audio interface)',
       'Output Route': 'Output Route',
       'Refresh output route': 'Refresh output route',
-      'System default (managed by macOS audio settings)':
-          'System default (managed by macOS audio settings)',
+      'System default (managed by macOS audio settings)': 'System default (managed by macOS audio settings)',
       'Output Device': 'Output Device',
       'Refresh output device': 'Refresh output device',
       'No selectable output devices': 'No selectable output devices',
@@ -1208,8 +1107,7 @@ class L10n {
       'is using Bluetooth output. Real-time monitoring is off by default.':
           'is using Bluetooth output. Real-time monitoring is off by default.',
       'Advanced: monitor anyway': 'Advanced: monitor anyway',
-      'May sound choppy or unstable on Bluetooth earphones.':
-          'May sound choppy or unstable on Bluetooth earphones.',
+      'May sound choppy or unstable on Bluetooth earphones.': 'May sound choppy or unstable on Bluetooth earphones.',
       'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
           'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.',
       'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -1230,10 +1128,8 @@ class L10n {
       'Detecting project BPM...': 'Detecting project BPM...',
       'Could not detect project BPM.': 'Could not detect project BPM.',
       'Project BPM detected and set to': 'Project BPM detected and set to',
-      'Add an audio clip before detecting project BPM.':
-          'Add an audio clip before detecting project BPM.',
-      'Select a rhythmic audio clip to detect project BPM.':
-          'Select a rhythmic audio clip to detect project BPM.',
+      'Add an audio clip before detecting project BPM.': 'Add an audio clip before detecting project BPM.',
+      'Select a rhythmic audio clip to detect project BPM.': 'Select a rhythmic audio clip to detect project BPM.',
       'Auto Detect Project BPM': 'Auto Detect Project BPM',
       'Could not detect clip tempo.': 'Could not detect clip tempo.',
       'Change Project BPM?': 'Change Project BPM?',
@@ -1272,8 +1168,7 @@ class L10n {
       'Insert instrument lane above': 'Insert instrument lane above',
       'Insert instrument lane below': 'Insert instrument lane below',
       'Change instrument lane': 'Change instrument lane',
-      'Changed {row} instrument to {instrument}':
-          'Changed {row} instrument to {instrument}',
+      'Changed {row} instrument to {instrument}': 'Changed {row} instrument to {instrument}',
       'Insert output row': 'Insert output row',
       'Remove row from group': 'Remove row from group',
       'Add audio clip': 'Add audio clip',
@@ -1337,17 +1232,14 @@ class L10n {
       'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.':
           'This automation target is orphaned. Undo the plugin removal or re-add the plugin to relink it.',
       'Clone ready for': 'Clone ready for',
-      'Invalid range. Tap a different end point.':
-          'Invalid range. Tap a different end point.',
-      'Could not load this effect plugin.':
-          'Could not load this effect plugin.',
+      'Invalid range. Tap a different end point.': 'Invalid range. Tap a different end point.',
+      'Could not load this effect plugin.': 'Could not load this effect plugin.',
       'Skipped unsupported cut action.': 'Skipped unsupported cut action.',
       'Cut clip.': 'Cut clip.',
       'Skipped incomplete move action.': 'Skipped incomplete move action.',
       'Move made no changes.': 'Move made no changes.',
       'Stretched clip.': 'Stretched clip.',
-      'Detected clip tempo and updated project tempo.':
-          'Detected clip tempo and updated project tempo.',
+      'Detected clip tempo and updated project tempo.': 'Detected clip tempo and updated project tempo.',
       'Deleted clip.': 'Deleted clip.',
       'Stopped sample processing.': 'Stopped sample processing.',
       'Copied row effects.': 'Copied row effects.',
@@ -1360,44 +1252,34 @@ class L10n {
       'Master has no effects to clear.': 'Master has no effects to clear.',
       'Cleared master effects.': 'Cleared master effects.',
       'Created automation clip.': 'Automation lane ready.',
-      'Add a row before creating automation clips.':
-          'Add a row before editing automation lanes.',
-      'Select a valid row before creating automation clips.':
-          'Select a valid row before editing automation lanes.',
-      'Could not resolve that automation target.':
-          'Could not resolve that automation target.',
-      'No automatable parameters found for this plugin.':
-          'No automatable parameters found for this plugin.',
-      'Could not resolve that plugin parameter.':
-          'Could not resolve that plugin parameter.',
+      'Add a row before creating automation clips.': 'Add a row before editing automation lanes.',
+      'Select a valid row before creating automation clips.': 'Select a valid row before editing automation lanes.',
+      'Could not resolve that automation target.': 'Could not resolve that automation target.',
+      'No automatable parameters found for this plugin.': 'No automatable parameters found for this plugin.',
+      'Could not resolve that plugin parameter.': 'Could not resolve that plugin parameter.',
       'Cleared automation clips.': 'Cleared automation lanes.',
       'Created': 'Created',
       'kick-synced sidechain clips.': 'kick-synced sidechain points.',
       'Deleted automation clip.': 'Deleted automation points.',
       'Moved automation clip.': 'Moved automation points.',
-      'Automation clip is already unique.':
-          'Automation points are already independent.',
+      'Automation clip is already unique.': 'Automation points are already independent.',
       'Made automation clip unique.': 'Made automation points independent.',
       'Updated automation clip points.': 'Updated automation lane points.',
       'Cleared automation.': 'Cleared automation.',
       'Added automation ramp.': 'Added automation ramp.',
       'Set automation points.': 'Set automation points.',
-      'MIDI notes already match that chop grid.':
-          'MIDI notes already match that chop grid.',
+      'MIDI notes already match that chop grid.': 'MIDI notes already match that chop grid.',
       'Could not update this MIDI clip.': 'Could not update this MIDI clip.',
-      'MIDI notes already match that pitch.':
-          'MIDI notes already match that pitch.',
+      'MIDI notes already match that pitch.': 'MIDI notes already match that pitch.',
       'Shifted MIDI notes': 'Shifted MIDI notes',
       'up': 'up',
       'down': 'down',
       'by': 'by',
-      'That MIDI clip is already that long.':
-          'That MIDI clip is already that long.',
+      'That MIDI clip is already that long.': 'That MIDI clip is already that long.',
       'Extended MIDI clip to': 'Extended MIDI clip to',
       'Created MIDI clip from AI notes.': 'Created MIDI clip from AI notes.',
       'Converting audio to MIDI...': 'Converting audio to MIDI...',
-      'Created MIDI clip below the source audio.':
-          'Created MIDI clip below the source audio.',
+      'Created MIDI clip below the source audio.': 'Created MIDI clip below the source audio.',
       'Applied 1 change.': 'Applied 1 change.',
       'Applied {count} changes.': 'Applied {count} changes.',
       'Applied 1 verified change': 'Applied 1 verified change',
@@ -1416,8 +1298,7 @@ class L10n {
       'Disabled the metronome.': 'Disabled the metronome.',
       'Enabled loop playback.': 'Enabled loop playback.',
       'Disabled loop playback.': 'Disabled loop playback.',
-      'Adjusted {target} gain by {value} dB.':
-          'Adjusted {target} gain by {value} dB.',
+      'Adjusted {target} gain by {value} dB.': 'Adjusted {target} gain by {value} dB.',
       'Set {target} gain to {value} dB.': 'Set {target} gain to {value} dB.',
       'Adjusted {target} pan by {value}.': 'Adjusted {target} pan by {value}.',
       'Set {target} pan to {value}.': 'Set {target} pan to {value}.',
@@ -1427,8 +1308,7 @@ class L10n {
       'Unsoloed {target}.': 'Unsoloed {target}.',
       'Renamed {target} to {name}.': 'Renamed {target} to {name}.',
       'Updated the role for {target}.': 'Updated the role for {target}.',
-      'Applied phone-mic cleanup to {target}.':
-          'Applied phone-mic cleanup to {target}.',
+      'Applied phone-mic cleanup to {target}.': 'Applied phone-mic cleanup to {target}.',
       'Selected {target}.': 'Selected {target}.',
       'Updated the color of {target}.': 'Updated the color of {target}.',
       'Created MIDI row {name}.': 'Created MIDI row {name}.',
@@ -1439,57 +1319,38 @@ class L10n {
       'Collapsed the group.': 'Collapsed the group.',
       'Expanded the group.': 'Expanded the group.',
       'Moved {target} by {value} beats.': 'Moved {target} by {value} beats.',
-      'Trimmed {target} to beats {start}–{end}.':
-          'Trimmed {target} to beats {start}–{end}.',
+      'Trimmed {target} to beats {start}–{end}.': 'Trimmed {target} to beats {start}–{end}.',
       'Split {target} at beat {value}.': 'Split {target} at beat {value}.',
-      'Duplicated {target} at beat {value}.':
-          'Duplicated {target} at beat {value}.',
+      'Duplicated {target} at beat {value}.': 'Duplicated {target} at beat {value}.',
       'Glued the selected audio clips.': 'Glued the selected audio clips.',
-      'Separated vocals and instrumental.':
-          'Separated vocals and instrumental.',
+      'Separated vocals and instrumental.': 'Separated vocals and instrumental.',
       'Converted {target} to MIDI.': 'Converted {target} to MIDI.',
-      'Set {target} pitch to {value} semitones.':
-          'Set {target} pitch to {value} semitones.',
-      'Adjusted {target} pitch by {value} semitones.':
-          'Adjusted {target} pitch by {value} semitones.',
-      'Set {target} length to {value} beats.':
-          'Set {target} length to {value} beats.',
-      'Scaled {target} length by {value}.':
-          'Scaled {target} length by {value}.',
-      'Set {target} source tempo to {value} BPM.':
-          'Set {target} source tempo to {value} BPM.',
-      'Updated tempo following for {target}.':
-          'Updated tempo following for {target}.',
-      'Aligned {target} to the project tempo.':
-          'Aligned {target} to the project tempo.',
-      'Set the project tempo from {target}.':
-          'Set the project tempo from {target}.',
+      'Set {target} pitch to {value} semitones.': 'Set {target} pitch to {value} semitones.',
+      'Adjusted {target} pitch by {value} semitones.': 'Adjusted {target} pitch by {value} semitones.',
+      'Set {target} length to {value} beats.': 'Set {target} length to {value} beats.',
+      'Scaled {target} length by {value}.': 'Scaled {target} length by {value}.',
+      'Set {target} source tempo to {value} BPM.': 'Set {target} source tempo to {value} BPM.',
+      'Updated tempo following for {target}.': 'Updated tempo following for {target}.',
+      'Aligned {target} to the project tempo.': 'Aligned {target} to the project tempo.',
+      'Set the project tempo from {target}.': 'Set the project tempo from {target}.',
       'Trimmed silence from {target}.': 'Trimmed silence from {target}.',
-      'Aligned the first sound in {target}.':
-          'Aligned the first sound in {target}.',
-      'Transposed {target} by {value} semitones.':
-          'Transposed {target} by {value} semitones.',
-      'Created a MIDI clip with {count} notes.':
-          'Created a MIDI clip with {count} notes.',
+      'Aligned the first sound in {target}.': 'Aligned the first sound in {target}.',
+      'Transposed {target} by {value} semitones.': 'Transposed {target} by {value} semitones.',
+      'Created a MIDI clip with {count} notes.': 'Created a MIDI clip with {count} notes.',
       'Replaced notes in {target}.': 'Replaced notes in {target}.',
       'Appended notes to {target}.': 'Appended notes to {target}.',
       'Chopped notes in {target}.': 'Chopped notes in {target}.',
-      'Added/configured {effect} on {target}.':
-          'Added/configured {effect} on {target}.',
+      'Added/configured {effect} on {target}.': 'Added/configured {effect} on {target}.',
       'Removed an effect from {target}.': 'Removed an effect from {target}.',
-      'Updated effect bypass on {target}.':
-          'Updated effect bypass on {target}.',
+      'Updated effect bypass on {target}.': 'Updated effect bypass on {target}.',
       'Added a gain fade on {target}.': 'Added a gain fade on {target}.',
-      'Set {count} automation points on {target}.':
-          'Set {count} automation points on {target}.',
+      'Set {count} automation points on {target}.': 'Set {count} automation points on {target}.',
       'Cleared automation on {target}.': 'Cleared automation on {target}.',
       'Placed {count} library sample(s).': 'Placed {count} library sample(s).',
       'Replaced the sample in {target}.': 'Replaced the sample in {target}.',
       'Applied the requested mix.': 'Applied the requested mix.',
-      "I couldn't apply that row mute edit.":
-          "I couldn't apply that row mute edit.",
-      "I couldn't apply that row solo edit.":
-          "I couldn't apply that row solo edit.",
+      "I couldn't apply that row mute edit.": "I couldn't apply that row mute edit.",
+      "I couldn't apply that row solo edit.": "I couldn't apply that row solo edit.",
       'vocal stem': 'vocal stem',
       'instrumental stem': 'instrumental stem',
       'vocal row': 'vocal row',
@@ -1505,12 +1366,10 @@ class L10n {
       'copied clip': 'copied clip',
       'glued clip': 'glued clip',
       'generated group': 'generated group',
-      'Stem separation failed for target clips.':
-          'Stem separation failed for target clips.',
+      'Stem separation failed for target clips.': 'Stem separation failed for target clips.',
       'Created stems for': 'Created stems for',
       'clips.': 'clips.',
-      'Stem separation is only available for audio clips.':
-          'Stem separation is only available for audio clips.',
+      'Stem separation is only available for audio clips.': 'Stem separation is only available for audio clips.',
       'Selected clip file was not found.': 'Selected clip file was not found.',
       'Splitting stems...': 'Splitting stems...',
       'Stem separation failed.': 'Stem separation failed.',
@@ -1525,6 +1384,7 @@ class L10n {
       'Instrument': 'Instrument',
       'All': 'All',
       'Keys': 'Keys',
+      'Guitars': 'Guitars',
       'Strings': 'Strings',
       'Woodwinds': 'Woodwinds',
       'Brass': 'Brass',
@@ -1557,10 +1417,8 @@ class L10n {
       'Quantize': 'Quantize',
       'C Major': 'C Major',
       'Snap selected notes to C major': 'Snap selected notes to C major',
-      'Transpose selected notes down one semitone':
-          'Transpose selected notes down one semitone',
-      'Transpose selected notes up one semitone':
-          'Transpose selected notes up one semitone',
+      'Transpose selected notes down one semitone': 'Transpose selected notes down one semitone',
+      'Transpose selected notes up one semitone': 'Transpose selected notes up one semitone',
       '+3rd': '+3rd',
       '+5th': '+5th',
       'Fullscreen': 'Fullscreen',
@@ -1583,24 +1441,17 @@ class L10n {
       'No notes are ready to render.': 'No notes are ready to render.',
       'No notes are ready to preview.': 'No notes are ready to preview.',
       'Preparing Pitch Lab preview...': 'Preparing Pitch Lab preview...',
-      'Select an audio clip first, then open Pitch Lab.':
-          'Select an audio clip first, then open Pitch Lab.',
-      'Select an audio clip on a timeline row first.':
-          'Select an audio clip on a timeline row first.',
-      'Could not extract stable notes from this clip.':
-          'Could not extract stable notes from this clip.',
+      'Select an audio clip first, then open Pitch Lab.': 'Select an audio clip first, then open Pitch Lab.',
+      'Select an audio clip on a timeline row first.': 'Select an audio clip on a timeline row first.',
+      'Could not extract stable notes from this clip.': 'Could not extract stable notes from this clip.',
       'Could not analyze this clip.': 'Could not analyze this clip.',
       'Rendering tuned audio...': 'Rendering tuned audio...',
-      'No pitch or timing changes to render.':
-          'No pitch or timing changes to render.',
-      'Rendered tuned clip below the source.':
-          'Rendered tuned clip below the source.',
+      'No pitch or timing changes to render.': 'No pitch or timing changes to render.',
+      'Rendered tuned clip below the source.': 'Rendered tuned clip below the source.',
       'Could not render the tuned clip.': 'Could not render the tuned clip.',
-      'No pitch or timing changes to preview.':
-          'No pitch or timing changes to preview.',
+      'No pitch or timing changes to preview.': 'No pitch or timing changes to preview.',
       'Could not preview the tuned clip.': 'Could not preview the tuned clip.',
-      'Double-tap to place the first note':
-          'Double-tap to place the first note',
+      'Double-tap to place the first note': 'Double-tap to place the first note',
       'No editable notes detected': 'No editable notes detected',
       'Drag notes to change pitch or timing. Drag empty space to move around. Pinch to zoom. Save when the melody feels right.':
           'Drag notes to change pitch or timing. Drag empty space to move around. Pinch to zoom. Save when the melody feels right.',
@@ -1610,20 +1461,15 @@ class L10n {
       'Duplicate': 'Duplicate',
       'File Browser Help': 'File Browser Help',
       'Load a folder into the browser.': 'Load a folder into the browser.',
-      'Tap a folder button to switch the current folder.':
-          'Tap a folder button to switch the current folder.',
+      'Tap a folder button to switch the current folder.': 'Tap a folder button to switch the current folder.',
       'Preview an audio file.': 'Preview an audio file.',
-      'Hold and drag a file into the timeline.':
-          'Hold and drag a file into the timeline.',
-      'Hold a folder button to remove it.':
-          'Hold a folder button to remove it.',
-      'Use the bottom waveform to seek preview playback.':
-          'Use the bottom waveform to seek preview playback.',
+      'Hold and drag a file into the timeline.': 'Hold and drag a file into the timeline.',
+      'Hold a folder button to remove it.': 'Hold a folder button to remove it.',
+      'Use the bottom waveform to seek preview playback.': 'Use the bottom waveform to seek preview playback.',
       'Insert at playhead': 'Insert at playhead',
       'Remove': 'Remove',
       'Add a sample folder': 'Add a sample folder',
-      'This folder is currently unavailable.':
-          'This folder is currently unavailable.',
+      'This folder is currently unavailable.': 'This folder is currently unavailable.',
       'Tip: choose local folders (not cloud-only placeholders).':
           'Tip: choose local folders (not cloud-only placeholders).',
       'Pick folder': 'Pick folder',
@@ -1674,20 +1520,16 @@ class L10n {
       'MIDI clip': 'MIDI clip',
       'Audio clip': 'Audio clip',
       'Follows project BPM.': 'Follows project BPM.',
-      'MIDI clips follow project BPM automatically.':
-          'MIDI clips follow project BPM automatically.',
-      'No extra tempo mode is needed here.':
-          'No extra tempo mode is needed here.',
-      'Choose how this audio clip follows project BPM':
-          'Choose how this audio clip follows project BPM',
+      'MIDI clips follow project BPM automatically.': 'MIDI clips follow project BPM automatically.',
+      'No extra tempo mode is needed here.': 'No extra tempo mode is needed here.',
+      'Choose how this audio clip follows project BPM': 'Choose how this audio clip follows project BPM',
       'Reversed': 'Reversed',
       'Reverse': 'Reverse',
       'Detect tempo': 'Detect tempo',
       'Split vocals': 'Split vocals',
       'Adjust To Tempo (Resample)': 'Adjust To Tempo (Resample)',
       'Stretch To Tempo (Keep Pitch)': 'Stretch To Tempo (Keep Pitch)',
-      'Stretch mode is shown with teal clip handles.':
-          'Stretch mode is shown with teal clip handles.',
+      'Stretch mode is shown with teal clip handles.': 'Stretch mode is shown with teal clip handles.',
       'Detect Tempo + Set Project BPM': 'Detect Tempo + Set Project BPM',
       'Select Icon': 'Select Icon',
       'Microphone access is turned off': 'Microphone access is turned off',
@@ -1702,16 +1544,12 @@ class L10n {
           'Built-in microphone recording needs access in Settings. External audio interfaces can still be used below when available.',
       'Built-in microphone recording needs access. External audio interfaces can still be used below when available.':
           'Built-in microphone recording needs access. External audio interfaces can still be used below when available.',
-      'Audition folders and drag and drop':
-          'Audition folders and drag and drop',
-      'Could not save preference. Please retry.':
-          'Could not save preference. Please retry.',
-      'Could not update telemetry preference. Please retry.':
-          'Could not update telemetry preference. Please retry.',
+      'Audition folders and drag and drop': 'Audition folders and drag and drop',
+      'Could not save preference. Please retry.': 'Could not save preference. Please retry.',
+      'Could not update telemetry preference. Please retry.': 'Could not update telemetry preference. Please retry.',
       'Could not update marketing email preference. Please retry.':
           'Could not update marketing email preference. Please retry.',
-      'Could not open this link on your device right now.':
-          'Could not open this link on your device right now.',
+      'Could not open this link on your device right now.': 'Could not open this link on your device right now.',
       'Data export request': 'Data export request',
       'Data correction/deletion request': 'Data correction/deletion request',
       'Privacy inquiry': 'Privacy inquiry',
@@ -1726,47 +1564,36 @@ class L10n {
       'Review legal documents, control privacy settings, and submit data-rights requests here.':
           'Review legal documents, control privacy settings, and submit data-rights requests here.',
       'Documents': 'Documents',
-      'How Mixroom collects, uses, and shares information.':
-          'How Mixroom collects, uses, and shares information.',
-      'Rules for using Mixroom and user content.':
-          'Rules for using Mixroom and user content.',
+      'How Mixroom collects, uses, and shares information.': 'How Mixroom collects, uses, and shares information.',
+      'Rules for using Mixroom and user content.': 'Rules for using Mixroom and user content.',
       'Subprocessors': 'Subprocessors',
       'See third-party service providers that process data on Mixroom\'s behalf.':
           'See third-party service providers that process data on Mixroom\'s behalf.',
       'Open-source licenses': 'Open-source licenses',
-      'View software licenses used by this app.':
-          'View software licenses used by this app.',
+      'View software licenses used by this app.': 'View software licenses used by this app.',
       'Privacy Controls': 'Privacy Controls',
       'You can change these preferences at any time from this screen.':
           'You can change these preferences at any time from this screen.',
-      'Optional analytics and diagnostics':
-          'Optional analytics and diagnostics',
+      'Optional analytics and diagnostics': 'Optional analytics and diagnostics',
       'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.':
           'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.',
       'Personalized recommendations': 'Personalized recommendations',
-      'Uses activity signals to tailor tips and suggestions.':
-          'Uses activity signals to tailor tips and suggestions.',
-      'Product updates and marketing email':
-          'Product updates and marketing email',
+      'Uses activity signals to tailor tips and suggestions.': 'Uses activity signals to tailor tips and suggestions.',
+      'Product updates and marketing email': 'Product updates and marketing email',
       'Receive release notes, offers, and feature announcements.':
           'Receive release notes, offers, and feature announcements.',
       'Your Data Rights': 'Your Data Rights',
       'Request my data export': 'Request my data export',
-      'Email request for a copy of your data.':
-          'Email request for a copy of your data.',
-      'Request data correction or deletion':
-          'Request data correction or deletion',
-      'Email request for correction or erasure.':
-          'Email request for correction or erasure.',
+      'Email request for a copy of your data.': 'Email request for a copy of your data.',
+      'Request data correction or deletion': 'Request data correction or deletion',
+      'Email request for correction or erasure.': 'Email request for correction or erasure.',
       'Contact': 'Contact',
       'Privacy contact': 'Privacy contact',
       'Support contact': 'Support contact',
       'Danger Zone': 'Danger Zone',
       'Delete account permanently': 'Delete account permanently',
-      'Removes your account and signs you out.':
-          'Removes your account and signs you out.',
-      'Legal details and supporting information':
-          'Legal details and supporting information',
+      'Removes your account and signs you out.': 'Removes your account and signs you out.',
+      'Legal details and supporting information': 'Legal details and supporting information',
       'Last updated: {date}': 'Last updated: {date}',
       'This policy explains how Mixroom handles personal data in-app.':
           'This policy explains how Mixroom handles personal data in-app.',
@@ -1840,10 +1667,8 @@ class L10n {
       'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.':
           'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.',
       'No active account.': 'No active account.',
-      'Type DELETE to confirm account deletion.':
-          'Type DELETE to confirm account deletion.',
-      'Enter your current password to delete this account.':
-          'Enter your current password to delete this account.',
+      'Type DELETE to confirm account deletion.': 'Type DELETE to confirm account deletion.',
+      'Enter your current password to delete this account.': 'Enter your current password to delete this account.',
       'Re-authenticate with {provider} to delete this account.':
           'Re-authenticate with {provider} to delete this account.',
       'Re-authenticate with your social provider to delete this account.':
@@ -1893,8 +1718,7 @@ class L10n {
       'Select rows to group': 'Select rows to group',
       'Cancel row grouping selection': 'Cancel row grouping selection',
       'Set': 'Set',
-      'Apply changes and effects together':
-          'Apply changes and effects together',
+      'Apply changes and effects together': 'Apply changes and effects together',
       'Tap row headers to select rows': 'Tap row headers to select rows',
       'Choose rows to group': 'Choose rows to group',
       'Master Rack': 'Master Rack',
@@ -1930,6 +1754,8 @@ class L10n {
       'Cloud projects are not available.': 'Cloud projects are not available.',
       'Cloud sync failed': 'Cloud sync failed',
       'Cloud synced': 'Cloud synced',
+      'Not synced': 'Not synced',
+      'Cloud update available': 'Cloud update available',
       'Compliance controls': 'Compliance controls',
       'Create sampler': 'Create sampler',
       'Custom AI models': 'Custom AI models',
@@ -1946,8 +1772,7 @@ class L10n {
       'Edit it if it is wrong.': 'Edit it if it is wrong.',
       'Education privacy controls': 'Education privacy controls',
       'Education sandbox': 'Education sandbox',
-      'Email verified. Your account is ready.':
-          'Email verified. Your account is ready.',
+      'Email verified. Your account is ready.': 'Email verified. Your account is ready.',
       'Enter 20.0 to 999.0 BPM': 'Enter 20.0 to 999.0 BPM',
       'Enter a valid BPM.': 'Enter a valid BPM.',
       'Enter the code from your email and your password to finish signing in.':
@@ -1974,8 +1799,7 @@ class L10n {
       'One-Button Mix': 'One-Button Mix',
       'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.':
           'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.',
-      'One-Button Mix executed. Open chat for details.':
-          'One-Button Mix executed. Open chat for details.',
+      'One-Button Mix executed. Open chat for details.': 'One-Button Mix executed. Open chat for details.',
       'Payment method': 'Payment method',
       'Premium sound libraries': 'Premium sound libraries',
       'Priority support': 'Priority support',
@@ -1986,6 +1810,9 @@ class L10n {
       'Project bundle format': 'Project bundle format',
       'Project is currently': 'Project is currently',
       'Project synced to cloud': 'Project synced to cloud',
+      'Replace cloud version?': 'Replace cloud version?',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          'The cloud copy changed on another device or account. Replace it with this device\'s version?',
       'Replace sampler source': 'Replace sampler source',
       'Replace source': 'Replace source',
       'Sample pack storage': 'Sample pack storage',
@@ -2004,20 +1831,16 @@ class L10n {
       'Storage': 'Storage',
       'Storage full': 'Storage full',
       'Stretch Clip': 'Stretch Clip',
-      'Stretch uses this as the clip source BPM.':
-          'Stretch uses this as the clip source BPM.',
+      'Stretch uses this as the clip source BPM.': 'Stretch uses this as the clip source BPM.',
       'Studio tools': 'Studio tools',
       'Syncing to cloud…': 'Syncing to cloud…',
       'Tap to import demo project': 'Tap to import demo project',
       'Tempo detection could not lock. Enter the source BPM manually.':
           'Tempo detection could not lock. Enter the source BPM manually.',
       'Unable to open link right now.': 'Unable to open link right now.',
-      'Unable to open the store right now.':
-          'Unable to open the store right now.',
-      'Update link is not configured yet.':
-          'Update link is not configured yet.',
-      'Update the project title shown in your library.':
-          'Update the project title shown in your library.',
+      'Unable to open the store right now.': 'Unable to open the store right now.',
+      'Update link is not configured yet.': 'Update link is not configured yet.',
+      'Update the project title shown in your library.': 'Update the project title shown in your library.',
       'Upload hours': 'Upload hours',
       'WAV starter samples': 'WAV starter samples',
       'Warp Pro': 'Warp Pro',
@@ -2050,28 +1873,19 @@ class L10n {
       'Stereo Pro': 'Stereo Pro',
       'Volume Shaper': 'Volume Shaper',
       'Time Shaper': 'Time Shaper',
-      'Adds room or space around the sound.':
-          'Adds room or space around the sound.',
+      'Adds room or space around the sound.': 'Adds room or space around the sound.',
       'Evens out loud and quiet parts.': 'Evens out loud and quiet parts.',
-      'Reduces harsh moments without dulling everything.':
-          'Reduces harsh moments without dulling everything.',
-      'Changes the punch and tail of hits.':
-          'Changes the punch and tail of hits.',
-      'Stops peaks from getting too loud.':
-          'Stops peaks from getting too loud.',
-      'Trims peaks for a louder, harder sound.':
-          'Trims peaks for a louder, harder sound.',
-      'Quick tone control for lows, mids, and highs.':
-          'Quick tone control for lows, mids, and highs.',
+      'Reduces harsh moments without dulling everything.': 'Reduces harsh moments without dulling everything.',
+      'Changes the punch and tail of hits.': 'Changes the punch and tail of hits.',
+      'Stops peaks from getting too loud.': 'Stops peaks from getting too loud.',
+      'Trims peaks for a louder, harder sound.': 'Trims peaks for a louder, harder sound.',
+      'Quick tone control for lows, mids, and highs.': 'Quick tone control for lows, mids, and highs.',
       'Adds digital wear and texture.': 'Adds digital wear and texture.',
       'Repeats the sound like an echo.': 'Repeats the sound like an echo.',
-      'Reduces sharp S sounds and vocal harshness.':
-          'Reduces sharp S sounds and vocal harshness.',
-      'Adds grit, drive, and harmonic color.':
-          'Adds grit, drive, and harmonic color.',
+      'Reduces sharp S sounds and vocal harshness.': 'Reduces sharp S sounds and vocal harshness.',
+      'Adds grit, drive, and harmonic color.': 'Adds grit, drive, and harmonic color.',
       'Controls stereo width.': 'Controls stereo width.',
-      'Shapes the stereo image more precisely.':
-          'Shapes the stereo image more precisely.',
+      'Shapes the stereo image more precisely.': 'Shapes the stereo image more precisely.',
       'Creates rhythmic volume movement.': 'Creates rhythmic volume movement.',
       'Creates rhythmic timing changes.': 'Creates rhythmic timing changes.',
       'Adds a wider, doubled sound.': 'Adds a wider, doubled sound.',
@@ -2080,79 +1894,61 @@ class L10n {
       'Moves pitch up or down.': 'Moves pitch up or down.',
       'Pulls notes toward a key.': 'Pulls notes toward a key.',
       'Room Size: space size.': 'Room Size: space size.',
-      'Predelay: time before the room sound starts.':
-          'Predelay: time before the room sound starts.',
+      'Predelay: time before the room sound starts.': 'Predelay: time before the room sound starts.',
       'Mix: dry/wet balance.': 'Mix: dry/wet balance.',
-      'Threshold: level where compression starts.':
-          'Threshold: level where compression starts.',
+      'Threshold: level where compression starts.': 'Threshold: level where compression starts.',
       'Ratio: compression strength.': 'Ratio: compression strength.',
       'Attack: how fast it grabs peaks.': 'Attack: how fast it grabs peaks.',
       'Release: how fast it lets go.': 'Release: how fast it lets go.',
-      'Makeup: output level after compression.':
-          'Makeup: output level after compression.',
+      'Makeup: output level after compression.': 'Makeup: output level after compression.',
       'Mode: softening style.': 'Mode: softening style.',
       'Depth: amount of softening.': 'Depth: amount of softening.',
       'Focus: detail sensitivity.': 'Focus: detail sensitivity.',
       'Attack: how fast it reacts.': 'Attack: how fast it reacts.',
       'Release: how fast it recovers.': 'Release: how fast it recovers.',
       'Cut Limit: max reduction.': 'Cut Limit: max reduction.',
-      'Process Trim: input into the softener.':
-          'Process Trim: input into the softener.',
+      'Process Trim: input into the softener.': 'Process Trim: input into the softener.',
       'Output: final level.': 'Output: final level.',
-      'Delta: monitor what is being reduced.':
-          'Delta: monitor what is being reduced.',
-      'Low Range: lowest frequency affected.':
-          'Low Range: lowest frequency affected.',
-      'High Range: highest frequency affected.':
-          'High Range: highest frequency affected.',
+      'Delta: monitor what is being reduced.': 'Delta: monitor what is being reduced.',
+      'Low Range: lowest frequency affected.': 'Low Range: lowest frequency affected.',
+      'High Range: highest frequency affected.': 'High Range: highest frequency affected.',
       'Attack: front-edge punch.': 'Attack: front-edge punch.',
       'Sustain: tail length and body.': 'Sustain: tail length and body.',
       'Pump: movement after the hit.': 'Pump: movement after the hit.',
       'Speed: response speed.': 'Speed: response speed.',
       'Clip: catches sharp peaks.': 'Clip: catches sharp peaks.',
-      'Threshold: level where limiting starts.':
-          'Threshold: level where limiting starts.',
+      'Threshold: level where limiting starts.': 'Threshold: level where limiting starts.',
       'Release: recovery speed.': 'Release: recovery speed.',
       'Ceiling: max output level.': 'Ceiling: max output level.',
-      'Threshold: level where clipping starts.':
-          'Threshold: level where clipping starts.',
+      'Threshold: level where clipping starts.': 'Threshold: level where clipping starts.',
       'Low Gain: bass cut or boost.': 'Low Gain: bass cut or boost.',
-      'Mid Gain: body and presence cut or boost.':
-          'Mid Gain: body and presence cut or boost.',
-      'High Gain: brightness cut or boost.':
-          'High Gain: brightness cut or boost.',
+      'Mid Gain: body and presence cut or boost.': 'Mid Gain: body and presence cut or boost.',
+      'High Gain: brightness cut or boost.': 'High Gain: brightness cut or boost.',
       'Mode: texture style.': 'Mode: texture style.',
       'Tone: brightness.': 'Tone: brightness.',
       'Depth: amount of degradation.': 'Depth: amount of degradation.',
       'Spread: stereo width.': 'Spread: stereo width.',
-      'Delay Time: spacing between echoes.':
-          'Delay Time: spacing between echoes.',
+      'Delay Time: spacing between echoes.': 'Delay Time: spacing between echoes.',
       'Feedback: number of repeats.': 'Feedback: number of repeats.',
       'Frequency: harsh range to target.': 'Frequency: harsh range to target.',
-      'Threshold: level where reduction starts.':
-          'Threshold: level where reduction starts.',
+      'Threshold: level where reduction starts.': 'Threshold: level where reduction starts.',
       'Amount: reduction strength.': 'Amount: reduction strength.',
       'Drive: distortion amount.': 'Drive: distortion amount.',
       'Volume: level after distortion.': 'Volume: level after distortion.',
       'Output: level after distortion.': 'Output: level after distortion.',
       'Anger: extra bite and saturation.': 'Anger: extra bite and saturation.',
       'Offset: asymmetry and edge.': 'Offset: asymmetry and edge.',
-      'HPF Frequency: low cutoff before distortion.':
-          'HPF Frequency: low cutoff before distortion.',
-      'LPF Frequency: high cutoff after distortion.':
-          'LPF Frequency: high cutoff after distortion.',
+      'HPF Frequency: low cutoff before distortion.': 'HPF Frequency: low cutoff before distortion.',
+      'LPF Frequency: high cutoff after distortion.': 'LPF Frequency: high cutoff after distortion.',
       'Shape: distortion curve.': 'Shape: distortion curve.',
-      'Shape Tilt: tilts the distortion shape.':
-          'Shape Tilt: tilts the distortion shape.',
+      'Shape Tilt: tilts the distortion shape.': 'Shape Tilt: tilts the distortion shape.',
       'Distortion Type: clipping style.': 'Distortion Type: clipping style.',
-      'Width: wider or narrower stereo image.':
-          'Width: wider or narrower stereo image.',
+      'Width: wider or narrower stereo image.': 'Width: wider or narrower stereo image.',
       'Low Bypass: keeps bass centered.': 'Low Bypass: keeps bass centered.',
       'Mono: folds the signal to center.': 'Mono: folds the signal to center.',
       'Gain: output level.': 'Gain: output level.',
       'Width: stereo spread.': 'Width: stereo spread.',
-      'Asymmetry: left/right balance shape.':
-          'Asymmetry: left/right balance shape.',
+      'Asymmetry: left/right balance shape.': 'Asymmetry: left/right balance shape.',
       'Rotation: image angle.': 'Rotation: image angle.',
       'Shape: volume curve.': 'Shape: volume curve.',
       'Rate: movement speed.': 'Rate: movement speed.',
@@ -2168,19 +1964,16 @@ class L10n {
       'Key: target key.': 'Key: target key.',
       'Scale: allowed notes.': 'Scale: allowed notes.',
       'Correction: tuning strength.': 'Correction: tuning strength.',
-      'Retune Speed: how fast notes move.':
-          'Retune Speed: how fast notes move.',
+      'Retune Speed: how fast notes move.': 'Retune Speed: how fast notes move.',
       'Finish': 'Finish',
     },
     'ko': {
       'Casual enthusiasts': '가볍게 음악을 즐기는 분',
       'Start on mobile, tablet, or desktop.': '모바일, 태블릿, 데스크톱에서 시작하세요.',
       'Aspiring producers': '프로듀서를 꿈꾸는 분',
-      'More room to arrange, export, and finish tracks.':
-          '더 여유롭게 편곡하고, 내보내고, 트랙을 완성하세요.',
+      'More room to arrange, export, and finish tracks.': '더 여유롭게 편곡하고, 내보내고, 트랙을 완성하세요.',
       'Serious / Professional producers': '진지한 · 전문 프로듀서',
-      'Full production stack with advanced AI and more storage.':
-          '고급 AI와 넉넉한 저장 공간을 갖춘 완성형 프로덕션 환경.',
+      'Full production stack with advanced AI and more storage.': '고급 AI와 넉넉한 저장 공간을 갖춘 완성형 프로덕션 환경.',
       'Teams · High-volume pros': '팀 · 대량 작업 전문가',
       'Producer for everyone on the team.': '팀의 모든 구성원을 위한 Producer.',
       'Large businesses · studios · labels': '대기업 · 스튜디오 · 레이블',
@@ -2188,8 +1981,7 @@ class L10n {
       'Schools · Teachers · Institutions': '학교 · 교사 · 교육 기관',
       'Classroom licensing with teacher tools.': '교사용 도구를 갖춘 교실 라이선스.',
       '1 cloud project, sync across devices': '클라우드 프로젝트 1개, 기기 간 동기화',
-      '{projects} local projects, {tracks} tracks':
-          '로컬 프로젝트 {projects}개, 프로젝트당 트랙 {tracks}개',
+      '{projects} local projects, {tracks} tracks': '로컬 프로젝트 {projects}개, 프로젝트당 트랙 {tracks}개',
       'Core effects and instruments': '핵심 이펙트와 악기',
       'MP3 export': 'MP3 내보내기',
       'Light AI usage': '기본 AI 사용량',
@@ -2299,8 +2091,7 @@ class L10n {
       'Offset cannot exceed 180 seconds.': '오프셋은 180초를 초과할 수 없습니다.',
       'Start from Now': '지금부터 시작',
       'Delete track?': '트랙 삭제?',
-      'Are you sure you want to delete this audio track?':
-          '이 오디오 트랙을 삭제하시겠습니까?',
+      'Are you sure you want to delete this audio track?': '이 오디오 트랙을 삭제하시겠습니까?',
       'Cancel': '취소',
       'Something else…': '다른 요청…',
       'Describe what you want': '원하는 내용을 입력하세요',
@@ -2308,13 +2099,10 @@ class L10n {
       'Delete': '삭제',
       'Add Video Clip': '비디오 클립 추가',
       'Pro Mode Feature': '프로 모드 기능',
-      'Upgrade to Pro mode to import more than 1 video.':
-          '비디오를 1개 이상 가져오려면 프로 모드가 필요합니다.',
-      'Upgrade to Pro mode to import more than 3 audio tracks.':
-          '오디오 트랙을 3개 이상 가져오려면 프로 모드가 필요합니다.',
+      'Upgrade to Pro mode to import more than 1 video.': '비디오를 1개 이상 가져오려면 프로 모드가 필요합니다.',
+      'Upgrade to Pro mode to import more than 3 audio tracks.': '오디오 트랙을 3개 이상 가져오려면 프로 모드가 필요합니다.',
       'Delete clip?': '클립을 삭제하시겠습니까?',
-      'Are you sure you want to remove this video clip from your timeline?':
-          '타임라인에서 이 비디오 클립을 제거하시겠습니까?',
+      'Are you sure you want to remove this video clip from your timeline?': '타임라인에서 이 비디오 클립을 제거하시겠습니까?',
       'Exit project?': '프로젝트를 종료하시겠습니까?',
       'All progress will be lost.': '모든 진행 내용이 사라집니다.',
       'Confirm': '확인',
@@ -2323,8 +2111,7 @@ class L10n {
           '모든 오디오 트랙을 비디오와 자동으로 동기화합니다. 오디오 오프셋/트림이 조정될 수 있습니다.',
       'Audio Track Effects': '오디오 트랙 이펙터',
       'Exporting...': '내보내는 중...',
-      'Please don\'t close the app or lock your screen.':
-          '앱을 종료하거나 화면을 잠그지 마세요.',
+      'Please don\'t close the app or lock your screen.': '앱을 종료하거나 화면을 잠그지 마세요.',
       'Track': '트랙',
       'Row': '트랙',
       'Add Row': '트랙 추가',
@@ -2371,10 +2158,8 @@ class L10n {
       'Heavy Crunch': '헤비 크런치',
       'Applies wide reverb and subtle EQ to simulate a live concert space.':
           '라이브 콘서트 공간을 시뮬레이션하기 위해 넓은 리버브와 섬세한 EQ를 적용합니다.',
-      'Applies reverb and delay to give an echo effect.':
-          '에코 효과를 위해 리버브와 딜레이를 적용합니다.',
-      'Applies filters and soft distortion for a vintage, relaxed vibe.':
-          '빈티지하고 편안한 분위기를 위해 필터와 부드러운 디스토션을 적용합니다.',
+      'Applies reverb and delay to give an echo effect.': '에코 효과를 위해 리버브와 딜레이를 적용합니다.',
+      'Applies filters and soft distortion for a vintage, relaxed vibe.': '빈티지하고 편안한 분위기를 위해 필터와 부드러운 디스토션을 적용합니다.',
       'Crushes sound with heavy distortion.': '강한 디스토션으로 사운드를 뭉개줍니다.',
       'This will replace your current effects with ': '현재 효과가 다음으로 교체됩니다: ',
       'Add Effect': '효과 추가',
@@ -2382,25 +2167,18 @@ class L10n {
       'Parameters': '파라미터',
       'Select ': '선택 ',
       'Close': '닫기',
-      'Export failed: Output file missing or too small.':
-          '내보내기 실패: 출력 파일이 없거나 너무 작습니다.',
+      'Export failed: Output file missing or too small.': '내보내기 실패: 출력 파일이 없거나 너무 작습니다.',
       'Export failed! Check logs.': '내보내기 실패! 로그를 확인하세요.',
-      'AI Sync failed: Computed offset exceeds audio length.':
-          'AI 싱크 실패: 계산된 오프셋이 오디오 길이를 초과합니다.',
-      'AI Sync failed: Computed trim exceeds audio length.':
-          'AI 싱크 실패: 계산된 트림이 오디오 길이를 초과합니다.',
+      'AI Sync failed: Computed offset exceeds audio length.': 'AI 싱크 실패: 계산된 오프셋이 오디오 길이를 초과합니다.',
+      'AI Sync failed: Computed trim exceeds audio length.': 'AI 싱크 실패: 계산된 트림이 오디오 길이를 초과합니다.',
       'Done': '완료',
       'Load Preset': '프리셋 불러오기',
       'On Device': '기기 내',
       'Cloud Sync': '클라우드 동기화',
-      'Syncs projects to cloud storage automatically.':
-          '프로젝트를 클라우드 저장소에 자동으로 동기화합니다.',
-      'Uploads only when you choose "Sync to Cloud" in project settings.':
-          '프로젝트 설정에서 "Sync to Cloud"를 선택할 때만 업로드합니다.',
-      'Free Cloud Projects: {count} of {limit} used':
-          '무료 클라우드 프로젝트: {count}/{limit} 사용 중',
-      'Cloud projects: {count} of {limit} used':
-          '클라우드 프로젝트: {count}/{limit} 사용 중',
+      'Syncs projects to cloud storage automatically.': '프로젝트를 클라우드 저장소에 자동으로 동기화합니다.',
+      'Uploads only when you choose "Sync to Cloud" in project settings.': '프로젝트 설정에서 "Sync to Cloud"를 선택할 때만 업로드합니다.',
+      'Free Cloud Projects: {count} of {limit} used': '무료 클라우드 프로젝트: {count}/{limit} 사용 중',
+      'Cloud projects: {count} of {limit} used': '클라우드 프로젝트: {count}/{limit} 사용 중',
       'Cloud Location': '클라우드 위치',
       'Cloud Project Details': '클라우드 프로젝트 상세 정보',
       'Read-only cloud storage': '읽기 전용 클라우드 저장소',
@@ -2440,8 +2218,7 @@ class L10n {
       'Audio platform coming soon.': '오디오 플랫폼은 곧 제공됩니다.',
       'Video Projects': '비디오 프로젝트',
       'Subscription required': '구독이 필요합니다',
-      'Your current plan does not include video projects.':
-          '현재 플랜에는 비디오 프로젝트 기능이 포함되어 있지 않습니다.',
+      'Your current plan does not include video projects.': '현재 플랜에는 비디오 프로젝트 기능이 포함되어 있지 않습니다.',
       'New Project': '새 프로젝트',
       'Project limit reached': '프로젝트 한도에 도달했습니다',
       'Upgrade for more projects': '더 많은 프로젝트 사용하기',
@@ -2489,12 +2266,9 @@ class L10n {
           '이 기기에서는 프로젝트를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
       'Video projects are temporarily unavailable on this device. Please try again in a moment.':
           '이 기기에서는 비디오 프로젝트를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
-      'We couldn\'t load your projects right now. Please try again.':
-          '지금은 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
-      'We couldn\'t load your video projects right now. Please try again.':
-          '지금은 비디오 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
-      'Delete a project to create or import a new one.':
-          '새 프로젝트를 만들거나 가져오려면 프로젝트를 삭제하세요.',
+      'We couldn\'t load your projects right now. Please try again.': '지금은 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
+      'We couldn\'t load your video projects right now. Please try again.': '지금은 비디오 프로젝트를 불러올 수 없습니다. 다시 시도하세요.',
+      'Delete a project to create or import a new one.': '새 프로젝트를 만들거나 가져오려면 프로젝트를 삭제하세요.',
       'Last opened': '마지막으로 연 시간',
       'Edit': '편집',
       'Rename': '이름 변경',
@@ -2503,8 +2277,7 @@ class L10n {
       'Version History': '버전 기록',
       'Settings': '설정',
       'Local app preferences': '로컬 앱 설정',
-      'Control project version history and local app preferences.':
-          '프로젝트 버전 기록과 로컬 앱 설정을 관리하세요.',
+      'Control project version history and local app preferences.': '프로젝트 버전 기록과 로컬 앱 설정을 관리하세요.',
       'Keep lightweight local project snapshots so older saves can be restored as copies.':
           '이전 저장 상태를 복사본으로 복원할 수 있도록 가벼운 로컬 프로젝트 스냅샷을 보관합니다.',
       'Cloud sync stores only the latest project.': '클라우드 동기화는 최신 프로젝트만 저장합니다.',
@@ -2527,14 +2300,12 @@ class L10n {
       'Tap empty grid to add. Drag to move. Pull right edge to resize.':
           '빈 그리드를 눌러 노트를 추가하세요. 드래그해 이동하고 오른쪽 끝을 끌어 길이를 조절하세요.',
       'Select groups quickly': '빠르게 그룹 선택',
-      'Hold empty space and drag a box to multi-select notes.':
-          '빈 공간을 길게 누른 뒤 박스를 드래그해 여러 노트를 선택하세요.',
+      'Hold empty space and drag a box to multi-select notes.': '빈 공간을 길게 누른 뒤 박스를 드래그해 여러 노트를 선택하세요.',
       'Zoom + edit faster': '빠르게 확대하고 편집하기',
       'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
           '두 손가락으로 핀치하거나 +/- 버튼을 사용해 시간과 음높이를 확대하세요.',
       'Use the bottom tray': '하단 트레이 활용',
-      'Duplicate, delete, and adjust length/velocity for selected notes.':
-          '선택한 노트를 복제, 삭제하거나 길이와 벨로시티를 조정하세요.',
+      'Duplicate, delete, and adjust length/velocity for selected notes.': '선택한 노트를 복제, 삭제하거나 길이와 벨로시티를 조정하세요.',
       'Got it': '확인',
       'Matches the current piano roll grid.': '현재 피아노 롤 그리드와 같습니다.',
       'Apply to selected notes.': '선택한 노트에 적용합니다.',
@@ -2542,10 +2313,8 @@ class L10n {
       'Selected notes already match that grid.': '선택한 노트가 이미 해당 그리드에 맞습니다.',
       'Notes already match that grid.': '노트가 이미 해당 그리드에 맞습니다.',
       'Piano Roll Tools': '피아노 롤 도구',
-      'Recording is active. Finish the take before running edit tools.':
-          '녹음 중입니다. 편집 도구를 사용하려면 먼저 녹음을 끝내세요.',
-      'Fast cleanup tools for timing, rhythm, and pitch.':
-          '타이밍, 리듬, 피치를 빠르게 정리하는 도구입니다.',
+      'Recording is active. Finish the take before running edit tools.': '녹음 중입니다. 편집 도구를 사용하려면 먼저 녹음을 끝내세요.',
+      'Fast cleanup tools for timing, rhythm, and pitch.': '타이밍, 리듬, 피치를 빠르게 정리하는 도구입니다.',
       'Select All': '모두 선택',
       'Grab every note in the current clip.': '현재 클립의 모든 노트를 선택합니다.',
       'Quantize All Notes': '모든 노트 퀀타이즈',
@@ -2566,12 +2335,10 @@ class L10n {
       'No notes changed.': '변경된 노트가 없습니다.',
       'Octave Up': '한 옥타브 올리기',
       'Move the selected notes up by 12 semitones.': '선택한 노트를 12반음 위로 올립니다.',
-      'Selected notes are already at the top range.':
-          '선택한 노트가 이미 가장 높은 범위에 있습니다.',
+      'Selected notes are already at the top range.': '선택한 노트가 이미 가장 높은 범위에 있습니다.',
       'Octave Down': '한 옥타브 내리기',
       'Move the selected notes down by 12 semitones.': '선택한 노트를 12반음 아래로 내립니다.',
-      'Selected notes are already at the bottom range.':
-          '선택한 노트가 이미 가장 낮은 범위에 있습니다.',
+      'Selected notes are already at the bottom range.': '선택한 노트가 이미 가장 낮은 범위에 있습니다.',
       'Finish recording to use piano roll tools': '피아노 롤 도구를 사용하려면 녹음을 끝내세요',
       'Piano roll tools': '피아노 롤 도구',
       'Custom': '사용자 지정',
@@ -2629,8 +2396,7 @@ class L10n {
       'Please select your birthday.': '생년월일을 선택해주세요.',
       'Please enter your password.': '비밀번호를 입력해주세요.',
       'Please choose what you use Mixroom for.': 'Mixroom 사용 목적을 선택해주세요.',
-      'Authentication is powered by Mixroom native auth.':
-          '인증은 Mixroom 자체 인증으로 제공됩니다.',
+      'Authentication is powered by Mixroom native auth.': '인증은 Mixroom 자체 인증으로 제공됩니다.',
       'Welcome to': 'Welcome to',
       'Email or Username': '이메일 또는 사용자 ID',
       'Email': '이메일',
@@ -2641,38 +2407,32 @@ class L10n {
       'Subscription details refreshed.': '구독 정보를 새로고침했습니다.',
       'Plan activated': '요금제가 활성화되었습니다',
       'You are now on': '현재 요금제:',
-      'Your subscription is active and Mixroom has applied your new access.':
-          '구독이 활성화되었고 Mixroom에 새 이용 권한이 적용되었습니다.',
+      'Your subscription is active and Mixroom has applied your new access.': '구독이 활성화되었고 Mixroom에 새 이용 권한이 적용되었습니다.',
       'Your plan change is synced. Store-managed downgrades or billing-cycle changes may take effect at renewal.':
           '요금제 변경이 동기화되었습니다. 스토어에서 관리되는 다운그레이드 또는 결제 주기 변경은 갱신 시점에 적용될 수 있습니다.',
       'Manage plan': '요금제 관리',
       'Manage in App Store': 'App Store에서 관리',
       'Manage in Google Play': 'Google Play에서 관리',
-      'Restore request sent. Matching purchases will sync shortly.':
-          '복원 요청을 보냈습니다. 일치하는 구매 내역은 곧 동기화됩니다.',
+      'Restore request sent. Matching purchases will sync shortly.': '복원 요청을 보냈습니다. 일치하는 구매 내역은 곧 동기화됩니다.',
       'Something went wrong.': '문제가 발생했습니다.',
       'This route is not configured yet.': '아직 설정되지 않은 경로입니다.',
       'This route is invalid.': '올바르지 않은 경로입니다.',
       'Could not open your email app.': '이메일 앱을 열 수 없습니다.',
       'Support contact is not configured yet.': '지원 연락처가 아직 설정되지 않았습니다.',
-      'This store product is not configured for the current build yet.':
-          '현재 빌드에는 이 스토어 상품이 아직 설정되어 있지 않습니다.',
+      'This store product is not configured for the current build yet.': '현재 빌드에는 이 스토어 상품이 아직 설정되어 있지 않습니다.',
       'Current access': '현재 이용 권한',
       'Free': '무료',
       'Starter': '스타터',
       'Plan & Billing': '요금제 및 결제',
       'Plan': '요금제',
       'Billing': '결제',
-      'Manage your current plan and available upgrades.':
-          '현재 요금제와 사용 가능한 업그레이드를 관리합니다.',
+      'Manage your current plan and available upgrades.': '현재 요금제와 사용 가능한 업그레이드를 관리합니다.',
       'Personal plan': '개인 요금제',
       'Team access': '팀 액세스',
       'Available plans': '사용 가능한 요금제',
       'Plans are loading.': '요금제를 불러오는 중입니다.',
-      'No plans are currently available for this device.':
-          '현재 이 기기에서 사용할 수 있는 요금제가 없습니다.',
-      'Applies to your personal cloud and app upgrades':
-          '개인 클라우드와 앱 업그레이드에 적용됩니다',
+      'No plans are currently available for this device.': '현재 이 기기에서 사용할 수 있는 요금제가 없습니다.',
+      'Applies to your personal cloud and app upgrades': '개인 클라우드와 앱 업그레이드에 적용됩니다',
       'Education': '교육',
       'Enterprise': '엔터프라이즈',
       'Owner': '소유자',
@@ -2685,10 +2445,8 @@ class L10n {
       'You are a {role}': '회원님은 {role}입니다',
       '{role} access to Education seat management and Starter-level student seats':
           '{role} 권한으로 교육 좌석 관리와 Starter 수준 학생 좌석을 사용할 수 있습니다',
-      '{role} access to enterprise workspace and shared cloud storage':
-          '{role} 권한으로 엔터프라이즈 워크스페이스와 공유 클라우드 저장소에 접근합니다',
-      '{role} access to shared workspace and cloud storage':
-          '{role} 권한으로 공유 워크스페이스와 클라우드 저장소에 접근합니다',
+      '{role} access to enterprise workspace and shared cloud storage': '{role} 권한으로 엔터프라이즈 워크스페이스와 공유 클라우드 저장소에 접근합니다',
+      '{role} access to shared workspace and cloud storage': '{role} 권한으로 공유 워크스페이스와 클라우드 저장소에 접근합니다',
       'Manage on web': '웹에서 관리',
       'Contact sales': '영업팀 문의',
       'Refreshing': '새로고침 중',
@@ -2713,8 +2471,7 @@ class L10n {
       'View Dashboard': '대시보드 보기',
       'Open the teacher dashboard to invite students, review student seat usage, and monitor class activity.':
           '교사 대시보드에서 학생 초대, 학생 좌석 사용량, 수업 활동을 확인하세요.',
-      'Teacher account is not counted as a student seat':
-          '교사 계정은 학생 좌석에 포함되지 않습니다',
+      'Teacher account is not counted as a student seat': '교사 계정은 학생 좌석에 포함되지 않습니다',
       'Student seats only': '학생 좌석만',
       '{used} / {limit} student seats': '학생 좌석 {used} / {limit}',
       '{count} student seats used': '학생 좌석 {count}개 사용 중',
@@ -2776,8 +2533,7 @@ class L10n {
           '학생 좌석 사용: {used} / {limit}. 활성: {active}. 초대됨: {invited}. 사용 가능: {available}.',
       '{used} / {limit} seats': '{used} / {limit}석',
       '{count} seats used': '{count}석 사용 중',
-      'Seat and billing management opens on mixroom.ai/account.':
-          '좌석 및 결제 관리는 mixroom.ai/account에서 열립니다.',
+      'Seat and billing management opens on mixroom.ai/account.': '좌석 및 결제 관리는 mixroom.ai/account에서 열립니다.',
       'Studio checkout is available on web. Enterprise and Education plans are handled by sales.':
           'Studio 결제는 웹에서 가능하며, 엔터프라이즈 및 교육 요금제는 영업팀이 처리합니다.',
       'See pricing': '가격 보기',
@@ -2814,8 +2570,7 @@ class L10n {
       'Removed {student}.': '{student}을(를) 제거했습니다.',
       'Invite cancelled for {student}.': '{student} 초대를 취소했습니다.',
       'Student seat updated.': '학생 좌석을 업데이트했습니다.',
-      'Could not update student seat. Try again.':
-          '학생 좌석을 업데이트할 수 없습니다. 다시 시도하세요.',
+      'Could not update student seat. Try again.': '학생 좌석을 업데이트할 수 없습니다. 다시 시도하세요.',
       'Education 10 Student Seats': '교육 학생 좌석 10개',
       'Education 20 Student Seats': '교육 학생 좌석 20개',
       'Education 30 Student Seats': '교육 학생 좌석 30개',
@@ -2887,12 +2642,10 @@ class L10n {
           '나중에 비밀번호를 추가하려면 로그아웃한 뒤 로그인 화면에서 해당 이메일로 비밀번호 찾기를 사용하세요.',
       'Confirmation code': '확인 코드',
       'Confirmation code sent!': '확인 코드가 전송되었습니다!',
-      'Confirmation code will be sent to your email inbox.':
-          '확인 코드는 이메일 받은편지함으로 전송됩니다.',
+      'Confirmation code will be sent to your email inbox.': '확인 코드는 이메일 받은편지함으로 전송됩니다.',
       'Select one (optional)': '선택하세요 (선택 사항)',
       'Not set': '선택 안 함',
-      'Enter a valid password and confirmation first to send the code.':
-          '코드를 보내려면 올바른 비밀번호와 비밀번호 확인을 먼저 입력하세요.',
+      'Enter a valid password and confirmation first to send the code.': '코드를 보내려면 올바른 비밀번호와 비밀번호 확인을 먼저 입력하세요.',
       'Continue': '계속',
       'Enter password': '비밀번호 입력',
       'Forgot password?': '비밀번호를 잊으셨나요?',
@@ -2902,13 +2655,10 @@ class L10n {
       'Create Account': '계정 만들기',
       'Create account': '계정 만들기',
       'Finish your account setup': '계정 설정을 마무리하세요',
-      'Add the last few details to start using Mixroom.':
-          'Mixroom을 시작하기 위한 마지막 정보를 입력하세요.',
+      'Add the last few details to start using Mixroom.': 'Mixroom을 시작하기 위한 마지막 정보를 입력하세요.',
       'Username': '사용자 ID',
-      '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.':
-          '1~30자. 영문 소문자, 숫자, 밑줄, 하이픈을 사용할 수 있습니다.',
-      'Available after the account backend is deployed.':
-          '계정 백엔드 배포 후 사용할 수 있습니다.',
+      '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.': '1~30자. 영문 소문자, 숫자, 밑줄, 하이픈을 사용할 수 있습니다.',
+      'Available after the account backend is deployed.': '계정 백엔드 배포 후 사용할 수 있습니다.',
       'Bio': '소개',
       'Tell listeners what you make.': '어떤 음악을 만드는지 간단히 적어보세요.',
       'Tell people a bit about yourself': '자신을 간단히 소개해보세요',
@@ -2941,10 +2691,8 @@ class L10n {
       'chat_help_cannot': '지원하지 않는 작업',
       'chat_help_cannot_generate': '새 오디오, 보컬, 악기를 처음부터 생성하지 않습니다.',
       'chat_help_cannot_empty': '프롬프트 한 줄로 완성된 곡을 만들지는 않습니다.',
-      'chat_help_examples':
-          '예시: “이 레퍼런스 트랙처럼 내 프로젝트를 믹스해줘.” “이걸 MIDI로 바꿔줘.” “house drums 128 추가해줘.”',
-      'Please agree to the Terms of Service and Privacy Policy.':
-          '이용약관 및 개인정보 처리방침에 동의해주세요.',
+      'chat_help_examples': '예시: “이 레퍼런스 트랙처럼 내 프로젝트를 믹스해줘.” “이걸 MIDI로 바꿔줘.” “house drums 128 추가해줘.”',
+      'Please agree to the Terms of Service and Privacy Policy.': '이용약관 및 개인정보 처리방침에 동의해주세요.',
       'Bio must be 160 characters or fewer.': '소개는 160자 이하로 입력해주세요.',
       'At least 8 characters': '최소 8자',
       'Use at least 8 characters.': '최소 8자를 사용하세요.',
@@ -2965,21 +2713,18 @@ class L10n {
       'Email verified. You are now signed in.': '이메일 인증이 완료되었습니다. 이제 로그인되었습니다.',
       'Verification code resent.': '인증 코드를 다시 보냈습니다.',
       'Verify your email': '이메일 인증',
-      'Enter the verification code sent to your email.':
-          '이메일로 전송된 인증 코드를 입력하세요.',
+      'Enter the verification code sent to your email.': '이메일로 전송된 인증 코드를 입력하세요.',
       'Verification Code': '인증 코드',
       'Enter code': '코드 입력',
       'Resend code': '코드 다시 보내기',
       'Verifying...': '인증 중...',
       'Verify Email': '이메일 인증하기',
       'Verification code sent.': '인증 코드를 보냈습니다.',
-      'Password updated. You can sign in now.':
-          '비밀번호가 변경되었습니다. 이제 로그인할 수 있습니다.',
+      'Password updated. You can sign in now.': '비밀번호가 변경되었습니다. 이제 로그인할 수 있습니다.',
       'Reset your password': '비밀번호 재설정',
       'Enter verification code': '인증 코드 입력',
       'We will send a verification code to your email.': '이메일로 인증 코드를 보내드립니다.',
-      'Use the code from email and set a new password.':
-          '이메일로 받은 코드를 입력하고 새 비밀번호를 설정하세요.',
+      'Use the code from email and set a new password.': '이메일로 받은 코드를 입력하고 새 비밀번호를 설정하세요.',
       'New Password': '새 비밀번호',
       'Confirm New Password': '새 비밀번호 확인',
       'Send Reset Code': '재설정 코드 보내기',
@@ -2993,8 +2738,7 @@ class L10n {
       'Step {current} of {total}': '{total}단계 중 {current}단계',
       'Change': '변경',
       'Select birthday': '생년월일 선택',
-      'You must be at least {age} years old to use Mixroom.':
-          'Mixroom을 사용하려면 만 {age}세 이상이어야 합니다.',
+      'You must be at least {age} years old to use Mixroom.': 'Mixroom을 사용하려면 만 {age}세 이상이어야 합니다.',
       'Log Out': '로그아웃',
       'Delete Account': '계정 삭제',
       'Delete account?': '계정을 삭제하시겠습니까?',
@@ -3007,8 +2751,7 @@ class L10n {
       'Not provided': '미입력',
       'Save Changes': '변경사항 저장',
       'Email not verified': '이메일 미인증',
-      'Please verify your email for better account security.':
-          '계정 보안을 위해 이메일 인증을 완료해주세요.',
+      'Please verify your email for better account security.': '계정 보안을 위해 이메일 인증을 완료해주세요.',
       'Sending...': '전송 중...',
       'Resend verification email': '인증 이메일 다시 보내기',
       'Birthday': '생년월일',
@@ -3025,37 +2768,30 @@ class L10n {
       'For work': '업무용',
       'Songwriting': '작곡',
       'Mix/master practice': '믹싱/마스터링 연습',
-      'Account data sync target: Mixroom account profile.':
-          '계정 데이터 동기화 대상: Mixroom 계정 프로필.',
+      'Account data sync target: Mixroom account profile.': '계정 데이터 동기화 대상: Mixroom 계정 프로필.',
       'Feedback': '피드백',
       'Bug Report': '버그 제보',
       'Feedback for': '피드백 대상',
       'Send Feedback': '피드백 보내기',
       'Submit': '제출',
-      'Please enter your feedback or bug report first.':
-          '먼저 피드백이나 버그 제보 내용을 입력해 주세요.',
+      'Please enter your feedback or bug report first.': '먼저 피드백이나 버그 제보 내용을 입력해 주세요.',
       'Choose feedback or bug report, then describe it. You can also attach current editor context.':
           '피드백 또는 버그 제보를 선택한 뒤 내용을 작성해 주세요. 현재 편집기 상태도 함께 첨부할 수 있습니다.',
       'Choose feedback or bug report, then describe it. Account details are attached automatically.':
           '피드백 또는 버그 제보를 선택한 뒤 내용을 작성해 주세요. 계정 정보는 자동으로 함께 첨부됩니다.',
       'Thank you for your submission!': '의견을 보내주셔서 감사합니다!',
       'Thank you for the feedback!': '피드백 감사합니다!',
-      'Tell us what is working, missing, or would make this better.':
-          '잘 작동하는 점, 부족한 점, 더 좋아졌으면 하는 점을 알려주세요.',
-      'Describe the bug, what you expected, and what happened.':
-          '버그 내용과 기대한 동작, 실제로 발생한 내용을 알려주세요.',
+      'Tell us what is working, missing, or would make this better.': '잘 작동하는 점, 부족한 점, 더 좋아졌으면 하는 점을 알려주세요.',
+      'Describe the bug, what you expected, and what happened.': '버그 내용과 기대한 동작, 실제로 발생한 내용을 알려주세요.',
       '{count} characters left': '{count}자 남음',
       'Allow Mixroom to respond by email.': 'Mixroom이 이메일로 답변할 수 있도록 허용합니다.',
       'Optional. We may follow up using your account email about this submission.':
           '선택 사항입니다. 이 제출 내용과 관련해 계정 이메일로 후속 연락을 드릴 수 있습니다.',
       'Include with this report': '이 제보에 포함',
-      'Include AI chat history and project settings.':
-          'AI 채팅 기록과 프로젝트 설정을 포함합니다.',
-      'Attach recent assistant messages and current DAW settings.':
-          '최근 어시스턴트 메시지와 현재 DAW 설정을 첨부합니다.',
+      'Include AI chat history and project settings.': 'AI 채팅 기록과 프로젝트 설정을 포함합니다.',
+      'Attach recent assistant messages and current DAW settings.': '최근 어시스턴트 메시지와 현재 DAW 설정을 첨부합니다.',
       'Include a DAW screenshot.': 'DAW 스크린샷을 포함합니다.',
-      'Mixroom captures the editor view with chat closed.':
-          'Mixroom이 채팅을 닫은 상태의 편집기 화면을 캡처합니다.',
+      'Mixroom captures the editor view with chat closed.': 'Mixroom이 채팅을 닫은 상태의 편집기 화면을 캡처합니다.',
       'Video projects are coming soon.': '비디오 프로젝트는 곧 제공됩니다.',
       'No matching projects.': '일치하는 프로젝트가 없습니다.',
       'Sort by recent': '최근 순 정렬',
@@ -3088,24 +2824,20 @@ class L10n {
       'Enter current password': '현재 비밀번호 입력',
       'Password updated successfully.': '비밀번호가 성공적으로 변경되었습니다.',
       'Please enter your current password.': '현재 비밀번호를 입력하세요.',
-      'New password must be different from current password.':
-          '새 비밀번호는 현재 비밀번호와 달라야 합니다.',
+      'New password must be different from current password.': '새 비밀번호는 현재 비밀번호와 달라야 합니다.',
       'Updating...': '업데이트 중...',
       'This page shows your current sign-in method. More linking options can come later.':
           '현재 로그인 방식을 보여줍니다. 추가 연결 옵션은 추후 제공될 수 있습니다.',
       'Username, birthday, and bio require the deployed account backend before they can be saved.':
           '사용자 ID, 생년월일, 소개는 계정 백엔드 배포 후 저장할 수 있습니다.',
-      'Username, birthday, and bio save after the account backend is deployed.':
-          '사용자 ID, 생년월일, 소개는 계정 백엔드 배포 후 저장됩니다.',
-      'Manage privacy controls, legal documents, and data requests.':
-          '개인정보 설정, 법적 문서, 데이터 요청을 관리합니다.',
+      'Username, birthday, and bio save after the account backend is deployed.': '사용자 ID, 생년월일, 소개는 계정 백엔드 배포 후 저장됩니다.',
+      'Manage privacy controls, legal documents, and data requests.': '개인정보 설정, 법적 문서, 데이터 요청을 관리합니다.',
       'Tell us what is working, what is broken, or what you want to see next.':
           '잘 작동하는 점, 문제 있는 점, 다음에 보고 싶은 기능을 알려주세요.',
       'Send feedback or bug report': '피드백 또는 버그 제보 보내기',
       'Project files are stored locally.': '프로젝트 파일은 기기에 로컬로 저장됩니다.',
       'Prompt usage': '프롬프트 사용량',
-      'Extra prompt credits are used first, before daily and weekly limits.':
-          '추가 프롬프트 크레딧이 일일/주간 한도보다 먼저 사용됩니다.',
+      'Extra prompt credits are used first, before daily and weekly limits.': '추가 프롬프트 크레딧이 일일/주간 한도보다 먼저 사용됩니다.',
       'Daily and weekly prompt usage limits.': '일일 및 주간 프롬프트 사용 한도입니다.',
       'Extra prompt bank': '추가 프롬프트 뱅크',
       'left': '남음',
@@ -3124,8 +2856,7 @@ class L10n {
       'Need more AI?': 'AI가 더 필요하신가요?',
       'View Plans': '요금제 보기',
       'Clear chat history?': '채팅 기록을 지울까요?',
-      'This removes the saved project chat context and cannot be undone.':
-          '저장된 프로젝트 채팅 컨텍스트를 삭제하며 되돌릴 수 없습니다.',
+      'This removes the saved project chat context and cannot be undone.': '저장된 프로젝트 채팅 컨텍스트를 삭제하며 되돌릴 수 없습니다.',
       'Clear': '지우기',
       'Chat history cleared': '채팅 기록을 지웠습니다',
       'Project Chat': '프로젝트 채팅',
@@ -3133,8 +2864,7 @@ class L10n {
           '채팅 컨텍스트는 이 프로젝트에 저장됩니다.\n대화를 시작하면 다시 열어도 그대로 유지됩니다.',
       'This is an experimental feature in development. Output may be unexpected.':
           '이 기능은 개발 중인 실험적 기능입니다. 출력이 예상과 다를 수 있습니다.',
-      'Ask Mixroom to create, edit, or mix your project.':
-          'Mixroom에게 프로젝트 생성, 편집 또는 믹싱을 요청해 보세요.',
+      'Ask Mixroom to create, edit, or mix your project.': 'Mixroom에게 프로젝트 생성, 편집 또는 믹싱을 요청해 보세요.',
       'Copied': '복사됨',
       'Copied chat log.': '채팅 로그를 복사했습니다.',
       'Drop audio here': '여기에 오디오 놓기',
@@ -3146,15 +2876,13 @@ class L10n {
       'Show prompt limits': '프롬프트 한도 보기',
       'Extra bank': '추가 뱅크',
       'used first': '먼저 사용됨',
-      'Prompt limit reached. Tap to see reset time.':
-          '프롬프트 한도에 도달했습니다. 재설정 시간을 확인하려면 탭하세요.',
+      'Prompt limit reached. Tap to see reset time.': '프롬프트 한도에 도달했습니다. 재설정 시간을 확인하려면 탭하세요.',
       'No copied clip to paint': '붙여넣을 복사된 클립이 없습니다',
       'MIDI Clip': 'MIDI 클립',
       'Audio Clip': '오디오 클립',
       'Rename Clip': '클립 이름 변경',
       'Clip name': '클립 이름',
-      'Tempo detection is only for audio clips.':
-          '템포 감지는 오디오 클립에서만 사용할 수 있습니다.',
+      'Tempo detection is only for audio clips.': '템포 감지는 오디오 클립에서만 사용할 수 있습니다.',
       'Place clone': '복제본 배치',
       'Clear clipboard': '클립보드 지우기',
       'Clipboard cleared': '클립보드를 지웠습니다',
@@ -3192,16 +2920,31 @@ class L10n {
       'Unable to arm selected MIDI clip.': '선택한 MIDI 클립을 녹음 대기 상태로 설정할 수 없습니다.',
       'Select a track to record on first.': '먼저 녹음할 트랙을 선택하세요.',
       'Failed to start recording': '녹음을 시작하지 못했습니다',
-      'Microphone access is blocked. Open app settings to record audio.':
-          '마이크 접근이 차단되었습니다. 오디오 녹음을 위해 앱 설정을 여세요.',
-      'Microphone access is required to record audio.':
-          '오디오 녹음을 위해 마이크 접근이 필요합니다.',
+      'Microphone access is blocked. Open app settings to record audio.': '마이크 접근이 차단되었습니다. 오디오 녹음을 위해 앱 설정을 여세요.',
+      'Microphone access is required to record audio.': '오디오 녹음을 위해 마이크 접근이 필요합니다.',
       'Recording failed or no data captured.': '녹음에 실패했거나 캡처된 데이터가 없습니다.',
       'Failed to add recorded track.': '녹음된 트랙을 추가하지 못했습니다.',
       'File is unavailable.': '파일을 사용할 수 없습니다.',
       'Folder already loaded for this project.': '이 프로젝트에 이미 불러온 폴더입니다.',
       'Failed to preview sample': '샘플 미리듣기 실패',
       'Project Settings': '프로젝트 설정',
+      'Prepare compatible version': '호환 버전 준비',
+      'Preparing…': '준비 중…',
+      'Compatible version': '호환 버전',
+      'About compatible versions': '호환 버전 정보',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          '이 프로젝트는 타사 플러그인을 사용합니다. 해당 플러그인이 없는 모바일이나 다른 기기에서도 열 수 있도록 호환 버전을 준비하세요.',
+      'Your original stays editable': '원본은 계속 편집 가능',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          '편집 가능한 프로젝트와 플러그인 설정은 변경 없이 번들에 함께 유지됩니다.',
+      'Rendered audio keeps the sound': '렌더링 오디오로 사운드 유지',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          '타사 플러그인과 프리즈된 트랙을 렌더링합니다. 필요하면 렌더링된 Master 트랙도 추가합니다.',
+      'Edits stay separate': '편집 내용은 별도로 저장',
+      'Editing the compatible version creates a separate normal project.':
+          '호환 버전을 편집하면 별도의 일반 프로젝트가 생성됩니다.',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          '해당 트랙이나 마스터를 변경한 후 다시 준비하세요. 저장과 클라우드 동기화는 계속 정상 작동합니다.',
       'Project Name': '프로젝트 이름',
       'Metronome': '메트로놈',
       'Metronome Volume': '메트로놈 볼륨',
@@ -3215,17 +2958,13 @@ class L10n {
       'When stopping playback with Space, jump back to the point where playback started.':
           '스페이스바로 재생을 멈추면 재생을 시작했던 위치로 돌아갑니다.',
       'Keyboard Shortcuts': '키보드 단축키',
-      'View, remap, and reset desktop shortcuts.':
-          '데스크톱 단축키를 확인하고, 다시 지정하고, 초기화합니다.',
+      'View, remap, and reset desktop shortcuts.': '데스크톱 단축키를 확인하고, 다시 지정하고, 초기화합니다.',
       'Plugin Manager': '플러그인 관리자',
-      'Rescan, favorite, or hide desktop plugins.':
-          '데스크톱 플러그인을 다시 스캔하거나 즐겨찾기/숨김 처리합니다.',
+      'Rescan, favorite, or hide desktop plugins.': '데스크톱 플러그인을 다시 스캔하거나 즐겨찾기/숨김 처리합니다.',
       'Desktop Diagnostics': '데스크톱 진단',
-      'Check audio device, CPU, buffer, and scan state.':
-          '오디오 장치, CPU, 버퍼, 스캔 상태를 확인합니다.',
+      'Check audio device, CPU, buffer, and scan state.': '오디오 장치, CPU, 버퍼, 스캔 상태를 확인합니다.',
       'Recovery & Missing Assets': '복구 및 누락된 에셋',
-      'Review recovered backups and missing media/plugin notices.':
-          '복구된 백업과 누락된 미디어/플러그인 알림을 확인합니다.',
+      'Review recovered backups and missing media/plugin notices.': '복구된 백업과 누락된 미디어/플러그인 알림을 확인합니다.',
       'Scan': '스캔',
       'View': '보기',
       'Bluetooth headset mic': '블루투스 헤드셋 마이크',
@@ -3238,12 +2977,10 @@ class L10n {
       'Selected output device is not available.': '선택한 출력 장치를 사용할 수 없습니다.',
       'Use default mic': '기본 마이크 사용',
       'Input Channel': '입력 채널',
-      'System default (speaker / Bluetooth / audio interface)':
-          '시스템 기본값 (스피커 / 블루투스 / 오디오 인터페이스)',
+      'System default (speaker / Bluetooth / audio interface)': '시스템 기본값 (스피커 / 블루투스 / 오디오 인터페이스)',
       'Output Route': '출력 경로',
       'Refresh output route': '출력 경로 새로고침',
-      'System default (managed by macOS audio settings)':
-          '시스템 기본값 (macOS 오디오 설정에서 관리)',
+      'System default (managed by macOS audio settings)': '시스템 기본값 (macOS 오디오 설정에서 관리)',
       'Output Device': '출력 장치',
       'Refresh output device': '출력 장치 새로고침',
       'No selectable output devices': '선택 가능한 출력 장치가 없습니다',
@@ -3253,8 +2990,7 @@ class L10n {
       'is using Bluetooth output. Real-time monitoring is off by default.':
           '는 블루투스 출력을 사용 중입니다. 실시간 모니터링은 기본적으로 꺼져 있습니다.',
       'Advanced: monitor anyway': '고급기능: 실시간 모니터링 활성화',
-      'May sound choppy or unstable on Bluetooth earphones.':
-          '블루투스 이어폰에서 끊기거나 불안정하게 들릴 수 있습니다.',
+      'May sound choppy or unstable on Bluetooth earphones.': '블루투스 이어폰에서 끊기거나 불안정하게 들릴 수 있습니다.',
       'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
           '블루투스 헤드셋 마이크는 음질 저하와 지연 증가를 유발할 수 있습니다. 이 장치는 현재 녹음이 허용되어 있습니다.',
       'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -3275,10 +3011,8 @@ class L10n {
       'Detecting project BPM...': '프로젝트 BPM 감지 중...',
       'Could not detect project BPM.': '프로젝트 BPM을 감지할 수 없습니다.',
       'Project BPM detected and set to': '프로젝트 BPM을 감지하여',
-      'Add an audio clip before detecting project BPM.':
-          '프로젝트 BPM을 감지하려면 오디오 클립을 추가하세요.',
-      'Select a rhythmic audio clip to detect project BPM.':
-          '프로젝트 BPM을 감지할 리듬 오디오 클립을 선택하세요.',
+      'Add an audio clip before detecting project BPM.': '프로젝트 BPM을 감지하려면 오디오 클립을 추가하세요.',
+      'Select a rhythmic audio clip to detect project BPM.': '프로젝트 BPM을 감지할 리듬 오디오 클립을 선택하세요.',
       'Auto Detect Project BPM': '프로젝트 BPM 자동 감지',
       'Could not detect clip tempo.': '클립 템포를 감지할 수 없습니다.',
       'Change Project BPM?': '프로젝트 BPM을 변경할까요?',
@@ -3300,10 +3034,8 @@ class L10n {
       'Next redo': '다음 다시 실행',
       'steps back': '단계 뒤로',
       'steps forward': '단계 앞으로',
-      'Undo history from a previous session is not available here yet.':
-          '이전 세션의 실행 취소 기록은 아직 여기서 사용할 수 없습니다.',
-      'Redo history from a previous session is not available here yet.':
-          '이전 세션의 다시 실행 기록은 아직 여기서 사용할 수 없습니다.',
+      'Undo history from a previous session is not available here yet.': '이전 세션의 실행 취소 기록은 아직 여기서 사용할 수 없습니다.',
+      'Redo history from a previous session is not available here yet.': '이전 세션의 다시 실행 기록은 아직 여기서 사용할 수 없습니다.',
       'Add': '추가',
       'Add row': '트랙 추가',
       'Insert row above': '위에 트랙 삽입',
@@ -3317,8 +3049,7 @@ class L10n {
       'Insert instrument lane above': '위에 악기 레인 삽입',
       'Insert instrument lane below': '아래에 악기 레인 삽입',
       'Change instrument lane': '악기 레인 변경',
-      'Changed {row} instrument to {instrument}':
-          '{row}: 악기를 {instrument}로 변경했습니다',
+      'Changed {row} instrument to {instrument}': '{row}: 악기를 {instrument}로 변경했습니다',
       'Insert output row': '출력 트랙 삽입',
       'Remove row from group': '그룹에서 트랙 제거',
       'Add audio clip': '오디오 클립 추가',
@@ -3389,8 +3120,7 @@ class L10n {
       'Skipped incomplete move action.': '완료되지 않은 이동 작업을 건너뛰었습니다.',
       'Move made no changes.': '이동으로 변경된 내용이 없습니다.',
       'Stretched clip.': '클립을 스트레치했습니다.',
-      'Detected clip tempo and updated project tempo.':
-          '클립 템포를 감지하고 프로젝트 템포를 업데이트했습니다.',
+      'Detected clip tempo and updated project tempo.': '클립 템포를 감지하고 프로젝트 템포를 업데이트했습니다.',
       'Deleted clip.': '클립을 삭제했습니다.',
       'Stopped sample processing.': '샘플 처리를 중지했습니다.',
       'Copied row effects.': '트랙 이펙트를 복사했습니다.',
@@ -3403,13 +3133,10 @@ class L10n {
       'Master has no effects to clear.': '마스터에는 지울 이펙트가 없습니다.',
       'Cleared master effects.': '마스터 이펙트를 지웠습니다.',
       'Created automation clip.': '오토메이션 레인이 준비되었습니다.',
-      'Add a row before creating automation clips.':
-          '오토메이션 레인을 편집하기 전에 트랙을 추가하세요.',
-      'Select a valid row before creating automation clips.':
-          '오토메이션 레인을 편집하기 전에 올바른 트랙을 선택하세요.',
+      'Add a row before creating automation clips.': '오토메이션 레인을 편집하기 전에 트랙을 추가하세요.',
+      'Select a valid row before creating automation clips.': '오토메이션 레인을 편집하기 전에 올바른 트랙을 선택하세요.',
       'Could not resolve that automation target.': '해당 오토메이션 대상을 찾을 수 없습니다.',
-      'No automatable parameters found for this plugin.':
-          '이 플러그인에서 오토메이션 가능한 파라미터를 찾을 수 없습니다.',
+      'No automatable parameters found for this plugin.': '이 플러그인에서 오토메이션 가능한 파라미터를 찾을 수 없습니다.',
       'Could not resolve that plugin parameter.': '해당 플러그인 파라미터를 찾을 수 없습니다.',
       'Cleared automation clips.': '오토메이션 레인을 지웠습니다.',
       'Created': '생성함',
@@ -3422,8 +3149,7 @@ class L10n {
       'Cleared automation.': '오토메이션을 지웠습니다.',
       'Added automation ramp.': '오토메이션 램프를 추가했습니다.',
       'Set automation points.': '오토메이션 포인트를 설정했습니다.',
-      'MIDI notes already match that chop grid.':
-          'MIDI 노트가 이미 해당 찹 그리드와 일치합니다.',
+      'MIDI notes already match that chop grid.': 'MIDI 노트가 이미 해당 찹 그리드와 일치합니다.',
       'Could not update this MIDI clip.': '이 MIDI 클립을 업데이트할 수 없습니다.',
       'MIDI notes already match that pitch.': 'MIDI 노트가 이미 해당 피치와 일치합니다.',
       'Shifted MIDI notes': 'MIDI 노트를 이동했습니다',
@@ -3434,8 +3160,7 @@ class L10n {
       'Extended MIDI clip to': 'MIDI 클립 길이를 다음으로 늘렸습니다:',
       'Created MIDI clip from AI notes.': 'AI 노트로 MIDI 클립을 만들었습니다.',
       'Converting audio to MIDI...': '오디오를 MIDI로 변환 중...',
-      'Created MIDI clip below the source audio.':
-          '원본 오디오 아래에 MIDI 클립을 만들었습니다.',
+      'Created MIDI clip below the source audio.': '원본 오디오 아래에 MIDI 클립을 만들었습니다.',
       'Applied 1 change.': '변경 사항 1개를 적용했습니다.',
       'Applied {count} changes.': '변경 사항 {count}개를 적용했습니다.',
       'Applied 1 verified change': '검증된 변경 사항 1개 적용',
@@ -3454,8 +3179,7 @@ class L10n {
       'Disabled the metronome.': '메트로놈을 껐습니다.',
       'Enabled loop playback.': '루프 재생을 켰습니다.',
       'Disabled loop playback.': '루프 재생을 껐습니다.',
-      'Adjusted {target} gain by {value} dB.':
-          '{target} 게인을 {value} dB 조절했습니다.',
+      'Adjusted {target} gain by {value} dB.': '{target} 게인을 {value} dB 조절했습니다.',
       'Set {target} gain to {value} dB.': '{target} 게인을 {value} dB로 설정했습니다.',
       'Adjusted {target} pan by {value}.': '{target} 팬을 {value}만큼 조절했습니다.',
       'Set {target} pan to {value}.': '{target} 팬을 {value}로 설정했습니다.',
@@ -3476,41 +3200,32 @@ class L10n {
       'Collapsed the group.': '그룹을 접었습니다.',
       'Expanded the group.': '그룹을 펼쳤습니다.',
       'Moved {target} by {value} beats.': '{target}을 {value}비트 이동했습니다.',
-      'Trimmed {target} to beats {start}–{end}.':
-          '{target}을 {start}–{end}비트 범위로 트리밍했습니다.',
+      'Trimmed {target} to beats {start}–{end}.': '{target}을 {start}–{end}비트 범위로 트리밍했습니다.',
       'Split {target} at beat {value}.': '{target}을 {value}비트에서 분할했습니다.',
       'Duplicated {target} at beat {value}.': '{target}을 {value}비트에 복제했습니다.',
       'Glued the selected audio clips.': '선택한 오디오 클립을 글루했습니다.',
       'Separated vocals and instrumental.': '보컬과 반주를 분리했습니다.',
       'Converted {target} to MIDI.': '{target}을 MIDI로 변환했습니다.',
-      'Set {target} pitch to {value} semitones.':
-          '{target} 피치를 {value}반음으로 설정했습니다.',
-      'Adjusted {target} pitch by {value} semitones.':
-          '{target} 피치를 {value}반음 조절했습니다.',
-      'Set {target} length to {value} beats.':
-          '{target} 길이를 {value}비트로 설정했습니다.',
+      'Set {target} pitch to {value} semitones.': '{target} 피치를 {value}반음으로 설정했습니다.',
+      'Adjusted {target} pitch by {value} semitones.': '{target} 피치를 {value}반음 조절했습니다.',
+      'Set {target} length to {value} beats.': '{target} 길이를 {value}비트로 설정했습니다.',
       'Scaled {target} length by {value}.': '{target} 길이를 {value}배로 조절했습니다.',
-      'Set {target} source tempo to {value} BPM.':
-          '{target} 원본 템포를 {value} BPM으로 설정했습니다.',
+      'Set {target} source tempo to {value} BPM.': '{target} 원본 템포를 {value} BPM으로 설정했습니다.',
       'Updated tempo following for {target}.': '{target}의 템포 따라가기를 업데이트했습니다.',
       'Aligned {target} to the project tempo.': '{target}을 프로젝트 템포에 맞췄습니다.',
       'Set the project tempo from {target}.': '{target}을 기준으로 프로젝트 템포를 설정했습니다.',
       'Trimmed silence from {target}.': '{target}의 무음 구간을 트리밍했습니다.',
       'Aligned the first sound in {target}.': '{target}의 첫 소리를 정렬했습니다.',
-      'Transposed {target} by {value} semitones.':
-          '{target}을 {value}반음 트랜스포즈했습니다.',
-      'Created a MIDI clip with {count} notes.':
-          '노트 {count}개가 있는 MIDI 클립을 만들었습니다.',
+      'Transposed {target} by {value} semitones.': '{target}을 {value}반음 트랜스포즈했습니다.',
+      'Created a MIDI clip with {count} notes.': '노트 {count}개가 있는 MIDI 클립을 만들었습니다.',
       'Replaced notes in {target}.': '{target}의 노트를 교체했습니다.',
       'Appended notes to {target}.': '{target}에 노트를 추가했습니다.',
       'Chopped notes in {target}.': '{target}의 노트를 잘게 나눴습니다.',
-      'Added/configured {effect} on {target}.':
-          '{target}에 {effect}를 추가하고 설정했습니다.',
+      'Added/configured {effect} on {target}.': '{target}에 {effect}를 추가하고 설정했습니다.',
       'Removed an effect from {target}.': '{target}에서 이펙트를 제거했습니다.',
       'Updated effect bypass on {target}.': '{target}의 이펙트 바이패스를 업데이트했습니다.',
       'Added a gain fade on {target}.': '{target}에 게인 페이드를 추가했습니다.',
-      'Set {count} automation points on {target}.':
-          '{target}에 오토메이션 포인트 {count}개를 설정했습니다.',
+      'Set {count} automation points on {target}.': '{target}에 오토메이션 포인트 {count}개를 설정했습니다.',
       'Cleared automation on {target}.': '{target}의 오토메이션을 지웠습니다.',
       'Placed {count} library sample(s).': '라이브러리 샘플 {count}개를 배치했습니다.',
       'Replaced the sample in {target}.': '{target}의 샘플을 교체했습니다.',
@@ -3535,8 +3250,7 @@ class L10n {
       'Stem separation failed for target clips.': '대상 클립의 스템 분리에 실패했습니다.',
       'Created stems for': '스템을 생성한 클립 수:',
       'clips.': '개.',
-      'Stem separation is only available for audio clips.':
-          '스템 분리는 오디오 클립에서만 사용할 수 있습니다.',
+      'Stem separation is only available for audio clips.': '스템 분리는 오디오 클립에서만 사용할 수 있습니다.',
       'Selected clip file was not found.': '선택한 클립 파일을 찾을 수 없습니다.',
       'Splitting stems...': '스템 분리 중...',
       'Stem separation failed.': '스템 분리에 실패했습니다.',
@@ -3551,6 +3265,7 @@ class L10n {
       'Instrument': '악기',
       'All': '전체',
       'Keys': '건반',
+      'Guitars': '기타 악기',
       'Strings': '현악기',
       'Woodwinds': '목관악기',
       'Brass': '금관악기',
@@ -3607,12 +3322,9 @@ class L10n {
       'No notes are ready to render.': '렌더할 노트가 아직 없습니다.',
       'No notes are ready to preview.': '미리들을 노트가 아직 없습니다.',
       'Preparing Pitch Lab preview...': '피치 랩 미리듣기를 준비 중...',
-      'Select an audio clip first, then open Pitch Lab.':
-          '먼저 오디오 클립을 선택한 다음 피치 랩을 여세요.',
-      'Select an audio clip on a timeline row first.':
-          '먼저 타임라인 트랙의 오디오 클립을 선택하세요.',
-      'Could not extract stable notes from this clip.':
-          '이 클립에서 안정적인 노트를 추출하지 못했습니다.',
+      'Select an audio clip first, then open Pitch Lab.': '먼저 오디오 클립을 선택한 다음 피치 랩을 여세요.',
+      'Select an audio clip on a timeline row first.': '먼저 타임라인 트랙의 오디오 클립을 선택하세요.',
+      'Could not extract stable notes from this clip.': '이 클립에서 안정적인 노트를 추출하지 못했습니다.',
       'Could not analyze this clip.': '이 클립을 분석하지 못했습니다.',
       'Rendering tuned audio...': '보정된 오디오를 렌더링 중...',
       'No pitch or timing changes to render.': '렌더할 피치 또는 타이밍 변경이 없습니다.',
@@ -3630,19 +3342,16 @@ class L10n {
       'Duplicate': '복제',
       'File Browser Help': '파일 브라우저 도움말',
       'Load a folder into the browser.': '브라우저에 폴더를 불러옵니다.',
-      'Tap a folder button to switch the current folder.':
-          '폴더 버튼을 탭해 현재 폴더를 전환합니다.',
+      'Tap a folder button to switch the current folder.': '폴더 버튼을 탭해 현재 폴더를 전환합니다.',
       'Preview an audio file.': '오디오 파일을 미리 듣습니다.',
       'Hold and drag a file into the timeline.': '파일을 길게 눌러 타임라인으로 드래그합니다.',
       'Hold a folder button to remove it.': '폴더 버튼을 길게 눌러 제거합니다.',
-      'Use the bottom waveform to seek preview playback.':
-          '아래 파형에서 미리듣기 재생 위치를 이동합니다.',
+      'Use the bottom waveform to seek preview playback.': '아래 파형에서 미리듣기 재생 위치를 이동합니다.',
       'Insert at playhead': '재생 헤드 위치에 삽입',
       'Remove': '제거',
       'Add a sample folder': '샘플 폴더 추가',
       'This folder is currently unavailable.': '현재 이 폴더를 사용할 수 없습니다.',
-      'Tip: choose local folders (not cloud-only placeholders).':
-          '팁: 클라우드 전용 자리 표시자가 아닌 로컬 폴더를 선택하세요.',
+      'Tip: choose local folders (not cloud-only placeholders).': '팁: 클라우드 전용 자리 표시자가 아닌 로컬 폴더를 선택하세요.',
       'Pick folder': '폴더 선택',
       'Remove folder': '폴더 제거',
       'No files found.': '파일을 찾을 수 없습니다.',
@@ -3691,19 +3400,16 @@ class L10n {
       'MIDI clip': 'MIDI 클립',
       'Audio clip': '오디오 클립',
       'Follows project BPM.': '프로젝트 BPM을 따릅니다.',
-      'MIDI clips follow project BPM automatically.':
-          'MIDI 클립은 프로젝트 BPM을 자동으로 따릅니다.',
+      'MIDI clips follow project BPM automatically.': 'MIDI 클립은 프로젝트 BPM을 자동으로 따릅니다.',
       'No extra tempo mode is needed here.': '여기에는 추가 템포 모드가 필요하지 않습니다.',
-      'Choose how this audio clip follows project BPM':
-          '이 오디오 클립이 프로젝트 BPM을 따르는 방식을 선택합니다',
+      'Choose how this audio clip follows project BPM': '이 오디오 클립이 프로젝트 BPM을 따르는 방식을 선택합니다',
       'Reversed': '뒤집힘',
       'Reverse': '뒤집기',
       'Detect tempo': '템포 감지',
       'Split vocals': '보컬 분리',
       'Adjust To Tempo (Resample)': '템포에 맞추기 (리샘플)',
       'Stretch To Tempo (Keep Pitch)': '템포에 맞춰 스트레치 (피치 유지)',
-      'Stretch mode is shown with teal clip handles.':
-          '스트레치 모드는 청록색 클립 핸들로 표시됩니다.',
+      'Stretch mode is shown with teal clip handles.': '스트레치 모드는 청록색 클립 핸들로 표시됩니다.',
       'Detect Tempo + Set Project BPM': '템포 감지 + 프로젝트 BPM 설정',
       'Select Icon': '아이콘 선택',
       'Microphone access is turned off': '마이크 접근이 꺼져 있습니다',
@@ -3720,12 +3426,9 @@ class L10n {
           '내장 마이크 녹음을 사용하려면 접근 권한이 필요합니다. 외부 오디오 인터페이스는 사용 가능한 경우 아래에서 계속 사용할 수 있습니다.',
       'Audition folders and drag and drop': '폴더 미리듣기 및 드래그 앤 드롭',
       'Could not save preference. Please retry.': '설정을 저장할 수 없습니다. 다시 시도하세요.',
-      'Could not update telemetry preference. Please retry.':
-          '텔레메트리 설정을 업데이트할 수 없습니다. 다시 시도하세요.',
-      'Could not update marketing email preference. Please retry.':
-          '마케팅 이메일 설정을 업데이트할 수 없습니다. 다시 시도하세요.',
-      'Could not open this link on your device right now.':
-          '지금 이 기기에서 링크를 열 수 없습니다.',
+      'Could not update telemetry preference. Please retry.': '텔레메트리 설정을 업데이트할 수 없습니다. 다시 시도하세요.',
+      'Could not update marketing email preference. Please retry.': '마케팅 이메일 설정을 업데이트할 수 없습니다. 다시 시도하세요.',
+      'Could not open this link on your device right now.': '지금 이 기기에서 링크를 열 수 없습니다.',
       'Data export request': '데이터 내보내기 요청',
       'Data correction/deletion request': '데이터 정정/삭제 요청',
       'Privacy inquiry': '개인정보 문의',
@@ -3740,28 +3443,22 @@ class L10n {
       'Review legal documents, control privacy settings, and submit data-rights requests here.':
           '여기에서 법적 문서를 확인하고 개인정보 설정을 관리하며 데이터 권리 요청을 제출할 수 있습니다.',
       'Documents': '문서',
-      'How Mixroom collects, uses, and shares information.':
-          'Mixroom이 정보를 수집, 사용, 공유하는 방식입니다.',
-      'Rules for using Mixroom and user content.':
-          'Mixroom 및 사용자 콘텐츠 이용 규칙입니다.',
+      'How Mixroom collects, uses, and shares information.': 'Mixroom이 정보를 수집, 사용, 공유하는 방식입니다.',
+      'Rules for using Mixroom and user content.': 'Mixroom 및 사용자 콘텐츠 이용 규칙입니다.',
       'Subprocessors': '하위 처리업체',
       'See third-party service providers that process data on Mixroom\'s behalf.':
           'Mixroom을 대신해 데이터를 처리하는 제3자 서비스 제공업체를 확인합니다.',
       'Open-source licenses': '오픈소스 라이선스',
-      'View software licenses used by this app.':
-          '이 앱에서 사용하는 소프트웨어 라이선스를 확인합니다.',
+      'View software licenses used by this app.': '이 앱에서 사용하는 소프트웨어 라이선스를 확인합니다.',
       'Privacy Controls': '개인정보 설정',
-      'You can change these preferences at any time from this screen.':
-          '이 화면에서 언제든지 설정을 변경할 수 있습니다.',
+      'You can change these preferences at any time from this screen.': '이 화면에서 언제든지 설정을 변경할 수 있습니다.',
       'Optional analytics and diagnostics': '선택적 분석 및 진단',
       'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.':
           'Mixroom의 품질 개선과 제품 의사결정을 돕기 위해 앱 사용 이벤트와 진단 정보를 공유합니다.',
       'Personalized recommendations': '맞춤형 추천',
-      'Uses activity signals to tailor tips and suggestions.':
-          '활동 신호를 사용해 팁과 제안을 맞춤화합니다.',
+      'Uses activity signals to tailor tips and suggestions.': '활동 신호를 사용해 팁과 제안을 맞춤화합니다.',
       'Product updates and marketing email': '제품 업데이트 및 마케팅 이메일',
-      'Receive release notes, offers, and feature announcements.':
-          '릴리스 노트, 혜택, 기능 안내를 받습니다.',
+      'Receive release notes, offers, and feature announcements.': '릴리스 노트, 혜택, 기능 안내를 받습니다.',
       'Your Data Rights': '내 데이터 권리',
       'Request my data export': '내 데이터 내보내기 요청',
       'Email request for a copy of your data.': '데이터 사본을 이메일로 요청합니다.',
@@ -3775,8 +3472,7 @@ class L10n {
       'Removes your account and signs you out.': '계정을 삭제하고 로그아웃합니다.',
       'Legal details and supporting information': '법적 세부정보 및 참고 정보',
       'Last updated: {date}': '마지막 업데이트: {date}',
-      'This policy explains how Mixroom handles personal data in-app.':
-          '이 정책은 Mixroom이 앱 내 개인정보를 처리하는 방식을 설명합니다.',
+      'This policy explains how Mixroom handles personal data in-app.': '이 정책은 Mixroom이 앱 내 개인정보를 처리하는 방식을 설명합니다.',
       '1. Information We Collect': '1. 수집하는 정보',
       'We may collect account information (such as email and profile details), usage analytics, crash diagnostics, and content metadata needed to operate features.':
           '기능 운영에 필요한 계정 정보(이메일 및 프로필 세부정보 등), 사용 분석, 충돌 진단 정보, 콘텐츠 메타데이터를 수집할 수 있습니다.',
@@ -3798,8 +3494,7 @@ class L10n {
       '7. Contact': '7. 문의',
       'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.':
           '개인정보 요청은 privacy@mixroom.ai로, 지원 문의는 support@mixroom.ai로 연락하세요.',
-      'These terms govern use of Mixroom and related services.':
-          '본 약관은 Mixroom 및 관련 서비스 이용에 적용됩니다.',
+      'These terms govern use of Mixroom and related services.': '본 약관은 Mixroom 및 관련 서비스 이용에 적용됩니다.',
       '1. Acceptance': '1. 동의',
       'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.':
           '계정을 만들거나 Mixroom을 사용하면 본 약관 및 여기에서 참조하는 정책에 동의하는 것입니다.',
@@ -3848,20 +3543,16 @@ class L10n {
           'Mixroom이 서비스 제공업체를 추가하거나 제거함에 따라 이 목록은 변경될 수 있습니다. 중요한 업데이트는 앱 내 및 Mixroom 개인정보 문서에 반영됩니다.',
       'No active account.': '활성 계정이 없습니다.',
       'Type DELETE to confirm account deletion.': '계정 삭제를 확인하려면 DELETE를 입력하세요.',
-      'Enter your current password to delete this account.':
-          '이 계정을 삭제하려면 현재 비밀번호를 입력하세요.',
-      'Re-authenticate with {provider} to delete this account.':
-          '이 계정을 삭제하려면 {provider}로 다시 인증하세요.',
-      'Re-authenticate with your social provider to delete this account.':
-          '이 계정을 삭제하려면 소셜 로그인 제공업체로 다시 인증하세요.',
+      'Enter your current password to delete this account.': '이 계정을 삭제하려면 현재 비밀번호를 입력하세요.',
+      'Re-authenticate with {provider} to delete this account.': '이 계정을 삭제하려면 {provider}로 다시 인증하세요.',
+      'Re-authenticate with your social provider to delete this account.': '이 계정을 삭제하려면 소셜 로그인 제공업체로 다시 인증하세요.',
       'That re-authentication did not match your Mixroom account. Please try again.':
           '재인증한 계정이 Mixroom 계정과 일치하지 않습니다. 다시 시도하세요.',
       'Delete account': '계정 삭제',
       'This permanently removes your Mixroom account and signed-in session on this device.':
           '이 기기의 로그인 세션과 Mixroom 계정이 영구적으로 삭제됩니다.',
       'Before you continue': '계속하기 전에',
-      'Your profile, auth access, and linked account data will be removed.':
-          '프로필, 인증 접근 권한, 연결된 계정 데이터가 삭제됩니다.',
+      'Your profile, auth access, and linked account data will be removed.': '프로필, 인증 접근 권한, 연결된 계정 데이터가 삭제됩니다.',
       'Deleting your Mixroom account does not cancel App Store or Google Play billing. Cancel there first if needed.':
           'Mixroom 계정을 삭제해도 App Store 또는 Google Play 결제는 취소되지 않습니다. 필요한 경우 먼저 해당 스토어에서 취소하세요.',
       'To protect your account, Mixroom will ask you to confirm DELETE and verify this session one more time.':
@@ -3923,8 +3614,7 @@ class L10n {
       'Billing email': '결제 이메일',
       'Capture Deck': '캡처 덱',
       'Change Instrument': '악기 변경',
-      'Choose how audio should be packed into the .mixroom file.':
-          '.mixroom 파일에 오디오를 포함하는 방식을 선택하세요.',
+      'Choose how audio should be packed into the .mixroom file.': '.mixroom 파일에 오디오를 포함하는 방식을 선택하세요.',
       'Clear lane': '레인 지우기',
       'Clip source set to': '클립 소스 설정:',
       'Cloud delete failed': '클라우드 삭제 실패',
@@ -3935,6 +3625,8 @@ class L10n {
       'Cloud projects are not available.': '클라우드 프로젝트를 사용할 수 없습니다.',
       'Cloud sync failed': '클라우드 동기화 실패',
       'Cloud synced': '클라우드 동기화 완료',
+      'Not synced': '동기화되지 않음',
+      'Cloud update available': '클라우드 업데이트 있음',
       'Compliance controls': '규정 준수 제어',
       'Create sampler': '샘플러 만들기',
       'Custom AI models': '사용자 지정 AI 모델',
@@ -3954,8 +3646,7 @@ class L10n {
       'Email verified. Your account is ready.': '이메일이 확인되었습니다. 계정이 준비되었습니다.',
       'Enter 20.0 to 999.0 BPM': '20.0에서 999.0 BPM을 입력하세요',
       'Enter a valid BPM.': '유효한 BPM을 입력하세요.',
-      'Enter the code from your email and your password to finish signing in.':
-          '로그인을 완료하려면 이메일 코드와 비밀번호를 입력하세요.',
+      'Enter the code from your email and your password to finish signing in.': '로그인을 완료하려면 이메일 코드와 비밀번호를 입력하세요.',
       'Extra storage': '추가 저장 공간',
       'Fill every four steps': '4스텝마다 채우기',
       'Fill every two steps': '2스텝마다 채우기',
@@ -3969,8 +3660,7 @@ class L10n {
       'Insert Instrument Lane Below': '아래에 악기 레인 삽입',
       'Instrument Lane': '악기 레인',
       'Manage billing': '결제 관리',
-      'Media access is required to preview or open the saved export.':
-          '저장된 내보내기를 미리 보거나 열려면 미디어 접근 권한이 필요합니다.',
+      'Media access is required to preview or open the saved export.': '저장된 내보내기를 미리 보거나 열려면 미디어 접근 권한이 필요합니다.',
       'Members': '멤버',
       'Mixing…': '믹싱 중…',
       'No external plugins found': '외부 플러그인을 찾을 수 없습니다',
@@ -3978,8 +3668,7 @@ class L10n {
       'One-Button Mix': '원버튼 믹스',
       'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.':
           '실행하면 프로젝트 컨텍스트가 Mixroom과 현재 AI 제공업체로 전송됩니다. 현재 제공업체: OpenAI. 원본 오디오는 전송되지 않습니다.',
-      'One-Button Mix executed. Open chat for details.':
-          '원버튼 믹스를 실행했습니다. 자세한 내용은 채팅을 여세요.',
+      'One-Button Mix executed. Open chat for details.': '원버튼 믹스를 실행했습니다. 자세한 내용은 채팅을 여세요.',
       'Payment method': '결제 수단',
       'Premium sound libraries': '프리미엄 사운드 라이브러리',
       'Priority support': '우선 지원',
@@ -3990,6 +3679,9 @@ class L10n {
       'Project bundle format': '프로젝트 번들 형식',
       'Project is currently': '현재 프로젝트:',
       'Project synced to cloud': '프로젝트가 클라우드에 동기화되었습니다',
+      'Replace cloud version?': '클라우드 버전을 교체할까요?',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          '다른 기기 또는 계정에서 클라우드 복사본이 변경되었습니다. 이 기기의 버전으로 교체할까요?',
       'Replace sampler source': '샘플러 소스 교체',
       'Replace source': '소스 교체',
       'SYNC': '동기화',
@@ -4010,19 +3702,16 @@ class L10n {
       'Storage': '저장 공간',
       'Storage full': '저장 공간 가득 참',
       'Stretch Clip': '클립 스트레치',
-      'Stretch uses this as the clip source BPM.':
-          '스트레치는 이 값을 클립 소스 BPM으로 사용합니다.',
+      'Stretch uses this as the clip source BPM.': '스트레치는 이 값을 클립 소스 BPM으로 사용합니다.',
       'Studio tools': '스튜디오 도구',
       'Sync': '동기화',
       'Syncing to cloud…': '클라우드에 동기화 중…',
       'Tap to import demo project': '탭하여 데모 프로젝트 가져오기',
-      'Tempo detection could not lock. Enter the source BPM manually.':
-          '템포 감지가 확정되지 않았습니다. 소스 BPM을 직접 입력하세요.',
+      'Tempo detection could not lock. Enter the source BPM manually.': '템포 감지가 확정되지 않았습니다. 소스 BPM을 직접 입력하세요.',
       'Unable to open link right now.': '지금 링크를 열 수 없습니다.',
       'Unable to open the store right now.': '지금 스토어를 열 수 없습니다.',
       'Update link is not configured yet.': '업데이트 링크가 아직 설정되지 않았습니다.',
-      'Update the project title shown in your library.':
-          '라이브러리에 표시되는 프로젝트 제목을 업데이트합니다.',
+      'Update the project title shown in your library.': '라이브러리에 표시되는 프로젝트 제목을 업데이트합니다.',
       'Upload hours': '업로드 시간',
       'WAV starter samples': 'WAV 스타터 샘플',
       'Warp Pro': 'Warp Pro',
@@ -4057,8 +3746,7 @@ class L10n {
       'Time Shaper': '타임 셰이퍼',
       'Adds room or space around the sound.': '소리에 공간감을 더합니다.',
       'Evens out loud and quiet parts.': '큰 소리와 작은 소리의 차이를 고르게 만듭니다.',
-      'Reduces harsh moments without dulling everything.':
-          '전체를 답답하게 만들지 않고 거친 순간을 줄입니다.',
+      'Reduces harsh moments without dulling everything.': '전체를 답답하게 만들지 않고 거친 순간을 줄입니다.',
       'Changes the punch and tail of hits.': '타격음의 펀치와 여운을 조절합니다.',
       'Stops peaks from getting too loud.': '피크가 너무 커지지 않게 막습니다.',
       'Trims peaks for a louder, harder sound.': '피크를 잘라 더 크고 단단한 소리를 만듭니다.',
@@ -4077,8 +3765,7 @@ class L10n {
       'Moves pitch up or down.': '피치를 올리거나 내립니다.',
       'Pulls notes toward a key.': '음을 지정한 키로 끌어당깁니다.',
       'Room Size: space size.': 'Room Size: 공간 크기.',
-      'Predelay: time before the room sound starts.':
-          'Predelay: 공간음이 시작되기 전 시간.',
+      'Predelay: time before the room sound starts.': 'Predelay: 공간음이 시작되기 전 시간.',
       'Mix: dry/wet balance.': 'Mix: 원음과 이펙트음의 비율.',
       'Threshold: level where compression starts.': 'Threshold: 컴프레션이 시작되는 레벨.',
       'Ratio: compression strength.': 'Ratio: 컴프레션 강도.',
@@ -4106,8 +3793,7 @@ class L10n {
       'Ceiling: max output level.': 'Ceiling: 최대 출력 레벨.',
       'Threshold: level where clipping starts.': 'Threshold: 클리핑이 시작되는 레벨.',
       'Low Gain: bass cut or boost.': 'Low Gain: 저음 컷 또는 부스트.',
-      'Mid Gain: body and presence cut or boost.':
-          'Mid Gain: 바디감과 존재감 컷 또는 부스트.',
+      'Mid Gain: body and presence cut or boost.': 'Mid Gain: 바디감과 존재감 컷 또는 부스트.',
       'High Gain: brightness cut or boost.': 'High Gain: 밝기 컷 또는 부스트.',
       'Mode: texture style.': 'Mode: 질감 스타일.',
       'Tone: brightness.': 'Tone: 밝기.',
@@ -4123,10 +3809,8 @@ class L10n {
       'Output: level after distortion.': 'Output: 디스토션 후 레벨.',
       'Anger: extra bite and saturation.': 'Anger: 추가 질감과 새추레이션.',
       'Offset: asymmetry and edge.': 'Offset: 비대칭감과 엣지.',
-      'HPF Frequency: low cutoff before distortion.':
-          'HPF Frequency: 디스토션 전 저역 컷오프.',
-      'LPF Frequency: high cutoff after distortion.':
-          'LPF Frequency: 디스토션 후 고역 컷오프.',
+      'HPF Frequency: low cutoff before distortion.': 'HPF Frequency: 디스토션 전 저역 컷오프.',
+      'LPF Frequency: high cutoff after distortion.': 'LPF Frequency: 디스토션 후 고역 컷오프.',
       'Shape: distortion curve.': 'Shape: 디스토션 커브.',
       'Shape Tilt: tilts the distortion shape.': 'Shape Tilt: 디스토션 형태 기울기.',
       'Distortion Type: clipping style.': 'Distortion Type: 클리핑 스타일.',
@@ -4155,13 +3839,15 @@ class L10n {
       'Finish': '완료',
     },
     'zh': {
+      'Replace cloud version?': '替换云端版本？',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          '云端副本已在其他设备或账户上更改。要用此设备上的版本替换它吗？',
       'Casual enthusiasts': '轻度音乐爱好者',
       'Start on mobile, tablet, or desktop.': '从手机、平板或桌面端开始。',
       'Aspiring producers': '进阶制作人',
       'More room to arrange, export, and finish tracks.': '获得更多空间来编曲、导出并完成作品。',
       'Serious / Professional producers': '专业制作人',
-      'Full production stack with advanced AI and more storage.':
-          '完整制作工具链，配备高级 AI 和更多存储空间。',
+      'Full production stack with advanced AI and more storage.': '完整制作工具链，配备高级 AI 和更多存储空间。',
       'Teams · High-volume pros': '团队 · 高产专业人士',
       'Producer for everyone on the team.': '为团队中的每个人提供 Producer。',
       'Large businesses · studios · labels': '大型企业 · 工作室 · 唱片公司',
@@ -4169,8 +3855,7 @@ class L10n {
       'Schools · Teachers · Institutions': '学校 · 教师 · 教育机构',
       'Classroom licensing with teacher tools.': '包含教师工具的课堂授权。',
       '1 cloud project, sync across devices': '1 个云端项目，可跨设备同步',
-      '{projects} local projects, {tracks} tracks':
-          '{projects} 个本地项目，每个 {tracks} 条轨道',
+      '{projects} local projects, {tracks} tracks': '{projects} 个本地项目，每个 {tracks} 条轨道',
       'Core effects and instruments': '核心效果器和乐器',
       'MP3 export': 'MP3 导出',
       'Light AI usage': '轻量 AI 使用量',
@@ -4261,10 +3946,8 @@ class L10n {
       'Version History': '版本历史',
       'Settings': '设置',
       'Local app preferences': '本地应用偏好',
-      'Control project version history and local app preferences.':
-          '管理项目版本历史和本地应用偏好。',
-      'Keep lightweight local project snapshots so older saves can be restored as copies.':
-          '保留轻量本地项目快照，以便将旧保存恢复为副本。',
+      'Control project version history and local app preferences.': '管理项目版本历史和本地应用偏好。',
+      'Keep lightweight local project snapshots so older saves can be restored as copies.': '保留轻量本地项目快照，以便将旧保存恢复为副本。',
       'Cloud sync stores only the latest project.': '云同步只保存最新项目。',
       'Current': '当前',
       'Current project': '当前项目',
@@ -4279,8 +3962,7 @@ class L10n {
       'Project duplicated': '项目已复制',
       'Plan activated': '方案已启用',
       'You are now on': '你现在使用的是',
-      'Your subscription is active and Mixroom has applied your new access.':
-          '你的订阅已生效，Mixroom 已应用新的访问权限。',
+      'Your subscription is active and Mixroom has applied your new access.': '你的订阅已生效，Mixroom 已应用新的访问权限。',
       'Your plan change is synced. Store-managed downgrades or billing-cycle changes may take effect at renewal.':
           '你的方案变更已同步。由应用商店管理的降级或计费周期变更可能会在续订时生效。',
       'Manage plan': '管理方案',
@@ -4333,30 +4015,23 @@ class L10n {
           '请选择反馈或错误报告，然后描述内容。账户信息会自动附加。',
       'Thank you for your submission!': '感谢你的提交！',
       'Thank you for the feedback!': '感谢你的反馈！',
-      'Tell us what is working, missing, or would make this better.':
-          '请告诉我们哪些功能好用、缺少什么，或者怎样会更好。',
-      'Describe the bug, what you expected, and what happened.':
-          '请描述错误、你期望的结果以及实际发生的情况。',
+      'Tell us what is working, missing, or would make this better.': '请告诉我们哪些功能好用、缺少什么，或者怎样会更好。',
+      'Describe the bug, what you expected, and what happened.': '请描述错误、你期望的结果以及实际发生的情况。',
       '{count} characters left': '还可输入 {count} 个字符',
       'Allow Mixroom to respond by email.': '允许 Mixroom 通过电子邮件回复。',
-      'Optional. We may follow up using your account email about this submission.':
-          '可选。我们可能会使用你的账户邮箱跟进此次提交。',
+      'Optional. We may follow up using your account email about this submission.': '可选。我们可能会使用你的账户邮箱跟进此次提交。',
       'Include with this report': '随此报告包含',
       'Include AI chat history and project settings.': '包含 AI 聊天记录和项目设置。',
-      'Attach recent assistant messages and current DAW settings.':
-          '附加最近的助手消息和当前 DAW 设置。',
+      'Attach recent assistant messages and current DAW settings.': '附加最近的助手消息和当前 DAW 设置。',
       'Include a DAW screenshot.': '包含 DAW 截图。',
-      'Mixroom captures the editor view with chat closed.':
-          'Mixroom 会在聊天关闭时捕获编辑器视图。',
+      'Mixroom captures the editor view with chat closed.': 'Mixroom 会在聊天关闭时捕获编辑器视图。',
       'Delete': '删除',
       'Add Video Clip': '添加视频片段',
       'Pro Mode Feature': '专业模式功能',
       'Upgrade to Pro mode to import more than 1 video.': '升级到专业模式以导入超过1个视频。',
-      'Upgrade to Pro mode to import more than 3 audio tracks.':
-          '升级到专业模式以导入超过3条音轨。',
+      'Upgrade to Pro mode to import more than 3 audio tracks.': '升级到专业模式以导入超过3条音轨。',
       'Delete clip?': '删除片段？',
-      'Are you sure you want to remove this video clip from your timeline?':
-          '确定要从时间轴中移除此视频片段吗？',
+      'Are you sure you want to remove this video clip from your timeline?': '确定要从时间轴中移除此视频片段吗？',
       'Exit project?': '退出项目？',
       'All progress will be lost.': '所有进度将丢失。',
       'Confirm': '确认',
@@ -4381,11 +4056,9 @@ class L10n {
       'Echoes': '回声',
       'LoFi Effect': 'LoFi 效果',
       'Heavy Crunch': '重度失真',
-      'Applies wide reverb and subtle EQ to simulate a live concert space.':
-          '应用宽广混响和细微均衡，模拟现场音乐会空间。',
+      'Applies wide reverb and subtle EQ to simulate a live concert space.': '应用宽广混响和细微均衡，模拟现场音乐会空间。',
       'Applies reverb and delay to give an echo effect.': '应用混响和延迟以产生回声效果。',
-      'Applies filters and soft distortion for a vintage, relaxed vibe.':
-          '应用滤波和轻微失真，营造复古、松弛的氛围。',
+      'Applies filters and soft distortion for a vintage, relaxed vibe.': '应用滤波和轻微失真，营造复古、松弛的氛围。',
       'Crushes sound with heavy distortion.': '使用强烈失真压碎声音。',
       'This will replace your current effects with ': '这将把您当前的效果替换为 ',
       'Add Effect': '添加效果',
@@ -4415,10 +4088,8 @@ class L10n {
       'highest': '最高质量',
       'smaller file': '较小文件',
       'Start export': '开始导出',
-      'AI Sync failed: Computed offset exceeds audio length.':
-          'AI 同步失败：计算的偏移超过音频长度。',
-      'AI Sync failed: Computed trim exceeds audio length.':
-          'AI 同步失败：计算的裁剪超过音频长度。',
+      'AI Sync failed: Computed offset exceeds audio length.': 'AI 同步失败：计算的偏移超过音频长度。',
+      'AI Sync failed: Computed trim exceeds audio length.': 'AI 同步失败：计算的裁剪超过音频长度。',
       'Done': '完成',
       'Undo History': '撤销历史',
       'Redo History': '重做历史',
@@ -4428,10 +4099,8 @@ class L10n {
       'Next redo': '下一次重做',
       'steps back': '步后退',
       'steps forward': '步前进',
-      'Undo history from a previous session is not available here yet.':
-          '上一个会话的撤销历史暂时还不能在这里使用。',
-      'Redo history from a previous session is not available here yet.':
-          '上一个会话的重做历史暂时还不能在这里使用。',
+      'Undo history from a previous session is not available here yet.': '上一个会话的撤销历史暂时还不能在这里使用。',
+      'Redo history from a previous session is not available here yet.': '上一个会话的重做历史暂时还不能在这里使用。',
       'Add': '添加',
       'Add row': '添加轨道',
       'Insert row above': '在上方插入轨道',
@@ -4508,20 +4177,15 @@ class L10n {
       'On Device': '在设备上',
       'Cloud Sync': '云同步',
       'Syncs projects to cloud storage automatically.': '自动将项目同步到云存储。',
-      'Uploads only when you choose "Sync to Cloud" in project settings.':
-          '仅在项目设置中选择“Sync to Cloud”时上传。',
-      'Free Cloud Projects: {count} of {limit} used':
-          '免费云项目：已使用 {count}/{limit}',
+      'Uploads only when you choose "Sync to Cloud" in project settings.': '仅在项目设置中选择“Sync to Cloud”时上传。',
+      'Free Cloud Projects: {count} of {limit} used': '免费云项目：已使用 {count}/{limit}',
       'Cloud projects: {count} of {limit} used': '云项目：已使用 {count}/{limit}',
       'Cloud Location': '云位置',
       'Cloud Project Details': '云项目详情',
       'Read-only cloud storage': '只读云存储',
-      'This cloud location is read-only. Renew or unlock it to sync changes.':
-          '此云位置为只读。请续订或解锁后再同步更改。',
-      'This cloud project is read-only. Renew or unlock it to sync changes.':
-          '此云项目为只读。请续订或解锁后再同步更改。',
-      'This cloud project is read-only. Renew or unlock it to make changes.':
-          '此云项目为只读。请续订或解锁后再进行更改。',
+      'This cloud location is read-only. Renew or unlock it to sync changes.': '此云位置为只读。请续订或解锁后再同步更改。',
+      'This cloud project is read-only. Renew or unlock it to sync changes.': '此云项目为只读。请续订或解锁后再同步更改。',
+      'This cloud project is read-only. Renew or unlock it to make changes.': '此云项目为只读。请续订或解锁后再进行更改。',
       'View Details': '查看详情',
       'Workspace': '工作区',
       'Status': '状态',
@@ -4542,20 +4206,16 @@ class L10n {
       'Upgrade to use {name}': '升级以使用{name}',
       'Upgrade for more plugins': '升级以使用更多插件',
       'Upgrade for more instruments': '升级以使用更多乐器',
-      'Additional Mixroom plugins are available on Starter and higher plans.':
-          '更多 Mixroom 插件可在 Starter 及更高套餐中使用。',
-      'Additional Mixroom presets are available on Starter and higher plans.':
-          '更多 Mixroom 预设可在 Starter 及更高套餐中使用。',
-      'Additional Mixroom instruments are available on Starter and higher plans.':
-          '更多 Mixroom 乐器可在 Starter 及更高套餐中使用。',
+      'Additional Mixroom plugins are available on Starter and higher plans.': '更多 Mixroom 插件可在 Starter 及更高套餐中使用。',
+      'Additional Mixroom presets are available on Starter and higher plans.': '更多 Mixroom 预设可在 Starter 及更高套餐中使用。',
+      'Additional Mixroom instruments are available on Starter and higher plans.': '更多 Mixroom 乐器可在 Starter 及更高套餐中使用。',
       'Not now': '暂不',
       'View plans': '查看套餐',
       'Upgrade for more projects': '升级以使用更多项目',
       'Free includes 10 local projects. Export or delete one, or upgrade for more.':
           '免费套餐包含 10 个本地项目。请导出或删除一个项目，或升级以使用更多项目。',
       'Upgrade for more tracks': '升级以添加更多轨道',
-      'Free includes 5 tracks per project. Upgrade to add more.':
-          '免费套餐每个项目最多包含 5 条轨道。升级即可添加更多轨道。',
+      'Free includes 5 tracks per project. Upgrade to add more.': '免费套餐每个项目最多包含 5 条轨道。升级即可添加更多轨道。',
       'Upgrade to use this plugin': '升级以使用此插件',
       'All plugins and external plugin hosting are available on Starter and higher plans.':
           '所有插件和外部插件托管均可在 Starter 及更高套餐中使用。',
@@ -4627,8 +4287,7 @@ class L10n {
       'Select a track to record on first.': '请先选择要录制的轨道。',
       'Failed to start recording': '无法开始录制',
       'Allow access': '允许访问',
-      'Microphone access is blocked. Open app settings to record audio.':
-          '麦克风权限被阻止。请打开应用设置以录制音频。',
+      'Microphone access is blocked. Open app settings to record audio.': '麦克风权限被阻止。请打开应用设置以录制音频。',
       'Microphone access is required to record audio.': '录制音频需要麦克风权限。',
       'Microphone access is turned off': '麦克风访问已关闭',
       'No input devices available': '没有可用的输入设备',
@@ -4642,6 +4301,23 @@ class L10n {
       'Folder already loaded for this project.': '该项目已加载此文件夹。',
       'Failed to preview sample': '样本预听失败',
       'Project Settings': '项目设置',
+      'Prepare compatible version': '准备兼容版本',
+      'Preparing…': '准备中…',
+      'Compatible version': '兼容版本',
+      'About compatible versions': '关于兼容版本',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          '此项目使用了第三方插件。请准备兼容版本，让没有这些插件的手机或其他设备也能打开项目。',
+      'Your original stays editable': '原项目仍可编辑',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          '可编辑项目及其插件设置会保持不变，并一起保存在项目包中。',
+      'Rendered audio keeps the sound': '渲染音频保留声音效果',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          '它会处理第三方插件和冻结轨道，并在需要时添加渲染后的 Master 轨道。',
+      'Edits stay separate': '编辑内容单独保存',
+      'Editing the compatible version creates a separate normal project.':
+          '编辑兼容版本会创建一个单独的普通项目。',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          '更改相关轨道或主控后请重新准备。保存和云同步仍会正常进行。',
       'Project Name': '项目名称',
       'Metronome': '节拍器',
       'Metronome Volume': '节拍器音量',
@@ -4652,18 +4328,15 @@ class L10n {
       'Show Producer Capture UI': '显示制作人采集界面',
       'Use Computer Keyboard as MIDI Input': '将电脑键盘用作 MIDI 输入',
       'Spacebar Stop Returns to Start': '空格停止时返回起点',
-      'When stopping playback with Space, jump back to the point where playback started.':
-          '用空格停止播放时，跳回播放开始的位置。',
+      'When stopping playback with Space, jump back to the point where playback started.': '用空格停止播放时，跳回播放开始的位置。',
       'Keyboard Shortcuts': '键盘快捷键',
       'View, remap, and reset desktop shortcuts.': '查看、重新映射和重置桌面快捷键。',
       'Plugin Manager': '插件管理器',
       'Rescan, favorite, or hide desktop plugins.': '重新扫描、收藏或隐藏桌面插件。',
       'Desktop Diagnostics': '桌面诊断',
-      'Check audio device, CPU, buffer, and scan state.':
-          '检查音频设备、CPU、缓冲区和扫描状态。',
+      'Check audio device, CPU, buffer, and scan state.': '检查音频设备、CPU、缓冲区和扫描状态。',
       'Recovery & Missing Assets': '恢复与缺失资源',
-      'Review recovered backups and missing media/plugin notices.':
-          '查看已恢复的备份以及缺失媒体/插件通知。',
+      'Review recovered backups and missing media/plugin notices.': '查看已恢复的备份以及缺失媒体/插件通知。',
       'Scan': '扫描',
       'View': '查看',
       'Bluetooth headset mic': '蓝牙耳机麦克风',
@@ -4678,23 +4351,18 @@ class L10n {
       'Input Device': '输入设备',
       'Refresh audio devices': '刷新音频设备',
       'Input Channel': '输入通道',
-      'System default (speaker / Bluetooth / audio interface)':
-          '系统默认（扬声器 / 蓝牙 / 音频接口）',
+      'System default (speaker / Bluetooth / audio interface)': '系统默认（扬声器 / 蓝牙 / 音频接口）',
       'Output Route': '输出路由',
       'Refresh output route': '刷新输出路由',
-      'System default (managed by macOS audio settings)':
-          '系统默认（由 macOS 音频设置管理）',
+      'System default (managed by macOS audio settings)': '系统默认（由 macOS 音频设置管理）',
       'Output Device': '输出设备',
       'Refresh output device': '刷新输出设备',
       'No selectable output devices': '没有可选择的输出设备',
       'Bluetooth recording policy': '蓝牙录音策略',
-      'Bluetooth playback and recording are supported. Real-time monitoring is off by default.':
-          '支持蓝牙播放和录音。实时监听默认关闭。',
-      'is using Bluetooth output. Real-time monitoring is off by default.':
-          '正在使用蓝牙输出。实时监听默认关闭。',
+      'Bluetooth playback and recording are supported. Real-time monitoring is off by default.': '支持蓝牙播放和录音。实时监听默认关闭。',
+      'is using Bluetooth output. Real-time monitoring is off by default.': '正在使用蓝牙输出。实时监听默认关闭。',
       'Advanced: monitor anyway': '高级：仍然监听',
-      'May sound choppy or unstable on Bluetooth earphones.':
-          '在蓝牙耳机上可能出现卡顿或不稳定。',
+      'May sound choppy or unstable on Bluetooth earphones.': '在蓝牙耳机上可能出现卡顿或不稳定。',
       'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
           '蓝牙耳机麦克风可能降低音质并增加延迟。该设备当前允许录音。',
       'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -4730,6 +4398,7 @@ class L10n {
       'Instrument': '乐器',
       'All': '全部',
       'Keys': '键盘',
+      'Guitars': '吉他',
       'Strings': '弦乐',
       'Woodwinds': '木管',
       'Brass': '铜管',
@@ -4820,8 +4489,7 @@ class L10n {
       'Remove': '移除',
       'Add a sample folder': '添加采样文件夹',
       'This folder is currently unavailable.': '当前无法使用此文件夹。',
-      'Tip: choose local folders (not cloud-only placeholders).':
-          '提示：请选择本地文件夹（不要选择仅云端占位文件夹）。',
+      'Tip: choose local folders (not cloud-only placeholders).': '提示：请选择本地文件夹（不要选择仅云端占位文件夹）。',
       'Pick folder': '选择文件夹',
       'Remove folder': '移除文件夹',
       'No files found.': '未找到文件。',
@@ -5011,10 +4679,8 @@ class L10n {
       'Output: level after distortion.': 'Output: 失真后的电平。',
       'Anger: extra bite and saturation.': 'Anger: 额外的咬合感和饱和。',
       'Offset: asymmetry and edge.': 'Offset: 不对称感和边缘感。',
-      'HPF Frequency: low cutoff before distortion.':
-          'HPF Frequency: 失真前的低频截止。',
-      'LPF Frequency: high cutoff after distortion.':
-          'LPF Frequency: 失真后的高频截止。',
+      'HPF Frequency: low cutoff before distortion.': 'HPF Frequency: 失真前的低频截止。',
+      'LPF Frequency: high cutoff after distortion.': 'LPF Frequency: 失真后的高频截止。',
       'Shape: distortion curve.': 'Shape: 失真曲线。',
       'Shape Tilt: tilts the distortion shape.': 'Shape Tilt: 倾斜失真形状。',
       'Distortion Type: clipping style.': 'Distortion Type: 削波样式。',
@@ -5045,11 +4711,9 @@ class L10n {
       'Casual enthusiasts': '気軽に楽しむ音楽好き',
       'Start on mobile, tablet, or desktop.': 'モバイル、タブレット、デスクトップで始められます。',
       'Aspiring producers': 'これからのプロデューサー',
-      'More room to arrange, export, and finish tracks.':
-          'アレンジ、書き出し、仕上げにもっと余裕を。',
+      'More room to arrange, export, and finish tracks.': 'アレンジ、書き出し、仕上げにもっと余裕を。',
       'Serious / Professional producers': '本格派・プロのプロデューサー',
-      'Full production stack with advanced AI and more storage.':
-          '高度な AI と大容量ストレージを備えた完全な制作環境。',
+      'Full production stack with advanced AI and more storage.': '高度な AI と大容量ストレージを備えた完全な制作環境。',
       'Teams · High-volume pros': 'チーム・大量制作のプロ',
       'Producer for everyone on the team.': 'チームの全員に Producer を。',
       'Large businesses · studios · labels': '大企業・スタジオ・レーベル',
@@ -5057,8 +4721,7 @@ class L10n {
       'Schools · Teachers · Institutions': '学校・教員・教育機関',
       'Classroom licensing with teacher tools.': '教員向けツール付きの教室ライセンス。',
       '1 cloud project, sync across devices': 'クラウドプロジェクト 1 件、デバイス間で同期',
-      '{projects} local projects, {tracks} tracks':
-          'ローカルプロジェクト {projects} 件、各 {tracks} トラック',
+      '{projects} local projects, {tracks} tracks': 'ローカルプロジェクト {projects} 件、各 {tracks} トラック',
       'Core effects and instruments': '基本エフェクトと楽器',
       'MP3 export': 'MP3 書き出し',
       'Light AI usage': 'ライト AI 利用',
@@ -5085,8 +4748,7 @@ class L10n {
       'High-volume AI for every seat': '全席で大容量 AI を利用',
       'High-volume advanced AI usage': '大容量の高度な AI 利用',
       'Standard AI usage': '標準 AI 利用',
-      'Another AI change is still being applied. Please wait for it to finish.':
-          '別のAI変更を適用中です。完了するまでお待ちください。',
+      'Another AI change is still being applied. Please wait for it to finish.': '別のAI変更を適用中です。完了するまでお待ちください。',
       'hello': 'こんにちは',
       'share': '共有',
       'Editor': 'エディター',
@@ -5168,8 +4830,7 @@ class L10n {
       'Offset cannot exceed 180 seconds.': 'オフセットは180秒を超えることはできません。',
       'Start from Now': '今から開始',
       'Delete track?': 'トラックを削除?',
-      'Are you sure you want to delete this audio track?':
-          'このオーディオトラックを削除してもよろしいですか？',
+      'Are you sure you want to delete this audio track?': 'このオーディオトラックを削除してもよろしいですか？',
       'Cancel': 'キャンセル',
       'Something else…': 'その他の内容…',
       'Describe what you want': '希望する内容を入力してください',
@@ -5177,13 +4838,10 @@ class L10n {
       'Delete': '削除',
       'Add Video Clip': '動画クリップを追加',
       'Pro Mode Feature': 'プロモードの機能',
-      'Upgrade to Pro mode to import more than 1 video.':
-          '1本以上の動画を取り込むにはプロモードにアップグレードしてください。',
-      'Upgrade to Pro mode to import more than 3 audio tracks.':
-          '3本以上のオーディオトラックを取り込むにはプロモードにアップグレードしてください。',
+      'Upgrade to Pro mode to import more than 1 video.': '1本以上の動画を取り込むにはプロモードにアップグレードしてください。',
+      'Upgrade to Pro mode to import more than 3 audio tracks.': '3本以上のオーディオトラックを取り込むにはプロモードにアップグレードしてください。',
       'Delete clip?': 'クリップを削除しますか？',
-      'Are you sure you want to remove this video clip from your timeline?':
-          'タイムラインからこの動画クリップを削除してもよろしいですか？',
+      'Are you sure you want to remove this video clip from your timeline?': 'タイムラインからこの動画クリップを削除してもよろしいですか？',
       'Exit project?': 'プロジェクトを終了しますか？',
       'All progress will be lost.': '進行状況はすべて失われます。',
       'Confirm': '確認',
@@ -5192,8 +4850,7 @@ class L10n {
           'すべてのオーディオトラックを動画に自動同期します。オーディオのオフセット/トリムが調整される場合があります。',
       'Audio Track Effects': 'オーディオトラックのエフェクト',
       'Exporting...': '書き出し中...',
-      'Please don\'t close the app or lock your screen.':
-          'アプリを閉じたり画面をロックしないでください。',
+      'Please don\'t close the app or lock your screen.': 'アプリを閉じたり画面をロックしないでください。',
       'Track': 'トラック',
       'Volume': 'ボリューム',
       'Automation': 'オートメーション',
@@ -5216,39 +4873,28 @@ class L10n {
       'Echoes': 'エコー',
       'LoFi Effect': 'LoFi エフェクト',
       'Heavy Crunch': 'ヘビークランチ',
-      'Applies wide reverb and subtle EQ to simulate a live concert space.':
-          '広がりのあるリバーブと繊細なEQでライブ会場の空間を再現します。',
-      'Applies reverb and delay to give an echo effect.':
-          'リバーブとディレイを適用してエコー効果を与えます。',
-      'Applies filters and soft distortion for a vintage, relaxed vibe.':
-          'フィルターと穏やかな歪みで、ヴィンテージでリラックスした雰囲気を演出します。',
+      'Applies wide reverb and subtle EQ to simulate a live concert space.': '広がりのあるリバーブと繊細なEQでライブ会場の空間を再現します。',
+      'Applies reverb and delay to give an echo effect.': 'リバーブとディレイを適用してエコー効果を与えます。',
+      'Applies filters and soft distortion for a vintage, relaxed vibe.': 'フィルターと穏やかな歪みで、ヴィンテージでリラックスした雰囲気を演出します。',
       'Crushes sound with heavy distortion.': '強いディストーションでサウンドを潰します。',
-      'This will replace your current effects with ':
-          '現在のエフェクトは次の内容に置き換えられます： ',
+      'This will replace your current effects with ': '現在のエフェクトは次の内容に置き換えられます： ',
       'Add Effect': 'エフェクトを追加',
       'Delete Effect?': 'エフェクトを削除しますか？',
       'Parameters': 'パラメーター',
       'Select ': '選択 ',
       'Close': '閉じる',
-      'Export failed: Output file missing or too small.':
-          '書き出し失敗：出力ファイルが見つからないか小さすぎます。',
+      'Export failed: Output file missing or too small.': '書き出し失敗：出力ファイルが見つからないか小さすぎます。',
       'Export failed! Check logs.': '書き出し失敗！ログを確認してください。',
-      'AI Sync failed: Computed offset exceeds audio length.':
-          'AI同期に失敗:計算されたオフセットが音声の長さを超えています。',
-      'AI Sync failed: Computed trim exceeds audio length.':
-          'AI同期に失敗:計算されたトリムが音声の長さを超えています。',
+      'AI Sync failed: Computed offset exceeds audio length.': 'AI同期に失敗:計算されたオフセットが音声の長さを超えています。',
+      'AI Sync failed: Computed trim exceeds audio length.': 'AI同期に失敗:計算されたトリムが音声の長さを超えています。',
       'Done': '完了',
       'Load Preset': 'プリセットを読み込む',
       'On Device': 'このデバイス内',
       'Cloud Sync': 'クラウド同期',
-      'Syncs projects to cloud storage automatically.':
-          'プロジェクトをクラウドストレージに自動で同期します。',
-      'Uploads only when you choose "Sync to Cloud" in project settings.':
-          'プロジェクト設定で「Sync to Cloud」を選んだときだけアップロードします。',
-      'Free Cloud Projects: {count} of {limit} used':
-          '無料クラウドプロジェクト: {count}/{limit} 使用中',
-      'Cloud projects: {count} of {limit} used':
-          'クラウドプロジェクト: {count}/{limit} 使用中',
+      'Syncs projects to cloud storage automatically.': 'プロジェクトをクラウドストレージに自動で同期します。',
+      'Uploads only when you choose "Sync to Cloud" in project settings.': 'プロジェクト設定で「Sync to Cloud」を選んだときだけアップロードします。',
+      'Free Cloud Projects: {count} of {limit} used': '無料クラウドプロジェクト: {count}/{limit} 使用中',
+      'Cloud projects: {count} of {limit} used': 'クラウドプロジェクト: {count}/{limit} 使用中',
       'Cloud Location': 'クラウドの場所',
       'Cloud Project Details': 'クラウドプロジェクトの詳細',
       'Read-only cloud storage': '読み取り専用クラウドストレージ',
@@ -5288,16 +4934,14 @@ class L10n {
       'Audio platform coming soon.': 'オーディオプラットフォームは近日公開です。',
       'Video Projects': 'ビデオプロジェクト',
       'Subscription required': 'サブスクリプションが必要です',
-      'Your current plan does not include video projects.':
-          '現在のプランにはビデオプロジェクト機能が含まれていません。',
+      'Your current plan does not include video projects.': '現在のプランにはビデオプロジェクト機能が含まれていません。',
       'New Project': '新規プロジェクト',
       'Project limit reached': 'プロジェクト上限に達しました',
       'Upgrade for more projects': 'プロジェクト数を増やす',
       'Free includes 10 local projects. Export or delete one, or upgrade for more.':
           '無料プランではローカルプロジェクトは10個までです。1つを書き出すか削除するか、アップグレードしてください。',
       'Upgrade for more tracks': 'トラック数を増やす',
-      'Free includes 5 tracks per project. Upgrade to add more.':
-          '無料プランでは1プロジェクト5トラックまでです。追加するにはアップグレードしてください。',
+      'Free includes 5 tracks per project. Upgrade to add more.': '無料プランでは1プロジェクト5トラックまでです。追加するにはアップグレードしてください。',
       'Create a new project': '新しいプロジェクトを作成',
       'Create a new video project': '新しいビデオプロジェクトを作成',
       'Delete one to continue': '続けるには1つ削除してください',
@@ -5337,12 +4981,9 @@ class L10n {
           'この端末では現在プロジェクトを利用できません。しばらくしてからもう一度お試しください。',
       'Video projects are temporarily unavailable on this device. Please try again in a moment.':
           'この端末では現在ビデオプロジェクトを利用できません。しばらくしてからもう一度お試しください。',
-      'We couldn\'t load your projects right now. Please try again.':
-          '現在プロジェクトを読み込めません。もう一度お試しください。',
-      'We couldn\'t load your video projects right now. Please try again.':
-          '現在ビデオプロジェクトを読み込めません。もう一度お試しください。',
-      'Delete a project to create or import a new one.':
-          '新しいプロジェクトを作成または読み込むには、プロジェクトを削除してください。',
+      'We couldn\'t load your projects right now. Please try again.': '現在プロジェクトを読み込めません。もう一度お試しください。',
+      'We couldn\'t load your video projects right now. Please try again.': '現在ビデオプロジェクトを読み込めません。もう一度お試しください。',
+      'Delete a project to create or import a new one.': '新しいプロジェクトを作成または読み込むには、プロジェクトを削除してください。',
       'Last opened': '最終オープン',
       'Edit': '編集',
       'Rename': '名前を変更',
@@ -5351,8 +4992,7 @@ class L10n {
       'Version History': 'バージョン履歴',
       'Settings': '設定',
       'Local app preferences': 'ローカルアプリ設定',
-      'Control project version history and local app preferences.':
-          'プロジェクトのバージョン履歴とローカル設定を管理します。',
+      'Control project version history and local app preferences.': 'プロジェクトのバージョン履歴とローカル設定を管理します。',
       'Keep lightweight local project snapshots so older saves can be restored as copies.':
           '以前の保存をコピーとして復元できるよう、軽量なローカルスナップショットを保持します。',
       'Cloud sync stores only the latest project.': 'クラウド同期は最新のプロジェクトのみを保存します。',
@@ -5372,17 +5012,13 @@ class L10n {
       'Piano Roll Quick Guide': 'ピアノロールのクイックガイド',
       'A few gestures that make editing faster.': '編集を速くするためのジェスチャーです。',
       'Create + shape notes': 'ノートを作成して形を調整',
-      'Tap empty grid to add. Drag to move. Pull right edge to resize.':
-          '空いているグリッドをタップして追加します。ドラッグで移動し、右端を引いて長さを変えます。',
+      'Tap empty grid to add. Drag to move. Pull right edge to resize.': '空いているグリッドをタップして追加します。ドラッグで移動し、右端を引いて長さを変えます。',
       'Select groups quickly': '素早くグループ選択',
-      'Hold empty space and drag a box to multi-select notes.':
-          '空白部分を長押ししてボックスをドラッグすると、複数のノートを選択できます。',
+      'Hold empty space and drag a box to multi-select notes.': '空白部分を長押ししてボックスをドラッグすると、複数のノートを選択できます。',
       'Zoom + edit faster': 'すばやくズームして編集',
-      'Pinch with two fingers or use +/- buttons to zoom in time and pitch.':
-          '2本指でピンチするか +/- ボタンを使って、時間と音程を拡大できます。',
+      'Pinch with two fingers or use +/- buttons to zoom in time and pitch.': '2本指でピンチするか +/- ボタンを使って、時間と音程を拡大できます。',
       'Use the bottom tray': '下部トレイを使う',
-      'Duplicate, delete, and adjust length/velocity for selected notes.':
-          '選択したノートを複製、削除し、長さやベロシティを調整できます。',
+      'Duplicate, delete, and adjust length/velocity for selected notes.': '選択したノートを複製、削除し、長さやベロシティを調整できます。',
       'Got it': '了解',
       'Matches the current piano roll grid.': '現在のピアノロールグリッドに一致しています。',
       'Apply to selected notes.': '選択したノートに適用します。',
@@ -5390,10 +5026,8 @@ class L10n {
       'Selected notes already match that grid.': '選択したノートはすでにそのグリッドに合っています。',
       'Notes already match that grid.': 'ノートはすでにそのグリッドに合っています。',
       'Piano Roll Tools': 'ピアノロールツール',
-      'Recording is active. Finish the take before running edit tools.':
-          '録音中です。編集ツールを使う前に録音を終了してください。',
-      'Fast cleanup tools for timing, rhythm, and pitch.':
-          'タイミング、リズム、音程を素早く整えるツールです。',
+      'Recording is active. Finish the take before running edit tools.': '録音中です。編集ツールを使う前に録音を終了してください。',
+      'Fast cleanup tools for timing, rhythm, and pitch.': 'タイミング、リズム、音程を素早く整えるツールです。',
       'Select All': 'すべて選択',
       'Grab every note in the current clip.': '現在のクリップ内のすべてのノートを選択します。',
       'Quantize All Notes': 'すべてのノートをクオンタイズ',
@@ -5404,8 +5038,7 @@ class L10n {
       'Choose the grid for the selected notes.': '選択したノート用のグリッドを選択してください。',
       'Chop All Notes': 'すべてのノートを分割',
       'Split notes into repeated rhythmic slices.': 'ノートを繰り返しのリズムスライスに分割します。',
-      'Choose the slice grid for the whole clip.':
-          'クリップ全体に適用する分割グリッドを選択してください。',
+      'Choose the slice grid for the whole clip.': 'クリップ全体に適用する分割グリッドを選択してください。',
       'Chop Selected': '選択したノートを分割',
       'Slice only the notes you selected.': '選択したノートだけを分割します。',
       'Choose the slice grid for the selection.': '選択したノート用の分割グリッドを選択してください。',
@@ -5476,8 +5109,7 @@ class L10n {
       'Please select your birthday.': '生年月日を選択してください。',
       'Please enter your password.': 'パスワードを入力してください。',
       'Please choose what you use Mixroom for.': 'Mixroomの利用目的を選択してください。',
-      'Authentication is powered by Mixroom native auth.':
-          '認証はMixroomの独自認証を利用しています。',
+      'Authentication is powered by Mixroom native auth.': '認証はMixroomの独自認証を利用しています。',
       'Welcome to': 'Welcome to',
       'Email or Username': 'メールまたはユーザー名',
       'Email': 'メール',
@@ -5494,31 +5126,26 @@ class L10n {
       'Manage plan': 'プランを管理',
       'Manage in App Store': 'App Storeで管理',
       'Manage in Google Play': 'Google Playで管理',
-      'Restore request sent. Matching purchases will sync shortly.':
-          '復元リクエストを送信しました。一致する購入はまもなく同期されます。',
+      'Restore request sent. Matching purchases will sync shortly.': '復元リクエストを送信しました。一致する購入はまもなく同期されます。',
       'Something went wrong.': '問題が発生しました。',
       'This route is not configured yet.': 'このルートはまだ設定されていません。',
       'This route is invalid.': 'このルートは無効です。',
       'Could not open your email app.': 'メールアプリを開けませんでした。',
       'Support contact is not configured yet.': 'サポート連絡先はまだ設定されていません。',
-      'This store product is not configured for the current build yet.':
-          'このストア商品は現在のビルドではまだ設定されていません。',
+      'This store product is not configured for the current build yet.': 'このストア商品は現在のビルドではまだ設定されていません。',
       'Current access': '現在の利用権限',
       'Free': '無料',
       'Starter': 'スターター',
       'Plan & Billing': 'プランと請求',
       'Plan': 'プラン',
       'Billing': '請求',
-      'Manage your current plan and available upgrades.':
-          '現在のプランと利用可能なアップグレードを管理します。',
+      'Manage your current plan and available upgrades.': '現在のプランと利用可能なアップグレードを管理します。',
       'Personal plan': '個人プラン',
       'Team access': 'チームアクセス',
       'Available plans': '利用可能なプラン',
       'Plans are loading.': 'プランを読み込み中です。',
-      'No plans are currently available for this device.':
-          '現在このデバイスで利用できるプランはありません。',
-      'Applies to your personal cloud and app upgrades':
-          '個人クラウドとアプリのアップグレードに適用されます',
+      'No plans are currently available for this device.': '現在このデバイスで利用できるプランはありません。',
+      'Applies to your personal cloud and app upgrades': '個人クラウドとアプリのアップグレードに適用されます',
       'Education': '教育',
       'Enterprise': 'エンタープライズ',
       'Owner': '所有者',
@@ -5531,10 +5158,8 @@ class L10n {
       'You are a {role}': 'あなたは{role}です',
       '{role} access to Education seat management and Starter-level student seats':
           '{role}として教育席の管理とStarter相当の学生席を利用できます',
-      '{role} access to enterprise workspace and shared cloud storage':
-          '{role}としてエンタープライズワークスペースと共有クラウドストレージにアクセスできます',
-      '{role} access to shared workspace and cloud storage':
-          '{role}として共有ワークスペースとクラウドストレージにアクセスできます',
+      '{role} access to enterprise workspace and shared cloud storage': '{role}としてエンタープライズワークスペースと共有クラウドストレージにアクセスできます',
+      '{role} access to shared workspace and cloud storage': '{role}として共有ワークスペースとクラウドストレージにアクセスできます',
       'Manage on web': 'Webで管理',
       'Contact sales': '営業に問い合わせ',
       'Refreshing': '更新中',
@@ -5621,8 +5246,7 @@ class L10n {
           '使用中の学生席: {used} / {limit}。有効: {active}。招待済み: {invited}。利用可能: {available}。',
       '{used} / {limit} seats': '{used} / {limit}席',
       '{count} seats used': '{count}席使用中',
-      'Seat and billing management opens on mixroom.ai/account.':
-          '席と請求の管理は mixroom.ai/account で開きます。',
+      'Seat and billing management opens on mixroom.ai/account.': '席と請求の管理は mixroom.ai/account で開きます。',
       'Studio checkout is available on web. Enterprise and Education plans are handled by sales.':
           'StudioのチェックアウトはWebで利用できます。エンタープライズと教育プランは営業が対応します。',
       'See pricing': '価格を見る',
@@ -5659,8 +5283,7 @@ class L10n {
       'Removed {student}.': '{student}を削除しました。',
       'Invite cancelled for {student}.': '{student}への招待をキャンセルしました。',
       'Student seat updated.': '学生席を更新しました。',
-      'Could not update student seat. Try again.':
-          '学生席を更新できませんでした。もう一度お試しください。',
+      'Could not update student seat. Try again.': '学生席を更新できませんでした。もう一度お試しください。',
       'Education 10 Student Seats': '教育 学生席10席',
       'Education 20 Student Seats': '教育 学生席20席',
       'Education 30 Student Seats': '教育 学生席30席',
@@ -5691,12 +5314,9 @@ class L10n {
       'Upgrade to use {name}': '{name}を使うにはアップグレードが必要です',
       'Upgrade for more plugins': 'プラグインを増やす',
       'Upgrade for more instruments': '楽器を増やす',
-      'Additional Mixroom plugins are available on Starter and higher plans.':
-          '追加のMixroomプラグインはStarter以上のプランで利用できます。',
-      'Additional Mixroom presets are available on Starter and higher plans.':
-          '追加のMixroomプリセットはStarter以上のプランで利用できます。',
-      'Additional Mixroom instruments are available on Starter and higher plans.':
-          '追加のMixroom楽器はStarter以上のプランで利用できます。',
+      'Additional Mixroom plugins are available on Starter and higher plans.': '追加のMixroomプラグインはStarter以上のプランで利用できます。',
+      'Additional Mixroom presets are available on Starter and higher plans.': '追加のMixroomプリセットはStarter以上のプランで利用できます。',
+      'Additional Mixroom instruments are available on Starter and higher plans.': '追加のMixroom楽器はStarter以上のプランで利用できます。',
       'Project exceeds Free track limit': 'プロジェクトが無料プランのトラック上限を超えています',
       'All {count} tracks were restored and will be preserved when you save. Free can add up to {limit} tracks per project; upgrade to add more.':
           '全{count}トラックが復元され、保存しても保持されます。無料プランでは1プロジェクトあたり最大{limit}トラックまで追加できます。さらに追加するにはアップグレードしてください。',
@@ -5732,12 +5352,10 @@ class L10n {
           '後でパスワードを追加するには、サインアウトしてからサインイン画面でそのメールアドレスを使って「パスワードを忘れた場合」を使用してください。',
       'Confirmation code': '確認コード',
       'Confirmation code sent!': '確認コードを送信しました！',
-      'Confirmation code will be sent to your email inbox.':
-          '確認コードはメール受信箱に送信されます。',
+      'Confirmation code will be sent to your email inbox.': '確認コードはメール受信箱に送信されます。',
       'Select one (optional)': '1つ選択してください（任意）',
       'Not set': '未設定',
-      'Enter a valid password and confirmation first to send the code.':
-          'コード送信前に有効なパスワードと確認入力を完了してください。',
+      'Enter a valid password and confirmation first to send the code.': 'コード送信前に有効なパスワードと確認入力を完了してください。',
       'Continue': '続行',
       'Enter password': 'パスワードを入力',
       'Forgot password?': 'パスワードをお忘れですか？',
@@ -5747,13 +5365,10 @@ class L10n {
       'Create Account': 'アカウント作成',
       'Create account': 'アカウント作成',
       'Finish your account setup': 'アカウント設定を完了してください',
-      'Add the last few details to start using Mixroom.':
-          'Mixroomを使い始めるために、最後の情報を入力してください。',
+      'Add the last few details to start using Mixroom.': 'Mixroomを使い始めるために、最後の情報を入力してください。',
       'Username': 'ユーザー名',
-      '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.':
-          '1〜30文字。小文字英字、数字、アンダースコア、ハイフンを使えます。',
-      'Available after the account backend is deployed.':
-          'アカウントバックエンドのデプロイ後に利用できます。',
+      '1-30 chars. Lowercase letters, numbers, underscores, and hyphens.': '1〜30文字。小文字英字、数字、アンダースコア、ハイフンを使えます。',
+      'Available after the account backend is deployed.': 'アカウントバックエンドのデプロイ後に利用できます。',
       'Bio': '自己紹介',
       'Tell listeners what you make.': 'どんな音楽を作っているかを書いてください。',
       'Tell people a bit about yourself': 'あなたのことをひとこと書いてください',
@@ -5786,10 +5401,8 @@ class L10n {
       'chat_help_cannot': 'できないこと',
       'chat_help_cannot_generate': '新しいオーディオ、ボーカル、楽器をゼロから生成することはできません。',
       'chat_help_cannot_empty': '1つのプロンプトだけで完成した曲は作れません。',
-      'chat_help_examples':
-          '例: 「このリファレンストラックみたいに自分のプロジェクトをミックスして。」 「これをMIDIにして。」 「house drums 128 を追加して。」',
-      'Please agree to the Terms of Service and Privacy Policy.':
-          '利用規約とプライバシーポリシーに同意してください。',
+      'chat_help_examples': '例: 「このリファレンストラックみたいに自分のプロジェクトをミックスして。」 「これをMIDIにして。」 「house drums 128 を追加して。」',
+      'Please agree to the Terms of Service and Privacy Policy.': '利用規約とプライバシーポリシーに同意してください。',
       'Bio must be 160 characters or fewer.': '自己紹介は160文字以内で入力してください。',
       'At least 8 characters': '8文字以上',
       'Use at least 8 characters.': '8文字以上で入力してください。',
@@ -5810,8 +5423,7 @@ class L10n {
       'Email verified. You are now signed in.': 'メール認証が完了しました。サインインしました。',
       'Verification code resent.': '認証コードを再送しました。',
       'Verify your email': 'メール認証',
-      'Enter the verification code sent to your email.':
-          'メールに送信された認証コードを入力してください。',
+      'Enter the verification code sent to your email.': 'メールに送信された認証コードを入力してください。',
       'Verification Code': '認証コード',
       'Enter code': 'コードを入力',
       'Resend code': 'コードを再送',
@@ -5822,8 +5434,7 @@ class L10n {
       'Reset your password': 'パスワードをリセット',
       'Enter verification code': '認証コードを入力',
       'We will send a verification code to your email.': 'メールに認証コードを送信します。',
-      'Use the code from email and set a new password.':
-          'メールのコードを使って新しいパスワードを設定してください。',
+      'Use the code from email and set a new password.': 'メールのコードを使って新しいパスワードを設定してください。',
       'New Password': '新しいパスワード',
       'Confirm New Password': '新しいパスワード確認',
       'Send Reset Code': 'リセットコードを送信',
@@ -5837,8 +5448,7 @@ class L10n {
       'Step {current} of {total}': 'ステップ {current} / {total}',
       'Change': '変更',
       'Select birthday': '生年月日を選択',
-      'You must be at least {age} years old to use Mixroom.':
-          'Mixroomを利用するには{age}歳以上である必要があります。',
+      'You must be at least {age} years old to use Mixroom.': 'Mixroomを利用するには{age}歳以上である必要があります。',
       'Log Out': 'ログアウト',
       'Delete Account': 'アカウント削除',
       'Delete account?': 'アカウントを削除しますか？',
@@ -5851,8 +5461,7 @@ class L10n {
       'Not provided': '未設定',
       'Save Changes': '変更を保存',
       'Email not verified': 'メール未認証',
-      'Please verify your email for better account security.':
-          'アカウントの安全性向上のため、メール認証を完了してください。',
+      'Please verify your email for better account security.': 'アカウントの安全性向上のため、メール認証を完了してください。',
       'Sending...': '送信中...',
       'Resend verification email': '確認メールを再送',
       'Birthday': '生年月日',
@@ -5869,36 +5478,30 @@ class L10n {
       'For work': '仕事用',
       'Songwriting': '作曲',
       'Mix/master practice': 'ミックス/マスタリング練習',
-      'Account data sync target: Mixroom account profile.':
-          'アカウントデータ同期先: Mixroom アカウントプロファイル。',
+      'Account data sync target: Mixroom account profile.': 'アカウントデータ同期先: Mixroom アカウントプロファイル。',
       'Feedback': 'フィードバック',
       'Bug Report': 'バグ報告',
       'Feedback for': 'フィードバック先',
       'Send Feedback': 'フィードバックを送信',
       'Submit': '送信',
-      'Please enter your feedback or bug report first.':
-          '先にフィードバックまたはバグ報告の内容を入力してください。',
+      'Please enter your feedback or bug report first.': '先にフィードバックまたはバグ報告の内容を入力してください。',
       'Choose feedback or bug report, then describe it. You can also attach current editor context.':
           'フィードバックまたはバグ報告を選び、内容を入力してください。現在のエディター情報も添付できます。',
       'Choose feedback or bug report, then describe it. Account details are attached automatically.':
           'フィードバックまたはバグ報告を選び、内容を入力してください。アカウント情報は自動で添付されます。',
       'Thank you for your submission!': 'ご意見ありがとうございます！',
       'Thank you for the feedback!': 'フィードバックありがとうございます！',
-      'Tell us what is working, missing, or would make this better.':
-          '良い点、不足している点、改善してほしい点を教えてください。',
-      'Describe the bug, what you expected, and what happened.':
-          '不具合の内容、期待した動作、実際に起きたことを教えてください。',
+      'Tell us what is working, missing, or would make this better.': '良い点、不足している点、改善してほしい点を教えてください。',
+      'Describe the bug, what you expected, and what happened.': '不具合の内容、期待した動作、実際に起きたことを教えてください。',
       '{count} characters left': '残り{count}文字',
       'Allow Mixroom to respond by email.': 'Mixroom からメールで返信できるようにする。',
       'Optional. We may follow up using your account email about this submission.':
           '任意です。この内容について、アカウントのメールアドレスにご連絡する場合があります。',
       'Include with this report': 'この報告に含める',
       'Include AI chat history and project settings.': 'AIチャット履歴とプロジェクト設定を含める。',
-      'Attach recent assistant messages and current DAW settings.':
-          '最近のアシスタントメッセージと現在のDAW設定を添付します。',
+      'Attach recent assistant messages and current DAW settings.': '最近のアシスタントメッセージと現在のDAW設定を添付します。',
       'Include a DAW screenshot.': 'DAWのスクリーンショットを含める。',
-      'Mixroom captures the editor view with chat closed.':
-          'Mixroomはチャットを閉じた状態のエディター画面をキャプチャします。',
+      'Mixroom captures the editor view with chat closed.': 'Mixroomはチャットを閉じた状態のエディター画面をキャプチャします。',
       'Video projects are coming soon.': '動画プロジェクトは近日公開です。',
       'No matching projects.': '一致するプロジェクトがありません。',
       'Sort by recent': '最近順で並べ替え',
@@ -5931,8 +5534,7 @@ class L10n {
       'Enter current password': '現在のパスワードを入力',
       'Password updated successfully.': 'パスワードが正常に更新されました。',
       'Please enter your current password.': '現在のパスワードを入力してください。',
-      'New password must be different from current password.':
-          '新しいパスワードは現在のパスワードと異なる必要があります。',
+      'New password must be different from current password.': '新しいパスワードは現在のパスワードと異なる必要があります。',
       'Updating...': '更新中...',
       'This page shows your current sign-in method. More linking options can come later.':
           '現在のサインイン方法を表示しています。追加の連携オプションは今後提供される可能性があります。',
@@ -5940,15 +5542,12 @@ class L10n {
           'ユーザー名、生年月日、自己紹介は、アカウントバックエンドのデプロイ後に保存できます。',
       'Username, birthday, and bio save after the account backend is deployed.':
           'ユーザー名、生年月日、自己紹介は、アカウントバックエンドのデプロイ後に保存されます。',
-      'Manage privacy controls, legal documents, and data requests.':
-          'プライバシー設定、法的文書、データリクエストを管理します。',
-      'Tell us what is working, what is broken, or what you want to see next.':
-          '良い点、不具合、次にほしい機能を教えてください。',
+      'Manage privacy controls, legal documents, and data requests.': 'プライバシー設定、法的文書、データリクエストを管理します。',
+      'Tell us what is working, what is broken, or what you want to see next.': '良い点、不具合、次にほしい機能を教えてください。',
       'Send feedback or bug report': 'フィードバックまたはバグ報告を送信',
       'Project files are stored locally.': 'プロジェクトファイルはこの端末に保存されます。',
       'Prompt usage': 'プロンプト使用量',
-      'Extra prompt credits are used first, before daily and weekly limits.':
-          '追加プロンプトクレジットは、日次/週次の上限より先に消費されます。',
+      'Extra prompt credits are used first, before daily and weekly limits.': '追加プロンプトクレジットは、日次/週次の上限より先に消費されます。',
       'Daily and weekly prompt usage limits.': '日次と週次のプロンプト使用上限です。',
       'Extra prompt bank': '追加プロンプトバンク',
       'left': '残り',
@@ -5967,17 +5566,14 @@ class L10n {
       'Need more AI?': 'AIをもっと使いますか？',
       'View Plans': 'プランを見る',
       'Clear chat history?': 'チャット履歴を消去しますか？',
-      'This removes the saved project chat context and cannot be undone.':
-          '保存されたプロジェクトのチャット履歴を削除します。元に戻せません。',
+      'This removes the saved project chat context and cannot be undone.': '保存されたプロジェクトのチャット履歴を削除します。元に戻せません。',
       'Clear': '消去',
       'Chat history cleared': 'チャット履歴を消去しました',
       'Project Chat': 'プロジェクトチャット',
       'Chat context now stays with this project.\nStart a conversation and it will still be here when you reopen it.':
           'チャットコンテキストはこのプロジェクトに保存されます。\n会話を始めると、再度開いたときもそのまま残ります。',
-      'This is an experimental feature in development. Output may be unexpected.':
-          'この機能は開発中の実験的な機能です。出力は予期しない場合があります。',
-      'Ask Mixroom to create, edit, or mix your project.':
-          'Mixroomにプロジェクトの作成、編集、ミックスを頼んでみましょう。',
+      'This is an experimental feature in development. Output may be unexpected.': 'この機能は開発中の実験的な機能です。出力は予期しない場合があります。',
+      'Ask Mixroom to create, edit, or mix your project.': 'Mixroomにプロジェクトの作成、編集、ミックスを頼んでみましょう。',
       'Copied': 'コピー済み',
       'Copied chat log.': 'チャットログをコピーしました。',
       'Drop audio here': 'ここにオーディオをドロップ',
@@ -5989,8 +5585,7 @@ class L10n {
       'Show prompt limits': 'プロンプト上限を表示',
       'Extra bank': '追加バンク',
       'used first': '先に使用',
-      'Prompt limit reached. Tap to see reset time.':
-          'プロンプト上限に達しました。タップしてリセット時刻を確認してください。',
+      'Prompt limit reached. Tap to see reset time.': 'プロンプト上限に達しました。タップしてリセット時刻を確認してください。',
       'No copied clip to paint': '貼り付けるコピー済みクリップがありません',
       'MIDI Clip': 'MIDIクリップ',
       'Audio Clip': 'オーディオクリップ',
@@ -6034,8 +5629,7 @@ class L10n {
       'Unable to arm selected MIDI clip.': '選択したMIDIクリップを録音待機にできませんでした。',
       'Select a track to record on first.': '先に録音するトラックを選択してください。',
       'Failed to start recording': '録音の開始に失敗しました',
-      'Microphone access is blocked. Open app settings to record audio.':
-          'マイクアクセスがブロックされています。録音するにはアプリ設定を開いてください。',
+      'Microphone access is blocked. Open app settings to record audio.': 'マイクアクセスがブロックされています。録音するにはアプリ設定を開いてください。',
       'Microphone access is required to record audio.': '録音にはマイクアクセスが必要です。',
       'Microphone access is turned off': 'マイクアクセスがオフになっています',
       'No input devices available': '利用可能な入力デバイスがありません',
@@ -6049,6 +5643,23 @@ class L10n {
       'Folder already loaded for this project.': 'このプロジェクトでは既に読み込まれているフォルダーです。',
       'Failed to preview sample': 'サンプルの試聴に失敗しました',
       'Project Settings': 'プロジェクト設定',
+      'Prepare compatible version': '互換バージョンを準備',
+      'Preparing…': '準備中…',
+      'Compatible version': '互換バージョン',
+      'About compatible versions': '互換バージョンについて',
+      'This project uses third-party plug-ins. Prepare a compatible version so anyone can open it on mobile or another device without those plug-ins.':
+          'このプロジェクトはサードパーティ製プラグインを使用しています。それらがないモバイルや別のデバイスでも開けるように、互換バージョンを準備してください。',
+      'Your original stays editable': 'オリジナルは引き続き編集可能',
+      'The editable project and its plug-in settings stay bundled and unchanged.':
+          '編集可能なプロジェクトとプラグイン設定は変更されず、バンドル内に一緒に保持されます。',
+      'Rendered audio keeps the sound': 'レンダリング音声でサウンドを維持',
+      'It covers third-party plug-ins and frozen tracks. A rendered Master track is added when needed.':
+          'サードパーティ製プラグインとフリーズ済みトラックをレンダリングし、必要に応じてMasterトラックを追加します。',
+      'Edits stay separate': '編集内容は別に保存',
+      'Editing the compatible version creates a separate normal project.':
+          '互換バージョンを編集すると、別の通常プロジェクトが作成されます。',
+      'Prepare again after changing affected tracks or the master. Saving and cloud sync still work normally.':
+          '対象トラックまたはマスターを変更したら再度準備してください。保存とクラウド同期は引き続き通常どおり動作します。',
       'Project Name': 'プロジェクト名',
       'Metronome': 'メトロノーム',
       'Metronome Volume': 'メトロノーム音量',
@@ -6062,17 +5673,13 @@ class L10n {
       'When stopping playback with Space, jump back to the point where playback started.':
           'スペースキーで再生を停止したとき、再生を開始した位置へ戻ります。',
       'Keyboard Shortcuts': 'キーボードショートカット',
-      'View, remap, and reset desktop shortcuts.':
-          'デスクトップショートカットの確認、割り当て変更、リセットを行います。',
+      'View, remap, and reset desktop shortcuts.': 'デスクトップショートカットの確認、割り当て変更、リセットを行います。',
       'Plugin Manager': 'プラグインマネージャー',
-      'Rescan, favorite, or hide desktop plugins.':
-          'デスクトッププラグインを再スキャン、お気に入り登録、非表示にします。',
+      'Rescan, favorite, or hide desktop plugins.': 'デスクトッププラグインを再スキャン、お気に入り登録、非表示にします。',
       'Desktop Diagnostics': 'デスクトップ診断',
-      'Check audio device, CPU, buffer, and scan state.':
-          'オーディオデバイス、CPU、バッファー、スキャン状態を確認します。',
+      'Check audio device, CPU, buffer, and scan state.': 'オーディオデバイス、CPU、バッファー、スキャン状態を確認します。',
       'Recovery & Missing Assets': '復旧と不足アセット',
-      'Review recovered backups and missing media/plugin notices.':
-          '復旧したバックアップと不足しているメディア/プラグイン通知を確認します。',
+      'Review recovered backups and missing media/plugin notices.': '復旧したバックアップと不足しているメディア/プラグイン通知を確認します。',
       'Scan': 'スキャン',
       'View': '表示',
       'Bluetooth headset mic': 'Bluetoothヘッドセットマイク',
@@ -6087,12 +5694,10 @@ class L10n {
       'Input Device': '入力デバイス',
       'Refresh audio devices': 'オーディオデバイスを更新',
       'Input Channel': '入力チャンネル',
-      'System default (speaker / Bluetooth / audio interface)':
-          'システム既定（スピーカー / Bluetooth / オーディオインターフェース）',
+      'System default (speaker / Bluetooth / audio interface)': 'システム既定（スピーカー / Bluetooth / オーディオインターフェース）',
       'Output Route': '出力ルート',
       'Refresh output route': '出力ルートを更新',
-      'System default (managed by macOS audio settings)':
-          'システム既定（macOSオーディオ設定で管理）',
+      'System default (managed by macOS audio settings)': 'システム既定（macOSオーディオ設定で管理）',
       'Output Device': '出力デバイス',
       'Refresh output device': '出力デバイスを更新',
       'No selectable output devices': '選択可能な出力デバイスがありません',
@@ -6102,8 +5707,7 @@ class L10n {
       'is using Bluetooth output. Real-time monitoring is off by default.':
           'はBluetooth出力を使用しています。リアルタイムモニタリングはデフォルトでオフです。',
       'Advanced: monitor anyway': '詳細: それでもモニターする',
-      'May sound choppy or unstable on Bluetooth earphones.':
-          'Bluetoothイヤホンでは音が途切れたり不安定になる場合があります。',
+      'May sound choppy or unstable on Bluetooth earphones.': 'Bluetoothイヤホンでは音が途切れたり不安定になる場合があります。',
       'Bluetooth headset mic can reduce audio quality and increase latency. This device is currently allowed for recording.':
           'Bluetoothヘッドセットマイクは音質低下や遅延増加の可能性があります。このデバイスは現在録音を許可されています。',
       'Bluetooth headset mic can reduce audio quality and increase latency. You will be asked to confirm before recording.':
@@ -6141,10 +5745,8 @@ class L10n {
       'Next redo': '次にやり直す',
       'steps back': 'ステップ戻る',
       'steps forward': 'ステップ進む',
-      'Undo history from a previous session is not available here yet.':
-          '前回セッションの取り消し履歴はまだここでは使用できません。',
-      'Redo history from a previous session is not available here yet.':
-          '前回セッションのやり直し履歴はまだここでは使用できません。',
+      'Undo history from a previous session is not available here yet.': '前回セッションの取り消し履歴はまだここでは使用できません。',
+      'Redo history from a previous session is not available here yet.': '前回セッションのやり直し履歴はまだここでは使用できません。',
       'Add': 'を追加',
       'Add row': 'トラックを追加',
       'Insert row above': '上にトラックを挿入',
@@ -6158,8 +5760,7 @@ class L10n {
       'Insert instrument lane above': '上にインストゥルメントレーンを挿入',
       'Insert instrument lane below': '下にインストゥルメントレーンを挿入',
       'Change instrument lane': 'インストゥルメントレーンを変更',
-      'Changed {row} instrument to {instrument}':
-          '{row}のインストゥルメントを{instrument}に変更しました',
+      'Changed {row} instrument to {instrument}': '{row}のインストゥルメントを{instrument}に変更しました',
       'Insert output row': '出力トラックを挿入',
       'Remove row from group': 'グループからトラックを削除',
       'Add audio clip': 'オーディオクリップを追加',
@@ -6230,8 +5831,7 @@ class L10n {
       'Skipped incomplete move action.': '不完全な移動操作をスキップしました。',
       'Move made no changes.': '移動による変更はありませんでした。',
       'Stretched clip.': 'クリップをストレッチしました。',
-      'Detected clip tempo and updated project tempo.':
-          'クリップテンポを検出し、プロジェクトテンポを更新しました。',
+      'Detected clip tempo and updated project tempo.': 'クリップテンポを検出し、プロジェクトテンポを更新しました。',
       'Deleted clip.': 'クリップを削除しました。',
       'Stopped sample processing.': 'サンプル処理を停止しました。',
       'Copied row effects.': '行エフェクトをコピーしました。',
@@ -6244,13 +5844,10 @@ class L10n {
       'Master has no effects to clear.': 'マスターにクリアするエフェクトはありません。',
       'Cleared master effects.': 'マスターエフェクトをクリアしました。',
       'Created automation clip.': 'オートメーションレーンの準備ができました。',
-      'Add a row before creating automation clips.':
-          'オートメーションレーンを編集する前に行を追加してください。',
-      'Select a valid row before creating automation clips.':
-          'オートメーションレーンを編集する前に有効な行を選択してください。',
+      'Add a row before creating automation clips.': 'オートメーションレーンを編集する前に行を追加してください。',
+      'Select a valid row before creating automation clips.': 'オートメーションレーンを編集する前に有効な行を選択してください。',
       'Could not resolve that automation target.': 'そのオートメーション対象を解決できませんでした。',
-      'No automatable parameters found for this plugin.':
-          'このプラグインにオートメーション可能なパラメータが見つかりません。',
+      'No automatable parameters found for this plugin.': 'このプラグインにオートメーション可能なパラメータが見つかりません。',
       'Could not resolve that plugin parameter.': 'そのプラグインパラメータを解決できませんでした。',
       'Cleared automation clips.': 'オートメーションレーンをクリアしました。',
       'Created': '作成しました',
@@ -6263,8 +5860,7 @@ class L10n {
       'Cleared automation.': 'オートメーションをクリアしました。',
       'Added automation ramp.': 'オートメーションランプを追加しました。',
       'Set automation points.': 'オートメーションポイントを設定しました。',
-      'MIDI notes already match that chop grid.':
-          'MIDIノートはすでにそのチョップグリッドに一致しています。',
+      'MIDI notes already match that chop grid.': 'MIDIノートはすでにそのチョップグリッドに一致しています。',
       'Could not update this MIDI clip.': 'このMIDIクリップを更新できませんでした。',
       'MIDI notes already match that pitch.': 'MIDIノートはすでにそのピッチに一致しています。',
       'Shifted MIDI notes': 'MIDIノートを移動しました',
@@ -6315,30 +5911,24 @@ class L10n {
       'Collapsed the group.': 'グループを折りたたみました。',
       'Expanded the group.': 'グループを展開しました。',
       'Moved {target} by {value} beats.': '{target}を{value}拍移動しました。',
-      'Trimmed {target} to beats {start}–{end}.':
-          '{target}を{start}～{end}拍にトリミングしました。',
+      'Trimmed {target} to beats {start}–{end}.': '{target}を{start}～{end}拍にトリミングしました。',
       'Split {target} at beat {value}.': '{target}を{value}拍で分割しました。',
       'Duplicated {target} at beat {value}.': '{target}を{value}拍に複製しました。',
       'Glued the selected audio clips.': '選択したオーディオクリップを結合しました。',
       'Separated vocals and instrumental.': 'ボーカルとインストゥルメンタルを分離しました。',
       'Converted {target} to MIDI.': '{target}をMIDIに変換しました。',
-      'Set {target} pitch to {value} semitones.':
-          '{target}のピッチを{value}半音に設定しました。',
-      'Adjusted {target} pitch by {value} semitones.':
-          '{target}のピッチを{value}半音調整しました。',
+      'Set {target} pitch to {value} semitones.': '{target}のピッチを{value}半音に設定しました。',
+      'Adjusted {target} pitch by {value} semitones.': '{target}のピッチを{value}半音調整しました。',
       'Set {target} length to {value} beats.': '{target}の長さを{value}拍に設定しました。',
       'Scaled {target} length by {value}.': '{target}の長さを{value}倍にしました。',
-      'Set {target} source tempo to {value} BPM.':
-          '{target}の元テンポを{value} BPMに設定しました。',
+      'Set {target} source tempo to {value} BPM.': '{target}の元テンポを{value} BPMに設定しました。',
       'Updated tempo following for {target}.': '{target}のテンポ追従を更新しました。',
       'Aligned {target} to the project tempo.': '{target}をプロジェクトテンポに合わせました。',
       'Set the project tempo from {target}.': '{target}を基準にプロジェクトテンポを設定しました。',
       'Trimmed silence from {target}.': '{target}の無音部分をトリミングしました。',
       'Aligned the first sound in {target}.': '{target}の最初の音を揃えました。',
-      'Transposed {target} by {value} semitones.':
-          '{target}を{value}半音トランスポーズしました。',
-      'Created a MIDI clip with {count} notes.':
-          '{count}個のノートを含むMIDIクリップを作成しました。',
+      'Transposed {target} by {value} semitones.': '{target}を{value}半音トランスポーズしました。',
+      'Created a MIDI clip with {count} notes.': '{count}個のノートを含むMIDIクリップを作成しました。',
       'Replaced notes in {target}.': '{target}のノートを置き換えました。',
       'Appended notes to {target}.': '{target}にノートを追加しました。',
       'Chopped notes in {target}.': '{target}のノートを細分化しました。',
@@ -6346,8 +5936,7 @@ class L10n {
       'Removed an effect from {target}.': '{target}からエフェクトを削除しました。',
       'Updated effect bypass on {target}.': '{target}のエフェクトバイパスを更新しました。',
       'Added a gain fade on {target}.': '{target}にゲインフェードを追加しました。',
-      'Set {count} automation points on {target}.':
-          '{target}に{count}個のオートメーションポイントを設定しました。',
+      'Set {count} automation points on {target}.': '{target}に{count}個のオートメーションポイントを設定しました。',
       'Cleared automation on {target}.': '{target}のオートメーションをクリアしました。',
       'Placed {count} library sample(s).': 'ライブラリサンプルを{count}個配置しました。',
       'Replaced the sample in {target}.': '{target}のサンプルを置き換えました。',
@@ -6372,8 +5961,7 @@ class L10n {
       'Stem separation failed for target clips.': '対象クリップのステム分離に失敗しました。',
       'Created stems for': 'ステムを作成したクリップ数:',
       'clips.': '個。',
-      'Stem separation is only available for audio clips.':
-          'ステム分離はオーディオクリップでのみ使用できます。',
+      'Stem separation is only available for audio clips.': 'ステム分離はオーディオクリップでのみ使用できます。',
       'Selected clip file was not found.': '選択したクリップファイルが見つかりませんでした。',
       'Splitting stems...': 'ステムを分離中...',
       'Stem separation failed.': 'ステム分離に失敗しました。',
@@ -6388,6 +5976,7 @@ class L10n {
       'Instrument': '楽器',
       'All': 'すべて',
       'Keys': '鍵盤',
+      'Guitars': 'ギター',
       'Strings': '弦楽器',
       'Woodwinds': '木管楽器',
       'Brass': '金管楽器',
@@ -6444,12 +6033,9 @@ class L10n {
       'No notes are ready to render.': 'レンダーできるノートがありません。',
       'No notes are ready to preview.': 'プレビューできるノートがありません。',
       'Preparing Pitch Lab preview...': 'ピッチラボのプレビューを準備中...',
-      'Select an audio clip first, then open Pitch Lab.':
-          '先にオーディオクリップを選択してからピッチラボを開いてください。',
-      'Select an audio clip on a timeline row first.':
-          '先にタイムライン行のオーディオクリップを選択してください。',
-      'Could not extract stable notes from this clip.':
-          'このクリップから安定したノートを抽出できませんでした。',
+      'Select an audio clip first, then open Pitch Lab.': '先にオーディオクリップを選択してからピッチラボを開いてください。',
+      'Select an audio clip on a timeline row first.': '先にタイムライン行のオーディオクリップを選択してください。',
+      'Could not extract stable notes from this clip.': 'このクリップから安定したノートを抽出できませんでした。',
       'Could not analyze this clip.': 'このクリップを解析できませんでした。',
       'Rendering tuned audio...': '補正したオーディオをレンダー中...',
       'No pitch or timing changes to render.': 'レンダーできるピッチやタイミングの変更がありません。',
@@ -6467,8 +6053,7 @@ class L10n {
       'Duplicate': '複製',
       'File Browser Help': 'ファイルブラウザーヘルプ',
       'Load a folder into the browser.': 'ブラウザーにフォルダーを読み込みます。',
-      'Tap a folder button to switch the current folder.':
-          'フォルダーボタンをタップして現在のフォルダーを切り替えます。',
+      'Tap a folder button to switch the current folder.': 'フォルダーボタンをタップして現在のフォルダーを切り替えます。',
       'Preview an audio file.': 'オーディオファイルを試聴します。',
       'Hold and drag a file into the timeline.': 'ファイルを長押ししてタイムラインへドラッグします。',
       'Hold a folder button to remove it.': 'フォルダーボタンを長押しして削除します。',
@@ -6477,8 +6062,7 @@ class L10n {
       'Remove': '削除',
       'Add a sample folder': 'サンプルフォルダーを追加',
       'This folder is currently unavailable.': 'このフォルダーは現在利用できません。',
-      'Tip: choose local folders (not cloud-only placeholders).':
-          'ヒント: クラウドのみのプレースホルダーではなく、ローカルフォルダーを選択してください。',
+      'Tip: choose local folders (not cloud-only placeholders).': 'ヒント: クラウドのみのプレースホルダーではなく、ローカルフォルダーを選択してください。',
       'Pick folder': 'フォルダーを選択',
       'Remove folder': 'フォルダーを削除',
       'No files found.': 'ファイルが見つかりません。',
@@ -6527,19 +6111,16 @@ class L10n {
       'MIDI clip': 'MIDIクリップ',
       'Audio clip': 'オーディオクリップ',
       'Follows project BPM.': 'プロジェクトBPMに追従します。',
-      'MIDI clips follow project BPM automatically.':
-          'MIDIクリップはプロジェクトBPMに自動で追従します。',
+      'MIDI clips follow project BPM automatically.': 'MIDIクリップはプロジェクトBPMに自動で追従します。',
       'No extra tempo mode is needed here.': 'ここでは追加のテンポモードは不要です。',
-      'Choose how this audio clip follows project BPM':
-          'このオーディオクリップがプロジェクトBPMに追従する方法を選択します',
+      'Choose how this audio clip follows project BPM': 'このオーディオクリップがプロジェクトBPMに追従する方法を選択します',
       'Reversed': '反転済み',
       'Reverse': '反転',
       'Detect tempo': 'テンポを検出',
       'Split vocals': 'ボーカルを分離',
       'Adjust To Tempo (Resample)': 'テンポに合わせる（リサンプル）',
       'Stretch To Tempo (Keep Pitch)': 'テンポに合わせてストレッチ（ピッチ維持）',
-      'Stretch mode is shown with teal clip handles.':
-          'ストレッチモードは青緑色のクリップハンドルで表示されます。',
+      'Stretch mode is shown with teal clip handles.': 'ストレッチモードは青緑色のクリップハンドルで表示されます。',
       'Detect Tempo + Set Project BPM': 'テンポ検出 + プロジェクトBPM設定',
       'Select Icon': 'アイコンを選択',
       'Crossfade': 'クロスフェード',
@@ -6557,12 +6138,9 @@ class L10n {
           'レベルを整え、マスキングを減らし、明瞭さを高めます。\n実行後でもすべて元に戻せます。',
       'Audition folders and drag and drop': 'フォルダー試聴とドラッグ&ドロップ',
       'Could not save preference. Please retry.': '設定を保存できませんでした。もう一度お試しください。',
-      'Could not update telemetry preference. Please retry.':
-          'テレメトリー設定を更新できませんでした。もう一度お試しください。',
-      'Could not update marketing email preference. Please retry.':
-          'マーケティングメール設定を更新できませんでした。もう一度お試しください。',
-      'Could not open this link on your device right now.':
-          '現在このデバイスでリンクを開けません。',
+      'Could not update telemetry preference. Please retry.': 'テレメトリー設定を更新できませんでした。もう一度お試しください。',
+      'Could not update marketing email preference. Please retry.': 'マーケティングメール設定を更新できませんでした。もう一度お試しください。',
+      'Could not open this link on your device right now.': '現在このデバイスでリンクを開けません。',
       'Data export request': 'データエクスポートリクエスト',
       'Data correction/deletion request': 'データ修正/削除リクエスト',
       'Privacy inquiry': 'プライバシーに関する問い合わせ',
@@ -6577,27 +6155,22 @@ class L10n {
       'Review legal documents, control privacy settings, and submit data-rights requests here.':
           'ここで法的文書の確認、プライバシー設定の管理、データ権利リクエストの送信ができます。',
       'Documents': '文書',
-      'How Mixroom collects, uses, and shares information.':
-          'Mixroomが情報を収集、使用、共有する方法です。',
+      'How Mixroom collects, uses, and shares information.': 'Mixroomが情報を収集、使用、共有する方法です。',
       'Rules for using Mixroom and user content.': 'Mixroomとユーザーコンテンツの利用ルールです。',
       'Subprocessors': 'サブプロセッサー',
       'See third-party service providers that process data on Mixroom\'s behalf.':
           'Mixroomに代わってデータを処理する第三者サービスプロバイダーを確認します。',
       'Open-source licenses': 'オープンソースライセンス',
-      'View software licenses used by this app.':
-          'このアプリで使用しているソフトウェアライセンスを表示します。',
+      'View software licenses used by this app.': 'このアプリで使用しているソフトウェアライセンスを表示します。',
       'Privacy Controls': 'プライバシー設定',
-      'You can change these preferences at any time from this screen.':
-          'この画面からいつでも設定を変更できます。',
+      'You can change these preferences at any time from this screen.': 'この画面からいつでも設定を変更できます。',
       'Optional analytics and diagnostics': '任意の分析と診断',
       'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.':
           'Mixroomの品質改善と製品判断に役立てるため、アプリ操作イベントと診断情報を共有します。',
       'Personalized recommendations': 'パーソナライズされたおすすめ',
-      'Uses activity signals to tailor tips and suggestions.':
-          'アクティビティシグナルを使ってヒントや提案を調整します。',
+      'Uses activity signals to tailor tips and suggestions.': 'アクティビティシグナルを使ってヒントや提案を調整します。',
       'Product updates and marketing email': '製品アップデートとマーケティングメール',
-      'Receive release notes, offers, and feature announcements.':
-          'リリースノート、オファー、機能のお知らせを受け取ります。',
+      'Receive release notes, offers, and feature announcements.': 'リリースノート、オファー、機能のお知らせを受け取ります。',
       'Your Data Rights': 'データに関する権利',
       'Request my data export': '自分のデータのエクスポートをリクエスト',
       'Email request for a copy of your data.': 'データのコピーをメールでリクエストします。',
@@ -6611,8 +6184,7 @@ class L10n {
       'Removes your account and signs you out.': 'アカウントを削除し、サインアウトします。',
       'Legal details and supporting information': '法的詳細と補足情報',
       'Last updated: {date}': '最終更新日: {date}',
-      'This policy explains how Mixroom handles personal data in-app.':
-          'このポリシーは、Mixroomがアプリ内で個人データを取り扱う方法を説明します。',
+      'This policy explains how Mixroom handles personal data in-app.': 'このポリシーは、Mixroomがアプリ内で個人データを取り扱う方法を説明します。',
       '1. Information We Collect': '1. 収集する情報',
       'We may collect account information (such as email and profile details), usage analytics, crash diagnostics, and content metadata needed to operate features.':
           '機能の運用に必要なアカウント情報（メールアドレスやプロフィール情報など）、利用分析、クラッシュ診断、コンテンツのメタデータを収集する場合があります。',
@@ -6634,8 +6206,7 @@ class L10n {
       '7. Contact': '7. お問い合わせ',
       'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.':
           'プライバシーに関するリクエストは privacy@mixroom.ai、サポートは support@mixroom.ai までご連絡ください。',
-      'These terms govern use of Mixroom and related services.':
-          '本規約は、Mixroomおよび関連サービスの利用に適用されます。',
+      'These terms govern use of Mixroom and related services.': '本規約は、Mixroomおよび関連サービスの利用に適用されます。',
       '1. Acceptance': '1. 同意',
       'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.':
           'アカウントを作成する、またはMixroomを利用することで、本規約およびここで参照されるポリシーに同意したものとみなされます。',
@@ -6683,22 +6254,17 @@ class L10n {
       'This list may change as Mixroom adds or removes service providers. Material updates are reflected in-app and in Mixroom privacy documentation.':
           'Mixroomがサービスプロバイダーを追加または削除することで、この一覧は変更される場合があります。重要な更新はアプリ内およびMixroomのプライバシー文書に反映されます。',
       'No active account.': '有効なアカウントがありません。',
-      'Type DELETE to confirm account deletion.':
-          'アカウント削除を確認するには DELETE と入力してください。',
-      'Enter your current password to delete this account.':
-          'このアカウントを削除するには現在のパスワードを入力してください。',
-      'Re-authenticate with {provider} to delete this account.':
-          'このアカウントを削除するには{provider}で再認証してください。',
-      'Re-authenticate with your social provider to delete this account.':
-          'このアカウントを削除するにはソーシャルログインプロバイダーで再認証してください。',
+      'Type DELETE to confirm account deletion.': 'アカウント削除を確認するには DELETE と入力してください。',
+      'Enter your current password to delete this account.': 'このアカウントを削除するには現在のパスワードを入力してください。',
+      'Re-authenticate with {provider} to delete this account.': 'このアカウントを削除するには{provider}で再認証してください。',
+      'Re-authenticate with your social provider to delete this account.': 'このアカウントを削除するにはソーシャルログインプロバイダーで再認証してください。',
       'That re-authentication did not match your Mixroom account. Please try again.':
           '再認証したアカウントがMixroomアカウントと一致しません。もう一度お試しください。',
       'Delete account': 'アカウント削除',
       'This permanently removes your Mixroom account and signed-in session on this device.':
           'このデバイスのサインインセッションとMixroomアカウントを完全に削除します。',
       'Before you continue': '続行する前に',
-      'Your profile, auth access, and linked account data will be removed.':
-          'プロフィール、認証アクセス、連携アカウントデータが削除されます。',
+      'Your profile, auth access, and linked account data will be removed.': 'プロフィール、認証アクセス、連携アカウントデータが削除されます。',
       'Deleting your Mixroom account does not cancel App Store or Google Play billing. Cancel there first if needed.':
           'Mixroomアカウントを削除してもApp StoreまたはGoogle Playの請求はキャンセルされません。必要な場合は先に各ストアでキャンセルしてください。',
       'To protect your account, Mixroom will ask you to confirm DELETE and verify this session one more time.':
@@ -6762,8 +6328,7 @@ class L10n {
       'Billing email': '請求先メール',
       'Capture Deck': 'キャプチャデッキ',
       'Change Instrument': '楽器を変更',
-      'Choose how audio should be packed into the .mixroom file.':
-          '.mixroomファイルにオーディオを含める方法を選択してください。',
+      'Choose how audio should be packed into the .mixroom file.': '.mixroomファイルにオーディオを含める方法を選択してください。',
       'Clear lane': 'レーンを消去',
       'Clip settings': 'クリップ設定',
       'Clip source set to': 'クリップソースを設定:',
@@ -6776,6 +6341,8 @@ class L10n {
       'Cloud projects are not available.': 'クラウドプロジェクトは利用できません。',
       'Cloud sync failed': 'クラウド同期に失敗しました',
       'Cloud synced': 'クラウド同期済み',
+      'Not synced': '未同期',
+      'Cloud update available': 'クラウド更新あり',
       'Compliance controls': 'コンプライアンス管理',
       'Copy': 'コピー',
       'Copy range': '範囲をコピー',
@@ -6798,8 +6365,7 @@ class L10n {
       'Email verified. Your account is ready.': 'メール確認が完了しました。アカウントを利用できます。',
       'Enter 20.0 to 999.0 BPM': '20.0から999.0 BPMを入力',
       'Enter a valid BPM.': '有効なBPMを入力してください。',
-      'Enter the code from your email and your password to finish signing in.':
-          'サインインを完了するには、メールのコードとパスワードを入力してください。',
+      'Enter the code from your email and your password to finish signing in.': 'サインインを完了するには、メールのコードとパスワードを入力してください。',
       'Extra storage': '追加ストレージ',
       'Fill every four steps': '4ステップごとに入力',
       'Fill every two steps': '2ステップごとに入力',
@@ -6814,8 +6380,7 @@ class L10n {
       'Instrument Lane': '楽器レーン',
       'Make unique': '個別化',
       'Manage billing': '請求を管理',
-      'Media access is required to preview or open the saved export.':
-          '保存した書き出しをプレビューまたは開くには、メディアアクセスが必要です。',
+      'Media access is required to preview or open the saved export.': '保存した書き出しをプレビューまたは開くには、メディアアクセスが必要です。',
       'Members': 'メンバー',
       'Mixing…': 'ミックス中…',
       'No external plugins found': '外部プラグインが見つかりません',
@@ -6823,8 +6388,7 @@ class L10n {
       'One-Button Mix': 'ワンボタンミックス',
       'Run sends project context to Mixroom and the active AI provider. Current provider: OpenAI. Raw audio is not sent.':
           '実行すると、プロジェクトのコンテキストがMixroomと現在のAIプロバイダーに送信されます。現在のプロバイダー: OpenAI。元のオーディオは送信されません。',
-      'One-Button Mix executed. Open chat for details.':
-          'ワンボタンミックスを実行しました。詳細はチャットを開いてください。',
+      'One-Button Mix executed. Open chat for details.': 'ワンボタンミックスを実行しました。詳細はチャットを開いてください。',
       'Open param': 'パラメーターを開く',
       'Paste': 'ペースト',
       'Paste here': 'ここにペースト',
@@ -6839,6 +6403,9 @@ class L10n {
       'Project is currently': '現在のプロジェクトは',
       'Project synced to cloud': 'プロジェクトをクラウドに同期しました',
       'Replace sampler source': 'サンプラーソースを置換',
+      'Replace cloud version?': 'クラウド版を置き換えますか？',
+      'The cloud copy changed on another device or account. Replace it with this device\'s version?':
+          '別のデバイスまたはアカウントでクラウドコピーが変更されました。このデバイスのバージョンに置き換えますか？',
       'Replace source': 'ソースを置換',
       'Row': '行',
       'SYNC': '同期',
@@ -6859,20 +6426,17 @@ class L10n {
       'Storage': 'ストレージ',
       'Storage full': 'ストレージがいっぱいです',
       'Stretch Clip': 'クリップをストレッチ',
-      'Stretch uses this as the clip source BPM.':
-          'ストレッチはこれをクリップのソースBPMとして使います。',
+      'Stretch uses this as the clip source BPM.': 'ストレッチはこれをクリップのソースBPMとして使います。',
       'Studio tools': 'スタジオツール',
       'Sync': '同期',
       'Syncing to cloud…': 'クラウドに同期中…',
       'Tap to import demo project': 'タップしてデモプロジェクトを読み込み',
-      'Tempo detection could not lock. Enter the source BPM manually.':
-          'テンポ検出を確定できませんでした。ソースBPMを手動で入力してください。',
+      'Tempo detection could not lock. Enter the source BPM manually.': 'テンポ検出を確定できませんでした。ソースBPMを手動で入力してください。',
       'Type...': '入力...',
       'Unable to open link right now.': '現在リンクを開けません。',
       'Unable to open the store right now.': '現在ストアを開けません。',
       'Update link is not configured yet.': '更新リンクはまだ設定されていません。',
-      'Update the project title shown in your library.':
-          'ライブラリに表示されるプロジェクトタイトルを更新します。',
+      'Update the project title shown in your library.': 'ライブラリに表示されるプロジェクトタイトルを更新します。',
       'Upload hours': 'アップロード時間',
       'WAV starter samples': 'WAVスターターサンプル',
       'Warp Pro': 'Warp Pro',
@@ -6881,8 +6445,7 @@ class L10n {
       'You are': '現在のプラン',
       'will be deleted from cloud storage. Local copies on this device will remain.':
           'クラウドストレージから削除されます。このデバイスのローカルコピーは残ります。',
-      'will be deleted from this device. The cloud copy will remain available.':
-          'このデバイスから削除されます。クラウドコピーは引き続き利用できます。',
+      'will be deleted from this device. The cloud copy will remain available.': 'このデバイスから削除されます。クラウドコピーは引き続き利用できます。',
       'Plugin info': 'プラグイン情報',
       'Plugin control.': 'プラグインのコントロール。',
       'Changes this sound.': 'この音を変化させます。',
@@ -6908,8 +6471,7 @@ class L10n {
       'Time Shaper': 'タイムシェイパー',
       'Adds room or space around the sound.': '音に部屋や空間の広がりを加えます。',
       'Evens out loud and quiet parts.': '大きい部分と小さい部分をならします。',
-      'Reduces harsh moments without dulling everything.':
-          '全体をこもらせずに刺さる瞬間を抑えます。',
+      'Reduces harsh moments without dulling everything.': '全体をこもらせずに刺さる瞬間を抑えます。',
       'Changes the punch and tail of hits.': 'ヒットのアタック感と余韻を調整します。',
       'Stops peaks from getting too loud.': 'ピークが大きくなりすぎるのを防ぎます。',
       'Trims peaks for a louder, harder sound.': 'ピークを削って、より大きく硬い音にします。',
@@ -6930,8 +6492,7 @@ class L10n {
       'Room Size: space size.': 'Room Size: 空間の大きさ。',
       'Predelay: time before the room sound starts.': 'Predelay: 空間音が始まるまでの時間。',
       'Mix: dry/wet balance.': 'Mix: 原音とエフェクト音のバランス。',
-      'Threshold: level where compression starts.':
-          'Threshold: コンプレッションが始まるレベル。',
+      'Threshold: level where compression starts.': 'Threshold: コンプレッションが始まるレベル。',
       'Ratio: compression strength.': 'Ratio: コンプレッションの強さ。',
       'Attack: how fast it grabs peaks.': 'Attack: ピークをつかむ速さ。',
       'Release: how fast it lets go.': 'Release: 戻る速さ。',
@@ -6957,8 +6518,7 @@ class L10n {
       'Ceiling: max output level.': 'Ceiling: 最大出力レベル。',
       'Threshold: level where clipping starts.': 'Threshold: クリッピングが始まるレベル。',
       'Low Gain: bass cut or boost.': 'Low Gain: 低域のカットまたはブースト。',
-      'Mid Gain: body and presence cut or boost.':
-          'Mid Gain: 太さや存在感のカットまたはブースト。',
+      'Mid Gain: body and presence cut or boost.': 'Mid Gain: 太さや存在感のカットまたはブースト。',
       'High Gain: brightness cut or boost.': 'High Gain: 明るさのカットまたはブースト。',
       'Mode: texture style.': 'Mode: 質感のスタイル。',
       'Tone: brightness.': 'Tone: 明るさ。',
@@ -6974,10 +6534,8 @@ class L10n {
       'Output: level after distortion.': 'Output: ディストーション後のレベル。',
       'Anger: extra bite and saturation.': 'Anger: 追加の噛みつきとサチュレーション。',
       'Offset: asymmetry and edge.': 'Offset: 非対称感とエッジ。',
-      'HPF Frequency: low cutoff before distortion.':
-          'HPF Frequency: ディストーション前の低域カットオフ。',
-      'LPF Frequency: high cutoff after distortion.':
-          'LPF Frequency: ディストーション後の高域カットオフ。',
+      'HPF Frequency: low cutoff before distortion.': 'HPF Frequency: ディストーション前の低域カットオフ。',
+      'LPF Frequency: high cutoff after distortion.': 'LPF Frequency: ディストーション後の高域カットオフ。',
       'Shape: distortion curve.': 'Shape: ディストーションカーブ。',
       'Shape Tilt: tilts the distortion shape.': 'Shape Tilt: ディストーション形状の傾き。',
       'Distortion Type: clipping style.': 'Distortion Type: クリッピング方式。',
@@ -7015,11 +6573,7 @@ class L10n {
         key; // Final fallback: raw key (prevents null-crash on new strings)
   }
 
-  static String translateWithParams(
-    BuildContext context,
-    String key,
-    Map<String, String> params,
-  ) {
+  static String translateWithParams(BuildContext context, String key, Map<String, String> params) {
     var value = translate(context, key);
     for (final entry in params.entries) {
       value = value.replaceAll('{${entry.key}}', entry.value);
@@ -7034,18 +6588,13 @@ class L10n {
     final appUser = Provider.of<AppUserService>(context, listen: false);
 
     // Save to provider and persistent storage
-    await Provider.of<LocaleProvider>(
-      context,
-      listen: false,
-    ).setLocale(resolvedLocale);
+    await Provider.of<LocaleProvider>(context, listen: false).setLocale(resolvedLocale);
 
     // Directly access the state of MyApp and update the locale
     appState?.setAppLocale(resolvedLocale);
 
     if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
-      unawaited(
-        appUser.stageLocalePreference(localeCode: resolvedLocale.languageCode),
-      );
+      unawaited(appUser.stageLocalePreference(localeCode: resolvedLocale.languageCode));
     }
   }
 }

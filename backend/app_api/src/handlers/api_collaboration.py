@@ -237,19 +237,12 @@ def _workspace_status_allows_write(status: Any) -> bool:
     return str(status or "active").strip().lower() == "active"
 
 
-def _organization_grants_education_personal_cloud(organization: Dict[str, Any]) -> bool:
-    return (
-        str(organization.get("plan_code") or "").strip().lower() == "education"
-        and str(organization.get("membership_role") or "").strip().lower() == "student"
-        and str(organization.get("membership_status") or "active").strip().lower() == "active"
-        and _org_status_allows_write(organization.get("status"))
-    )
-
-
 def _organization_supports_shared_cloud(organization: Dict[str, Any]) -> bool:
     plan_code = str(organization.get("plan_code") or "").strip().lower()
     if plan_code == "education":
-        return False
+        # Education has a dedicated class cloud. It remains a separate
+        # location from each student's personal cloud storage.
+        return True
     plan = _catalog_plan(plan_code)
     limits = plan.get("limits") if isinstance(plan.get("limits"), dict) else {}
     return bool(
@@ -306,23 +299,6 @@ def _personal_entitlement_for_cloud(
             limits,
             _explicit_limit_overrides(raw),
         )
-    if snapshot is None:
-        snapshot = _snapshot_for_user(user_id)
-    for organization in snapshot.get("organizations") or []:
-        if not _organization_grants_education_personal_cloud(organization):
-            continue
-        education_plan = _catalog_plan("education")
-        capabilities = merge_capabilities(
-            capabilities,
-            education_plan.get("capabilities") or {},
-        )
-        limits = merge_limits(
-            limits,
-            education_plan.get("limits") or {},
-        )
-        plan_code = "education"
-        plan = education_plan
-        break
     return {
         "plan_code": plan.get("code") or plan_code,
         "capabilities": capabilities,
@@ -551,6 +527,8 @@ def _cloud_storage_payload(
             or str(workspace.get("name") or "").strip()
             or "Shared Cloud"
         )
+        if str(organization.get("plan_code") or "").strip().lower() == "education":
+            label = f"{label} Cloud" if not label.lower().endswith("cloud") else label
         locations.append(
             {
                 "storage_scope": "workspace",

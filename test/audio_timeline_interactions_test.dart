@@ -29,6 +29,7 @@ Future<AudioTrack> _buildClip({
   int durationMs = _kClipDurationMsInt,
   int row = 0,
   int rowId = 1,
+  int engineClipId = 1,
 }) {
   return AudioTrack.create(
     file: File('test_audio.wav'),
@@ -39,7 +40,7 @@ Future<AudioTrack> _buildClip({
     offset: 0.0,
     rowIndex: row,
     rowId: rowId,
-    engineClipId: 1,
+    engineClipId: engineClipId,
     label: 'Fixture Clip',
   );
 }
@@ -114,6 +115,8 @@ Offset _clipCenter(
   WidgetTester tester, {
   double additionalDx = 0.0,
   double clipDurationMs = _kClipDurationMs,
+  int row = 0,
+  double rowHeight = 80.0,
 }) {
   final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
   final playheadPx = (_kTestTimelineWidth / 2.0) - _kHeaderWidth;
@@ -121,7 +124,7 @@ Offset _clipCenter(
   return topLeft +
       Offset(
         _kHeaderWidth + playheadPx + (clipWidthPx / 2.0) + additionalDx,
-        _kRulerHeight + 40.0,
+        _kRulerHeight + (row * rowHeight) + (rowHeight / 2.0),
       );
 }
 
@@ -177,6 +180,73 @@ Future<void> _openRowHeaderMenu(WidgetTester tester, int row) async {
   );
   await tester.longPressAt(headerRect.centerLeft + const Offset(22, 0));
   await tester.pumpAndSettle();
+}
+
+CustomPainter _timelineClipPainter(WidgetTester tester) {
+  for (final customPaint in tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byType(AudioCanvasTimeline),
+      matching: find.byType(CustomPaint),
+    ),
+  )) {
+    final painter = customPaint.painter;
+    if (painter == null) continue;
+    try {
+      final indices = (painter as dynamic).visibleClipIndices;
+      if (indices is List<int>) return painter;
+    } on NoSuchMethodError {
+      // Other timeline painters do not expose clip visibility.
+    }
+  }
+  fail('Timeline painter with visible clip indices was not found.');
+}
+
+List<int> _paintedTimelineClipIndices(WidgetTester tester) {
+  final indices = (_timelineClipPainter(tester) as dynamic).visibleClipIndices;
+  return List<int>.of(indices as List<int>);
+}
+
+double _paintedTimelineVerticalScrollOffset(WidgetTester tester) {
+  for (final customPaint in tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byType(AudioCanvasTimeline),
+      matching: find.byType(CustomPaint),
+    ),
+  )) {
+    final painter = customPaint.painter;
+    if (painter == null) continue;
+    try {
+      final offset = (painter as dynamic).verticalScrollOffset;
+      if (offset is double) return offset;
+    } on NoSuchMethodError {
+      // Other timeline painters do not expose vertical scroll state.
+    }
+  }
+  fail('Timeline painter with vertical scroll state was not found.');
+}
+
+ScrollController _timelineVerticalScrollController(WidgetTester tester) {
+  final candidates = tester
+      .widgetList<SingleChildScrollView>(
+        find.descendant(
+          of: find.byType(AudioCanvasTimeline),
+          matching: find.byType(SingleChildScrollView),
+        ),
+      )
+      .where(
+        (scrollView) =>
+            scrollView.scrollDirection == Axis.vertical &&
+            scrollView.controller?.hasClients == true,
+      )
+      .map((scrollView) => scrollView.controller!)
+      .toList(growable: false);
+  if (candidates.isEmpty) {
+    fail('Timeline vertical scroll controller was not found.');
+  }
+  candidates.sort(
+    (a, b) => b.position.maxScrollExtent.compareTo(a.position.maxScrollExtent),
+  );
+  return candidates.first;
 }
 
 Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
@@ -571,6 +641,76 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(moveCommits, <int>[0, 1]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'tablet long-press box selects and highlights clips from the bottom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.android);
+    try {
+      final top = await _buildClip(row: 0, rowId: 1, engineClipId: 1);
+      final bottom = await _buildClip(row: 1, rowId: 2, engineClipId: 2);
+      final selectionSnapshots = <List<int>>[];
+      const tabletRowHeight = 84.0;
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[top, bottom],
+          rowsOverride: <TimelineRow>[
+            TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
+            TimelineRow(rowId: 2, name: 'Track 2', iconId: 0),
+          ],
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (selectedClipIndices, _) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final bottomCenter = _clipCenter(
+        tester,
+        row: 1,
+        rowHeight: tabletRowHeight,
+      );
+      final topCenter = _clipCenter(
+        tester,
+        row: 0,
+        rowHeight: tabletRowHeight,
+      );
+
+      final upGesture = await tester.startGesture(bottomCenter);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+      expect(
+        selectionSnapshots.where((snapshot) => snapshot.contains(1)),
+        isNotEmpty,
+        reason: 'starting clip must stay selected when the box begins',
+      );
+
+      await upGesture.moveTo(topCenter);
+      await tester.pump();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+
+      await upGesture.up();
+      await tester.pumpAndSettle();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+
+      selectionSnapshots.clear();
+      final downGesture = await tester.startGesture(topCenter);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+      await downGesture.moveTo(bottomCenter);
+      await tester.pump();
+      expect(selectionSnapshots.last, <int>[0, 1]);
+      await downGesture.up();
+      await tester.pumpAndSettle();
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -2640,6 +2780,42 @@ void main() {
     expect(deleteRequests, <int>[0]);
   });
 
+  testWidgets('clip deletion cancels a drag that holds a stale clip index',
+      (tester) async {
+    final clips = <AudioTrack>[
+      await _buildClip(),
+      await _buildClip(),
+      await _buildClip(),
+    ];
+    final moveRequests = <int>[];
+
+    Widget harness(List<AudioTrack> currentClips) => _buildHarness(
+          clips: currentClips,
+          onMoveClipCommit: (clipIndex, _, __) async {
+            moveRequests.add(clipIndex);
+          },
+        );
+
+    await tester.pumpWidget(harness(clips));
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.startGesture(_clipCenter(tester));
+    await gesture.moveBy(const Offset(24.0, 0.0));
+    await tester.pump();
+
+    // The topmost clip is index 2. Removing it while the pointer remains down
+    // must invalidate the transient drag before another update arrives.
+    await tester.pumpWidget(harness(clips.take(2).toList(growable: false)));
+    await tester.pump();
+    await gesture.moveBy(const Offset(24.0, 0.0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(moveRequests, isEmpty);
+  });
+
   testWidgets('desktop delete key removes selected clips', (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
     final deleteRequests = <int>[];
@@ -3202,6 +3378,75 @@ void main() {
 
     expect(find.byType(RowEffectsPanel), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
+
+  testWidgets(
+      'effect parameter geometry admits an off-screen clip on the next scroll',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final rows = List<TimelineRow>.generate(
+        8,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final upperClip = await _buildClip(row: 0, rowId: 1, engineClipId: 1);
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[upperClip],
+          controller: controller,
+          rowsOverride: rows,
+          rowEffects: const <String>['EQ'],
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller.ensureRowExpanded(7, tab: 1);
+      await tester.pumpAndSettle();
+
+      final effectsPanel = tester.widget<RowEffectsPanel>(
+        find.byType(RowEffectsPanel),
+      );
+      effectsPanel.onHeightChanged(800.0);
+      await tester.pumpAndSettle();
+
+      final verticalController = _timelineVerticalScrollController(tester);
+      verticalController.jumpTo(verticalController.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(_paintedTimelineClipIndices(tester), isNot(contains(0)));
+      final painterWithoutClipZero = _timelineClipPainter(tester);
+
+      effectsPanel.onHeightChanged(240.0);
+      await tester.pumpAndSettle();
+
+      expect(
+        _paintedTimelineVerticalScrollOffset(tester),
+        closeTo(verticalController.offset, 0.01),
+      );
+
+      final stableOffset = verticalController.offset;
+      effectsPanel.onHeightChanged(240.0);
+      await tester.pumpAndSettle();
+      expect(verticalController.offset, stableOffset);
+
+      verticalController.jumpTo(0.0);
+      await tester.pumpAndSettle();
+      expect(_paintedTimelineClipIndices(tester), contains(0));
+      final painterWithClipZero = _timelineClipPainter(tester);
+      expect(
+        painterWithClipZero.shouldRepaint(painterWithoutClipZero),
+        isTrue,
+        reason: 'clip index 0 entering the viewport must invalidate paint',
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
   });
 
   testWidgets('tablet effects tab shows horizontal device chain controls',

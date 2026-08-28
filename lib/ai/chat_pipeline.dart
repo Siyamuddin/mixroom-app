@@ -23,6 +23,7 @@ import 'cloud_llm_service.dart';
 import 'project_state_builder.dart';
 import 'local_mixing_model.dart';
 import 'magnitude_predictor.dart';
+import 'one_button_mix_profiles.dart';
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
@@ -641,6 +642,7 @@ class ChatPipeline {
     Map<String, dynamic> clientContext = const <String, dynamic>{},
     bool autoApplyProposals = false,
     bool bypassLearnedMagnitudes = false,
+    String? oneButtonMixProfileId,
   }) async {
     final userText = text.trim();
     if (userText.isEmpty) {
@@ -972,6 +974,9 @@ class ChatPipeline {
         'learned_magnitude_enabled': learnedMagnitudeEnabled,
         'learned_magnitude_ready': magnitudePredictor.isReady,
         'learned_magnitude_bypassed': bypassLearnedMagnitudes,
+        if ((oneButtonMixProfileId ?? '').trim().isNotEmpty)
+          'one_button_mix_profile_id':
+              OneButtonMixProfiles.byId(oneButtonMixProfileId).id,
       };
 
       // Collect a merged mix result across all calls
@@ -1085,6 +1090,11 @@ class ChatPipeline {
             }
           }
         }
+
+        resolvedActions = OneButtonMixProfiles.tuneActions(
+          resolvedActions,
+          profileId: oneButtonMixProfileId,
+        );
 
         if (kAiDebugLogs) {
           mixDebugSteps.add(<String, dynamic>{

@@ -107,7 +107,13 @@ Map<String, dynamic> _clientContext() => <String, dynamic>{
   ],
   'allowed_instrument_ids': <String>['piano'],
   'ai_v3_instrument_catalog': <Map<String, dynamic>>[
-    <String, dynamic>{'instrument_id': 'piano', 'name': 'Piano'},
+    <String, dynamic>{
+      'instrument_id': 'piano',
+      'name': 'Piano',
+      'playable_pitch_ranges': <Map<String, int>>[
+        <String, int>{'low': 21, 'high': 108},
+      ],
+    },
   ],
   'allowed_builtin_effects': <String>['Reverb'],
   'ai_v3_playhead_ms': 1500,
@@ -251,7 +257,13 @@ void main() {
 
     expect(context.data['instruments'], <String>['bass', 'piano']);
     expect(context.data['instrument_catalog'], <Map<String, dynamic>>[
-      <String, dynamic>{'instrument_id': 'piano', 'name': 'Piano'},
+      <String, dynamic>{
+        'instrument_id': 'piano',
+        'name': 'Piano',
+        'playable_pitch_ranges': <Map<String, int>>[
+          <String, int>{'low': 21, 'high': 108},
+        ],
+      },
     ]);
     expect(
       (context.data['effects'] as List).map(

@@ -97,7 +97,7 @@ Future<void> showAppMessageDialog({
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
                   width: 38,
@@ -113,17 +113,14 @@ Future<void> showAppMessageDialog({
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontFamily: 'Pretendard',
-                        color: Color(0xFFF4F4F4),
-                        fontSize: 18,
-                        height: 1.18,
-                        fontWeight: FontWeight.w800,
-                      ),
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 18,
+                      height: 1.18,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
