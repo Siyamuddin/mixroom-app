@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/ai/cloud_llm_service.dart';
+import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -2452,10 +2454,14 @@ class _SubscriptionEntitlementCardState
   String? _lastShownIapError;
   BillingProductDefinition? _pendingIapProduct;
   DateTime? _lastHandledCompletedPurchaseAtUtc;
+  CloudLlmService? _aiUsageService;
+  AiPromptRateLimitStatus? _aiUsageStatus;
+  bool _aiUsageLoading = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _aiUsageService ??= _createAiUsageService();
     final iapService = context.read<IapService>();
     if (!identical(_boundIapService, iapService)) {
       _boundIapService?.removeListener(_handleIapServiceChanged);
@@ -2473,7 +2479,33 @@ class _SubscriptionEntitlementCardState
   @override
   void dispose() {
     _boundIapService?.removeListener(_handleIapServiceChanged);
+    _aiUsageService?.dispose();
     super.dispose();
+  }
+
+  CloudLlmService _createAiUsageService() {
+    final authService = context.read<AuthService>();
+    return CloudLlmService(
+      proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+      proxyPath: LlmConfig.proxyPath,
+      requestTimeout: Duration(seconds: LlmConfig.requestTimeoutSeconds),
+      authTokenProvider: authService.getIdTokenOrNull,
+      refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
+    );
+  }
+
+  Future<void> _refreshAiUsage() async {
+    final service = _aiUsageService;
+    if (service == null) return;
+    if (mounted) {
+      setState(() => _aiUsageLoading = true);
+    }
+    final status = await service.fetchPromptRateLimitStatus();
+    if (!mounted) return;
+    setState(() {
+      _aiUsageStatus = status;
+      _aiUsageLoading = false;
+    });
   }
 
   void _handleIapServiceChanged() {
@@ -2521,7 +2553,10 @@ class _SubscriptionEntitlementCardState
     // it before awaiting refresh work so reopening Account cannot show it again.
     iapService.consumeCompletedPurchaseNotice();
     await entitlementService.refresh(force: true);
-    await entitlementService.refreshAccountSurface(force: true);
+    await Future.wait(<Future<void>>[
+      entitlementService.refreshAccountSurface(force: true),
+      _refreshAiUsage(),
+    ]);
     if (!mounted) return;
     final planLabel = _completedPurchasePlanLabel(
       product,
@@ -2743,6 +2778,7 @@ class _SubscriptionEntitlementCardState
     }
     await Future.wait(<Future<void>>[
       accountSurfaceFuture,
+      _refreshAiUsage(),
       if (iapRefreshFuture != null) iapRefreshFuture,
     ]);
     if (!silent && mounted) {
@@ -3224,6 +3260,8 @@ class _SubscriptionEntitlementCardState
     return AccountSubscriptionSurface(
       entitlementService: entitlementService,
       iapService: iapService,
+      aiUsageStatus: _aiUsageStatus,
+      isAiUsageLoading: _aiUsageLoading,
       platformKey: _platformKey(),
       regionCode: regionCode,
       platformProvider: provider,

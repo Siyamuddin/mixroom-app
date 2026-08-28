@@ -35,6 +35,18 @@ void main() {
       expect(empty.remainingPercent, 0);
     });
 
+    test(
+      'prompt rate limit status exposes the most constrained percentage',
+      () {
+        final status = AiPromptRateLimitStatus.fromJson({
+          'daily': {'used': 25, 'limit': 100, 'remaining': 75},
+          'weekly': {'used': 600, 'limit': 1000, 'remaining': 400},
+        });
+
+        expect(status.remainingPercent, 40);
+      },
+    );
+
     test('kDebugSystemPrompt stays in sync with the server prompt', () {
       final serverText = File(
         'backend/llm_proxy/src/common/llm_contract.py',

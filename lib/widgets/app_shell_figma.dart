@@ -1097,16 +1097,6 @@ class MixroomMainSideRail extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               _MixroomDesktopRailIconButton(
-                label: L10n.translate(context, 'Platform'),
-                active: selectedTab == MixroomMainTab.platform,
-                assetPath: _iconForTab(
-                  MixroomMainTab.platform,
-                  selectedTab == MixroomMainTab.platform,
-                ),
-                onTap: () => onTabSelected(MixroomMainTab.platform),
-              ),
-              const SizedBox(height: 14),
-              _MixroomDesktopRailIconButton(
                 label: L10n.translate(context, 'Projects'),
                 active: selectedTab == MixroomMainTab.projects,
                 assetPath: _iconForTab(

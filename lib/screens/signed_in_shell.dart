@@ -1412,6 +1412,23 @@ class _HomeHero extends StatelessWidget {
           const Positioned(
             left: 0,
             right: 0,
+            top: 0,
+            height: 180,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF070B1C), Color(0x00070B1C)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const Positioned(
+            left: 0,
+            right: 0,
             bottom: 0,
             height: 210,
             child: IgnorePointer(

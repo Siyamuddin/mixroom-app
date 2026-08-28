@@ -10972,9 +10972,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     },
     'chat_send_body': {
       'en':
-          'We loaded a sample prompt. If you press send, it will use 1 AI credit and run the real workflow.',
-      'ko': '샘플 프롬프트가 미리 입력되어 있어요. 보내기를 누르면 AI 크레딧 1개가 사용되고 실제 워크플로가 실행돼요.',
-      'ja': 'サンプルプロンプトは入力済みです。送信すると AI クレジットを 1 つ消費し、実際のワークフローが実行されます。',
+          'We loaded a sample prompt. If you press send, it will count toward your AI usage and run the real workflow.',
+      'ko': '샘플 프롬프트가 미리 입력되어 있어요. 보내기를 누르면 AI 사용량에 반영되고 실제 워크플로가 실행돼요.',
+      'ja': 'サンプルプロンプトは入力済みです。送信すると AI 使用量に反映され、実際のワークフローが実行されます。',
     },
     'chat_send_helper': {
       'en': 'Send it to try it now, or tap Next to keep moving.',
@@ -93239,8 +93239,10 @@ class _ChatBarState extends State<_ChatBar> {
     });
   }
 
-  String _badgeLabel(BuildContext context) {
-    return L10n.translate(context, 'Usage');
+  String _badgeLabel() {
+    final status = widget.promptRateLimitStatus;
+    if (status == null) return '--%';
+    return '${status.remainingPercent}%';
   }
 
   String _badgeTooltip(BuildContext context) {
@@ -93319,7 +93321,7 @@ class _ChatBarState extends State<_ChatBar> {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  _badgeLabel(context),
+                  _badgeLabel(),
                   style: const TextStyle(
                     fontFamily: 'Pretendard',
                     fontSize: 12,

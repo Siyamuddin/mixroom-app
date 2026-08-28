@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
@@ -102,6 +103,8 @@ class AccountSubscriptionSurface extends StatefulWidget {
     super.key,
     required this.entitlementService,
     required this.iapService,
+    required this.aiUsageStatus,
+    required this.isAiUsageLoading,
     required this.platformKey,
     required this.regionCode,
     required this.platformProvider,
@@ -116,6 +119,8 @@ class AccountSubscriptionSurface extends StatefulWidget {
 
   final EntitlementService entitlementService;
   final IapService iapService;
+  final AiPromptRateLimitStatus? aiUsageStatus;
+  final bool isAiUsageLoading;
   final String platformKey;
   final String regionCode;
   final BillingProvider platformProvider;
@@ -244,6 +249,8 @@ class _AccountSubscriptionSurfaceState
               _PlanHero(
                 entitlement: entitlement,
                 billing: widget.entitlementService.billingAccount,
+                aiUsageStatus: widget.aiUsageStatus,
+                isAiUsageLoading: widget.isAiUsageLoading,
                 isBusy: busy,
                 onManageSubscription: widget.onManageSubscription,
               ),
@@ -418,12 +425,16 @@ class _PlanHero extends StatelessWidget {
   const _PlanHero({
     required this.entitlement,
     required this.billing,
+    required this.aiUsageStatus,
+    required this.isAiUsageLoading,
     required this.isBusy,
     required this.onManageSubscription,
   });
 
   final EntitlementSnapshot entitlement;
   final BillingAccountSnapshot? billing;
+  final AiPromptRateLimitStatus? aiUsageStatus;
+  final bool isAiUsageLoading;
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
 
@@ -432,6 +443,8 @@ class _PlanHero extends StatelessWidget {
     return _EntitlementOverviewCard(
       entitlement: entitlement,
       billing: billing,
+      aiUsageStatus: aiUsageStatus,
+      isAiUsageLoading: isAiUsageLoading,
       isBusy: isBusy,
       onManageSubscription: onManageSubscription,
     );
@@ -442,12 +455,16 @@ class _EntitlementOverviewCard extends StatelessWidget {
   const _EntitlementOverviewCard({
     required this.entitlement,
     required this.billing,
+    required this.aiUsageStatus,
+    required this.isAiUsageLoading,
     required this.isBusy,
     required this.onManageSubscription,
   });
 
   final EntitlementSnapshot entitlement;
   final BillingAccountSnapshot? billing;
+  final AiPromptRateLimitStatus? aiUsageStatus;
+  final bool isAiUsageLoading;
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
 
@@ -555,7 +572,7 @@ class _EntitlementOverviewCard extends StatelessWidget {
           ),
           if (planCode != 'free') ...[
             const SizedBox(height: 14),
-            _PromptUsageCard(entitlement: entitlement),
+            _AiUsageCard(status: aiUsageStatus, isLoading: isAiUsageLoading),
           ],
         ],
       ),
@@ -705,128 +722,180 @@ class _SubscriptionActionButton extends StatelessWidget {
   }
 }
 
-class _PromptUsageCard extends StatelessWidget {
-  const _PromptUsageCard({required this.entitlement});
+class _AiUsageCard extends StatelessWidget {
+  const _AiUsageCard({required this.status, required this.isLoading});
 
-  final EntitlementSnapshot entitlement;
-
-  @override
-  Widget build(BuildContext context) {
-    final limits = entitlement.limits;
-    final daily = _promptLimitReadout(context, limits['ai_prompts_daily']);
-    final weekly = _promptLimitReadout(context, limits['ai_prompts_weekly']);
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Divider(height: 1, color: Colors.white.withValues(alpha: 0.26)),
-          const SizedBox(height: 14),
-          Text(
-            _t(context, 'AI usage'),
-            style: const TextStyle(
-              color: Color(0xFFF4F4F4),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          _PromptLimitRow(label: _t(context, 'Daily'), value: daily),
-          Divider(height: 14, color: Colors.white.withValues(alpha: 0.24)),
-          _PromptLimitRow(label: _t(context, 'Weekly'), value: weekly),
-        ],
-      ),
-    );
-  }
-}
-
-String _promptLimitReadout(BuildContext context, Object? raw) {
-  final value = (raw ?? '').toString().trim();
-  if (value.isEmpty) return _t(context, 'Included');
-  if (value.toLowerCase() == 'custom') return _t(context, 'Custom');
-  final parsed = raw is num ? raw : num.tryParse(value);
-  if (parsed == null) return value;
-  final formatted = NumberFormat.decimalPattern(
-    Localizations.localeOf(context).toString(),
-  ).format(parsed);
-  return _tr(context, '{count} prompts', {'count': formatted});
-}
-
-class _PromptLimitRow extends StatelessWidget {
-  const _PromptLimitRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
+  final AiPromptRateLimitStatus? status;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFFF4F4F4),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
+        Divider(height: 1, color: Colors.white.withValues(alpha: 0.26)),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _t(context, 'AI usage'),
+                style: const TextStyle(
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
-          ),
+            if (isLoading)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Colors.white54,
+                ),
+              ),
+          ],
         ),
-        Text(
-          value,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.72),
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
-          ),
+        const SizedBox(height: 8),
+        _AiUsageRow(
+          label: _t(context, 'Daily'),
+          remainingPercent: status?.daily.remainingPercent,
+        ),
+        Divider(height: 14, color: Colors.white.withValues(alpha: 0.24)),
+        _AiUsageRow(
+          label: _t(context, 'Weekly'),
+          remainingPercent: status?.weekly.remainingPercent,
         ),
       ],
     );
   }
 }
 
-class _PromptUsagePill extends StatelessWidget {
-  const _PromptUsagePill({required this.label, required this.value});
+class _AiUsageRow extends StatelessWidget {
+  const _AiUsageRow({required this.label, required this.remainingPercent});
 
   final String label;
-  final String value;
+  final int? remainingPercent;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 200),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+    final normalizedPercent = remainingPercent?.clamp(0, 100).toInt();
+    final value = normalizedPercent == null
+        ? '--%'
+        : '$normalizedPercent% ${_t(context, 'left')}';
+
+    return Semantics(
+      label: '$label $value',
+      child: Row(
         children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.48),
-              fontSize: 10.4,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
+          SizedBox(
+            width: 58,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFFF4F4F4),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12.4,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
+          const SizedBox(width: 10),
+          Expanded(
+            child: ExcludeSemantics(
+              child: _AiUsageProgressBar(remainingPercent: normalizedPercent),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 70,
+            child: ExcludeSemantics(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: Text(
+                  value,
+                  key: ValueKey<String>(value),
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontSize: 12.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _AiUsageProgressBar extends StatelessWidget {
+  const _AiUsageProgressBar({required this.remainingPercent});
+
+  final int? remainingPercent;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = (remainingPercent ?? 0) / 100;
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: target),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutCubic,
+      builder: (context, progress, _) {
+        final color = _aiUsageProgressColor(progress);
+        return Container(
+          height: 7,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          alignment: Alignment.centerLeft,
+          child: FractionallySizedBox(
+            widthFactor: progress,
+            heightFactor: 1,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                gradient: LinearGradient(
+                  colors: [color.withValues(alpha: 0.72), color],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.34),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+Color _aiUsageProgressColor(double progress) {
+  final normalized = progress.clamp(0.0, 1.0);
+  if (normalized <= 0.5) {
+    return Color.lerp(
+      const Color(0xFFFF6673),
+      const Color(0xFFFFC15C),
+      normalized * 2,
+    )!;
+  }
+  return Color.lerp(
+    const Color(0xFFFFC15C),
+    const Color(0xFF67E8A5),
+    (normalized - 0.5) * 2,
+  )!;
 }
 
 class _AccessDisplay {

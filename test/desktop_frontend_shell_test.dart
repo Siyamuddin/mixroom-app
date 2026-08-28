@@ -87,7 +87,7 @@ void main() {
 
       expect(find.text('Desktop'), findsOneWidget);
       expect(find.byTooltip('Home'), findsOneWidget);
-      expect(find.byTooltip('Platform'), findsOneWidget);
+      expect(find.byTooltip('Platform'), findsNothing);
       expect(find.byTooltip('Projects'), findsOneWidget);
       expect(find.byTooltip('Account'), findsOneWidget);
       expect(find.byTooltip('New Project'), findsOneWidget);
@@ -115,6 +115,23 @@ void main() {
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
+  });
+
+  testWidgets('mobile dock retains the platform tab', (tester) async {
+    MixroomMainTab? selectedTab;
+    await _pumpDesktopApp(
+      tester,
+      child: MixroomMainBottomDock(
+        selectedTab: MixroomMainTab.home,
+        onTabSelected: (tab) => selectedTab = tab,
+        onAddTap: () {},
+      ),
+    );
+
+    await tester.tap(find.byType(MixroomShellRoundButton).at(1));
+
+    expect(selectedTab, MixroomMainTab.platform);
+    expect(tester.takeException(), isNull);
   });
 }
 
