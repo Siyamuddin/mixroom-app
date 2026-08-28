@@ -804,6 +804,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // This test covers free movement, independent of the default snap mode.
+    await tester.tapAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+
     final center = _clipCenter(tester);
     final gesture = await tester.createGesture(
       kind: PointerDeviceKind.mouse,
@@ -841,8 +845,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tapAt(_magnetButtonCenter(tester));
-    await tester.pumpAndSettle();
     expect(snapStates.last, isTrue);
 
     final center = _clipCenter(tester);
@@ -883,8 +885,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tapAt(_magnetButtonCenter(tester));
-    await tester.pumpAndSettle();
     expect(snapStates.last, isTrue);
 
     final center = _clipCenter(tester);
@@ -2913,6 +2913,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Preserve the exact playhead position being exercised by this test.
+    await tester.tapAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -2940,6 +2944,10 @@ void main() {
         },
       ),
     );
+    await tester.pumpAndSettle();
+
+    // Preserve the exact empty-lane click position being exercised here.
+    await tester.tapAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
     final timelineTopLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
@@ -3096,6 +3104,10 @@ void main() {
         },
       ),
     );
+    await tester.pumpAndSettle();
+
+    // This test validates group spacing rather than snap quantization.
+    await tester.tapAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);

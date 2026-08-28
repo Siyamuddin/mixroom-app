@@ -157,7 +157,7 @@ SPEC CHECKSUMS:
   GCDWebServer: 2c156a56c8226e2d5c0c3f208a3621ccffbe3ce4
   HLSCachingReverseProxyServer: 59935e1e0244ad7f3375d75b5ef46e8eb26ab181
   image_gallery_saver: 14711d79da40581063e8842a11acf1969d781ed7
-  juce_audio_engine: 326a30c916bbb6f10da2c02f7eb1d8a067e5a550
+  juce_audio_engine: 353be95e1555c3df3ac7d98fedfbe8820384352a
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
   onnxruntime-c: 7f778680e96145956c0a31945f260321eed2611a
   onnxruntime-objc: 83d28b87525bd971259a66e153ea32b5d023de19

@@ -2,11 +2,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/entitlement_models.dart';
+import 'package:mixroom/widgets/account_glass_ui.dart';
 
 typedef ManageSubscriptionAction =
     void Function({BillingProvider? provider, String? managementChannel});
@@ -101,6 +103,8 @@ class AccountSubscriptionSurface extends StatefulWidget {
     super.key,
     required this.entitlementService,
     required this.iapService,
+    required this.aiUsageStatus,
+    required this.isAiUsageLoading,
     required this.platformKey,
     required this.regionCode,
     required this.platformProvider,
@@ -115,6 +119,8 @@ class AccountSubscriptionSurface extends StatefulWidget {
 
   final EntitlementService entitlementService;
   final IapService iapService;
+  final AiPromptRateLimitStatus? aiUsageStatus;
+  final bool isAiUsageLoading;
   final String platformKey;
   final String regionCode;
   final BillingProvider platformProvider;
@@ -243,6 +249,8 @@ class _AccountSubscriptionSurfaceState
               _PlanHero(
                 entitlement: entitlement,
                 billing: widget.entitlementService.billingAccount,
+                aiUsageStatus: widget.aiUsageStatus,
+                isAiUsageLoading: widget.isAiUsageLoading,
                 isBusy: busy,
                 onManageSubscription: widget.onManageSubscription,
               ),
@@ -417,12 +425,16 @@ class _PlanHero extends StatelessWidget {
   const _PlanHero({
     required this.entitlement,
     required this.billing,
+    required this.aiUsageStatus,
+    required this.isAiUsageLoading,
     required this.isBusy,
     required this.onManageSubscription,
   });
 
   final EntitlementSnapshot entitlement;
   final BillingAccountSnapshot? billing;
+  final AiPromptRateLimitStatus? aiUsageStatus;
+  final bool isAiUsageLoading;
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
 
@@ -431,6 +443,8 @@ class _PlanHero extends StatelessWidget {
     return _EntitlementOverviewCard(
       entitlement: entitlement,
       billing: billing,
+      aiUsageStatus: aiUsageStatus,
+      isAiUsageLoading: isAiUsageLoading,
       isBusy: isBusy,
       onManageSubscription: onManageSubscription,
     );
@@ -441,12 +455,16 @@ class _EntitlementOverviewCard extends StatelessWidget {
   const _EntitlementOverviewCard({
     required this.entitlement,
     required this.billing,
+    required this.aiUsageStatus,
+    required this.isAiUsageLoading,
     required this.isBusy,
     required this.onManageSubscription,
   });
 
   final EntitlementSnapshot entitlement;
   final BillingAccountSnapshot? billing;
+  final AiPromptRateLimitStatus? aiUsageStatus;
+  final bool isAiUsageLoading;
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
 
@@ -457,42 +475,25 @@ class _EntitlementOverviewCard extends StatelessWidget {
     final planCode = purchaseContext.planCode.trim().isNotEmpty
         ? purchaseContext.planCode.trim().toLowerCase()
         : entitlement.planCode.trim().toLowerCase();
-    final accent = _planAccentColor(planCode);
     final status = _subscriptionStatusLabel(context, entitlement.status);
     final canManagePersonal = personal.canManage && !isBusy;
     final billingDetails = _billingDetailsForOverview(
       context,
       billing,
-      entitlement,
       isBusy: isBusy,
       onManageSubscription: onManageSubscription,
     );
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.055),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.09)),
-      ),
+      padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(13),
-                  border: Border.all(color: accent.withValues(alpha: 0.28)),
-                ),
-                child: Icon(_planIcon(planCode), color: accent, size: 20),
-              ),
-              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -501,7 +502,7 @@ class _EntitlementOverviewCard extends StatelessWidget {
                       _t(context, 'Current plan'),
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.62),
-                        fontSize: 10.5,
+                        fontSize: 11.5,
                         fontWeight: FontWeight.w700,
                         height: 1.1,
                       ),
@@ -513,7 +514,7 @@ class _EntitlementOverviewCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 23,
+                        fontSize: 24,
                         fontWeight: FontWeight.w800,
                         height: 1.05,
                       ),
@@ -541,7 +542,8 @@ class _EntitlementOverviewCard extends StatelessWidget {
           ],
           const SizedBox(height: 14),
           Wrap(
-            spacing: 8,
+            alignment: WrapAlignment.end,
+            spacing: 6,
             runSpacing: 8,
             children: [
               if (personal.actionLabel.trim().isNotEmpty)
@@ -570,7 +572,7 @@ class _EntitlementOverviewCard extends StatelessWidget {
           ),
           if (planCode != 'free') ...[
             const SizedBox(height: 14),
-            _PromptUsageCard(entitlement: entitlement),
+            _AiUsageCard(status: aiUsageStatus, isLoading: isAiUsageLoading),
           ],
         ],
       ),
@@ -580,8 +582,7 @@ class _EntitlementOverviewCard extends StatelessWidget {
 
 List<_BillingDetailItem> _billingDetailsForOverview(
   BuildContext context,
-  BillingAccountSnapshot? billing,
-  EntitlementSnapshot entitlement, {
+  BillingAccountSnapshot? billing, {
   required bool isBusy,
   required ManageSubscriptionAction onManageSubscription,
 }) {
@@ -591,9 +592,8 @@ List<_BillingDetailItem> _billingDetailsForOverview(
       ? billing.expiresAt
       : null;
   final shouldShowProvider =
-      entitlement.isPaidPlan ||
-      (billing.provider != BillingProvider.adminGrant &&
-          billing.provider != BillingProvider.unknown);
+      billing.provider != BillingProvider.adminGrant &&
+      billing.provider != BillingProvider.unknown;
 
   return [
     if (shouldShowProvider)
@@ -682,106 +682,220 @@ class _SubscriptionActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
+    if (!emphasized) {
+      return TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 15),
+        label: Text(label),
+        style: TextButton.styleFrom(
+          foregroundColor: Colors.white.withValues(alpha: 0.72),
+          disabledForegroundColor: Colors.white.withValues(alpha: 0.30),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          minimumSize: const Size(0, 0),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(
+            fontSize: 11.2,
+            fontWeight: FontWeight.w700,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+      );
+    }
+    return FilledButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 15),
       label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: emphasized
-            ? Colors.white.withValues(alpha: 0.90)
-            : const Color(0xFFA4C2FF),
+      style: FilledButton.styleFrom(
+        foregroundColor: kAccountGlassText,
         disabledForegroundColor: Colors.white.withValues(alpha: 0.34),
-        backgroundColor: emphasized
-            ? Colors.white.withValues(alpha: 0.08)
-            : Colors.transparent,
-        side: BorderSide(
-          color: emphasized
-              ? Colors.white.withValues(alpha: 0.16)
-              : const Color(0xFFA4C2FF).withValues(alpha: 0.34),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        backgroundColor: kAccountGlassBlue.withValues(alpha: 0.88),
+        disabledBackgroundColor: kAccountGlassBlue.withValues(alpha: 0.30),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         minimumSize: const Size(0, 0),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        textStyle: const TextStyle(fontSize: 11.2, fontWeight: FontWeight.w800),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+        textStyle: const TextStyle(fontSize: 11.4, fontWeight: FontWeight.w800),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       ),
     );
   }
 }
 
-class _PromptUsageCard extends StatelessWidget {
-  const _PromptUsageCard({required this.entitlement});
+class _AiUsageCard extends StatelessWidget {
+  const _AiUsageCard({required this.status, required this.isLoading});
 
-  final EntitlementSnapshot entitlement;
+  final AiPromptRateLimitStatus? status;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
-    final limits = entitlement.limits;
-    final planCode = entitlement.planCode.trim().toLowerCase();
-    final usage = _formatPlanAiUsageFeature(context, planCode, limits);
-    final modelTier = _modelTierReadout(context, limits['ai_model_tier']);
-    final advanced = _advancedPromptReadout(context, limits);
-
-    return Wrap(
-      spacing: 22,
-      runSpacing: 10,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _PromptUsagePill(
-          label: _t(context, 'AI usage'),
-          value: usage ?? _t(context, 'Standard AI usage'),
+        Divider(height: 1, color: Colors.white.withValues(alpha: 0.26)),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _t(context, 'AI usage'),
+                style: const TextStyle(
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            if (isLoading)
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Colors.white54,
+                ),
+              ),
+          ],
         ),
-        _PromptUsagePill(label: _t(context, 'Model access'), value: modelTier),
-        if (advanced.isNotEmpty)
-          _PromptUsagePill(
-            label: _t(context, 'Reasoning access'),
-            value: advanced,
-          ),
+        const SizedBox(height: 8),
+        _AiUsageRow(
+          label: _t(context, 'Daily'),
+          remainingPercent: status?.daily.remainingPercent,
+        ),
+        Divider(height: 14, color: Colors.white.withValues(alpha: 0.24)),
+        _AiUsageRow(
+          label: _t(context, 'Weekly'),
+          remainingPercent: status?.weekly.remainingPercent,
+        ),
       ],
     );
   }
 }
 
-class _PromptUsagePill extends StatelessWidget {
-  const _PromptUsagePill({required this.label, required this.value});
+class _AiUsageRow extends StatelessWidget {
+  const _AiUsageRow({required this.label, required this.remainingPercent});
 
   final String label;
-  final String value;
+  final int? remainingPercent;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 200),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+    final normalizedPercent = remainingPercent?.clamp(0, 100).toInt();
+    final value = normalizedPercent == null
+        ? '--%'
+        : '$normalizedPercent% ${_t(context, 'left')}';
+
+    return Semantics(
+      label: '$label $value',
+      child: Row(
         children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.48),
-              fontSize: 10.4,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
+          SizedBox(
+            width: 58,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFFF4F4F4),
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12.4,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
+          const SizedBox(width: 10),
+          Expanded(
+            child: ExcludeSemantics(
+              child: _AiUsageProgressBar(remainingPercent: normalizedPercent),
+            ),
+          ),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 70,
+            child: ExcludeSemantics(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                child: Text(
+                  value,
+                  key: ValueKey<String>(value),
+                  textAlign: TextAlign.right,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontSize: 12.2,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
+
+class _AiUsageProgressBar extends StatelessWidget {
+  const _AiUsageProgressBar({required this.remainingPercent});
+
+  final int? remainingPercent;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = (remainingPercent ?? 0) / 100;
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(end: target),
+      duration: const Duration(milliseconds: 520),
+      curve: Curves.easeOutCubic,
+      builder: (context, progress, _) {
+        final color = _aiUsageProgressColor(progress);
+        return Container(
+          height: 7,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          alignment: Alignment.centerLeft,
+          child: FractionallySizedBox(
+            widthFactor: progress,
+            heightFactor: 1,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                gradient: LinearGradient(
+                  colors: [color.withValues(alpha: 0.72), color],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.34),
+                    blurRadius: 6,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+Color _aiUsageProgressColor(double progress) {
+  final normalized = progress.clamp(0.0, 1.0);
+  if (normalized <= 0.5) {
+    return Color.lerp(
+      const Color(0xFFFF6673),
+      const Color(0xFFFFC15C),
+      normalized * 2,
+    )!;
+  }
+  return Color.lerp(
+    const Color(0xFFFFC15C),
+    const Color(0xFF67E8A5),
+    (normalized - 0.5) * 2,
+  )!;
 }
 
 class _AccessDisplay {
@@ -821,36 +935,45 @@ class _BillingActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 2,
+      runSpacing: 4,
       children: [
-        Expanded(
-          child: _QuietActionButton(
-            label: _t(context, 'Restore purchases'),
-            icon: Icons.restore_rounded,
-            onPressed: isBusy ? null : onRestorePurchases,
+        _QuietActionButton(
+          label: _t(context, 'Restore purchases'),
+          icon: Icons.restore_rounded,
+          onPressed: isBusy ? null : onRestorePurchases,
+        ),
+        _QuietActionButton(
+          label: _t(context, 'Contact support'),
+          icon: Icons.support_agent_rounded,
+          onPressed: isBusy ? null : onContactSupport,
+        ),
+        IconButton(
+          tooltip: isRefreshing || isBusy
+              ? _t(context, 'Refreshing')
+              : _t(context, 'Refresh'),
+          onPressed: isRefreshing || isBusy ? null : onRefresh,
+          icon: isRefreshing
+              ? const SizedBox(
+                  width: 15,
+                  height: 15,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.8,
+                    color: Colors.white60,
+                  ),
+                )
+              : const Icon(Icons.refresh_rounded, size: 18),
+          color: Colors.white60,
+          style: IconButton.styleFrom(
+            backgroundColor: Colors.white.withValues(alpha: 0.08),
+            minimumSize: const Size(34, 34),
+            padding: EdgeInsets.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ),
-        Expanded(
-          child: _QuietActionButton(
-            label: _t(context, 'Contact support'),
-            icon: Icons.support_agent_rounded,
-            onPressed: isBusy ? null : onContactSupport,
-          ),
-        ),
-        if (kDebugMode)
-          IconButton(
-            tooltip: isRefreshing || isBusy
-                ? _t(context, 'Refreshing')
-                : _t(context, 'Refresh'),
-            onPressed: isRefreshing || isBusy ? null : onRefresh,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            color: Colors.white60,
-            style: IconButton.styleFrom(
-              minimumSize: const Size(32, 32),
-              padding: EdgeInsets.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
       ],
     );
   }
@@ -943,6 +1066,54 @@ String _paymentMethodLabel(BillingPaymentMethodDisplay method) {
   return expiry.trim();
 }
 
+class AccountPlansCarousel extends StatelessWidget {
+  const AccountPlansCarousel({
+    super.key,
+    required this.entitlementService,
+    required this.iapService,
+    required this.platformKey,
+    required this.regionCode,
+    required this.platformProvider,
+    required this.onOpenAccountPlans,
+    this.scrollbarGutter = 0,
+    this.railEdgeInset = 6,
+  });
+
+  final EntitlementService entitlementService;
+  final IapService iapService;
+  final String platformKey;
+  final String regionCode;
+  final BillingProvider platformProvider;
+  final VoidCallback onOpenAccountPlans;
+  final double scrollbarGutter;
+  final double railEdgeInset;
+
+  @override
+  Widget build(BuildContext context) {
+    final entitlement =
+        entitlementService.entitlement ?? EntitlementSnapshot.free(userId: '');
+    final catalog = entitlementService.billingCatalog;
+    final products = _visibleBillingProducts(catalog, platformKey);
+    final busy =
+        entitlementService.isAccountSurfaceLoading ||
+        iapService.isPurchaseInProgress;
+    return _PlansPanel(
+      entitlement: entitlement,
+      catalog: catalog,
+      products: products,
+      platformProvider: platformProvider,
+      regionCode: regionCode,
+      iapService: iapService,
+      isBusy: busy,
+      onManageSubscription: ({provider, managementChannel}) =>
+          onOpenAccountPlans(),
+      onSelectProduct: (_) => onOpenAccountPlans(),
+      scrollbarGutter: scrollbarGutter,
+      railEdgeInset: railEdgeInset,
+    );
+  }
+}
+
 class _PlansPanel extends StatefulWidget {
   const _PlansPanel({
     required this.entitlement,
@@ -954,6 +1125,8 @@ class _PlansPanel extends StatefulWidget {
     required this.isBusy,
     required this.onManageSubscription,
     required this.onSelectProduct,
+    this.scrollbarGutter = 0,
+    this.railEdgeInset = 6,
   });
 
   final EntitlementSnapshot entitlement;
@@ -965,6 +1138,8 @@ class _PlansPanel extends StatefulWidget {
   final bool isBusy;
   final ManageSubscriptionAction onManageSubscription;
   final ValueChanged<BillingProductDefinition> onSelectProduct;
+  final double scrollbarGutter;
+  final double railEdgeInset;
 
   @override
   State<_PlansPanel> createState() => _PlansPanelState();
@@ -973,6 +1148,9 @@ class _PlansPanel extends StatefulWidget {
 class _PlansPanelState extends State<_PlansPanel> {
   final ScrollController _plansScrollController = ScrollController();
   final FocusNode _plansFocusNode = FocusNode(debugLabel: 'billing_plans');
+  double _currentCardStep = 0;
+  int _currentCardCount = 0;
+  bool _centerCards = false;
 
   @override
   void dispose() {
@@ -1004,8 +1182,8 @@ class _PlansPanelState extends State<_PlansPanel> {
                   _t(context, 'Explore More Plans'),
                   style: const TextStyle(
                     color: Color(0xFFF4F4F4),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
                     height: 1.35,
                   ),
                 ),
@@ -1036,17 +1214,77 @@ class _PlansPanelState extends State<_PlansPanel> {
                 const cardGap = 10.0;
                 final contentWidth = (constraints.maxWidth - railPadding * 2)
                     .clamp(0.0, double.infinity);
-                final visibleCardCount = contentWidth >= 740
+                final usableContentWidth =
+                    (contentWidth - widget.railEdgeInset * 2).clamp(
+                      0.0,
+                      double.infinity,
+                    );
+                final visibleCardCount = usableContentWidth >= 740
                     ? 3
-                    : contentWidth >= 500
+                    : usableContentWidth >= 500
                     ? 2
                     : 1;
                 final cardWidth = visibleCardCount == 1
-                    ? contentWidth
-                    : ((contentWidth - cardGap * (visibleCardCount - 1)) /
+                    ? usableContentWidth
+                    : ((usableContentWidth - cardGap * (visibleCardCount - 1)) /
                               visibleCardCount)
                           .clamp(224.0, 264.0);
                 final cardStep = cardWidth + cardGap;
+                final cardCenteringInset = (contentWidth - cardWidth) / 2;
+                final centerCards = visibleCardCount == 1;
+                final railInset = centerCards
+                    ? (cardCenteringInset > widget.railEdgeInset
+                          ? cardCenteringInset
+                          : widget.railEdgeInset)
+                    : widget.railEdgeInset;
+                _currentCardStep = cardStep;
+                _currentCardCount = cards.length;
+                _centerCards = centerCards;
+                final scrollbarGutter = widget.scrollbarGutter;
+                final plansScrollView = SingleChildScrollView(
+                  controller: _plansScrollController,
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  clipBehavior: Clip.hardEdge,
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: railInset),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final entry in cards.asMap().entries) ...[
+                          SizedBox(
+                            width: cardWidth,
+                            height: 450,
+                            child: _PlanListRow(
+                              data: entry.value,
+                              planIsCurrent: _isCurrentPlanCard(entry.value),
+                              priceLabel: _priceLabelForCard(
+                                context,
+                                entry.value,
+                              ),
+                              billingCaption: _billingCaptionForCard(
+                                context,
+                                entry.value,
+                              ),
+                              isBusy: widget.isBusy,
+                              productActions: _productActionsForCard(
+                                context,
+                                entry.value,
+                              ),
+                              fallbackAction: _fallbackActionForCard(
+                                context,
+                                entry.value,
+                                _isCurrentPlanCard(entry.value),
+                              ),
+                            ),
+                          ),
+                          if (entry.key != cards.length - 1)
+                            const SizedBox(width: cardGap),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
 
                 return Container(
                   padding: const EdgeInsets.fromLTRB(
@@ -1056,11 +1294,8 @@ class _PlansPanelState extends State<_PlansPanel> {
                     12,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(24),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: NotificationListener<ScrollEndNotification>(
@@ -1070,54 +1305,26 @@ class _PlansPanelState extends State<_PlansPanel> {
                       }
                       return false;
                     },
-                    child: Scrollbar(
-                      controller: _plansScrollController,
-                      notificationPredicate: (notification) =>
-                          notification.metrics.axis == Axis.horizontal,
-                      child: SingleChildScrollView(
-                        controller: _plansScrollController,
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        clipBehavior: Clip.hardEdge,
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            for (final entry in cards.asMap().entries) ...[
-                              SizedBox(
-                                width: cardWidth,
-                                height: 450,
-                                child: _PlanListRow(
-                                  data: entry.value,
-                                  planIsCurrent: _isCurrentPlanCard(
-                                    entry.value,
-                                  ),
-                                  priceLabel: _priceLabelForCard(
-                                    context,
-                                    entry.value,
-                                  ),
-                                  billingCaption: _billingCaptionForCard(
-                                    context,
-                                    entry.value,
-                                  ),
-                                  isBusy: widget.isBusy,
-                                  productActions: _productActionsForCard(
-                                    context,
-                                    entry.value,
-                                  ),
-                                  fallbackAction: _fallbackActionForCard(
-                                    context,
-                                    entry.value,
-                                    _isCurrentPlanCard(entry.value),
-                                  ),
-                                ),
+                    child: scrollbarGutter > 0
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(height: 450, child: plansScrollView),
+                              SizedBox(height: scrollbarGutter),
+                              _PlanRailProgressIndicator(
+                                controller: _plansScrollController,
                               ),
-                              if (entry.key != cards.length - 1)
-                                const SizedBox(width: cardGap),
                             ],
-                          ],
-                        ),
-                      ),
-                    ),
+                          )
+                        : Scrollbar(
+                            controller: _plansScrollController,
+                            notificationPredicate: (notification) =>
+                                notification.metrics.axis == Axis.horizontal,
+                            child: SizedBox(
+                              height: 450,
+                              child: plansScrollView,
+                            ),
+                          ),
                   ),
                 );
               },
@@ -1156,9 +1363,18 @@ class _PlansPanelState extends State<_PlansPanel> {
   }
 
   List<double> _planSnapPoints(ScrollPosition position, {double? cardStep}) {
-    final step =
-        cardStep ?? _planCardStepForViewport(position.viewportDimension);
+    final step = cardStep ?? _currentCardStep;
     if (step <= 0) return <double>[position.minScrollExtent];
+
+    if (_centerCards) {
+      return List<double>.generate(
+        _currentCardCount,
+        (index) => (position.minScrollExtent + index * step).clamp(
+          position.minScrollExtent,
+          position.maxScrollExtent,
+        ),
+      );
+    }
 
     final points = <double>[position.minScrollExtent];
     var next = position.minScrollExtent + step;
@@ -1194,21 +1410,6 @@ class _PlansPanelState extends State<_PlansPanel> {
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
     );
-  }
-
-  double _planCardStepForViewport(double viewportWidth) {
-    const cardGap = 10.0;
-    final visibleCardCount = viewportWidth >= 740
-        ? 3
-        : viewportWidth >= 500
-        ? 2
-        : 1;
-    final cardWidth = visibleCardCount == 1
-        ? viewportWidth
-        : ((viewportWidth - cardGap * (visibleCardCount - 1)) /
-                  visibleCardCount)
-              .clamp(224.0, 264.0);
-    return cardWidth + cardGap;
   }
 
   String? _storePriceForProduct(
@@ -1630,15 +1831,15 @@ class _PlanScrollButton extends StatelessWidget {
       icon: Icon(icon, size: 17),
       color: Colors.white.withValues(alpha: 0.82),
       style: IconButton.styleFrom(
-        backgroundColor: Colors.white.withValues(alpha: 0.07),
+        backgroundColor: Colors.black.withValues(alpha: 0.14),
         hoverColor: Colors.white.withValues(alpha: 0.12),
         highlightColor: Colors.white.withValues(alpha: 0.14),
         minimumSize: const Size(32, 32),
         fixedSize: const Size(32, 32),
         padding: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(color: Colors.white.withValues(alpha: 0.09)),
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: Colors.white.withValues(alpha: 0.28)),
         ),
       ),
     );
@@ -2291,6 +2492,72 @@ String _advancedPromptReadout(
   return _t(context, 'Premium reasoning');
 }
 
+class _PlanRailProgressIndicator extends StatelessWidget {
+  const _PlanRailProgressIndicator({required this.controller});
+
+  final ScrollController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 3,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) {
+              if (!controller.hasClients) {
+                return const SizedBox.shrink();
+              }
+              final position = controller.position;
+              final totalExtent =
+                  position.maxScrollExtent + position.viewportDimension;
+              final thumbFraction = totalExtent <= 0
+                  ? 1.0
+                  : (position.viewportDimension / totalExtent).clamp(0.0, 1.0);
+              final thumbWidth = (constraints.maxWidth * thumbFraction).clamp(
+                36.0,
+                constraints.maxWidth,
+              );
+              final travel = constraints.maxWidth - thumbWidth;
+              final progress = position.maxScrollExtent <= 0
+                  ? 0.0
+                  : (position.pixels / position.maxScrollExtent).clamp(
+                      0.0,
+                      1.0,
+                    );
+              return Stack(
+                children: [
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: travel * progress,
+                    top: 0,
+                    bottom: 0,
+                    width: thumbWidth,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.42),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _PlanListRow extends StatelessWidget {
   const _PlanListRow({
     required this.data,
@@ -2327,24 +2594,10 @@ class _PlanListRow extends StatelessWidget {
       width: double.infinity,
       height: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: planIsCurrent
-            ? const Color(0xFFF4F4F4).withValues(alpha: 0.18)
-            : const Color(0xFFF4F4F4).withValues(alpha: 0.13),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: planIsCurrent
-              ? Colors.white.withValues(alpha: 0.24)
-              : Colors.white.withValues(alpha: 0.12),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 10,
-            spreadRadius: 0,
-            offset: const Offset(0, 5),
-          ),
-        ],
+      decoration: accountGlassDecoration(
+        radius: 24,
+        strong: planIsCurrent,
+        selected: planIsCurrent,
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -2364,8 +2617,8 @@ class _PlanListRow extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
               height: 1.12,
             ),
           ),
@@ -2388,8 +2641,8 @@ class _PlanListRow extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
               height: 1,
             ),
           ),
@@ -2535,8 +2788,8 @@ class _PlanInlineActions extends StatelessWidget {
         child: FilledButton(
           onPressed: isBusy ? null : primary.onPressed,
           style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFFF4F4F4),
-            foregroundColor: const Color(0xFF111318),
+            backgroundColor: kAccountGlassBlue,
+            foregroundColor: kAccountGlassText,
             disabledBackgroundColor: Colors.white.withValues(
               alpha: primary.onPressed == null ? 0.12 : 0.22,
             ),
@@ -2693,12 +2946,8 @@ class _TeamAccessSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2706,8 +2955,8 @@ class _TeamAccessSummary extends StatelessWidget {
             _t(context, 'Team access'),
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 12.6,
-              fontWeight: FontWeight.w700,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
             ),
           ),
           const SizedBox(height: 9),
@@ -2756,14 +3005,8 @@ class _EducationStudentAccessPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-      decoration: BoxDecoration(
-        color: const Color(0xFF10251E).withValues(alpha: 0.62),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: const Color(0xFF8DF2C2).withValues(alpha: 0.16),
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      decoration: accountGlassDecoration(radius: 24),
       child: Row(
         children: [
           Container(
@@ -2788,7 +3031,7 @@ class _EducationStudentAccessPanel extends StatelessWidget {
                   _t(context, 'Education access'),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 12.8,
+                  fontSize: 16,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -2832,12 +3075,8 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.045),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      decoration: accountGlassDecoration(radius: 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2845,7 +3084,7 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
             _t(context, 'Education invite'),
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 12.8,
+              fontSize: 16,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -2865,22 +3104,22 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
                     ),
                     isDense: true,
                     filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.06),
+                    fillColor: Colors.black.withValues(alpha: 0.14),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(18),
                       borderSide: BorderSide(
                         color: Colors.white.withValues(alpha: 0.08),
                       ),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(18),
                       borderSide: BorderSide(
                         color: Colors.white.withValues(alpha: 0.08),
                       ),
                     ),
                     focusedBorder: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(10)),
-                      borderSide: BorderSide(color: Color(0xFF8DF2C2)),
+                      borderRadius: BorderRadius.all(Radius.circular(18)),
+                      borderSide: BorderSide(color: kAccountGlassBlue),
                     ),
                   ),
                   onSubmitted: (_) => onAccept(),
@@ -2890,14 +3129,14 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
               ElevatedButton(
                 onPressed: isBusy ? null : onAccept,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFECF6FF),
-                  foregroundColor: const Color(0xFF101820),
+                  backgroundColor: kAccountGlassBlue,
+                  foregroundColor: kAccountGlassText,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 13,
                     vertical: 12,
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(18),
                   ),
                 ),
                 child: Text(
@@ -3327,13 +3566,7 @@ class _EducationDashboardHeader extends StatelessWidget {
           });
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF10202B).withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: const Color(0xFF7FD4FF).withValues(alpha: 0.16),
-        ),
-      ),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3408,11 +3641,7 @@ class _EducationDashboardNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      decoration: accountGlassDecoration(radius: 18),
       child: Text(
         message,
         style: TextStyle(
@@ -3592,15 +3821,11 @@ class _EducationMetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.055),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      decoration: accountGlassDecoration(radius: 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: const Color(0xFF7FD4FF), size: 18),
+          Icon(icon, color: kAccountGlassText, size: 18),
           const Spacer(),
           Text(
             value,
@@ -3733,11 +3958,7 @@ class _EducationPanelShell extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.045),
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
-      ),
+      decoration: accountGlassDecoration(radius: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3800,22 +4021,22 @@ class _EducationInviteRow extends StatelessWidget {
               hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.36)),
               isDense: true,
               filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.06),
+              fillColor: Colors.black.withValues(alpha: 0.14),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: BorderSide(
                   color: Colors.white.withValues(alpha: 0.08),
                 ),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(18),
                 borderSide: BorderSide(
                   color: Colors.white.withValues(alpha: 0.08),
                 ),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0xFF7FD4FF)),
+                borderRadius: BorderRadius.circular(18),
+                borderSide: const BorderSide(color: kAccountGlassBlue),
               ),
             ),
             onSubmitted: (_) => onInvite(),
@@ -3825,11 +4046,11 @@ class _EducationInviteRow extends StatelessWidget {
         ElevatedButton(
           onPressed: isBusy ? null : onInvite,
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFECF6FF),
-            foregroundColor: const Color(0xFF101820),
+            backgroundColor: kAccountGlassBlue,
+            foregroundColor: kAccountGlassText,
             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(18),
             ),
           ),
           child: Text(isBusy ? _t(context, 'Inviting') : _t(context, 'Invite')),
@@ -3951,11 +4172,7 @@ class _EducationStudentRow extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
-      ),
+      decoration: accountGlassDecoration(radius: 18),
       child: Row(
         children: [
           Expanded(
@@ -4139,11 +4356,7 @@ class _EducationSimplePane extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(11),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
-      ),
+      decoration: accountGlassDecoration(radius: 18),
       child: Row(
         children: [
           Expanded(
@@ -4211,11 +4424,11 @@ class _OrganizationAccessRow extends StatelessWidget {
     }.contains(organization.role.trim().toLowerCase());
     return Container(
       margin: const EdgeInsets.only(top: 8),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+        color: Colors.black.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4227,7 +4440,7 @@ class _OrganizationAccessRow extends StatelessWidget {
                   organization.name,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 13.2,
+                  fontSize: 15,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -4318,9 +4531,9 @@ class _TinyBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
+        color: Colors.black.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
       ),
       child: Text(
         label,
@@ -4350,8 +4563,10 @@ class _QuietActionButton extends StatelessWidget {
     return TextButton.icon(
       onPressed: onPressed,
       style: TextButton.styleFrom(
-        foregroundColor: Colors.white70,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        foregroundColor: Colors.white.withValues(alpha: 0.66),
+        disabledForegroundColor: Colors.white.withValues(alpha: 0.28),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
       icon: Icon(icon, size: 15),
       label: Text(
@@ -4371,12 +4586,8 @@ class _LoadingPlansCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(13, 13, 13, 13),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      decoration: accountGlassDecoration(radius: 24),
       child: Text(
         message,
         style: const TextStyle(
@@ -4401,9 +4612,9 @@ class _MetricChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: Colors.black.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
       ),
       child: RichText(
         text: TextSpan(

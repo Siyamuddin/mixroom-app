@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 
+import '../l10n/l10n.dart';
 import '../models/app_update_policy.dart';
 import 'app_shell_figma.dart';
 
@@ -63,7 +64,10 @@ class SoftUpdateDialog extends StatelessWidget {
                         ),
                       ),
                       child: Text(
-                        isForce ? 'Update Required' : 'Update Available',
+                        L10n.translate(
+                          context,
+                          isForce ? 'Update Required' : 'Update Available',
+                        ),
                         style: TextStyle(
                           fontFamily: 'Pretendard',
                           color: accentColor,
@@ -77,9 +81,12 @@ class SoftUpdateDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    isForce
-                        ? 'Keep Mixroom up to date.'
-                        : 'A newer Mixroom is ready.',
+                    L10n.translate(
+                      context,
+                      isForce
+                          ? 'Keep Mixroom up to date.'
+                          : 'A newer Mixroom is ready.',
+                    ),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontFamily: 'Pretendard',
@@ -92,9 +99,12 @@ class SoftUpdateDialog extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    isForce
-                        ? 'A newer version of Mixroom is required to keep using the app.'
-                        : 'Update for the latest fixes, improvements, and AI reliability updates.',
+                    L10n.translate(
+                      context,
+                      isForce
+                          ? 'A newer version of Mixroom is required to keep using the app.'
+                          : 'Update for the latest fixes, improvements, and AI reliability updates.',
+                    ),
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontFamily: 'Pretendard',
@@ -108,14 +118,14 @@ class SoftUpdateDialog extends StatelessWidget {
                     children: [
                       Expanded(
                         child: _VersionPill(
-                          label: 'Current',
+                          label: L10n.translate(context, 'Current'),
                           value: decision.currentVersion,
                         ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: _VersionPill(
-                          label: 'Latest',
+                          label: L10n.translate(context, 'Latest'),
                           value: decision.latestVersion,
                           emphasize: true,
                         ),
@@ -138,7 +148,7 @@ class SoftUpdateDialog extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    child: const Text('Update now'),
+                    child: Text(L10n.translate(context, 'Update now')),
                   ),
                   if (!isForce) ...[
                     const SizedBox(height: 10),
@@ -153,7 +163,7 @@ class SoftUpdateDialog extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      child: const Text('Later'),
+                      child: Text(L10n.translate(context, 'Later')),
                     ),
                   ],
                       ],

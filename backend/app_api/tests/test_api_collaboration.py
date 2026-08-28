@@ -568,6 +568,68 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(locations["personal"]["plan_code"], "free")
         self.assertEqual(locations["workspace"]["plan_code"], "studio")
 
+    def test_existing_workspace_upload_recovers_omitted_workspace_scope(self):
+        module.billing_repo.get_entitlement.return_value = {
+            "user_id": "user-1",
+            "status": "active",
+            "plan_code": "free",
+            "capabilities": {"cloud_projects": True},
+            "limits": {"cloud_projects": 1, "storage_gb": 0.1},
+        }
+        module.repo.get_user_cloud_project.return_value = {
+            "project_id": "workspace-project-1",
+            "workspace_id": "ws-1",
+            "organization_id": "org-1",
+            "can_write": True,
+        }
+        module.repo.build_user_access_snapshot.return_value = {
+            "organizations": [
+                {
+                    "organization_id": "org-1",
+                    "plan_code": "studio",
+                    "status": "active",
+                    "membership_role": "member",
+                    "membership_status": "active",
+                }
+            ],
+            "memberships": [],
+            "workspaces": [
+                {
+                    "workspace_id": "ws-1",
+                    "organization_id": "org-1",
+                    "status": "active",
+                }
+            ],
+            "cloud_projects": [
+                {
+                    "project_id": "workspace-project-1",
+                    "workspace_id": "ws-1",
+                    "organization_id": "org-1",
+                    "storage_mode": "s3_mixroom",
+                    "document_size_bytes": 1024,
+                }
+            ],
+            "summary": {},
+            "configurable": True,
+        }
+
+        response = module.handler(
+            {
+                "rawPath": "/v1/cloud-projects/me",
+                "requestContext": {"http": {"method": "POST"}},
+                "body": (
+                    '{"project_id":"workspace-project-1",'
+                    '"name":"Studio Mix","size_bytes":2048}'
+                ),
+            },
+            object(),
+        )
+
+        self.assertEqual(response["statusCode"], 200)
+        body = module.repo.create_cloud_project_upload.call_args.args[1]
+        self.assertEqual(body["workspace_id"], "ws-1")
+        self.assertEqual(body["organization_id"], "org-1")
+
     def test_cloud_project_upload_respects_storage_quota(self):
         module.billing_repo.get_entitlement.return_value = {
             "user_id": "user-1",

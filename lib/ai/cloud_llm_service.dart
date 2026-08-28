@@ -95,6 +95,9 @@ class AiPromptRateLimitStatus {
 
   bool get isBlocked => !canSubmit;
 
+  int get remainingPercent =>
+      math.min(daily.remainingPercent, weekly.remainingPercent);
+
   DateTime? get blockedResetAt {
     switch (blockedBy) {
       case 'weekly_prompts':
@@ -207,6 +210,7 @@ class CloudLlmService {
   final Duration requestTimeout;
   final String conversationStateMode;
   final http.Client _httpClient;
+  final bool _ownsHttpClient;
   final Map<String, String> _directConversationIds = <String, String>{};
   final Map<String, int> _conversationTurnCounts = <String, int>{};
 
@@ -220,7 +224,14 @@ class CloudLlmService {
     this.requestTimeout = const Duration(seconds: 25),
     this.conversationStateMode = 'manual_history',
     http.Client? httpClient,
-  }) : _httpClient = httpClient ?? http.Client();
+  }) : _ownsHttpClient = httpClient == null,
+       _httpClient = httpClient ?? http.Client();
+
+  void dispose() {
+    if (_ownsHttpClient) {
+      _httpClient.close();
+    }
+  }
 
   bool get _supportsTemperature => !model.toLowerCase().startsWith('gpt-5');
   Map<String, dynamic>? get _defaultReasoning {

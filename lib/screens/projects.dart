@@ -162,6 +162,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   final CloudProjectService _cloudProjectService = CloudProjectService();
   StreamSubscription<String>? _importSub;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopDropSub;
+  Future<void>? _projectRefreshInFlight;
+  bool _projectRefreshQueued = false;
+  bool _queuedProjectRefreshIncludeCloud = false;
+  bool _queuedProjectRefreshShowBlockingLoader = false;
+  Set<String> _observedCloudProjectSyncs = const <String>{};
+  final Set<String> _settlingCloudProjectSyncs = <String>{};
   Future<void>? _cloudRefreshInFlight;
   String? _loadError;
   String? _cloudError;
@@ -232,6 +238,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     });
     ProjectManager.projectLibraryRevision.addListener(
       _handleProjectLibraryChanged,
+    );
+    _observedCloudProjectSyncs = Set<String>.from(
+      ProjectManager.cloudProjectSyncInFlight.value,
+    );
+    ProjectManager.cloudProjectSyncInFlight.addListener(
+      _handleCloudProjectSyncActivityChanged,
     );
     final cachedProjects = _cachedProjects;
     final cachedBundledDemoProjects = _cachedBundledDemoProjects;
@@ -310,6 +322,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     ProjectManager.projectLibraryRevision.removeListener(
       _handleProjectLibraryChanged,
     );
+    ProjectManager.cloudProjectSyncInFlight.removeListener(
+      _handleCloudProjectSyncActivityChanged,
+    );
     _cloudProjectService.close();
     _libraryPageController.dispose();
     for (final controller in _libraryScrollControllers.values) {
@@ -337,6 +352,27 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     unawaited(_refresh());
   }
 
+  void _handleCloudProjectSyncActivityChanged() {
+    if (!mounted) return;
+    final current = Set<String>.from(
+      ProjectManager.cloudProjectSyncInFlight.value,
+    );
+    final completed = _observedCloudProjectSyncs.difference(current);
+    _observedCloudProjectSyncs = current;
+    _settlingCloudProjectSyncs.addAll(completed);
+    setState(() {});
+    if (completed.isNotEmpty) {
+      unawaited(_finishSettlingCloudProjectSyncs(completed));
+    }
+  }
+
+  Future<void> _finishSettlingCloudProjectSyncs(Set<String> projectIds) async {
+    await _refresh(includeCloud: true, showBlockingLoader: false);
+    if (!mounted) return;
+    _settlingCloudProjectSyncs.removeAll(projectIds);
+    setState(() {});
+  }
+
   Future<void> _handleDesktopFinderDrop(List<DesktopFileDropItem> items) async {
     if (!Platform.isMacOS || items.isEmpty) return;
     final mixroomItems = items.where((item) => item.isMixroom).toList();
@@ -350,6 +386,40 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _refresh({
     bool includeCloud = false,
     bool showBlockingLoader = true,
+  }) {
+    _projectRefreshQueued = true;
+    _queuedProjectRefreshIncludeCloud |= includeCloud;
+    _queuedProjectRefreshShowBlockingLoader |= showBlockingLoader;
+
+    final active = _projectRefreshInFlight;
+    if (active != null) return active;
+
+    final task = _drainProjectRefreshes();
+    _projectRefreshInFlight = task;
+    return task.whenComplete(() {
+      if (identical(_projectRefreshInFlight, task)) {
+        _projectRefreshInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _drainProjectRefreshes() async {
+    while (mounted && _projectRefreshQueued) {
+      final includeCloud = _queuedProjectRefreshIncludeCloud;
+      final showBlockingLoader = _queuedProjectRefreshShowBlockingLoader;
+      _projectRefreshQueued = false;
+      _queuedProjectRefreshIncludeCloud = false;
+      _queuedProjectRefreshShowBlockingLoader = false;
+      await _refreshOnce(
+        includeCloud: includeCloud,
+        showBlockingLoader: showBlockingLoader,
+      );
+    }
+  }
+
+  Future<void> _refreshOnce({
+    required bool includeCloud,
+    required bool showBlockingLoader,
   }) async {
     final shouldShowBlockingLoader =
         showBlockingLoader && _projects.isEmpty && _bundledDemoProjects.isEmpty;
@@ -1378,9 +1448,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   _LocalCloudStatusPresentation _localCloudStatus(
     ProjectMeta meta,
-    CloudProjectAccessItem? cloud,
-  ) {
+    CloudProjectAccessItem? cloud, {
+    bool syncInProgress = false,
+  }) {
     final location = _localCloudLocationLabel(meta, cloud);
+    if (syncInProgress) {
+      final baseLabel = L10n.translate(context, 'Syncing to cloud…');
+      return _LocalCloudStatusPresentation(
+        label: location == null || location.isEmpty
+            ? baseLabel
+            : '$baseLabel • $location',
+        statusLabel: baseLabel,
+        icon: Icons.sync_rounded,
+        color: const Color(0xFFA4C2FF),
+      );
+    }
     final freshness = resolveProjectCloudFreshness(
       project: meta,
       cloudStatusAvailable: cloud != null,
@@ -1493,11 +1575,19 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   ) {
     final projectId = meta.projectId.trim();
     final cloudProjectId = (meta.cloudProjectId ?? '').trim();
+    final editorSyncs = ProjectManager.cloudProjectSyncInFlight.value;
     return (projectId.isNotEmpty &&
-            _cloudProjectsInFlight.contains(projectId)) ||
+            (_cloudProjectsInFlight.contains(projectId) ||
+                editorSyncs.contains(projectId) ||
+                _settlingCloudProjectSyncs.contains(projectId))) ||
         (cloudProjectId.isNotEmpty &&
-            _cloudProjectsInFlight.contains(cloudProjectId)) ||
-        (cloud != null && _cloudProjectsInFlight.contains(cloud.projectId));
+            (_cloudProjectsInFlight.contains(cloudProjectId) ||
+                editorSyncs.contains(cloudProjectId) ||
+                _settlingCloudProjectSyncs.contains(cloudProjectId))) ||
+        (cloud != null &&
+            (_cloudProjectsInFlight.contains(cloud.projectId) ||
+                editorSyncs.contains(cloud.projectId) ||
+                _settlingCloudProjectSyncs.contains(cloud.projectId)));
   }
 
   String? _syncQuotaErrorForBundle(
@@ -4715,13 +4805,31 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final local = _localProjectForCloud(
                                             cloud,
                                           );
+                                          final inFlight = local == null
+                                              ? _cloudProjectsInFlight.contains(
+                                                      cloud.projectId,
+                                                    ) ||
+                                                    ProjectManager
+                                                        .cloudProjectSyncInFlight
+                                                        .value
+                                                        .contains(
+                                                          cloud.projectId,
+                                                        ) ||
+                                                    _settlingCloudProjectSyncs
+                                                        .contains(
+                                                          cloud.projectId,
+                                                        )
+                                              : _localCloudSyncInFlight(
+                                                  local,
+                                                  cloud,
+                                                );
                                           final localCloudStatus = local == null
                                               ? null
-                                              : _localCloudStatus(local, cloud);
-                                          final inFlight =
-                                              _cloudProjectsInFlight.contains(
-                                                cloud.projectId,
-                                              );
+                                              : _localCloudStatus(
+                                                  local,
+                                                  cloud,
+                                                  syncInProgress: inFlight,
+                                                );
                                           final updated = cloud.updatedAt;
                                           final anchorKey = GlobalObjectKey(
                                             'cloud_project_actions_${cloud.projectId}',
@@ -5003,14 +5111,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                             (project.cloudProjectId ?? '')
                                                 .trim()
                                                 .isNotEmpty;
-                                        final cloudStatus = cloudLinked
-                                            ? _localCloudStatus(project, cloud)
-                                            : null;
                                         final cloudInFlight =
                                             _localCloudSyncInFlight(
                                               project,
                                               cloud,
                                             );
+                                        final cloudStatus = cloudLinked
+                                            ? _localCloudStatus(
+                                                project,
+                                                cloud,
+                                                syncInProgress: cloudInFlight,
+                                              )
+                                            : null;
                                         final localSubtitle =
                                             '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
                                         final keyToken = _projectActionKeyToken(
