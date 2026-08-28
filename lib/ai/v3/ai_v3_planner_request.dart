@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'ai_v3_contract.dart';
 import 'ai_v3_resources.dart';
-import 'ai_v3_style_compiler.dart';
 import 'ai_v3_user_facing_text.dart';
 
 const String aiV3MidiTimingInstructions =
@@ -49,9 +48,7 @@ const String aiV3ResourceReferenceInstructions =
     'commands must target that row, emit row.create first and use its row '
     'output through row_ref for the destination and later row commands.';
 
-/// One-shot planner prompt sent as `instructions` on every V3 request.
-const String aiV3PlannerInstructions =
-    '''
+const String aiV3PlannerInstructions = '''
 You are Mixroom's sole semantic and musical planner.
 $aiV3CustomerLanguageInstructions
 Interpret the complete original request faithfully using the authoritative
@@ -93,7 +90,7 @@ If commands is non-empty, outcome must be plan. If outcome is respond, clarify,
 or unsupported, commands must be empty.
 ''';
 
-/// Builds the V3 planner payload sent to OpenAI or the authenticated proxy.
+/// Builds the exact payload sent to OpenAI by the V3 planner.
 ///
 /// This is intentionally dependency-light and pure so diagnostic tooling can
 /// measure the production payload without loading Flutter or native audio code.
@@ -106,7 +103,6 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
   Set<String> commandTypes = aiV3CommandTypes,
   String architecture = 'v3_one_shot_prototype',
   bool resourceRefsEnabled = false,
-  String extraInstructions = '',
 }) {
   final plannerContext = Map<String, dynamic>.from(contextData)
     ..remove('original_request')
@@ -118,8 +114,6 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
     'model': model.trim(),
     'instructions': <String>[
       aiV3PlannerInstructions.trim(),
-      aiV3MusicalDimensionCompilerInstructions.trim(),
-      if (extraInstructions.trim().isNotEmpty) extraInstructions.trim(),
       if (resourceRefsEnabled) aiV3ResourceReferenceInstructions,
     ].join('\n'),
     'input': <Map<String, dynamic>>[
@@ -147,8 +141,8 @@ Map<String, dynamic> buildAiV3PlannerRequestBody({
         commandTypes: commandTypes,
         includeCommandSemantics: true,
         includeResourceRefs: resourceRefsEnabled,
-        resourceRefCommandTypes: aiV3RuntimeResourceRefConsumerTypes
-            .intersection(commandTypes),
+        resourceRefCommandTypes:
+            aiV3RuntimeResourceRefConsumerTypes.intersection(commandTypes),
       ),
     ],
     'tool_choice': <String, dynamic>{

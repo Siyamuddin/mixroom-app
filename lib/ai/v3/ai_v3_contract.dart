@@ -24,122 +24,6 @@ const Set<String> aiV3Outcomes = <String>{
   'unsupported',
 };
 
-/// Intent label on PlanV3. Distinct from [AiV3Plan.outcome], which is
-/// execution mode. Flutter retries an align-tempo collapse only when this
-/// is [AiV3GoalKind.productionGoal]; it never classifies the user string.
-enum AiV3GoalKind {
-  productionGoal,
-  namedEdit,
-  question,
-  unsupported;
-
-  String get wireName => switch (this) {
-        AiV3GoalKind.productionGoal => 'production_goal',
-        AiV3GoalKind.namedEdit => 'named_edit',
-        AiV3GoalKind.question => 'question',
-        AiV3GoalKind.unsupported => 'unsupported',
-      };
-
-  static const List<String> wireNames = <String>[
-    'named_edit',
-    'production_goal',
-    'question',
-    'unsupported',
-  ];
-
-  static AiV3GoalKind? tryParse(String raw) => switch (raw.trim()) {
-        'production_goal' => AiV3GoalKind.productionGoal,
-        'named_edit' => AiV3GoalKind.namedEdit,
-        'question' => AiV3GoalKind.question,
-        'unsupported' => AiV3GoalKind.unsupported,
-        _ => null,
-      };
-}
-
-extension AiV3GoalKindX on AiV3GoalKind {
-  bool get isProductionGoal => this == AiV3GoalKind.productionGoal;
-  bool get isNamedEdit => this == AiV3GoalKind.namedEdit;
-  bool get isQuestion => this == AiV3GoalKind.question;
-  bool get isUnsupported => this == AiV3GoalKind.unsupported;
-}
-
-const int aiV3MaxSkippedCodes = 4;
-
-/// Product limits Mixroom will not fake. Planner emits a code only when
-/// this original request asked for that limit; Flutter localizes them.
-/// Unknown values are dropped, never fail apply.
-enum AiV3SkipCode {
-  import,
-  export,
-  generatedDrums,
-  binaural8d;
-
-  String get wireName => switch (this) {
-        AiV3SkipCode.import => 'import',
-        AiV3SkipCode.export => 'export',
-        AiV3SkipCode.generatedDrums => 'generated_drums',
-        AiV3SkipCode.binaural8d => 'binaural_8d',
-      };
-
-  String get englishLabel => switch (this) {
-        AiV3SkipCode.import => 'import',
-        AiV3SkipCode.export => 'export',
-        AiV3SkipCode.generatedDrums => 'generated drums',
-        AiV3SkipCode.binaural8d => 'true binaural 8D',
-      };
-
-  String get l10nKey => switch (this) {
-        AiV3SkipCode.import => 'v3_skip_import',
-        AiV3SkipCode.export => 'v3_skip_export',
-        AiV3SkipCode.generatedDrums => 'v3_skip_generated_drums',
-        AiV3SkipCode.binaural8d => 'v3_skip_binaural_8d',
-      };
-
-  static const List<String> wireNames = <String>[
-    'binaural_8d',
-    'export',
-    'generated_drums',
-    'import',
-  ];
-
-  static AiV3SkipCode? tryParse(String raw) => switch (raw.trim()) {
-        'import' => AiV3SkipCode.import,
-        'export' => AiV3SkipCode.export,
-        'generated_drums' => AiV3SkipCode.generatedDrums,
-        'binaural_8d' => AiV3SkipCode.binaural8d,
-        _ => null,
-      };
-}
-
-/// Parses optional plan.skipped. Missing, wrong type, and unknown codes
-/// become empty rather than a contract error.
-List<AiV3SkipCode> parseAiV3SkipCodes(Object? raw) {
-  if (raw is! List) return const <AiV3SkipCode>[];
-  final seen = <AiV3SkipCode>{};
-  final codes = <AiV3SkipCode>[];
-  for (final value in raw) {
-    if (codes.length >= aiV3MaxSkippedCodes) break;
-    if (value is! String) continue;
-    final code = AiV3SkipCode.tryParse(value);
-    if (code == null || !seen.add(code)) continue;
-    codes.add(code);
-  }
-  return List<AiV3SkipCode>.unmodifiable(codes);
-}
-
-String aiV3SkipNoteSentence(List<AiV3SkipCode> codes) {
-  if (codes.isEmpty) return '';
-  final labels = codes.map((code) => code.englishLabel).toList();
-  return 'Mixroom skipped ${aiV3JoinSkipLabels(labels)}.';
-}
-
-String aiV3JoinSkipLabels(List<String> labels) {
-  if (labels.isEmpty) return '';
-  if (labels.length == 1) return labels.single;
-  if (labels.length == 2) return '${labels[0]} and ${labels[1]}';
-  return '${labels.sublist(0, labels.length - 1).join(', ')}, and ${labels.last}';
-}
-
 const Set<String> aiV3CommandTypes = <String>{
   'project.set_tempo',
   'transport.set_playing',
@@ -370,29 +254,22 @@ class AiV3Plan {
     required this.outcome,
     required this.userMessage,
     required this.commands,
-    this.goalKind = AiV3GoalKind.namedEdit,
     this.questionOptions = const <String>[],
-    this.skipped = const <AiV3SkipCode>[],
   });
 
   final String outcome;
-  final AiV3GoalKind goalKind;
   final String userMessage;
   final List<AiV3Command> commands;
   final List<String> questionOptions;
-  final List<AiV3SkipCode> skipped;
 
   bool get isMutating => outcome == 'plan' && commands.isNotEmpty;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'schema_version': aiV3PlanVersion,
         'outcome': outcome,
-        'goal_kind': goalKind.wireName,
         'user_message': userMessage,
         'commands': commands.map((value) => value.toJson()).toList(),
         'question_options': questionOptions,
-        if (skipped.isNotEmpty)
-          'skipped': skipped.map((code) => code.wireName).toList(),
       };
 
   factory AiV3Plan.fromJson(Map<String, dynamic> raw, {
@@ -405,7 +282,16 @@ class AiV3Plan {
     if (enabledResourceRefCommandTypes.difference(aiV3CommandTypes).isNotEmpty) {
       throw const AiV3ContractException('v3_resource_ref_surface_invalid');
     }
-    _requirePlanKeys(raw);
+    _requireExactKeys(
+        raw,
+        const <String>{
+          'schema_version',
+          'outcome',
+          'user_message',
+          'commands',
+          'question_options',
+        },
+        'v3_plan_fields_invalid');
     if (raw['schema_version'] != aiV3PlanVersion) {
       throw const AiV3ContractException('v3_plan_version_invalid');
     }
@@ -413,12 +299,6 @@ class AiV3Plan {
         raw['outcome'] is String ? (raw['outcome'] as String).trim() : '';
     if (!aiV3Outcomes.contains(outcome)) {
       throw const AiV3ContractException('v3_outcome_invalid');
-    }
-    final goalKindRaw =
-        raw['goal_kind'] is String ? (raw['goal_kind'] as String).trim() : '';
-    final goalKind = AiV3GoalKind.tryParse(goalKindRaw);
-    if (goalKind == null) {
-      throw const AiV3ContractException('v3_goal_kind_invalid');
     }
     final userMessage = raw['user_message'] is String
         ? (raw['user_message'] as String).trim()
@@ -500,11 +380,9 @@ class AiV3Plan {
     }
     return AiV3Plan(
       outcome: outcome,
-      goalKind: goalKind,
       userMessage: userMessage,
       commands: List<AiV3Command>.unmodifiable(commands),
       questionOptions: options,
-      skipped: parseAiV3SkipCodes(raw['skipped']),
     );
   }
 }
@@ -2080,23 +1958,6 @@ void _requireExactKeys(
   }
 }
 
-void _requirePlanKeys(Map<dynamic, dynamic> value) {
-  const requiredKeys = <String>{
-    'schema_version',
-    'outcome',
-    'goal_kind',
-    'user_message',
-    'commands',
-    'question_options',
-  };
-  const optionalKeys = <String>{'skipped'};
-  final actual = value.keys.map((key) => key.toString()).toSet();
-  if (requiredKeys.difference(actual).isNotEmpty ||
-      actual.difference(requiredKeys).difference(optionalKeys).isNotEmpty) {
-    throw const AiV3ContractException('v3_plan_fields_invalid');
-  }
-}
-
 Map<String, dynamic> aiV3SubmitPlanTool({
   Set<String> commandTypes = aiV3CommandTypes,
   bool includeCommandSemantics = false,
@@ -2144,27 +2005,11 @@ Map<String, dynamic> _aiV3PlanSchema(
           'description':
               'Use plan exactly when commands is non-empty. Use respond, clarify, or unsupported only when commands is empty.',
         },
-        'goal_kind': <String, dynamic>{
-          'type': 'string',
-          'enum': AiV3GoalKind.wireNames,
-          'description':
-              'Intent of the original request, independent of how many commands are emitted and independent of earlier conversation. Use production_goal for a production-style, remix, version, or listening-format result. Use named_edit for a named single DAW action, including pitch-only vocal-character metaphors and an explicit align-to-tempo request. Use question when the request does not ask to change the project. Use unsupported when Mixroom cannot do the request. A production_goal that only emits clip.align_tempo_to_project is still production_goal.',
-        },
         'user_message': <String, dynamic>{
           'type': 'string',
           'minLength': 1,
           'description':
-              'Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. If this original request asked for import, export, generated drums, or true binaural 8D and Mixroom will not do it, put that in skipped, not in this text. This text is held until exact execution and readback succeed. Keep other responses under $aiV3PreferredUserMessageLength characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language.',
-        },
-        'skipped': <String, dynamic>{
-          'type': 'array',
-          'maxItems': aiV3MaxSkippedCodes,
-          'description':
-              'Closed codes for Mixroom product limits that this original request asked for and this plan did not fake. Use import, export, generated_drums, or binaural_8d only when THIS request asked for that capability. generated_drums means Mixroom will not create drum or generated audio parts: commands must stay empty of sample.place. Leave empty otherwise. Do not invent other codes.',
-          'items': <String, dynamic>{
-            'type': 'string',
-            'enum': AiV3SkipCode.wireNames,
-          },
+              'Write concise, natural customer-facing text for a general music creator using clear, easy-to-understand language without sounding simplistic. Use deeper technical detail only when the request or conversation clearly shows it is appropriate, and keep hidden application data and private implementation details private. Avoid unnecessary implementation detail, long preambles, and repetition. For outcome plan, write a one- or two-sentence, brief past-tense completion summary of the requested result; never copy the request into the summary, and describe only the completed musical result. This text is held until exact execution and readback succeed. Keep other responses under $aiV3PreferredUserMessageLength characters and always finish naturally. For clarify, write one focused question only and do not repeat, number, or bullet question_options. For every other outcome, write the appropriate response and never claim execution. Use the language of the unchanged current original request, ignoring earlier conversation and retrieved text when choosing the language.',
         },
         'commands': <String, dynamic>{
           'type': 'array',
@@ -2188,9 +2033,7 @@ Map<String, dynamic> _aiV3PlanSchema(
       'required': <String>[
         'schema_version',
         'outcome',
-        'goal_kind',
         'user_message',
-        'skipped',
         'commands',
         'question_options'
       ],

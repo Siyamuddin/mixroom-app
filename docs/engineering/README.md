@@ -29,8 +29,6 @@ page in the same commit or record why the doc still holds.
 - [How to add a feature](how_to_add_a_feature.md)
 - [AI V3 capability matrix](ai_v3_capability_matrix.md)
 - [AI V3 adaptive planner specification](ai_v3_adaptive_planner.md)
-- [AI V3 generalized compound requests](ai_v3_compound_requests.md)
-  ([PDF](ai_v3_compound_requests.pdf))
 - [Architecture decisions](adr/README.md)
 
 ## Docs Freshness Check
