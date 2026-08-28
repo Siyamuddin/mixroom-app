@@ -8,6 +8,7 @@ import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
+import 'package:mixroom/widgets/account_glass_ui.dart';
 import 'package:mixroom/widgets/delete_account_sheet.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -274,7 +275,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
               maxWidth: 920,
               expandToHeight: true,
               child: ListView(
-                padding: EdgeInsets.fromLTRB(14, 10, 14, 24 + bottomInset),
+                padding: EdgeInsets.fromLTRB(27, 10, 27, 24 + bottomInset),
                 children: [
                   _ShellPageTopBar(
                     title: L10n.translate(context, 'Legal & Privacy'),
@@ -286,13 +287,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
-                    ),
+                    decoration: accountGlassDecoration(radius: 24),
                     child: Text(
                       L10n.translate(
                         context,
@@ -391,6 +386,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                   const SizedBox(height: 12),
                   _SectionCard(
                     title: L10n.translate(context, 'Privacy Controls'),
+                    strong: true,
                     subtitle: L10n.translate(
                       context,
                       'You can change these preferences at any time from this screen.',
@@ -508,6 +504,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                   const SizedBox(height: 12),
                   _SectionCard(
                     title: L10n.translate(context, 'Danger Zone'),
+                    danger: true,
                     children: [
                       _ActionItem(
                         icon: Icons.delete_forever_outlined,
@@ -546,24 +543,14 @@ class _ShellPageTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
-      child: Row(
+    return SizedBox(
+      height: 92,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          MixroomShellRoundButton(
-            size: 46,
-            icon: const Icon(
-              Icons.arrow_back_ios_new_rounded,
-              size: 18,
-              color: Colors.white,
-            ),
-            onTap: () => Navigator.of(context).maybePop(),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
                 Text(
                   title,
                   maxLines: 1,
@@ -571,7 +558,7 @@ class _ShellPageTopBar extends StatelessWidget {
                   style: const TextStyle(
                     fontFamily: 'Pretendard',
                     color: Color(0xFFF4F4F4),
-                    fontSize: 18,
+                    fontSize: 19,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -584,10 +571,21 @@ class _ShellPageTopBar extends StatelessWidget {
                     fontFamily: 'Pretendard',
                     color: Colors.white.withValues(alpha: 0.62),
                     fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
+          ),
+          Align(
+            alignment: Alignment.topRight,
+            child: MixroomShellRoundButton(
+              size: 48,
+              icon: const Icon(
+                Icons.close_rounded,
+                size: 28,
+                color: Colors.white,
+              ),
+              onTap: () => Navigator.of(context).maybePop(),
             ),
           ),
         ],
@@ -601,20 +599,24 @@ class _SectionCard extends StatelessWidget {
     required this.title,
     this.subtitle,
     required this.children,
+    this.danger = false,
+    this.strong = false,
   });
 
   final String title;
   final String? subtitle;
   final List<Widget> children;
+  final bool danger;
+  final bool strong;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+      decoration: accountGlassDecoration(
+        radius: 24,
+        strong: strong,
+        danger: danger,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -624,8 +626,8 @@ class _SectionCard extends StatelessWidget {
             style: const TextStyle(
               fontFamily: 'Pretendard',
               color: Color(0xFFF4F4F4),
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
             ),
           ),
           if (subtitle != null) ...[
@@ -659,7 +661,7 @@ class _SectionCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 2),
             child: Container(
               height: 1,
-              color: Colors.white.withValues(alpha: 0.08),
+              color: Colors.white.withValues(alpha: 0.34),
             ),
           ),
         );
@@ -675,7 +677,7 @@ class _ActionItem extends StatelessWidget {
     required this.title,
     this.subtitle,
     required this.onTap,
-    this.iconColor = const Color(0xFFA4C2FF),
+    this.iconColor = kAccountGlassText,
     this.titleColor = Colors.white,
   });
 
@@ -786,7 +788,7 @@ class _ToggleItem extends StatelessWidget {
             child: Icon(
               icon,
               size: 22,
-              color: enabled ? const Color(0xFFA4C2FF) : Colors.white30,
+              color: enabled ? kAccountGlassText : Colors.white30,
             ),
           ),
           const SizedBox(width: 10),
@@ -832,7 +834,7 @@ class _ToggleItem extends StatelessWidget {
                 trackColor: WidgetStateProperty.resolveWith((states) {
                   if (!enabled) return Colors.white12;
                   return states.contains(WidgetState.selected)
-                      ? const Color.fromRGBO(120, 168, 226, 0.64)
+                      ? kAccountGlassBlue
                       : const Color.fromRGBO(244, 244, 244, 0.22);
                 }),
                 trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
@@ -1058,7 +1060,7 @@ class _LegalDocumentScreen extends StatelessWidget {
         output.add(
           Container(
             height: 1,
-            color: Colors.white.withValues(alpha: 0.08),
+            color: Colors.white.withValues(alpha: 0.34),
           ),
         );
       }
@@ -1085,7 +1087,7 @@ class _LegalDocumentScreen extends StatelessWidget {
               maxWidth: 920,
               expandToHeight: true,
               child: ListView(
-                padding: EdgeInsets.fromLTRB(14, 10, 14, 24 + bottomInset),
+                padding: EdgeInsets.fromLTRB(27, 10, 27, 24 + bottomInset),
                 children: [
                   _ShellPageTopBar(
                     title: title,
@@ -1096,13 +1098,10 @@ class _LegalDocumentScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
+                    padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                    decoration: accountGlassDecoration(
+                      radius: 24,
+                      strong: true,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1143,14 +1142,8 @@ class _LegalDocumentScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
-                    ),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                    decoration: accountGlassDecoration(radius: 24),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: _buildDocumentSections(context),

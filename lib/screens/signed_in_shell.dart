@@ -927,11 +927,11 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                 child: const MixroomShellShortLogo(),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
+                    const Text(
                       'Mixroom',
                       style: TextStyle(
                         fontFamily: 'Pretendard',
@@ -940,10 +940,10 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    SizedBox(height: 3),
+                    const SizedBox(height: 3),
                     Text(
-                      'AI-assisted music production',
-                      style: TextStyle(
+                      L10n.translate(context, 'AI-assisted music production'),
+                      style: const TextStyle(
                         fontFamily: 'Pretendard',
                         color: Color(0x99FFFFFF),
                         fontSize: 11,
@@ -955,7 +955,7 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
               ),
               const SizedBox(width: 8),
               Tooltip(
-                message: 'Close',
+                message: L10n.translate(context, 'Close'),
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
@@ -988,12 +988,16 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
               final version = status?.currentVersion.trim() ?? '';
               final canUpdate = status?.isUpdateAvailable == true;
               final statusText = loading
-                  ? 'Checking for updates…'
+                  ? L10n.translate(context, 'Checking for updates…')
                   : canUpdate
-                  ? 'Version ${status!.latestVersion} is available'
+                  ? L10n.translateWithParams(
+                      context,
+                      'Version {version} is available',
+                      {'version': status!.latestVersion},
+                    )
                   : status == null
-                  ? 'Version information unavailable'
-                  : 'You’re up to date';
+                  ? L10n.translate(context, 'Version information unavailable')
+                  : L10n.translate(context, 'You’re up to date');
               return Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -1009,7 +1013,13 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                     Row(
                       children: [
                         Text(
-                          version.isEmpty ? 'App version' : 'Version $version',
+                          version.isEmpty
+                              ? L10n.translate(context, 'App version')
+                              : L10n.translateWithParams(
+                                  context,
+                                  'Version {version}',
+                                  {'version': version},
+                                ),
                           style: const TextStyle(
                             fontFamily: 'Pretendard',
                             color: Color(0xFFF4F4F4),
@@ -1043,7 +1053,9 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                     ),
                     const SizedBox(height: 12),
                     _RailPopoverButton(
-                      label: canUpdate ? 'Update Mixroom' : 'Check for updates',
+                      label: canUpdate
+                          ? L10n.translate(context, 'Update Mixroom')
+                          : L10n.translate(context, 'Check for updates'),
                       icon: canUpdate
                           ? Icons.system_update_alt_rounded
                           : Icons.refresh_rounded,
@@ -1063,7 +1075,7 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
           const SizedBox(height: 12),
           _RailLinkRow(
             icon: Icons.language_rounded,
-            title: 'Mixroom website',
+            title: L10n.translate(context, 'Mixroom website'),
             subtitle: 'mixroom.ai',
             onTap: () => _openExternal('https://mixroom.ai'),
           ),
