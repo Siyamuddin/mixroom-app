@@ -3065,7 +3065,7 @@ bool JuceEngine::prepareBluetoothDuplexSessionV2()
 bool JuceEngine::openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds)
 {
 #if JUCE_IOS
-    return openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1);
+    return openPreparedSystemSelectedDuplexRouteV2(timeoutMilliseconds, 1, 1);
 #else
     juce::ignoreUnused(timeoutMilliseconds);
     return false;
@@ -3089,11 +3089,13 @@ bool JuceEngine::prepareSystemSelectedDuplexSessionV2()
 
 bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     int timeoutMilliseconds,
-    int outputChannels)
+    int outputChannels,
+    int inputChannels)
 {
 #if JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession() ||
-        isIOSIntentRouteInvalidatedV2() || timeoutMilliseconds <= 0)
+        isIOSIntentRouteInvalidatedV2() || timeoutMilliseconds <= 0 ||
+        inputChannels < 1 || inputChannels > 32)
         return false;
 
     const auto startedAtMs = juce::Time::getMillisecondCounterHiRes();
@@ -3107,7 +3109,7 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     };
 
     const auto error = deviceManager.initialise(
-        1,
+        inputChannels,
         juce::jlimit(1, 2, outputChannels),
         nullptr,
         true);
@@ -3116,11 +3118,11 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
         deviceManager.closeAudioDevice();
         return false;
     }
-    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    desiredInputOpenChannels.store(inputChannels, std::memory_order_relaxed);
     liveInputMonitoringEnabled = false;
     auto *device = deviceManager.getCurrentAudioDevice();
     if (device == nullptr ||
-        device->getActiveInputChannels().countNumberOfSetBits() != 1 ||
+        device->getActiveInputChannels().countNumberOfSetBits() != inputChannels ||
         device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
         device->getCurrentSampleRate() <= 1000.0 ||
         device->getCurrentBufferSizeSamples() <= 0)
@@ -3185,7 +3187,7 @@ bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(
     logCurrentAudioDeviceState("v2-system-selected-duplex-probe");
     return true;
 #else
-    juce::ignoreUnused(timeoutMilliseconds, outputChannels);
+    juce::ignoreUnused(timeoutMilliseconds, outputChannels, inputChannels);
     return false;
 #endif
 }
@@ -3225,7 +3227,9 @@ bool JuceEngine::validateRecordingRouteV2() const
         return false;
     auto *device = deviceManager.getCurrentAudioDevice();
     return device != nullptr &&
-        device->getActiveInputChannels().countNumberOfSetBits() == 1 &&
+        desiredInputOpenChannels.load(std::memory_order_relaxed) > 0 &&
+        device->getActiveInputChannels().countNumberOfSetBits() ==
+            desiredInputOpenChannels.load(std::memory_order_relaxed) &&
         device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
         device->getCurrentSampleRate() > 1000.0 &&
         device->getCurrentBufferSizeSamples() > 0;
@@ -3335,6 +3339,9 @@ void JuceEngine::shutdownEngine()
     requestLiveMidiPanicForAll(LiveMidiPanicMode::full);
 
     wavCapture.stop(true);
+#if JUCE_MAC && !JUCE_IOS
+    macIndependentMonitorBuffer.disableAndClear();
+#endif
 
 #if JUCE_IOS
     detachIOSBluetoothDuplexProbeCallback();
@@ -3377,6 +3384,10 @@ void JuceEngine::shutdownEngine()
     // *** IMPORTANT: clear Node::Ptr handles to old graph nodes ***
     inputNode = nullptr;
     outputNode = nullptr;
+#if JUCE_MAC && !JUCE_IOS
+    macIndependentMonitorSourceNode = nullptr;
+    macIndependentMonitorConnections.clear();
+#endif
     videoAudioNode = nullptr;
     masterGainNode = nullptr;
     masterPanNode = nullptr;
@@ -8456,13 +8467,17 @@ bool JuceEngine::play()
     {
         const int activeInputChannels =
             dev != nullptr ? dev->getActiveInputChannels().countNumberOfSetBits() : 0;
-        const bool verifiedRecordingInputActive =
-            wavCapture.isActive() &&
-            desiredInputOpenChannels.load(std::memory_order_relaxed) == 1 &&
-            activeInputChannels == 1;
+        const int desiredInputChannels =
+            desiredInputOpenChannels.load(std::memory_order_relaxed);
+        const bool verifiedPreparedInputShape =
+            desiredInputChannels > 0 &&
+            activeInputChannels == desiredInputChannels;
+        const bool verifiedOwnedInputActive =
+            verifiedPreparedInputShape &&
+            (wavCapture.isActive() || shouldRouteLiveInputToGraphV2());
         const bool invalidV2Route = v2PlaybackCallbackDetached ||
             missingOutputRoute ||
-            (activeInputChannels != 0 && !verifiedRecordingInputActive);
+            (activeInputChannels != 0 && !verifiedOwnedInputActive);
         if (invalidV2Route)
         {
             pause();
@@ -14768,6 +14783,7 @@ void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
     if (isV2PlaybackSession())
     {
+        liveInputMonitoringActiveV2.store(false, std::memory_order_release);
         liveInputMonitoringEnabled = false;
         return;
     }
@@ -14784,6 +14800,71 @@ void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 bool JuceEngine::isLiveInputMonitoringEnabled() const noexcept
 {
     return liveInputMonitoringEnabled;
+}
+
+bool JuceEngine::setLiveInputMonitorTargetV2(int row,
+                                             int channelStart,
+                                             int channelCount)
+{
+#if JUCE_IOS
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int activeInputs = device == nullptr
+        ? 0
+        : device->getActiveInputChannels().countNumberOfSetBits();
+    if (!isV2PlaybackSession() || !validateRecordingRouteV2() ||
+        row < 0 || row >= (int)rows.size() || channelStart < 0 ||
+        (channelCount != 1 && channelCount != 2) ||
+        channelStart + channelCount > activeInputs)
+        return false;
+
+    liveMonitorTargetRow = row;
+    liveMonitorChannelStart = channelStart;
+    liveMonitorChannelCount = channelCount;
+    liveInputMonitoringEnabled = true;
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    syncLiveInputMonitorRoutingLocked(batchUpdate);
+    if (liveMonitorConnections.size() != channelCount)
+    {
+        liveInputMonitoringEnabled = false;
+        liveMonitorChannelCount = 0;
+        syncLiveInputMonitorRoutingLocked(batchUpdate);
+        commitGraphMutationLocked(false);
+        return false;
+    }
+    commitGraphMutationLocked(false);
+    liveInputMonitoringActiveV2.store(true, std::memory_order_release);
+    return true;
+#else
+    juce::ignoreUnused(row, channelStart, channelCount);
+    return false;
+#endif
+}
+
+void JuceEngine::disableLiveInputMonitoringV2()
+{
+#if JUCE_IOS
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
+    if (!isV2PlaybackSession())
+        return;
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    liveInputMonitoringEnabled = false;
+    liveMonitorChannelCount = 0;
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    syncLiveInputMonitorRoutingLocked(batchUpdate);
+    commitGraphMutationLocked(false);
+#endif
+}
+
+bool JuceEngine::shouldRouteLiveInputToGraphV2() const noexcept
+{
+#if JUCE_IOS
+    return isV2PlaybackSession() &&
+        liveInputMonitoringActiveV2.load(std::memory_order_acquire);
+#else
+    return false;
+#endif
 }
 
 void JuceEngine::clearLiveInputMonitorConnectionsLocked(
@@ -14865,7 +14946,10 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
 #if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (v2Recording)
     {
-        if (!validateRecordingRouteV2() || channelStart != 0 || channelCount != 1)
+        const int requiredInputs = channelStart + channelCount;
+        if (!validateRecordingRouteV2() || channelStart < 0 ||
+            (channelCount != 1 && channelCount != 2) ||
+            requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed))
             return false;
     }
     else
@@ -14926,7 +15010,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                           channelStart))
         return false;
 
-    routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
+    if (!v2Recording || !liveInputMonitoringEnabled)
+        routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
@@ -14934,10 +15019,12 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
 #if JUCE_MAC && !JUCE_IOS
 bool JuceEngine::startIndependentInputRecordingToWav(
     const juce::File &file,
-    double inputSampleRate)
+    double inputSampleRate,
+    int channelCount)
 {
     if (wavCapture.isActive() || !engineInitialized ||
-        !isV2PlaybackSession() || inputSampleRate <= 1000.0)
+        !isV2PlaybackSession() || inputSampleRate <= 1000.0 ||
+        (channelCount != 1 && channelCount != 2))
         return false;
 
     auto *device = deviceManager.getCurrentAudioDevice();
@@ -14950,7 +15037,7 @@ bool JuceEngine::startIndependentInputRecordingToWav(
         return false;
 
     independentInputCaptureMode.store(true, std::memory_order_release);
-    if (!wavCapture.start(file, inputSampleRate, 1, 0))
+    if (!wavCapture.start(file, inputSampleRate, channelCount, 0))
     {
         independentInputCaptureMode.store(false, std::memory_order_release);
         return false;
@@ -14960,13 +15047,13 @@ bool JuceEngine::startIndependentInputRecordingToWav(
     return true;
 }
 
-void JuceEngine::captureIndependentInput(const float *input,
+void JuceEngine::captureIndependentInput(const float *const *inputs,
+                                         int numChannels,
                                          int numSamples) noexcept
 {
     if (!independentInputCaptureMode.load(std::memory_order_acquire))
         return;
-    const float *channels[] = {input};
-    wavCapture.capture(channels, input != nullptr ? 1 : 0, numSamples, 0);
+    wavCapture.capture(inputs, inputs != nullptr ? numChannels : 0, numSamples, 0);
 }
 
 juce::NamedValueSet JuceEngine::getIndependentInputCaptureFacts() const
@@ -14982,6 +15069,125 @@ juce::NamedValueSet JuceEngine::getIndependentInputCaptureFacts() const
     facts.set("source", independentInputCaptureMode.load(
         std::memory_order_acquire) ? "independentInput" : "deviceInput");
     return facts;
+}
+
+bool JuceEngine::prepareMacIndependentInputMonitoringV2(
+    int row,
+    int channelCount,
+    double inputSampleRate,
+    double outputSampleRate,
+    int inputBlockFrames,
+    int outputBlockFrames)
+{
+    auto *device = deviceManager.getCurrentAudioDevice();
+    if (!engineInitialized || !isV2PlaybackSession() ||
+        v2PlaybackCallbackDetached || metronomeCallback == nullptr ||
+        macIndependentMonitorBuffer.isActive() ||
+        row < 0 || row >= (int)rows.size() ||
+        (channelCount != 1 && channelCount != 2) ||
+        inputSampleRate <= 1000.0 || outputSampleRate <= 1000.0 ||
+        std::abs(inputSampleRate - outputSampleRate) >= 1.0 ||
+        inputBlockFrames <= 0 ||
+        inputBlockFrames > MacIndependentMonitorBuffer::maxBlockFrames ||
+        outputBlockFrames <= 0 ||
+        outputBlockFrames > MacIndependentMonitorBuffer::maxBlockFrames ||
+        device == nullptr ||
+        device->getActiveInputChannels().countNumberOfSetBits() != 0 ||
+        device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
+        std::abs(device->getCurrentSampleRate() - outputSampleRate) >= 1.0 ||
+        device->getCurrentBufferSizeSamples() != outputBlockFrames ||
+        metronomeCallback->getFirstValidCallbackCount() == 0 ||
+        std::abs(metronomeCallback->getFirstValidCallbackSampleRate() -
+                 outputSampleRate) >= 1.0 ||
+        metronomeCallback->getFirstValidCallbackFrames() != outputBlockFrames)
+        return false;
+
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (macIndependentMonitorSourceNode != nullptr ||
+        !macIndependentMonitorBuffer.configure(
+            row,
+            channelCount,
+            inputSampleRate,
+            outputSampleRate,
+            inputBlockFrames,
+            outputBlockFrames))
+        return false;
+
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    ensureRowBusNodesAttached(row, batchUpdate, true);
+    auto rowInput = rows[(size_t)row].inputNode;
+    if (rowInput == nullptr)
+    {
+        commitGraphMutationLocked(false);
+        return false;
+    }
+
+    auto source = std::make_unique<MacIndependentMonitorSourceProcessor>(
+        macIndependentMonitorBuffer);
+    auto sourceNode = graph.addNode(std::move(source), std::nullopt, batchUpdate);
+    if (sourceNode == nullptr)
+    {
+        commitGraphMutationLocked(false);
+        return false;
+    }
+
+    juce::Array<juce::AudioProcessorGraph::Connection> connections;
+    for (int channel = 0; channel < channelCount; ++channel)
+    {
+        const juce::AudioProcessorGraph::Connection connection{
+            {sourceNode->nodeID, channel},
+            {rowInput->nodeID, channel},
+        };
+        if (graph.addConnection(connection, batchUpdate))
+            connections.add(connection);
+    }
+    if (connections.size() != channelCount)
+    {
+        for (const auto &connection : connections)
+            graph.removeConnection(connection, batchUpdate);
+        graph.removeNode(sourceNode->nodeID, batchUpdate);
+        commitGraphMutationLocked(false);
+        return false;
+    }
+
+    macIndependentMonitorSourceNode = sourceNode;
+    macIndependentMonitorConnections = std::move(connections);
+    commitGraphMutationLocked(false);
+    macIndependentMonitorBuffer.activate();
+    return true;
+}
+
+bool JuceEngine::publishMacIndependentInputMonitoringV2(
+    const float *const *inputs,
+    int numChannels,
+    int numSamples) noexcept
+{
+    return macIndependentMonitorBuffer.push(inputs, numChannels, numSamples);
+}
+
+void JuceEngine::disableMacIndependentInputMonitoringV2()
+{
+    macIndependentMonitorBuffer.disableAndClear();
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (macIndependentMonitorSourceNode == nullptr &&
+        macIndependentMonitorConnections.isEmpty())
+        return;
+    constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+    for (const auto &connection : macIndependentMonitorConnections)
+        graph.removeConnection(connection, batchUpdate);
+    macIndependentMonitorConnections.clear();
+    if (macIndependentMonitorSourceNode != nullptr)
+    {
+        graph.removeNode(macIndependentMonitorSourceNode->nodeID, batchUpdate);
+        macIndependentMonitorSourceNode = nullptr;
+    }
+    commitGraphMutationLocked(false);
+}
+
+juce::NamedValueSet
+JuceEngine::getMacIndependentInputMonitoringFactsV2() const
+{
+    return macIndependentMonitorBuffer.getFacts();
 }
 #endif
 
@@ -15001,6 +15207,11 @@ RealtimeWavCapture::StopResult JuceEngine::stopRecording()
     logCurrentAudioDeviceState("recording-stopped");
 #endif
     return captureResult;
+}
+
+RealtimeWavCapture::StopResult JuceEngine::finalizeRecordingCaptureV2()
+{
+    return wavCapture.stop();
 }
 
 void JuceEngine::discardRecordingCapture()

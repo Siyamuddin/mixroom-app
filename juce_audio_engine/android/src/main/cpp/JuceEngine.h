@@ -4684,8 +4684,8 @@ public:
     bool initialisePlaybackV2Android();
     bool quiescePlaybackV2Android(bool closeDevice);
     bool reconfigurePlaybackV2Android();
-    bool prepareRecordingV2Android();
-    bool prepareSystemSelectedMediaDuplexV2Android();
+    bool prepareRecordingV2Android(int inputChannels);
+    bool prepareSystemSelectedMediaDuplexV2Android(int inputChannels);
     bool prepareBluetoothDuplexV2Android();
     bool waitForV2CallbackReady(int timeoutMs);
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
@@ -4973,6 +4973,10 @@ public:
     int getActiveOutputChannelCount() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
+    juce::NamedValueSet activateLiveInputMonitoringV2(int row,
+                                                      int channelStart,
+                                                      int channelCount);
+    bool shouldRouteLiveInputToGraphV2() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);
@@ -5051,7 +5055,7 @@ public:
                                   juce::MidiBuffer &scratchMidi) override;
 
 private:
-    bool prepareDefaultDuplexV2Android();
+    bool prepareDefaultDuplexV2Android(int inputChannels);
     JuceEngine();
     ~JuceEngine();
 
@@ -5105,6 +5109,7 @@ private:
     bool audioCallbackAttached = false;
     bool v2PlaybackCallbackDetached = false;
     bool androidV2RecordingPrepared = false;
+    std::atomic<bool> liveInputMonitoringActiveV2{false};
     juce::WaitableEvent androidV2CallbackReady;
     std::atomic<bool> androidV2CallbackProofPending{false};
     juce::AudioFormatManager formatManager;
@@ -5875,16 +5880,23 @@ public:
         engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
         // ===============================
-        // 3️⃣ RENDER GRAPH (OUTPUT ONLY)
+        // 3️⃣ RENDER GRAPH
         // ===============================
         const int renderBlockSize = juce::jmax(1, graphRenderBlockSize);
+        const bool routeVerifiedInput = engine.shouldRouteLiveInputToGraphV2();
+        const int playerInputChannels = routeVerifiedInput
+            ? juce::jmin(numInputChannels, (int)chunkInputPointers.size())
+            : 0;
         const int playerOutputChannels = juce::jmin(numOutputChannels, (int)chunkOutputPointers.size());
+        jassert(playerInputChannels == 0 || playerInputChannels == numInputChannels);
         jassert(playerOutputChannels == numOutputChannels);
 
         for (int offset = 0; offset < numSamples;)
         {
             const int chunkSamples = juce::jmin(renderBlockSize, numSamples - offset);
 
+            for (int ch = 0; ch < playerInputChannels; ++ch)
+                chunkInputPointers[(size_t)ch] = inputChannelData[ch] + offset;
             for (int ch = 0; ch < playerOutputChannels; ++ch)
                 chunkOutputPointers[(size_t)ch] = outputChannelData[ch] != nullptr
                                                       ? outputChannelData[ch] + offset
@@ -5895,8 +5907,8 @@ public:
             engine.applyTrackEffectAutomationAtCurrentBlockStart();
 
             player.audioDeviceIOCallbackWithContext(
-                nullptr,
-                0,
+                playerInputChannels > 0 ? chunkInputPointers.data() : nullptr,
+                playerInputChannels,
                 chunkOutputPointers.data(),
                 playerOutputChannels,
                 chunkSamples,
@@ -6033,6 +6045,7 @@ private:
     bool enabled = false;
     bool isPlaying = false;
     int graphRenderBlockSize = 0;
+    std::array<const float *, 64> chunkInputPointers{};
     std::array<float *, 64> chunkOutputPointers{};
 
     float volume = 0.5f;

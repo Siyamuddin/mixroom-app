@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:mixroom/ai/assistant_action_utils.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/instrument_picker_categories.dart';
+import 'package:mixroom/helpers/piano_roll_playhead.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
@@ -952,11 +953,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   double get _maxBeat {
-    var beat = math.max(32.0, _clipSpanBeat + 8.0);
+    var beat = pianoRollContentEndBeat(
+      clipSpanBeat: _clipSpanBeat,
+      playheadBeat: math.max(_playheadBeat, _visualClipPlayheadBeat),
+    );
     for (final n in _displayNotes) {
       beat = math.max(beat, n.startBeat + n.lengthBeats + 1.0);
     }
-    beat = math.max(beat, _clampedClipPlayheadBeat + 8.0);
     if (_horizontalController.hasClients) {
       final visibleEndBeat = (_horizontalController.offset +
               _horizontalController.position.viewportDimension) /
@@ -982,16 +985,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         .toDouble();
   }
 
-  double _clampedBeatForProjectPlayheadMs(double projectPlayheadMs) {
-    return _beatForProjectPlayheadMs(projectPlayheadMs)
-        .clamp(0.0, math.max(0.0, _clipSpanBeat))
-        .toDouble();
-  }
+  double _visibleBeatForProjectPlayheadMs(double projectPlayheadMs) =>
+      visiblePianoRollPlayheadBeat(
+        _beatForProjectPlayheadMs(projectPlayheadMs),
+      );
 
   double get _visualClipPlayheadBeat => _visualPlayheadBeat.value;
 
   void _setVisualPlayheadBeat(double beat) {
-    final next = beat.clamp(0.0, math.max(0.0, _clipSpanBeat)).toDouble();
+    final next = visiblePianoRollPlayheadBeat(beat);
     if ((_visualPlayheadBeat.value - next).abs() < 0.0001) return;
     _visualPlayheadBeat.value = next;
   }
@@ -1004,7 +1006,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _visualSampleElapsed =
         _playheadVisualTicker.isActive ? _visualTickerElapsed : Duration.zero;
     if (snap || !widget.isPlaying) {
-      _setVisualPlayheadBeat(_clampedBeatForProjectPlayheadMs(sampleMs));
+      _setVisualPlayheadBeat(_visibleBeatForProjectPlayheadMs(sampleMs));
     }
     if (widget.isPlaying) {
       if (!_playheadVisualTicker.isActive) {
@@ -1030,7 +1032,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         : Duration.zero;
     final visualMs = _visualSampleProjectPlayheadMs +
         (elapsedSinceSample.inMicroseconds / 1000.0);
-    _setVisualPlayheadBeat(_clampedBeatForProjectPlayheadMs(visualMs));
+    _setVisualPlayheadBeat(_visibleBeatForProjectPlayheadMs(visualMs));
   }
 
   double get _barLengthBeats {
@@ -1367,13 +1369,13 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   double get _playheadBeat =>
       _beatForProjectPlayheadMs(widget.projectPlayheadMs);
 
-  double get _clampedClipPlayheadBeat =>
-      _playheadBeat.clamp(0.0, math.max(0.0, _clipSpanBeat)).toDouble();
+  double get _transportPlayheadBeat =>
+      visiblePianoRollPlayheadBeat(_playheadBeat);
 
   double get _followScrubBeat => _visualClipPlayheadBeat;
 
   double get _visiblePlayheadBeat =>
-      _followPlayhead ? _followScrubBeat : _clampedClipPlayheadBeat;
+      _followPlayhead ? _followScrubBeat : _transportPlayheadBeat;
 
   double _projectMsForBeat(double beat) {
     return math.max(
@@ -1599,13 +1601,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final targetV = (targetRow * _rowHeight) - (verticalViewport * 0.5);
     _jumpBothVerticalControllers(targetV);
 
-    if (_notes.isNotEmpty) {
-      final horizontalViewport =
-          _horizontalController.position.viewportDimension;
-      final targetH =
-          _xForBeat(_clampedClipPlayheadBeat) - (horizontalViewport * 0.5);
-      _jumpHorizontalTo(targetH);
-    }
+    final horizontalViewport = _horizontalController.position.viewportDimension;
+    final targetH =
+        _xForBeat(_transportPlayheadBeat) - (horizontalViewport * 0.5);
+    _jumpHorizontalTo(targetH);
   }
 
   bool _handleFollowModeScrollNotification(ScrollNotification notification) {

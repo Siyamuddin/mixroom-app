@@ -15,8 +15,8 @@ object JuceBridge {
     @JvmStatic external fun initialisePlaybackV2JNI(): Boolean
     @JvmStatic external fun quiescePlaybackV2JNI(closeDevice: Boolean): Boolean
     @JvmStatic external fun reconfigurePlaybackV2JNI(): Boolean
-    @JvmStatic external fun prepareRecordingV2JNI(): Boolean
-    @JvmStatic external fun prepareSystemSelectedMediaDuplexV2JNI(): Boolean
+    @JvmStatic external fun prepareRecordingV2JNI(inputChannels: Int): Boolean
+    @JvmStatic external fun prepareSystemSelectedMediaDuplexV2JNI(inputChannels: Int): Boolean
     @JvmStatic external fun prepareBluetoothDuplexV2JNI(): Boolean
     @JvmStatic external fun waitForV2CallbackReadyJNI(timeoutMs: Int): Boolean
     @JvmStatic external fun beginBluetoothMediaRouteMigrationV2JNI(): Long
@@ -279,6 +279,11 @@ object JuceBridge {
     @JvmStatic external fun getCurrentDeviceNameJNI(): String
     @JvmStatic external fun getCurrentOutputDeviceNameJNI(): String
     @JvmStatic external fun setLiveInputMonitoringEnabledJNI(enabled: Boolean)
+    @JvmStatic external fun activateLiveInputMonitoringV2JNI(
+        row: Int,
+        channelStart: Int,
+        channelCount: Int,
+    ): HashMap<String, Any>
     @JvmStatic external fun startRecordingJNI(path: String, channelStart: Int, channelCount: Int): Boolean
     @JvmStatic external fun stopRecordingJNI(): HashMap<String, Any>
     @JvmStatic external fun stopRecordingWithoutPlaybackRestoreJNI(): HashMap<String, Any>

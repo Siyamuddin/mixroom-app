@@ -27,54 +27,78 @@ internal class AndroidMediaRouteV2Test {
   @Test
   fun systemRecordingResolvesOneAdapterBeforeMutation() {
     assertEquals(
-      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED,
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_MEDIA,
         apiLevel = 29,
         communicationCandidateCount = 0,
       ),
     )
     assertEquals(
-      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED_MEDIA,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED,
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_LE,
         apiLevel = 36,
         communicationCandidateCount = 0,
       ),
     )
     assertEquals(
       AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_MEDIA,
         apiLevel = 31,
         communicationCandidateCount = 1,
       ),
     )
     assertEquals(
       AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_MEDIA,
         apiLevel = 29,
         communicationCandidateCount = 1,
       ),
     )
     assertEquals(
       AndroidRecordingRouteAdapterV2.BLUETOOTH_COMMUNICATION,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_MEDIA,
         apiLevel = 30,
         communicationCandidateCount = 1,
       ),
     )
     assertEquals(
       null,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_MEDIA,
         apiLevel = 28,
         communicationCandidateCount = 1,
       ),
     )
     assertEquals(
       null,
-      AndroidSystemRecordingRouteResolverV2.resolveA2dp(
+      AndroidSystemRecordingRouteResolverV2.resolve(
+        sourceKind = AndroidRouteKindV2.BLUETOOTH_MEDIA,
         apiLevel = 36,
         communicationCandidateCount = 2,
       ),
     )
+    for (
+      kind in listOf(
+        AndroidRouteKindV2.BUILT_IN,
+        AndroidRouteKindV2.WIRED,
+        AndroidRouteKindV2.EXTERNAL,
+        AndroidRouteKindV2.UNKNOWN,
+      )
+    ) {
+      assertEquals(
+        AndroidRecordingRouteAdapterV2.SYSTEM_SELECTED,
+        AndroidSystemRecordingRouteResolverV2.resolve(
+          sourceKind = kind,
+          apiLevel = 28,
+          communicationCandidateCount = 3,
+        ),
+      )
+    }
   }
 
   @Test
@@ -466,7 +490,7 @@ internal class AndroidMediaRouteV2Test {
   }
 
   @Test
-  fun systemSelectedMediaDuplexPreservesA2dpAndAcceptsDefaultInputs() {
+  fun systemSelectedDuplexPreservesA2dpAndAcceptsDefaultInputs() {
     val source = AndroidRouteEndpointV2(
       17,
       AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
@@ -506,11 +530,11 @@ internal class AndroidMediaRouteV2Test {
 
     assertEquals(
       "ok",
-      AndroidSystemSelectedMediaDuplexReadinessV2.validate(facts),
+      AndroidSystemSelectedDuplexReadinessV2.validate(facts),
     )
     assertEquals(
       "ok",
-      AndroidSystemSelectedMediaDuplexReadinessV2.validate(
+      AndroidSystemSelectedDuplexReadinessV2.validate(
         facts.copy(
           actualInput = builtInInput.copy(type = AudioDeviceInfo.TYPE_USB_DEVICE),
           inputStream = inputStream.copy(routedDeviceId = builtInInput.id),
@@ -520,7 +544,7 @@ internal class AndroidMediaRouteV2Test {
   }
 
   @Test
-  fun systemSelectedMediaDuplexRejectsCommunicationAndRouteChanges() {
+  fun systemSelectedDuplexRejectsCommunicationAndRouteChanges() {
     val source = AndroidRouteEndpointV2(
       17,
       AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
@@ -555,9 +579,6 @@ internal class AndroidMediaRouteV2Test {
 
     val invalid = listOf(
       facts.copy(
-        actualInput = input.copy(type = AudioDeviceInfo.TYPE_BLUETOOTH_SCO),
-      ),
-      facts.copy(
         actualOutput = source.copy(id = 18),
         outputStream = outputStream.copy(routedDeviceId = 18),
       ),
@@ -569,7 +590,7 @@ internal class AndroidMediaRouteV2Test {
     )
     for (candidate in invalid) {
       assertTrue(
-        AndroidSystemSelectedMediaDuplexReadinessV2.validate(candidate) != "ok",
+        AndroidSystemSelectedDuplexReadinessV2.validate(candidate) != "ok",
       )
     }
   }

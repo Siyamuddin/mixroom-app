@@ -27,16 +27,28 @@
 + (NSNumber * _Nonnull)getMacOutputCallbackProofCountV2ObjC;
 + (NSNumber * _Nonnull)getMacOutputCallbackProofFramesV2ObjC;
 + (NSNumber * _Nonnull)getMacOutputCallbackProofSampleRateV2ObjC;
-+ (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID;
++ (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID
+                    channelStart:(NSInteger)channelStart
+                    channelCount:(NSInteger)channelCount;
 + (BOOL)waitForMacInputProbeCallbackV2ObjC:(NSInteger)timeoutMilliseconds;
 + (void)cancelMacInputProbeWaitV2ObjC;
 + (NSDictionary<NSString *, id> * _Nonnull)getMacInputProbeFactsV2ObjC;
 + (void)stopMacInputProbeV2ObjC;
-+ (BOOL)startMacInputRecordingV2ObjC:(NSString * _Nonnull)path;
++ (BOOL)startMacInputRecordingV2ObjC:(NSString * _Nonnull)path
+                         channelStart:(NSInteger)channelStart
+                         channelCount:(NSInteger)channelCount;
 + (NSDictionary<NSString *, id> * _Nonnull)stopMacInputRecordingV2ObjC;
 + (void)discardMacInputRecordingV2ObjC;
 + (BOOL)isMacInputRecordingV2ObjC;
 + (NSDictionary<NSString *, id> * _Nonnull)getMacInputCaptureFactsV2ObjC;
++ (BOOL)prepareMacIndependentInputMonitoringV2ObjC:(NSInteger)row
+                                      channelCount:(NSInteger)channelCount
+                                   inputSampleRate:(double)inputSampleRate
+                                  outputSampleRate:(double)outputSampleRate
+                                  inputBlockFrames:(NSInteger)inputBlockFrames
+                                 outputBlockFrames:(NSInteger)outputBlockFrames;
++ (void)disableMacIndependentInputMonitoringV2ObjC;
++ (NSDictionary<NSString *, NSNumber *> * _Nonnull)getMacIndependentInputMonitoringFactsV2ObjC;
 #endif
 + (void)beginOutputCallbackProofV2ObjC;
 + (BOOL)waitForOutputCallbackProofV2ObjC:(NSInteger)timeoutMilliseconds;
@@ -49,9 +61,14 @@
 + (BOOL)openPreparedBluetoothDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds;
 + (BOOL)prepareSystemSelectedDuplexSessionV2ObjC;
 + (BOOL)openPreparedSystemSelectedDuplexRouteV2ObjC:(NSInteger)timeoutMilliseconds
-                                      outputChannels:(NSInteger)outputChannels;
+                                      outputChannels:(NSInteger)outputChannels
+                                       inputChannels:(NSInteger)inputChannels;
 + (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
 + (BOOL)validateRecordingRouteV2ObjC;
++ (BOOL)setLiveInputMonitorTargetV2ObjC:(NSInteger)row
+                           channelStart:(NSInteger)channelStart
+                           channelCount:(NSInteger)channelCount;
++ (void)disableLiveInputMonitoringV2ObjC;
 + (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC;
 + (void)beginIOSIntentOperationV2ObjC;
 + (void)endIOSIntentOperationV2ObjC;
@@ -380,6 +397,7 @@
 + (NSNumber *)getRecordingPeakObjC;
 
 + (NSDictionary<NSString *, id> *)stopRecordingObjC;
++ (NSDictionary<NSString *, id> *)finalizeRecordingForMonitoringV2ObjC;
 + (void)discardRecordingCaptureObjC;
 + (BOOL)isRecordingObjC;
 

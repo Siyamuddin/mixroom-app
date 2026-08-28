@@ -2,7 +2,32 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+String _between(String source, String start, String end) {
+  final startIndex = source.indexOf(start);
+  final endIndex = source.indexOf(end, startIndex + start.length);
+  expect(startIndex, greaterThanOrEqualTo(0), reason: 'Missing: $start');
+  expect(endIndex, greaterThan(startIndex), reason: 'Missing: $end');
+  return source.substring(startIndex, endIndex);
+}
+
 void main() {
+  test('iOS advertises passive input capacity without route activation', () {
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final metadata = _between(
+      plugin,
+      'else if ([call.method isEqualToString:@"getInputDeviceInfos"])',
+      'else if ([call.method isEqualToString:@"selectInputDevice"])',
+    );
+
+    expect(metadata, contains('session.availableInputs'));
+    expect(metadata, contains('input.channels.count'));
+    expect(metadata, contains('session.preferredInput'));
+    expect(metadata, isNot(contains('setCategory')));
+    expect(metadata, isNot(contains('setActive')));
+  });
+
   late String plugin;
   late String engine;
   late String editor;
@@ -51,13 +76,15 @@ void main() {
     expect('dispatch_after'.allMatches(intent), hasLength(1));
   });
 
-  test('iOS V2 native writer requires an already prepared mono route', () {
-    final openStart = engine.indexOf('bool JuceEngine::openRecordingInputV2');
-    final quiesceStart = engine.indexOf(
-      'bool JuceEngine::quiescePlaybackRouteV2',
+  test('iOS V2 native writer captures the callback-proven selected range', () {
+    final openStart = engine.indexOf(
+      'bool JuceEngine::openPreparedSystemSelectedDuplexRouteV2(',
+    );
+    final validateStart = engine.indexOf(
+      'bool JuceEngine::validateRecordingRouteV2',
       openStart,
     );
-    final open = engine.substring(openStart, quiesceStart);
+    final open = engine.substring(openStart, validateStart);
     final writerStart = engine.indexOf('bool JuceEngine::startRecordingToWav');
     final writerEnd = engine.indexOf(
       'RealtimeWavCapture::StopResult JuceEngine::stopRecording()',
@@ -66,16 +93,27 @@ void main() {
     final writer = engine.substring(writerStart, writerEnd);
 
     expect(open, contains('const auto error = deviceManager.initialise('));
-    expect(open, contains('bluetoothHfp ? 1 : 2'));
-    expect(open, contains('desiredInputOpenChannels.store(1'));
+    expect(open, contains('inputChannels,'));
+    expect(open, contains('desiredInputOpenChannels.store(inputChannels'));
     expect(writer, contains('validateRecordingRouteV2()'));
-    expect(writer, contains('channelStart != 0'));
-    expect(writer, contains('channelCount != 1'));
+    expect(writer, contains('channelStart < 0'));
+    expect(writer, contains('channelCount != 1 && channelCount != 2'));
+    expect(
+      writer,
+      contains(
+        'requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed)',
+      ),
+    );
     final v2GuardStart = writer.indexOf('if (v2Recording)');
     final v2GuardEnd = writer.indexOf('else\n#endif', v2GuardStart);
     expect(
       writer.substring(v2GuardStart, v2GuardEnd),
       isNot(contains('applyPreferredAudioDeviceSetup(requiredInputs')),
+    );
+    expect(plugin, contains('session.maximumInputNumberOfChannels'));
+    expect(
+      plugin,
+      contains('MixroomIOSRouteIsBluetoothHFPDuplex(session.currentRoute)'),
     );
   });
 
@@ -208,7 +246,7 @@ void main() {
     expect(recording, isNot(contains('48000')));
   });
 
-  test('HFP input is captured but never monitored through the graph', () {
+  test('only verified V2 monitoring routes input through the graph', () {
     final callbackStart = File('juce_audio_engine/ios/Classes/JuceEngine.h')
         .readAsStringSync()
         .indexOf(
@@ -219,11 +257,28 @@ void main() {
     ).readAsStringSync();
     final callback = header.substring(callbackStart);
     expect(callback, contains('engine.captureInput(inputChannelData'));
+    expect(callback, contains('engine.shouldRouteLiveInputToGraphV2()'));
     expect(
       callback,
-      contains(
-        'player.audioDeviceIOCallbackWithContext(\n            nullptr,\n            0,',
-      ),
+      contains('routeVerifiedInput ? inputChannelData : nullptr'),
+    );
+    expect(callback, contains('routeVerifiedInput ? numInputChannels : 0'));
+    expect(engine, contains('liveInputMonitoringActiveV2.store(false'));
+    expect(engine, contains('liveInputMonitoringActiveV2.store(true'));
+
+    final playStart = engine.indexOf('bool JuceEngine::play()');
+    final pauseStart = engine.indexOf('void JuceEngine::pause()', playStart);
+    expect(playStart, greaterThanOrEqualTo(0));
+    expect(pauseStart, greaterThan(playStart));
+    final play = engine.substring(playStart, pauseStart);
+    expect(play, contains('verifiedPreparedInputShape'));
+    expect(
+      play,
+      contains('wavCapture.isActive() || shouldRouteLiveInputToGraphV2()'),
+    );
+    expect(
+      play,
+      contains('activeInputChannels != 0 && !verifiedOwnedInputActive'),
     );
 
     final routeStart = engine.indexOf('void JuceEngine::routeLiveInputToRow');
@@ -252,11 +307,24 @@ void main() {
       );
       final handler = editor.substring(handlerStart, handlerEnd);
       expect(handler, contains('abortRecordingV2(cancelOnly: true)'));
+      expect(handler, contains('AudioRouteCoordinatorStateV2.preparingInput'));
+      expect(handler, isNot(contains('_supportsV2AudioRecording')));
+      expect(handler, isNot(contains('_v2AudioSessionInvalidated')));
+      final recordResolverStart = editor.indexOf(
+        'Future<void> _startRecordingJuce() async {',
+      );
+      final recordResolverEnd = editor.indexOf(
+        'Future<void> _letRecordingVisualStatePaint()',
+        recordResolverStart,
+      );
+      final recordResolver = editor.substring(
+        recordResolverStart,
+        recordResolverEnd,
+      );
       expect(
-        handler,
+        recordResolver,
         contains('_showSmallNotice(_v2AudioSessionInvalidationNotice)'),
       );
-      expect(handler, contains('AudioRouteCoordinatorStateV2.preparingInput'));
       final startFlowStart = editor.indexOf(
         'Future<void> _startAudioRecordingJuce()',
       );
@@ -453,6 +521,22 @@ void main() {
     expect(startup, contains('final latestShutdown ='));
     expect(startup, contains('identical(latestShutdown, priorShutdown)'));
 
+    final iosCoordinatorStart = editor.indexOf(
+      'if (_isBluetoothV2Session && Platform.isIOS)',
+    );
+    final iosCoordinatorEnd = editor.indexOf(
+      'if (!_isBluetoothV2Session)',
+      iosCoordinatorStart,
+    );
+    final iosCoordinator = editor.substring(
+      iosCoordinatorStart,
+      iosCoordinatorEnd,
+    );
+    expect(
+      iosCoordinator,
+      contains('allowRecoveryGenerationSupersession: true'),
+    );
+
     final playbackIntentStart = plugin.indexOf(
       'NSDictionary<NSString *, id> *recordingSourceOutput =',
     );
@@ -473,6 +557,28 @@ void main() {
     expect(playbackIntent, contains('fallback_succeeded'));
     expect(playbackIntent, contains('activeInputChannels'));
     expect(playbackIntent, contains('audioCallbackAttached'));
+    expect(
+      playbackIntent,
+      contains('playbackOpenProfileOutput = recordingSourceOutput'),
+    );
+    expect(
+      playbackIntent,
+      contains(
+        '!recoveringAfterPhysicalInvalidation &&\n'
+        '                   MixroomIOSOutputIsBluetoothDuplex(expectedOutput)',
+      ),
+    );
+    expect(playbackIntent, contains('beginOutputCallbackProofV2ObjC'));
+    expect(playbackIntent, contains('waitForOutputCallbackProofV2ObjC:2000'));
+    expect(
+      playbackIntent,
+      contains('MixroomIOSOutputIdentityIsObservable(actualOutput)'),
+    );
+    expect(
+      playbackIntent,
+      contains('!MixroomIOSOutputIsBluetoothDuplex(actualOutput)'),
+    );
+    expect(playbackIntent, contains('MixroomIOSPlaybackSnapshotMatchesClock'));
     expect(playbackIntent, isNot(contains('dispatch_after')));
     final discard = playbackIntent.indexOf(
       '[JuceBridge discardRecordingCaptureObjC]',
@@ -541,10 +647,7 @@ void main() {
         'if (!mounted) {\n        await JuceAudioEngine.stopRecording();',
       ),
     );
-    expect(
-      start,
-      contains('_startRecordingPeakPolling();'),
-    );
+    expect(start, contains('_startRecordingPeakPolling();'));
     expect(
       start,
       contains('if (mounted &&\n          _isBluetoothV2Session &&'),
