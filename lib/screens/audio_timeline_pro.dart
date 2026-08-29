@@ -9632,14 +9632,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         Container(width: 1, height: 16, color: Colors.white24),
         Expanded(
           child: _buildClipPopupAction(
+            key: const ValueKey('selected_clip_popup_clip_settings'),
             icon: Icons.tune,
             color: Colors.white,
             onTap: () {
-              final clip = widget.clips[singleSelectionIndex];
               final openPanel = widget.onOpenAudioClipOptionsPanel;
-              if (widget.useTabletDawLayout &&
-                  !clip.isMidi &&
-                  openPanel != null) {
+              if (widget.useTabletDawLayout && openPanel != null) {
                 setState(_clearClipSelection);
                 openPanel(singleSelectionIndex);
                 return;

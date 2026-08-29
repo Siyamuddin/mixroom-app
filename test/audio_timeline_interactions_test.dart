@@ -318,6 +318,7 @@ Widget _buildHarness({
   Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane,
   void Function(int clipIndex)? onOpenMidiClip,
+  void Function(int clipIndex)? onOpenAudioClipOptionsPanel,
   void Function(int clipIndex)? onCopyClip,
   void Function(List<int> clipIndices)? onCopyClips,
   Future<bool> Function(int row, double timeMs)? onPasteClipAt,
@@ -549,6 +550,7 @@ Widget _buildHarness({
           onDeleteClips: null,
           onCutClipAt: null,
           onOpenMidiClip: onOpenMidiClip,
+          onOpenAudioClipOptionsPanel: onOpenAudioClipOptionsPanel,
           onCreateMidiClipInInstrumentLane: onCreateMidiClipInInstrumentLane,
           onStemSeparation: null,
           onSelectionChanged: onSelectionChanged,
@@ -2821,6 +2823,107 @@ void main() {
 
     expect(openRequests, <int>[0]);
   });
+
+  testWidgets(
+    'tablet MIDI clip settings opens the side panel instead of overlay',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildMidiClip()];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 1,
+          name: 'Keys',
+          iconId: 1,
+          kind: TimelineRowKind.instrument,
+          instrumentId: 'sfz.vsco.upright_piano',
+          instrumentName: 'Upright Piano',
+        ),
+      ];
+      final panelRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(panelRequests, <int>[0]);
+      expect(find.text('No extra tempo mode is needed here.'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'tablet audio clip settings still opens the side panel',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildClip()];
+      final panelRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(panelRequests, <int>[0]);
+    },
+  );
+
+  testWidgets(
+    'phone MIDI clip settings keeps the timeline overlay',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildMidiClip()];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 1,
+          name: 'Keys',
+          iconId: 1,
+          kind: TimelineRowKind.instrument,
+          instrumentId: 'sfz.vsco.upright_piano',
+          instrumentName: 'Upright Piano',
+        ),
+      ];
+      final panelRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          selectedClipIndex: 0,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(panelRequests, isEmpty);
+      expect(find.text('No extra tempo mode is needed here.'), findsOneWidget);
+    },
+  );
 
   testWidgets('selected sampler clip popup exposes replace source action',
       (tester) async {
