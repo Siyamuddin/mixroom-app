@@ -309,7 +309,7 @@ Selecting a clip opens a compact action popover.
 | --- | --- |
 | Copy | Copies the selected clip or selected clip group. |
 | Place clone | Pastes/clones the copied clip near the selection. |
-| Clip settings | Opens detailed clip settings. On desktop and tablet this is the right inspector for audio and MIDI. On phones it stays a compact overlay. |
+| Clip settings | Opens detailed clip settings. On desktop and tablet this is the right inspector for audio and MIDI. On phones it stays a compact overlay. On desktop, double-click an audio clip to open this too. |
 | Split at playhead | Splits an audio clip at the current playhead position, when valid. |
 | Delete | Removes the selected clip or selected clip group. |
 
@@ -670,7 +670,7 @@ Audio import behavior may vary by platform because Android, iOS, macOS, and Wind
 
 Instrument clips open in the piano roll.
 
-Use Add Instrument Clip to create a MIDI/instrument clip. Open the clip to edit notes in the piano roll.
+Use Add Instrument Clip to create a MIDI/instrument clip. Open the clip to edit notes in the piano roll. On desktop, double-click a MIDI clip to open the piano roll. Phone and tablet keep the piano button on the clip popover.
 
 ### Piano Roll Header
 
