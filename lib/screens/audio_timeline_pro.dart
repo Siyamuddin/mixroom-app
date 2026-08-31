@@ -1502,7 +1502,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kMasterAutomationLaneMinHeight = 312.0;
   static const double _kMacWheelZoomSensitivity = 0.0025;
   static const double _kMinTimelinePixelsPerMs = 0.001;
-  static const double _kMaxTimelinePixelsPerMs = 1.0;
+  // The detail waveform contains one point per 0.125 ms. At this ceiling each
+  // logical pixel can therefore resolve one stored detail point.
+  static const double _kMaxTimelinePixelsPerMs = 8.0;
   static const double _kHorizontalScrollbarHeight = 12.0;
   static const double _kHorizontalScrollbarActiveHeight = 15.0;
   static const double _kHorizontalScrollbarHitHeight = 22.0;
@@ -19875,7 +19877,19 @@ class _TimelinePainter extends CustomPainter {
       }
 
       // Subdivisions inside each bar are driven by magnet quantize setting.
-      for (int sub = 1; sub < subdivisions; sub++) {
+      // At deep zoom only a small portion of the bar is visible, so avoid
+      // scanning hundreds of offscreen subdivisions on every paint.
+      final firstVisibleSubdivision = math.max(
+        1,
+        ((visibleStartMs - barMs) / msPerSubdivision).ceil(),
+      );
+      final lastVisibleSubdivision = math.min(
+        subdivisions - 1,
+        ((visibleEndMs - barMs) / msPerSubdivision).floor(),
+      );
+      for (int sub = firstVisibleSubdivision;
+          sub <= lastVisibleSubdivision;
+          sub++) {
         final subMs = barMs + sub * msPerSubdivision;
         final subX = (subMs - scrollOffsetMs) * pixelsPerMs;
 
@@ -21295,8 +21309,18 @@ class _RulerPainter extends CustomPainter {
           );
         }
       }
-      // Draw quantize subdivisions within the bar.
-      for (int sub = 1; sub < subdivisions; sub++) {
+      // Draw only the quantize subdivisions that intersect the viewport.
+      final firstVisibleSubdivision = math.max(
+        1,
+        ((visibleStartMs - barMs) / msPerSubdivision).ceil(),
+      );
+      final lastVisibleSubdivision = math.min(
+        subdivisions - 1,
+        ((visibleEndMs - barMs) / msPerSubdivision).floor(),
+      );
+      for (int sub = firstVisibleSubdivision;
+          sub <= lastVisibleSubdivision;
+          sub++) {
         final subMs = barMs + sub * msPerSubdivision;
         final subX = (subMs - scrollOffsetMs) * pixelsPerMs;
         if (subX >= 0 && subX <= viewportWidth) {

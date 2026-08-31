@@ -17,7 +17,15 @@ void main() {
       expect(resolve(480.0), 16);
       expect(resolve(959.9), 16);
       expect(resolve(960.0), 32);
-      expect(resolve(100000.0), 32);
+      expect(resolve(1919.9), 32);
+      expect(resolve(1920.0), 64);
+      expect(resolve(3839.9), 64);
+      expect(resolve(3840.0), 128);
+      expect(resolve(7679.9), 128);
+      expect(resolve(7680.0), 256);
+      expect(resolve(15359.9), 256);
+      expect(resolve(15360.0), 512);
+      expect(resolve(100000.0), 512);
     });
 
     test('fixed mode preserves every positive divisions-per-bar value', () {
@@ -34,7 +42,12 @@ void main() {
     });
 
     test('invalid scale and fixed values fall back safely', () {
-      for (final pixelsPerBar in <double>[0.0, -1.0, double.nan]) {
+      for (final pixelsPerBar in <double>[
+        0.0,
+        -1.0,
+        double.nan,
+        double.infinity,
+      ]) {
         expect(
           TimelineGridPolicy.resolveDivisionsPerBar(
             mode: TimelineGridMode.adaptive,
@@ -101,6 +114,39 @@ void main() {
         ),
         480,
       );
+
+      final pianoRollPixelsPerBar = TimelineGridPolicy.pianoRollPixelsPerBar(
+        beatsPerBar: 4,
+        beatUnit: 4,
+        pixelsPerBeat: 240,
+      );
+      expect(
+        TimelineGridPolicy.resolveDivisionsPerBar(
+          mode: TimelineGridMode.adaptive,
+          fixedDivisionsPerBar: 4,
+          pixelsPerBar: pianoRollPixelsPerBar,
+        ),
+        32,
+      );
+    });
+
+    test('maximum arrangement zoom resolves a readable tick-level grid', () {
+      final pixelsPerBar = TimelineGridPolicy.arrangementPixelsPerBar(
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+        pixelsPerMs: 8.0,
+      );
+      final divisions = TimelineGridPolicy.resolveDivisionsPerBar(
+        mode: TimelineGridMode.adaptive,
+        fixedDivisionsPerBar: 4,
+        pixelsPerBar: pixelsPerBar,
+      );
+
+      expect(pixelsPerBar, 16000.0);
+      expect(divisions, 512);
+      expect(pixelsPerBar / divisions, greaterThanOrEqualTo(30.0));
+      expect(2000.0 / divisions, closeTo(3.90625, 0.000001));
     });
   });
 }

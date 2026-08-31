@@ -3,7 +3,16 @@ enum TimelineGridMode { adaptive, fixed }
 class TimelineGridPolicy {
   static const int defaultDivisionsPerBar = 4;
   static const double minimumAdaptiveSpacingPx = 30.0;
-  static const List<int> adaptiveDivisionsPerBar = <int>[4, 8, 16, 32];
+  static const List<int> adaptiveDivisionsPerBar = <int>[
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+  ];
 
   const TimelineGridPolicy._();
 

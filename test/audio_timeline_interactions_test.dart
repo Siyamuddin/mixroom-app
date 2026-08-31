@@ -1153,6 +1153,7 @@ void main() {
       final controller = AudioCanvasTimelineController();
       final snapSettings = <(bool, TimelineGridMode, int)>[];
       final moveCommits = <double>[];
+      final detailViewports = <WaveformDetailViewport>[];
 
       await tester.pumpWidget(
         _buildHarness(
@@ -1164,6 +1165,7 @@ void main() {
           onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
             snapSettings.add((enabled, mode, fixedDivisions));
           },
+          onWaveformDetailViewportSettled: detailViewports.add,
         ),
       );
       await tester.pumpAndSettle();
@@ -1182,15 +1184,17 @@ void main() {
       await tester.sendEventToBinding(
         PointerScrollEvent(
           position: center,
-          scrollDelta: const Offset(0, -1000),
+          scrollDelta: const Offset(0, -2000),
         ),
       );
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 181));
 
       expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
-      expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
       expect(snapSettings, hasLength(1));
+      expect(detailViewports.last.pixelsPerMs, 8.0);
 
       final gesture = await tester.createGesture(
         kind: PointerDeviceKind.mouse,
@@ -1204,7 +1208,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(moveCommits, hasLength(1));
-      expect(moveCommits.single, closeTo(62.5, 0.01));
+      expect(moveCommits.single, closeTo(7.8125, 0.01));
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -1821,12 +1825,14 @@ void main() {
     try {
       final controller = AudioCanvasTimelineController();
       final clips = <AudioTrack>[await _buildClip()];
+      final detailViewports = <WaveformDetailViewport>[];
 
       await tester.pumpWidget(
         _buildHarness(
           clips: clips,
           controller: controller,
           onMoveClipCommit: (_, __, ___) async {},
+          onWaveformDetailViewportSettled: detailViewports.add,
         ),
       );
       await tester.pumpAndSettle();
@@ -1848,6 +1854,21 @@ void main() {
       expect(state.thumbWidth, lessThan(72.0));
       expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
       expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
+
+      controller.beginHorizontalScrollbarDrag(
+        state.thumbLeft + state.thumbWidth - 2.0,
+      );
+      controller.dragHorizontalScrollbarBy(-2000.0);
+      controller.endHorizontalScrollbarDrag();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 181));
+
+      state = controller.horizontalScrollbarState;
+      expect(state.thumbLeft.isFinite, isTrue);
+      expect(state.thumbWidth.isFinite, isTrue);
+      expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+      expect(detailViewports.last.pixelsPerMs, 8.0);
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -4255,6 +4276,39 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(moveCommits, isEmpty);
+  });
+
+  testWidgets('scale gesture reaches the shared deep zoom ceiling',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+    final controller = AudioCanvasTimelineController();
+    final detailViewports = <WaveformDetailViewport>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        controller: controller,
+        onMoveClipCommit: (_, __, ___) async {},
+        onWaveformDetailViewportSettled: detailViewports.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final center = _clipCenter(tester);
+    final gesture = await tester.createGesture(
+      pointer: 103,
+      kind: PointerDeviceKind.trackpad,
+    );
+    await gesture.panZoomStart(center);
+    await tester.pump();
+    await gesture.panZoomUpdate(center, scale: 100.0);
+    await tester.pump();
+    await gesture.panZoomEnd();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 181));
+
+    expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+    expect(detailViewports.last.pixelsPerMs, 8.0);
   });
 
   testWidgets('pinch zoom does not leave an unselected clip selected',

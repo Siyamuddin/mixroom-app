@@ -224,14 +224,14 @@ The magnet button controls timeline snapping.
 | Tap magnet | Turns snapping on or off. |
 | Desktop/tablet: open the quantize dropdown | Opens the grid menu. |
 | Phone: hold magnet | Opens the grid menu. |
-| Choose Auto | Adapts the visible grid and snap interval from 1/4 up to 1/32 when the current zoom provides enough spacing. |
+| Choose Auto | Adapts the visible grid and snap interval from 1/4 through fine tick-level subdivisions up to 1/512 when the arrangement zoom provides enough spacing. |
 | Choose a fixed value | Keeps the selected grid, such as 1/4, 1/8, or 1/16, at every zoom level. |
 
 When magnet is on, timeline edits snap to the selected musical grid. This helps clips, cuts, pasted clips, painted clips, loop regions, and automation regions land exactly on beats or subdivisions.
 
 When magnet is off, users can place and edit items freely without grid snapping. This is better for dialogue, sound design, loose performances, or detailed cleanup.
 
-Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting.
+Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. The arrangement can zoom to waveform-detail level and Auto can continue through 1/64, 1/128, 1/256, and 1/512. The piano roll keeps its own current zoom range. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting. Fixed choices remain available through 1/32 and do not change with zoom.
 
 Fixed quantize values are divisions of one bar:
 
