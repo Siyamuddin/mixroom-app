@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/trackpad_touch_count.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -873,6 +874,187 @@ void main() {
     expect(moveCommits, hasLength(1));
     expect(moveCommits.single, closeTo(800.0, 0.01));
   });
+
+  testWidgets(
+    'desktop three-finger trackpad drag starts a selection box on a clip',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      TrackpadTouchCount.debugTouchCount = 3;
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final moveCommits = <int>[];
+        final selectionSnapshots = <List<int>>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onSelectionChanged: (selectedClipIndices, _) {
+              selectionSnapshots.add(
+                selectedClipIndices.toList(growable: false),
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(PlatformCapabilities.current.isDesktop, isTrue);
+        expect(TrackpadTouchCount.current, 3);
+
+        final start = _clipCenter(tester);
+        final end = start + const Offset(-400.0, 0.0);
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: kPrimaryMouseButton,
+        );
+        await gesture.down(start);
+        await tester.pump();
+        await gesture.moveTo(end);
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(moveCommits, isEmpty);
+        expect(
+          selectionSnapshots.where((snapshot) => snapshot.length >= 2),
+          isNotEmpty,
+          reason: 'three-finger drag should box-select, snapshots=$selectionSnapshots',
+        );
+        expect(selectionSnapshots.last.toSet(), <int>{0, 1});
+      } finally {
+        TrackpadTouchCount.debugReset();
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop cmd-click adds each clip instead of skipping earlier clips',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final moveCommits = <int>[];
+        final selectionSnapshots = <List<int>>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onSelectionChanged: (selectedClipIndices, _) {
+              selectionSnapshots.add(
+                selectedClipIndices.toList(growable: false),
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(PlatformCapabilities.current.isDesktop, isTrue);
+
+        final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+        final firstClipCenter = topLeft +
+            Offset(
+              _kHeaderWidth + (1000.0 * _kInitialPixelsPerMs),
+              _kRulerHeight + 46.0,
+            );
+        final secondClipCenter = topLeft +
+            Offset(
+              _kHeaderWidth + (3200.0 * _kInitialPixelsPerMs),
+              _kRulerHeight + 46.0,
+            );
+
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        for (final position in <Offset>[firstClipCenter, secondClipCenter]) {
+          final gesture = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+            buttons: kPrimaryMouseButton,
+          );
+          await gesture.down(position);
+          await tester.pump();
+          await gesture.up();
+          await tester.pump();
+        }
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+
+        expect(moveCommits, isEmpty);
+        expect(
+          selectionSnapshots.last.toSet(),
+          <int>{0, 1},
+          reason: 'cmd-click should keep both clips, snapshots=$selectionSnapshots',
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop cmd-drag on a clip still starts a selection box',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final moveCommits = <int>[];
+        final selectionSnapshots = <List<int>>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onSelectionChanged: (selectedClipIndices, _) {
+              selectionSnapshots.add(
+                selectedClipIndices.toList(growable: false),
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final start = _clipCenter(tester);
+        final end = start + const Offset(-400.0, 0.0);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: kPrimaryMouseButton,
+        );
+        await gesture.down(start);
+        await tester.pump();
+        await gesture.moveTo(end);
+        await tester.pump();
+        await gesture.up();
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+
+        expect(moveCommits, isEmpty);
+        expect(
+          selectionSnapshots.where((snapshot) => snapshot.length >= 2),
+          isNotEmpty,
+          reason: 'cmd-drag should box-select, snapshots=$selectionSnapshots',
+        );
+        expect(selectionSnapshots.last.toSet(), <int>{0, 1});
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
 
   testWidgets('desktop clip drag snaps to grid when magnet is enabled',
       (tester) async {
@@ -3617,6 +3799,64 @@ void main() {
 
     expect(trimCommits, hasLength(1));
   });
+
+  testWidgets(
+    'desktop group trim applies the same edge drag to every selected clip',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final trimCommits = <int>[];
+        final moveCommits = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            selectedClipIndex: 0,
+            selectedClipIndices: const <int>[0, 1],
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onTrimClipCommit: (
+              clipIndex,
+              newTrimStartMs,
+              newTrimEndMs,
+              oldTrimStartMs,
+              oldTrimEndMs,
+              originalStartMs, {
+              newStartMs,
+            }) {
+              trimCommits.add(clipIndex);
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final clipWidthPx = _kClipDurationMs * _kInitialPixelsPerMs;
+        final clip1LeftHandle = _clipCenter(tester) +
+            Offset(
+              -clipWidthPx -
+                  _kTrimHandleGapPx -
+                  (_kTrimHandleWidthPx / 2.0),
+              0,
+            );
+        await tester.dragFrom(clip1LeftHandle, const Offset(80, 0));
+        await tester.pumpAndSettle();
+
+        expect(
+          trimCommits.toSet(),
+          <int>{0, 1},
+          reason: 'trim=$trimCommits move=$moveCommits',
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
 
   testWidgets('tiny selected clips drag from the body instead of arming trim',
       (tester) async {

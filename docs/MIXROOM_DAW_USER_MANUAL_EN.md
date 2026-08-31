@@ -211,6 +211,8 @@ The timeline has five main tools.
 
 On phones and tablets, long-press a clip with Select active to begin a multi-selection, then tap the other clips to add them. Drag any selected clip to move the selected group. Tap empty timeline space to clear the group. Long-press and drag empty timeline space to draw a selection box around several clips.
 
+On desktop, drag empty lane space to draw a selection box. Command-click (Control-click on Windows) adds or removes a clip from the selection. Command-drag starts a box even when the drag begins on a clip. On Mac, a three-finger trackpad drag also starts a selection box; turn on Three Finger Drag in System Settings → Accessibility → Pointer Control → Trackpad Options if the system swallows the gesture. When several clips are selected, trim handles appear on each clip and dragging one handle trims the whole selection.
+
 The timeline tool menu also includes **Foreground grid**. When enabled, bar, beat, and quantize lines render over audio and MIDI regions so waveform timing remains visible against the musical grid.
 
 ### Magnet and Quantize
