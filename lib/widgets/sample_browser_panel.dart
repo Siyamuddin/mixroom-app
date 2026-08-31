@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
@@ -23,9 +24,77 @@ class SampleDragData {
   });
 }
 
-typedef SampleBrowserDirectoryReader = Future<List<FileSystemEntity>> Function(
-  String directoryPath,
-);
+/// Point inside the sample drag ghost that sits under the cursor.
+///
+/// Flutter [DragTarget] reports the ghost origin, not the pointer.
+/// Convert with [sampleDragPointerFromFeedbackOffset] before placement.
+const Offset kSampleDragFeedbackAnchor = Offset(42, 48);
+
+/// Maps a [DragTarget] feedback origin to the pointer global position.
+Offset sampleDragPointerFromFeedbackOffset(Offset feedbackOffset) =>
+    feedbackOffset + kSampleDragFeedbackAnchor;
+
+/// Slide/fade duration for hiding the mobile File Browser during a drag.
+const Duration kSampleBrowserDragRetractDuration = Duration(milliseconds: 190);
+
+/// Mobile File Browser slides off-screen while a sample is dragged.
+/// Desktop stays put and passes hits through.
+bool shouldRetractSampleBrowserForDrag({
+  required bool isDesktop,
+  required bool isDragActive,
+}) => !isDesktop && isDragActive;
+
+/// File Browser stays open after a drop so another sample can be added.
+bool shouldCloseSampleBrowserAfterSuccessfulDrop() => false;
+
+/// Desktop uses an immediate [Draggable]; iOS/Android keep long-press.
+Widget buildSampleFileDraggable({
+  required SampleDragData data,
+  required Widget child,
+  required Widget feedback,
+  required Widget childWhenDragging,
+  VoidCallback? onDragStarted,
+  void Function(DragUpdateDetails details)? onDragUpdate,
+  VoidCallback? onDragCompleted,
+  void Function(DraggableDetails details)? onDragEnd,
+  VoidCallback? onDragCanceled,
+}) {
+  Offset dragAnchor(
+    Draggable<Object> draggable,
+    BuildContext context,
+    Offset position,
+  ) => kSampleDragFeedbackAnchor;
+  if (PlatformCapabilities.current.isDesktop) {
+    return Draggable<SampleDragData>(
+      data: data,
+      dragAnchorStrategy: dragAnchor,
+      onDragStarted: onDragStarted,
+      onDragUpdate: onDragUpdate,
+      onDragCompleted: onDragCompleted,
+      onDragEnd: onDragEnd,
+      onDraggableCanceled: (_, __) => onDragCanceled?.call(),
+      feedback: feedback,
+      childWhenDragging: childWhenDragging,
+      child: MouseRegion(cursor: SystemMouseCursors.grab, child: child),
+    );
+  }
+  return LongPressDraggable<SampleDragData>(
+    data: data,
+    dragAnchorStrategy: dragAnchor,
+    delay: const Duration(milliseconds: 135),
+    onDragStarted: onDragStarted,
+    onDragUpdate: onDragUpdate,
+    onDragCompleted: onDragCompleted,
+    onDragEnd: onDragEnd,
+    onDraggableCanceled: (_, __) => onDragCanceled?.call(),
+    feedback: feedback,
+    childWhenDragging: childWhenDragging,
+    child: child,
+  );
+}
+
+typedef SampleBrowserDirectoryReader =
+    Future<List<FileSystemEntity>> Function(String directoryPath);
 
 class SampleBrowserPanelViewState {
   final String? selectedRoot;
@@ -170,8 +239,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
       0.0,
       initialViewState?.treeScrollOffset ?? 0.0,
     );
-    _pendingTreeScrollOffset =
-        initialTreeScrollOffset > 0.0 ? initialTreeScrollOffset : null;
+    _pendingTreeScrollOffset = initialTreeScrollOffset > 0.0
+        ? initialTreeScrollOffset
+        : null;
     _treeScrollController = ScrollController(
       initialScrollOffset: initialTreeScrollOffset,
     );
@@ -338,9 +408,11 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
     final label = p.basenameWithoutExtension(path).toLowerCase();
     final duration = _durationByFile[path];
     final shortOneShot = duration != null && duration.inMilliseconds <= 1800;
-    final loopLike = label.contains('loop') ||
-        RegExp(r'(^|[^0-9])([6-9][0-9]|1[0-9]{2}|2[0-4][0-9])\s?bpm')
-            .hasMatch(label) ||
+    final loopLike =
+        label.contains('loop') ||
+        RegExp(
+          r'(^|[^0-9])([6-9][0-9]|1[0-9]{2}|2[0-4][0-9])\s?bpm',
+        ).hasMatch(label) ||
         (duration != null && duration.inMilliseconds >= 1800);
     switch (_sampleFilter) {
       case 'loops':
@@ -382,8 +454,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
 
   bool _isFixedRoot(String rootPath) {
     final normalized = p.normalize(rootPath);
-    return widget.fixedRootFolders
-        .any((root) => p.normalize(root) == normalized);
+    return widget.fixedRootFolders.any(
+      (root) => p.normalize(root) == normalized,
+    );
   }
 
   String _decodeDisplayLabel(String value) {
@@ -457,9 +530,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
           final aDir = a is Directory;
           final bDir = b is Directory;
           if (aDir != bDir) return aDir ? -1 : 1;
-          return _displayNameForPath(a.path)
-              .toLowerCase()
-              .compareTo(_displayNameForPath(b.path).toLowerCase());
+          return _displayNameForPath(
+            a.path,
+          ).toLowerCase().compareTo(_displayNameForPath(b.path).toLowerCase());
         });
         if (visible.isNotEmpty) {
           return visible;
@@ -544,10 +617,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
     });
     _notifyViewState();
     if (shouldExpand) {
-      _ensureDirectoryLoaded(
-        dirPath,
-        force: _directoryNeedsRefresh(dirPath),
-      );
+      _ensureDirectoryLoaded(dirPath, force: _directoryNeedsRefresh(dirPath));
     }
   }
 
@@ -677,11 +747,13 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
     final lines = _buildTreeLines();
     if (lines.isEmpty) return KeyEventResult.handled;
 
-    final selectedLine = _lineForPath(lines, _selectedTreePath) ??
+    final selectedLine =
+        _lineForPath(lines, _selectedTreePath) ??
         _lineForPath(lines, widget.auditioningPath) ??
         _lineForPath(lines, _previewFocusPath);
-    final selectedIndex =
-        selectedLine == null ? -1 : lines.indexOf(selectedLine);
+    final selectedIndex = selectedLine == null
+        ? -1
+        : lines.indexOf(selectedLine);
 
     if (key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.arrowDown) {
@@ -698,11 +770,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
     }
 
     if (selectedLine == null) {
-      _selectTreeLine(
-        lines.first,
-        auditionFile: true,
-        ensureVisible: true,
-      );
+      _selectTreeLine(lines.first, auditionFile: true, ensureVisible: true);
       return KeyEventResult.handled;
     }
 
@@ -860,11 +928,13 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
 
   List<double> _amplifyAndCapWaveform(List<double> data) {
     if (data.isEmpty) return const <double>[];
-    return data.map((v) {
-      if (v > 1.0) return 1.0;
-      if (v < 0.0) return 0.0;
-      return v;
-    }).toList(growable: false);
+    return data
+        .map((v) {
+          if (v > 1.0) return 1.0;
+          if (v < 0.0) return 0.0;
+          return v;
+        })
+        .toList(growable: false);
   }
 
   int _previewWaveformBarCountForWidth(double width) {
@@ -888,18 +958,21 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
       if (!mounted) return;
       setState(() {});
     });
-    widget.resolveDuration(filePath).then((duration) {
-      if (!mounted) return;
-      setState(() {
-        _durationByFile[filePath] = duration;
-        _durationLoading.remove(filePath);
-      });
-    }).catchError((_) {
-      if (!mounted) return;
-      setState(() {
-        _durationLoading.remove(filePath);
-      });
-    });
+    widget
+        .resolveDuration(filePath)
+        .then((duration) {
+          if (!mounted) return;
+          setState(() {
+            _durationByFile[filePath] = duration;
+            _durationLoading.remove(filePath);
+          });
+        })
+        .catchError((_) {
+          if (!mounted) return;
+          setState(() {
+            _durationLoading.remove(filePath);
+          });
+        });
   }
 
   String _formatDuration(Duration duration) {
@@ -964,8 +1037,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
             onPointerDown: fixed
                 ? null
                 : (event) => _startFolderHold(root, label, event.position),
-            onPointerMove:
-                fixed ? null : (event) => _updateFolderHoldMove(event.position),
+            onPointerMove: fixed
+                ? null
+                : (event) => _updateFolderHoldMove(event.position),
             onPointerUp: fixed ? null : (_) => _endFolderHold(),
             onPointerCancel: fixed ? null : (_) => _endFolderHold(),
             child: InputChip(
@@ -1006,7 +1080,10 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
   }
 
   Future<void> _showFolderActions(
-      String rootPath, String label, Offset globalPosition) async {
+    String rootPath,
+    String label,
+    Offset globalPosition,
+  ) async {
     if (!mounted) return;
     if (_isFixedRoot(rootPath)) return;
     final overlay =
@@ -1027,8 +1104,11 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
           value: 'remove',
           child: Row(
             children: [
-              const Icon(Icons.folder_delete_outlined,
-                  color: Color(0xFFFFA4A4), size: 16),
+              const Icon(
+                Icons.folder_delete_outlined,
+                color: Color(0xFFFFA4A4),
+                size: 16,
+              ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -1144,14 +1224,18 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                         accent: const Color(0xFF7DB4FF),
                         title: L10n.translate(ctx, 'Add folders'),
                         body: L10n.translate(
-                            ctx, 'Load a folder into the browser.'),
+                          ctx,
+                          'Load a folder into the browser.',
+                        ),
                       ),
                       _HelpRow(
                         icon: Icons.folder_open_outlined,
                         accent: const Color(0xFF83D4B9),
                         title: L10n.translate(ctx, 'Switch folder roots'),
-                        body: L10n.translate(ctx,
-                            'Tap a folder button to switch the current folder.'),
+                        body: L10n.translate(
+                          ctx,
+                          'Tap a folder button to switch the current folder.',
+                        ),
                       ),
                       _HelpRow(
                         icon: Icons.play_circle_outline,
@@ -1164,21 +1248,27 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                         accent: const Color(0xFFE78CF3),
                         title: L10n.translate(ctx, 'Drag into timeline'),
                         body: L10n.translate(
-                            ctx, 'Hold and drag a file into the timeline.'),
+                          ctx,
+                          'Hold and drag a file into the timeline.',
+                        ),
                       ),
                       _HelpRow(
                         icon: Icons.delete_outline,
                         accent: const Color(0xFFFF9A7D),
                         title: L10n.translate(ctx, 'Remove folder roots'),
                         body: L10n.translate(
-                            ctx, 'Hold a folder button to remove it.'),
+                          ctx,
+                          'Hold a folder button to remove it.',
+                        ),
                       ),
                       _HelpRow(
                         icon: Icons.multitrack_audio_outlined,
                         accent: const Color(0xFF78D9FF),
                         title: L10n.translate(ctx, 'Scrub preview'),
-                        body: L10n.translate(ctx,
-                            'Use the bottom waveform to seek preview playback.'),
+                        body: L10n.translate(
+                          ctx,
+                          'Use the bottom waveform to seek preview playback.',
+                        ),
                         showDivider: false,
                       ),
                       const SizedBox(height: 12),
@@ -1345,15 +1435,15 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                 color: isAuditioning
                     ? _kPanelAccent.withOpacity(0.15)
                     : isSelected
-                        ? Colors.white.withOpacity(0.105)
-                        : Colors.white.withOpacity(0.035),
+                    ? Colors.white.withOpacity(0.105)
+                    : Colors.white.withOpacity(0.035),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: isAuditioning
                       ? _kPanelAccent.withOpacity(0.50)
                       : isSelected
-                          ? Colors.white.withOpacity(0.26)
-                          : Colors.white.withOpacity(0.04),
+                      ? Colors.white.withOpacity(0.26)
+                      : Colors.white.withOpacity(0.04),
                 ),
               ),
               child: Row(
@@ -1388,7 +1478,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                           color: Colors.white60,
                           fontSize: 10.5,
                           fontFeatures: <FontFeature>[
-                            FontFeature.tabularFigures()
+                            FontFeature.tabularFigures(),
                           ],
                         ),
                       ),
@@ -1396,13 +1486,20 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                   if (showInsertButton)
                     IconButton(
                       tooltip: L10n.translate(context, 'Insert at playhead'),
-                      constraints:
-                          const BoxConstraints(minWidth: 20, minHeight: 20),
+                      constraints: const BoxConstraints(
+                        minWidth: 20,
+                        minHeight: 20,
+                      ),
                       padding: EdgeInsets.zero,
-                      visualDensity:
-                          const VisualDensity(horizontal: -4, vertical: -4),
-                      icon: const Icon(Icons.add_circle_outline,
-                          size: 14, color: Colors.white70),
+                      visualDensity: const VisualDensity(
+                        horizontal: -4,
+                        vertical: -4,
+                      ),
+                      icon: const Icon(
+                        Icons.add_circle_outline,
+                        size: 14,
+                        color: Colors.white70,
+                      ),
                       color: Colors.white70,
                       onPressed: () => widget.onInsertSample(filePath),
                     ),
@@ -1420,36 +1517,41 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
       label: p.basenameWithoutExtension(fileName),
       duration: _durationByFile[filePath],
     );
-    final dragFeedback = Material(
-      color: Colors.transparent,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 220),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF7C7872).withOpacity(0.96),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white24),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.music_note, color: Colors.white, size: 16),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                fileName,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
+    final dragFeedback = RepaintBoundary(
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 220),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF7C7872).withOpacity(0.96),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.music_note, color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  fileName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
 
     void handleDragStarted() {
       _dragOutsideNotified = false;
+      if (kDebugMode) {
+        debugPrint('[SampleDrop] dragStarted path=$filePath');
+      }
       widget.onDragActivityChanged?.call(true);
     }
 
@@ -1470,48 +1572,25 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
       widget.onDragActivityChanged?.call(false);
     }
 
-    final draggable = PlatformCapabilities.current.isDesktop
-        ? Draggable<SampleDragData>(
-            data: dragData,
-            dragAnchorStrategy: (draggable, context, position) =>
-                const Offset(42, 48),
-            onDragStarted: handleDragStarted,
-            onDragUpdate: handleDragUpdate,
-            onDragCompleted: handleDragEnd,
-            onDragEnd: (_) => handleDragEnd(),
-            onDraggableCanceled: (_, __) => handleDragEnd(),
-            feedback: dragFeedback,
-            childWhenDragging: Opacity(
-              opacity: 0.38,
-              child: tile,
-            ),
-            child: MouseRegion(
-              cursor: SystemMouseCursors.grab,
-              child: tile,
-            ),
-          )
-        : LongPressDraggable<SampleDragData>(
-            data: dragData,
-            dragAnchorStrategy: (draggable, context, position) =>
-                const Offset(42, 48),
-            delay: const Duration(milliseconds: 135),
-            onDragStarted: handleDragStarted,
-            onDragUpdate: handleDragUpdate,
-            onDragCompleted: handleDragEnd,
-            onDragEnd: (_) => handleDragEnd(),
-            onDraggableCanceled: (_, __) => handleDragEnd(),
-            feedback: dragFeedback,
-            childWhenDragging: Opacity(
-              opacity: 0.38,
-              child: tile,
-            ),
-            child: tile,
+    final draggable = buildSampleFileDraggable(
+      data: dragData,
+      child: tile,
+      feedback: dragFeedback,
+      childWhenDragging: Opacity(opacity: 0.38, child: tile),
+      onDragStarted: handleDragStarted,
+      onDragUpdate: handleDragUpdate,
+      onDragEnd: (DraggableDetails details) {
+        if (kDebugMode) {
+          debugPrint(
+            '[SampleDrop] dragEnd accepted=${details.wasAccepted} '
+            'offset=${details.offset}',
           );
-
-    return KeyedSubtree(
-      key: _keyForTreePath(line.path),
-      child: draggable,
+        }
+        handleDragEnd();
+      },
     );
+
+    return KeyedSubtree(key: _keyForTreePath(line.path), child: draggable);
   }
 
   Widget _buildSampleFilterChips() {
@@ -1604,7 +1683,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
 
     final rootError = _dirErrors[root];
     final rootExists = Directory(root).existsSync();
-    final showSettingsCta = _isPermissionErrorMessage(rootError) &&
+    final showSettingsCta =
+        _isPermissionErrorMessage(rootError) &&
         widget.onOpenSystemSettings != null;
     if (!rootExists || rootError != null) {
       return Center(
@@ -1618,15 +1698,19 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
               Text(
                 rootError == null
                     ? L10n.translate(
-                        context, 'This folder is currently unavailable.')
+                        context,
+                        'This folder is currently unavailable.',
+                      )
                     : rootError,
                 style: const TextStyle(color: Colors.white70),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
               Text(
-                L10n.translate(context,
-                    'Tip: choose local folders (not cloud-only placeholders).'),
+                L10n.translate(
+                  context,
+                  'Tip: choose local folders (not cloud-only placeholders).',
+                ),
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
                 textAlign: TextAlign.center,
               ),
@@ -1742,8 +1826,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
               Future<void> seekFromDx(double localX, double width) async {
                 if (totalMs <= 0 || width <= 1) return;
                 final ratio = (localX / width).clamp(0.0, 1.0);
-                final target =
-                    Duration(milliseconds: (totalMs * ratio).round());
+                final target = Duration(
+                  milliseconds: (totalMs * ratio).round(),
+                );
                 await widget.onPreviewSeek(target);
               }
 
@@ -1755,7 +1840,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                       GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTapDown: (d) => seekFromDx(
-                            d.localPosition.dx, constraints.maxWidth),
+                          d.localPosition.dx,
+                          constraints.maxWidth,
+                        ),
                         child: SizedBox(
                           height: 28,
                           child: loading
@@ -1764,7 +1851,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                                     width: 14,
                                     height: 14,
                                     child: CircularProgressIndicator(
-                                        strokeWidth: 1.8),
+                                      strokeWidth: 1.8,
+                                    ),
                                   ),
                                 )
                               : CustomPaint(
@@ -1774,8 +1862,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                                     active: widget.previewPlaying,
                                     targetBarCount:
                                         _previewWaveformBarCountForWidth(
-                                      constraints.maxWidth,
-                                    ),
+                                          constraints.maxWidth,
+                                        ),
                                   ),
                                 ),
                         ),
@@ -1799,7 +1887,9 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                           Text(
                             '${_formatPreviewClock(pos)} / ${_formatPreviewClock(total)}',
                             style: const TextStyle(
-                                color: _kPanelMutedText, fontSize: 10.5),
+                              color: _kPanelMutedText,
+                              fontSize: 10.5,
+                            ),
                           ),
                         ],
                       ),
@@ -1883,53 +1973,82 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                                 onPressed: _showUsageInfo,
                                 padding: EdgeInsets.zero,
                                 visualDensity: const VisualDensity(
-                                    horizontal: -2, vertical: -2),
+                                  horizontal: -2,
+                                  vertical: -2,
+                                ),
                                 constraints: const BoxConstraints.tightFor(
-                                    width: 36, height: 34),
-                                icon: const Icon(Icons.info_outline,
-                                    color: Colors.white70, size: 19),
+                                  width: 36,
+                                  height: 34,
+                                ),
+                                icon: const Icon(
+                                  Icons.info_outline,
+                                  color: Colors.white70,
+                                  size: 19,
+                                ),
                               ),
                               IconButton(
                                 tooltip: L10n.translate(context, 'Add folder'),
                                 onPressed: widget.onAddFolder,
                                 padding: EdgeInsets.zero,
                                 visualDensity: const VisualDensity(
-                                    horizontal: -2, vertical: -2),
+                                  horizontal: -2,
+                                  vertical: -2,
+                                ),
                                 constraints: const BoxConstraints.tightFor(
-                                    width: 36, height: 34),
+                                  width: 36,
+                                  height: 34,
+                                ),
                                 icon: const Icon(
-                                    Icons.create_new_folder_outlined,
-                                    color: Colors.white70,
-                                    size: 19),
+                                  Icons.create_new_folder_outlined,
+                                  color: Colors.white70,
+                                  size: 19,
+                                ),
                               ),
                               if (selectedRoot != null)
                                 IconButton(
-                                  tooltip:
-                                      L10n.translate(context, 'Refresh folder'),
+                                  tooltip: L10n.translate(
+                                    context,
+                                    'Refresh folder',
+                                  ),
                                   onPressed: () => _ensureDirectoryLoaded(
-                                      selectedRoot,
-                                      force: true),
+                                    selectedRoot,
+                                    force: true,
+                                  ),
                                   padding: EdgeInsets.zero,
                                   visualDensity: const VisualDensity(
-                                      horizontal: -2, vertical: -2),
+                                    horizontal: -2,
+                                    vertical: -2,
+                                  ),
                                   constraints: const BoxConstraints.tightFor(
-                                      width: 36, height: 34),
-                                  icon: const Icon(Icons.refresh,
-                                      color: Colors.white70, size: 19),
+                                    width: 36,
+                                    height: 34,
+                                  ),
+                                  icon: const Icon(
+                                    Icons.refresh,
+                                    color: Colors.white70,
+                                    size: 19,
+                                  ),
                                 ),
                               if (selectedRoot != null)
                                 IconButton(
                                   tooltip: widget.expanded
                                       ? L10n.translate(
-                                          context, 'Collapse panel')
+                                          context,
+                                          'Collapse panel',
+                                        )
                                       : L10n.translate(context, 'Expand panel'),
-                                  onPressed: () => widget
-                                      .onExpandedChanged(!widget.expanded),
+                                  onPressed: () => widget.onExpandedChanged(
+                                    !widget.expanded,
+                                  ),
                                   padding: EdgeInsets.zero,
                                   visualDensity: const VisualDensity(
-                                      horizontal: -2, vertical: -2),
+                                    horizontal: -2,
+                                    vertical: -2,
+                                  ),
                                   constraints: const BoxConstraints.tightFor(
-                                      width: 36, height: 34),
+                                    width: 36,
+                                    height: 34,
+                                  ),
                                   icon: Icon(
                                     widget.expanded
                                         ? Icons.fullscreen_exit_outlined
@@ -1947,8 +2066,11 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                                   width: 44,
                                   height: 44,
                                 ),
-                                icon: const Icon(Icons.close,
-                                    color: Colors.white70, size: 19),
+                                icon: const Icon(
+                                  Icons.close,
+                                  color: Colors.white70,
+                                  size: 19,
+                                ),
                               ),
                             ],
                           ),
@@ -2022,8 +2144,8 @@ class _WaveformPreviewPainter extends CustomPainter {
     final strokeWidth = dxStep < 2.15
         ? 1.15
         : dxStep < 2.7
-            ? 1.35
-            : 1.7;
+        ? 1.35
+        : 1.7;
     final barPaint = Paint()
       ..color = const Color(0x66FFFFFF)
       ..strokeCap = StrokeCap.round
@@ -2092,9 +2214,7 @@ class _HelpRow extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: accent.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: accent.withValues(alpha: 0.22),
-                    ),
+                    border: Border.all(color: accent.withValues(alpha: 0.22)),
                   ),
                   child: Icon(icon, color: accent, size: 17),
                 ),
