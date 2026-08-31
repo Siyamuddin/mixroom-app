@@ -5953,6 +5953,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _sampleBrowserVisible = false;
   bool _sampleBrowserExpanded = false;
   bool _sampleDragActive = false;
+  final ValueNotifier<bool> _sampleDragPassThrough = ValueNotifier<bool>(false);
   bool _filePickerInFlight = false;
   bool _suppressSampleBrowserReopenAfterDrop = false;
   bool _reopenSampleBrowserAfterDrag = false;
@@ -12407,6 +12408,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatScrollRequest++;
     _pendingChatInsertions.clear();
     widget.evaluationController?._detach();
+    _sampleDragPassThrough.dispose();
     if (PlatformCapabilities.current.isDesktop) {
       HardwareKeyboard.instance.removeHandler(_handleMacEditorKeyEvent);
       unawaited(JuceAudioEngine.setDesktopKeyboardMidiForwardingEnabled(false));
@@ -13472,6 +13474,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _sampleBrowserVisible = false;
       _sampleBrowserExpanded = false;
       _sampleDragActive = false;
+      _sampleDragPassThrough.value = false;
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
       _sampleBrowserViewState = const SampleBrowserPanelViewState();
@@ -30255,6 +30258,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _audioTracks.length > beforeClipCount;
   }
 
+  /// Inserts from the File Browser + control without the full-window spinner.
+  Future<void> _insertSampleFromFileBrowser(String filePath) {
+    return _insertAudioFileAtTimeline(filePath, showLoadingOverlay: false);
+  }
+
   Future<void> _pickAndInsertAudioTrack() async {
     if (!await _ensureAndroidMediaLibraryAccess()) {
       return;
@@ -30957,6 +30965,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (!_sampleDragActive) {
+      _sampleDragPassThrough.value = true;
       setState(() {
         _sampleDragActive = true;
       });
@@ -30990,6 +30999,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _finderSampleDragDurationPath = null;
     _finderSampleDragData = null;
     _timelineController.clearExternalSampleDropPreview();
+    _sampleDragPassThrough.value = false;
     if (_sampleDragActive && mounted) {
       setState(() {
         _sampleDragActive = false;
@@ -32032,6 +32042,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
     });
+    _sampleDragPassThrough.value = false;
     _setDawPanelVisible('sample_browser', false);
   }
 
@@ -32041,60 +32052,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _setSampleDragActive(bool active) {
     if (!mounted) return;
-    bool shouldReopenAfterDelay = false;
-    bool reopenExpanded = false;
+    // Hit-test reads this live, so the File Browser can pass through on
+    // the next pointer move without waiting for this huge setState.
+    _sampleDragPassThrough.value = active;
+    // Desktop keeps the floating window in place. Rebuilding the editor
+    // on drop remounts the File Browser chrome and makes it blink.
+    if (PlatformCapabilities.current.isDesktop) {
+      _sampleDragActive = active;
+      return;
+    }
+    // Phone/iPad slide the sheet away while dragging, then restore it
+    // on drop or cancel so another sample can be added. Keep the panel
+    // mounted so the LongPressDraggable is not disposed mid-drag.
+    if (_sampleDragActive == active) return;
     setState(() {
       _sampleDragActive = active;
-      if (active && _sampleBrowserVisible && _sampleBrowserExpanded) {
-        _reopenSampleBrowserAfterDrag = true;
-        _reopenSampleBrowserExpanded = true;
-        _sampleBrowserExpanded = false;
-      }
-      if (!active &&
-          _reopenSampleBrowserAfterDrag &&
-          !_suppressSampleBrowserReopenAfterDrop) {
-        shouldReopenAfterDelay = true;
-        reopenExpanded = _reopenSampleBrowserExpanded;
-        _reopenSampleBrowserAfterDrag = false;
-        _reopenSampleBrowserExpanded = false;
-      } else if (!active && _suppressSampleBrowserReopenAfterDrop) {
-        _reopenSampleBrowserAfterDrag = false;
-        _reopenSampleBrowserExpanded = false;
-      }
-    });
-
-    if (!shouldReopenAfterDelay) return;
-    Future<void>.delayed(const Duration(milliseconds: 180), () {
-      if (!mounted ||
-          _sampleDragActive ||
-          _sampleBrowserRoots.isEmpty ||
-          _suppressSampleBrowserReopenAfterDrop) {
-        return;
-      }
-      setState(() {
-        _sampleBrowserVisible = true;
-        _sampleBrowserExpanded = reopenExpanded;
-      });
-      _setDawPanelVisible('sample_browser', true);
     });
   }
 
   void _cancelSampleBrowserReopenAfterSuccessfulDrop() {
     if (!mounted) return;
-    setState(() {
-      _suppressSampleBrowserReopenAfterDrop = true;
-      _reopenSampleBrowserAfterDrag = false;
-      _reopenSampleBrowserExpanded = false;
-      _sampleBrowserVisible = false;
-      _sampleBrowserExpanded = false;
-    });
-    _setDawPanelVisible('sample_browser', false);
-    Future<void>.delayed(const Duration(milliseconds: 320), () {
-      if (!mounted) return;
-      setState(() {
-        _suppressSampleBrowserReopenAfterDrop = false;
-      });
-    });
+    // Keep the File Browser available after a drop so another sample
+    // can be added. Mobile restores the sheet from _setSampleDragActive.
+    if (shouldCloseSampleBrowserAfterSuccessfulDrop()) {
+      return;
+    }
+    _reopenSampleBrowserAfterDrag = false;
+    _reopenSampleBrowserExpanded = false;
+    _suppressSampleBrowserReopenAfterDrop = false;
   }
 
   void _handleSampleDragExitedBrowserPanel() {
@@ -34541,9 +34526,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       child: Text(
                         L10n.translate(
                           context,
-                          isMidi
-                              ? 'MIDI Clip Options'
-                              : 'Audio Clip Options',
+                          isMidi ? 'MIDI Clip Options' : 'Audio Clip Options',
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -34671,63 +34654,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             trailing: isMidi
                 ? null
                 : Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(999),
-                onTap: () => unawaited(
-                  _handleToggleClipNormalize(index, !clip.normalizeVolume),
-                ),
-                child: Ink(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color:
-                        (clip.normalizeVolume
-                                ? const Color(0xFFD7DBE2)
-                                : Colors.white)
-                            .withValues(
-                              alpha: clip.normalizeVolume ? 0.34 : 0.08,
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => unawaited(
+                        _handleToggleClipNormalize(
+                          index,
+                          !clip.normalizeVolume,
+                        ),
+                      ),
+                      child: Ink(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              (clip.normalizeVolume
+                                      ? const Color(0xFFD7DBE2)
+                                      : Colors.white)
+                                  .withValues(
+                                    alpha: clip.normalizeVolume ? 0.34 : 0.08,
+                                  ),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(
+                              alpha: clip.normalizeVolume ? 0.42 : 0.13,
                             ),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.white.withValues(
-                        alpha: clip.normalizeVolume ? 0.42 : 0.13,
+                          ),
+                        ),
+                        child: Semantics(
+                          button: true,
+                          toggled: clip.normalizeVolume,
+                          label: L10n.translate(context, 'Normalize'),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                clip.normalizeVolume
+                                    ? Icons.toggle_on_rounded
+                                    : Icons.toggle_off_rounded,
+                                size: 19,
+                                color: const Color(0xFFF4F4F4),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                L10n.translate(context, 'Normalize'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  child: Semantics(
-                    button: true,
-                    toggled: clip.normalizeVolume,
-                    label: L10n.translate(context, 'Normalize'),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          clip.normalizeVolume
-                              ? Icons.toggle_on_rounded
-                              : Icons.toggle_off_rounded,
-                          size: 19,
-                          color: const Color(0xFFF4F4F4),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          L10n.translate(context, 'Normalize'),
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            color: Color(0xFFF4F4F4),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            height: 1.0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -34936,24 +34922,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             icon: Icons.graphic_eq_rounded,
                             label: 'Pitch Lab',
                             color: const Color(0xFF8BE7C8),
-                            onTap: () => unawaited(
-                              _openAudioPitchLabForClip(index),
-                            ),
+                            onTap: () =>
+                                unawaited(_openAudioPitchLabForClip(index)),
                           ),
                           clipPanelActionPill(
                             icon: Icons.library_music_outlined,
                             label: 'Split vocals',
-                            onTap: () => unawaited(
-                              _handleStemSeparationForClip(index),
-                            ),
+                            onTap: () =>
+                                unawaited(_handleStemSeparationForClip(index)),
                           ),
                           clipPanelActionPill(
                             icon: Icons.keyboard_alt_outlined,
                             label: 'Sampler',
                             color: const Color(0xFFD7DBE2),
-                            onTap: () => unawaited(
-                              _createSamplerFromAudioClip(index),
-                            ),
+                            onTap: () =>
+                                unawaited(_createSamplerFromAudioClip(index)),
                           ),
                         ],
                       ),
@@ -40560,7 +40543,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double bottom,
     required Widget child,
     List<BoxShadow>? boxShadow,
+    bool ignoringPointers = false,
+    ValueListenable<bool>? ignoringPointersListenable,
+    bool retractForSampleDrag = false,
   }) {
+    Widget overlayChild = boxShadow == null
+        ? child
+        : DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: boxShadow,
+            ),
+            child: child,
+          );
+    overlayChild = PassThroughIgnorePointer(
+      ignoring: ignoringPointers,
+      ignoringListenable: ignoringPointersListenable,
+      child: overlayChild,
+    );
+    if (retractForSampleDrag) {
+      final retracted = shouldRetractSampleBrowserForDrag(
+        isDesktop: PlatformCapabilities.current.isDesktop,
+        isDragActive: _sampleDragActive,
+      );
+      overlayChild = AnimatedSlide(
+        offset: retracted ? const Offset(0, 1) : Offset.zero,
+        duration: kSampleBrowserDragRetractDuration,
+        curve: Curves.easeOutCubic,
+        child: AnimatedOpacity(
+          opacity: retracted ? 0 : 1,
+          duration: kSampleBrowserDragRetractDuration,
+          curve: Curves.easeOutCubic,
+          child: overlayChild,
+        ),
+      );
+    }
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 190),
       curve: Curves.easeOutCubic,
@@ -40568,15 +40585,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       right: _kOverlayPanelHorizontalInset,
       top: top,
       bottom: bottom,
-      child: boxShadow == null
-          ? child
-          : DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: boxShadow,
-              ),
-              child: child,
-            ),
+      child: overlayChild,
     );
   }
 
@@ -40647,13 +40656,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   outerShadows: _kFloatingEditorWindowShadows,
                   minWidth: 360,
                   minHeight: 320,
+                  ignoringPointers: _sampleDragActive,
+                  ignoringPointersListenable: _sampleDragPassThrough,
                   child: SampleBrowserPanel(
                     rootFolders: _sampleBrowserRoots,
                     fixedRootFolders: _fixedSampleBrowserRootFolders,
                     auditioningPath: _auditioningSamplePath,
                     onAuditionTap: _auditionSampleFile,
-                    onInsertSample: (filePath) =>
-                        _insertAudioFileAtTimeline(filePath),
+                    onInsertSample: _insertSampleFromFileBrowser,
                     onAddFolder: _addSampleBrowserRootFolder,
                     onRemoveFolder: _removeSampleBrowserRoot,
                     resolveDuration: _resolveSampleDuration,
@@ -40680,13 +40690,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   top: _sampleBrowserExpanded ? 0.0 : samplePanelTop,
                   bottom: _sampleBrowserExpanded ? 0.0 : samplePanelBottom,
                   boxShadow: _kFloatingEditorWindowShadows,
+                  ignoringPointers: _sampleDragActive,
+                  ignoringPointersListenable: _sampleDragPassThrough,
+                  retractForSampleDrag: true,
                   child: SampleBrowserPanel(
                     rootFolders: _sampleBrowserRoots,
                     fixedRootFolders: _fixedSampleBrowserRootFolders,
                     auditioningPath: _auditioningSamplePath,
                     onAuditionTap: _auditionSampleFile,
-                    onInsertSample: (filePath) =>
-                        _insertAudioFileAtTimeline(filePath),
+                    onInsertSample: _insertSampleFromFileBrowser,
                     onAddFolder: _addSampleBrowserRootFolder,
                     onRemoveFolder: _removeSampleBrowserRoot,
                     resolveDuration: _resolveSampleDuration,
@@ -83979,6 +83991,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   row: row,
                                                   timeMs: timeMs,
                                                   uploadMethod: 'dragdrop',
+                                                  showLoadingOverlay: false,
                                                 );
                                               },
                                           onExternalSampleDragEntered: () {
@@ -83986,6 +83999,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           },
                                           externalSampleDragActive:
                                               _sampleDragActive,
+                                          externalSampleDragPassThrough:
+                                              _sampleDragPassThrough,
                                           onTutorialTimelineScrolled:
                                               _handleDawOnboardingTimelineScrolled,
                                           onTutorialTimelineZoomed:
@@ -84481,6 +84496,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     _kFloatingEditorWindowShadows,
                                                 minWidth: 360,
                                                 minHeight: 320,
+                                                ignoringPointers:
+                                                    _sampleDragActive,
+                                                ignoringPointersListenable:
+                                                    _sampleDragPassThrough,
                                                 child: SampleBrowserPanel(
                                                   rootFolders:
                                                       _sampleBrowserRoots,
@@ -84490,10 +84509,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       _auditioningSamplePath,
                                                   onAuditionTap:
                                                       _auditionSampleFile,
-                                                  onInsertSample: (filePath) =>
-                                                      _insertAudioFileAtTimeline(
-                                                        filePath,
-                                                      ),
+                                                  onInsertSample:
+                                                      _insertSampleFromFileBrowser,
                                                   onAddFolder:
                                                       _addSampleBrowserRootFolder,
                                                   onRemoveFolder:
@@ -84546,6 +84563,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         _sampleBrowserExpanded
                                                     ? 0.0
                                                     : samplePanelBottom,
+                                                ignoringPointers:
+                                                    _sampleDragActive,
+                                                ignoringPointersListenable:
+                                                    _sampleDragPassThrough,
+                                                retractForSampleDrag: true,
                                                 child: SampleBrowserPanel(
                                                   rootFolders:
                                                       _sampleBrowserRoots,
@@ -84555,10 +84577,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       _auditioningSamplePath,
                                                   onAuditionTap:
                                                       _auditionSampleFile,
-                                                  onInsertSample: (filePath) =>
-                                                      _insertAudioFileAtTimeline(
-                                                        filePath,
-                                                      ),
+                                                  onInsertSample:
+                                                      _insertSampleFromFileBrowser,
                                                   onAddFolder:
                                                       _addSampleBrowserRootFolder,
                                                   onRemoveFolder:
