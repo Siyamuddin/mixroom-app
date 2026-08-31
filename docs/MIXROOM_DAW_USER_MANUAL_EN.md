@@ -311,13 +311,15 @@ Selecting a clip opens a compact action popover.
 | --- | --- |
 | Copy | Copies the selected clip or selected clip group. |
 | Place clone | Pastes/clones the copied clip near the selection. |
-| Clip settings | Opens detailed clip settings. |
+| Clip settings | Opens detailed clip settings. On desktop and tablet this is the right inspector for audio and MIDI. On phones it stays a compact overlay. On desktop, double-click an audio clip to open this too. |
 | Split at playhead | Splits an audio clip at the current playhead position, when valid. |
 | Delete | Removes the selected clip or selected clip group. |
 
 ### Clip Settings
 
-Clip settings include:
+On desktop and tablet, Clip settings opens the right inspector. On phones it opens a compact overlay on the timeline.
+
+Audio clip settings include:
 
 - rename clip
 - clip gain
@@ -327,6 +329,8 @@ Clip settings include:
 - reverse audio
 - detect tempo
 - split vocals, when stem separation is available
+
+MIDI clip settings reuse that inspector layout on desktop and tablet, but hide audio-only actions. MIDI keeps rename, gain, and pitch, and shows that the clip follows project BPM automatically.
 
 ### Tempo Stretching and Clip Stretching
 
@@ -668,7 +672,7 @@ Audio import behavior may vary by platform because Android, iOS, macOS, and Wind
 
 Instrument clips open in the piano roll.
 
-Use Add Instrument Clip to create a MIDI/instrument clip. Open the clip to edit notes in the piano roll.
+Use Add Instrument Clip to create a MIDI/instrument clip. Open the clip to edit notes in the piano roll. On desktop, double-click a MIDI clip to open the piano roll. Phone and tablet keep the piano button on the clip popover.
 
 ### Piano Roll Header
 
@@ -1271,7 +1275,7 @@ Use screenshots from the latest production-like build so labels and layout match
 | Timeline tools | Select, stretch, paint, cut, delete, magnet snap, quantize grid |
 | Row header | Select, expand, mute, solo, row menu, add row |
 | Clip popover | Copy, clone, settings, split, delete |
-| Clip settings | Rename, gain, normalize, pitch, tempo mode, reverse, detect tempo, split vocals |
+| Clip settings | Rename, gain, pitch. Audio also has normalize, tempo mode, reverse, detect tempo, split vocals. Desktop/tablet opens the right inspector for audio and MIDI. |
 | Tempo stretching | Project Tempo Mode plus per-clip Stretch/Resample setting |
 | Loops | Create on ruler, drag handles, move loop region, restart from loop start |
 | Row effects | Presets, add, reorder, bypass, delete, copy, paste, clear |

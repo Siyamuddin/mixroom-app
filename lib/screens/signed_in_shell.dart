@@ -758,17 +758,12 @@ class _SignedInShellState extends State<SignedInShell> {
                   Expanded(
                     child: Stack(
                       children: [
-                        Positioned.fill(
-                          child: Padding(
-                            padding: const EdgeInsets.only(right: 28),
-                            child: _buildPage(_selectedTab),
-                          ),
-                        ),
+                        Positioned.fill(child: _buildPage(_selectedTab)),
                         if (_activeAnnouncement != null &&
                             _activeAnnouncement!.showsBanner)
                           Positioned(
                             left: 0,
-                            right: 28,
+                            right: 0,
                             top: MediaQuery.of(context).padding.top + 10,
                             child: SafeArea(
                               bottom: false,

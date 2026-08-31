@@ -1618,6 +1618,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   bool _pendingDrag = false;
   bool _pendingDragStartedFromSelection = false;
+  DateTime? _desktopClipDoubleClickAt;
+  Offset? _desktopClipDoubleClickGlobal;
+  int? _desktopClipDoubleClickIndex;
+  DateTime? _desktopClipDoubleClickOpenedAt;
+  int? _desktopClipDoubleClickOpenedIndex;
   bool _tentativeClipSelectionActive = false;
   bool _suppressNextTimelineTapAfterTentativeSelectionCommit = false;
   bool _desktopAdditiveSelectionGestureActive = false;
@@ -3261,6 +3266,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (_activeTimelinePointers.isEmpty) {
         _singleTouchSelectionSnapshot = null;
       }
+      _maybeOpenDesktopClipFromDoubleClick(event);
       return;
     }
     if (_activeTimelinePointers.isEmpty) {
@@ -3308,6 +3314,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (_activeTool == _TimelineTool.delete) {
       _resetDeleteStrokeState();
     }
+    _maybeOpenDesktopClipFromDoubleClick(event);
   }
 
   void _onTimelinePointerCancel(PointerCancelEvent event) {
@@ -9802,14 +9809,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         Container(width: 1, height: 16, color: Colors.white24),
         Expanded(
           child: _buildClipPopupAction(
+            key: const ValueKey('selected_clip_popup_clip_settings'),
             icon: Icons.tune,
             color: Colors.white,
             onTap: () {
-              final clip = widget.clips[singleSelectionIndex];
               final openPanel = widget.onOpenAudioClipOptionsPanel;
-              if (widget.useTabletDawLayout &&
-                  !clip.isMidi &&
-                  openPanel != null) {
+              if (widget.useTabletDawLayout && openPanel != null) {
                 setState(_clearClipSelection);
                 openPanel(singleSelectionIndex);
                 return;
@@ -17972,17 +17977,106 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final tappedAutomationClip = _timelineAutomationClipAt(
       details.localPosition,
     );
-    if (tappedAutomationClip == null) return;
+    if (tappedAutomationClip != null) {
+      setState(() {
+        _setSelectedAutomationClipFor(
+          tappedAutomationClip.row,
+          tappedAutomationClip.targetId,
+          tappedAutomationClip.clip.id,
+          lane: tappedAutomationClip.clip.lane,
+        );
+        _clearPendingAutomationClipSelection();
+      });
+      _openAutomationClipEditor(tappedAutomationClip);
+      return;
+    }
+    _openDesktopClipFromDoubleTap(details.localPosition);
+  }
+
+  /// Records a desktop clip click and opens the editor on the second click.
+  /// Pointer-up is used because ScaleGestureRecognizer often beats Flutter's
+  /// double-tap arena on this canvas.
+  void _maybeOpenDesktopClipFromDoubleClick(PointerUpEvent event) {
+    if (!PlatformCapabilities.current.isDesktop) return;
+    if (_activeTool == _TimelineTool.cut ||
+        _activeTool == _TimelineTool.paint ||
+        _activeTool == _TimelineTool.delete) {
+      return;
+    }
+    if (_interactionMode == 'drag' &&
+        _pendingClipDragExceededSlop(event.position)) {
+      _desktopClipDoubleClickAt = null;
+      return;
+    }
+    final clipIndex = _getGestureClipIndexAt(event.localPosition);
+    if (clipIndex == null) {
+      _desktopClipDoubleClickAt = null;
+      return;
+    }
+    final DateTime now = DateTime.now();
+    final DateTime? lastAt = _desktopClipDoubleClickAt;
+    final int? lastIndex = _desktopClipDoubleClickIndex;
+    final Offset? lastGlobal = _desktopClipDoubleClickGlobal;
+    final bool isDouble =
+        lastAt != null &&
+        lastIndex == clipIndex &&
+        lastGlobal != null &&
+        now.difference(lastAt) <= kDoubleTapTimeout &&
+        (event.position - lastGlobal).distance <= kDoubleTapSlop;
+    _desktopClipDoubleClickAt = now;
+    _desktopClipDoubleClickIndex = clipIndex;
+    _desktopClipDoubleClickGlobal = event.position;
+    if (!isDouble) return;
+    _desktopClipDoubleClickAt = null;
+    _openDesktopClipFromDoubleTap(event.localPosition);
+  }
+
+  /// Opens piano roll or clip options from a desktop double-click.
+  /// Flutter's double-tap recognizer otherwise eats the second click while
+  /// this handler only opened automation clips.
+  bool _openDesktopClipFromDoubleTap(Offset localPosition) {
+    if (!PlatformCapabilities.current.isDesktop) return false;
+    if (_activeTool == _TimelineTool.cut ||
+        _activeTool == _TimelineTool.paint ||
+        _activeTool == _TimelineTool.delete) {
+      return false;
+    }
+    final clipIndex = _getGestureClipIndexAt(localPosition);
+    if (clipIndex == null ||
+        clipIndex < 0 ||
+        clipIndex >= widget.clips.length) {
+      return false;
+    }
+    final clip = widget.clips[clipIndex];
+    final DateTime now = DateTime.now();
+    if (_desktopClipDoubleClickOpenedIndex == clipIndex &&
+        _desktopClipDoubleClickOpenedAt != null &&
+        now.difference(_desktopClipDoubleClickOpenedAt!) <
+            const Duration(milliseconds: 80)) {
+      return true;
+    }
+    _desktopClipDoubleClickOpenedIndex = clipIndex;
+    _desktopClipDoubleClickOpenedAt = now;
     setState(() {
-      _setSelectedAutomationClipFor(
-        tappedAutomationClip.row,
-        tappedAutomationClip.targetId,
-        tappedAutomationClip.clip.id,
-        lane: tappedAutomationClip.clip.lane,
-      );
-      _clearPendingAutomationClipSelection();
+      _clearPendingClipTapState();
+      _interactionMode = '';
+      _isUserInteracting = false;
+      _dragGroupStartMs.clear();
+      _dragGroupStartRows.clear();
+      _resetTrimInteractionState();
+      _clearClipSelection();
     });
-    _openAutomationClipEditor(tappedAutomationClip);
+    if (clip.clipKind == ClipKind.midi) {
+      widget.onOpenMidiClip?.call(clipIndex);
+      return true;
+    }
+    final openPanel = widget.onOpenAudioClipOptionsPanel;
+    if (widget.useTabletDawLayout && openPanel != null) {
+      openPanel(clipIndex);
+    } else {
+      _openClipSettingsPanel(clipIndex);
+    }
+    return true;
   }
 
   bool _canShowInstrumentLaneRegionMenuAt(Offset localPosition) {
@@ -18184,6 +18278,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           tappedDragIndex >= 0 &&
           tappedDragIndex < widget.clips.length;
       final shouldOpenMidiFromRetap =
+          !PlatformCapabilities.current.isDesktop &&
           shouldSelectClip &&
           _selectedClipIndices.contains(tappedDragIndex) &&
           widget.clips[tappedDragIndex].clipKind == ClipKind.midi;
@@ -18224,7 +18319,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
     // If a MIDI clip is already selected, allow forgiving re-taps around it
     // so opening piano roll remains easy even when zoomed out.
-    if (topIndex == null &&
+    if (!PlatformCapabilities.current.isDesktop &&
+        topIndex == null &&
         _selectedClipIndex >= 0 &&
         _selectedClipIndex < widget.clips.length) {
       final selectedClip = widget.clips[_selectedClipIndex];
@@ -18244,7 +18340,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (topIndex != null) {
       final clip = widget.clips[topIndex];
       final wasSelected = _selectedClipIndices.contains(topIndex);
-      if (clip.clipKind == ClipKind.midi && wasSelected) {
+      if (!PlatformCapabilities.current.isDesktop &&
+          clip.clipKind == ClipKind.midi &&
+          wasSelected) {
         widget.onOpenMidiClip?.call(topIndex);
         return;
       }

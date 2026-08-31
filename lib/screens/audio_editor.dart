@@ -4929,12 +4929,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _isValidAudioClipOptionsIndex(int? clipIndex) {
-    if (clipIndex == null ||
-        clipIndex < 0 ||
-        clipIndex >= _audioTracks.length) {
-      return false;
-    }
-    return !_audioTracks[clipIndex].isMidi;
+    return clipIndex != null &&
+        clipIndex >= 0 &&
+        clipIndex < _audioTracks.length;
   }
 
   void _openTabletAudioClipOptions(int clipIndex) {
@@ -34467,6 +34464,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       final index = clipIndex!;
       final clip = _audioTracks[index];
+      final isMidi = clip.isMidi;
       final accent = const Color(0xFF8A919D);
       final pitch = clip.pitchSemitones
           .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones)
@@ -34530,16 +34528,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           color: Colors.white.withValues(alpha: 0.10),
                         ),
                       ),
-                      child: const Icon(
-                        Icons.audio_file_rounded,
-                        color: Color(0xFFF4F4F4),
+                      child: Icon(
+                        isMidi
+                            ? Icons.piano_outlined
+                            : Icons.audio_file_rounded,
+                        color: const Color(0xFFF4F4F4),
                         size: 18,
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        L10n.translate(context, 'Audio Clip Options'),
+                        L10n.translate(
+                          context,
+                          isMidi
+                              ? 'MIDI Clip Options'
+                              : 'Audio Clip Options',
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -34663,7 +34668,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           const SizedBox(height: 10),
           section(
             title: 'Tone',
-            trailing: Material(
+            trailing: isMidi
+                ? null
+                : Material(
               color: Colors.transparent,
               child: InkWell(
                 borderRadius: BorderRadius.circular(999),
@@ -34826,90 +34833,132 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           const SizedBox(height: 10),
           section(
             title: 'Tempo',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.16),
-                    borderRadius: BorderRadius.circular(13),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.08),
-                    ),
-                  ),
-                  child: Row(
+            child: isMidi
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      clipTempoModeButton(
-                        label: 'Off',
-                        selected: !clip.stretchToProjectTempo,
-                        onTap: () =>
-                            unawaited(_handleDisableClipTempoFollow(index)),
+                      Text(
+                        L10n.translate(
+                          context,
+                          'MIDI clips follow project BPM automatically.',
+                        ),
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.82),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
                       ),
-                      clipTempoModeButton(
-                        label: 'Resample',
-                        selected:
-                            clip.stretchToProjectTempo &&
-                            !clip.tempoStretchPreservePitch,
-                        onTap: () => unawaited(_handleAdjustClipToTempo(index)),
-                      ),
-                      clipTempoModeButton(
-                        label: 'Stretch',
-                        selected:
-                            clip.stretchToProjectTempo &&
-                            clip.tempoStretchPreservePitch,
-                        onTap: () => unawaited(
-                          _handleStretchClipToTempoPreservePitch(index),
+                      const SizedBox(height: 6),
+                      Text(
+                        L10n.translate(
+                          context,
+                          'No extra tempo mode is needed here.',
+                        ),
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.62),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          height: 1.35,
                         ),
                       ),
                     ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(13),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.08),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            clipTempoModeButton(
+                              label: 'Off',
+                              selected: !clip.stretchToProjectTempo,
+                              onTap: () => unawaited(
+                                _handleDisableClipTempoFollow(index),
+                              ),
+                            ),
+                            clipTempoModeButton(
+                              label: 'Resample',
+                              selected:
+                                  clip.stretchToProjectTempo &&
+                                  !clip.tempoStretchPreservePitch,
+                              onTap: () =>
+                                  unawaited(_handleAdjustClipToTempo(index)),
+                            ),
+                            clipTempoModeButton(
+                              label: 'Stretch',
+                              selected:
+                                  clip.stretchToProjectTempo &&
+                                  clip.tempoStretchPreservePitch,
+                              onTap: () => unawaited(
+                                _handleStretchClipToTempoPreservePitch(index),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 7,
+                        runSpacing: 7,
+                        children: [
+                          clipPanelActionPill(
+                            icon: Icons.swap_horiz_rounded,
+                            label: clip.isReversed ? 'Reversed' : 'Reverse',
+                            color: clip.isReversed
+                                ? const Color(0xFFD7DBE2)
+                                : const Color(0xFFF4F4F4),
+                            onTap: () => unawaited(
+                              _setAudioClipReversedFromPanel(
+                                index,
+                                !clip.isReversed,
+                              ),
+                            ),
+                          ),
+                          clipPanelActionPill(
+                            icon: Icons.auto_fix_high_rounded,
+                            label: 'Set BPM',
+                            onTap: () => unawaited(
+                              _handleDetectClipTempoAndSetProjectTempo(index),
+                            ),
+                          ),
+                          clipPanelActionPill(
+                            icon: Icons.graphic_eq_rounded,
+                            label: 'Pitch Lab',
+                            color: const Color(0xFF8BE7C8),
+                            onTap: () => unawaited(
+                              _openAudioPitchLabForClip(index),
+                            ),
+                          ),
+                          clipPanelActionPill(
+                            icon: Icons.library_music_outlined,
+                            label: 'Split vocals',
+                            onTap: () => unawaited(
+                              _handleStemSeparationForClip(index),
+                            ),
+                          ),
+                          clipPanelActionPill(
+                            icon: Icons.keyboard_alt_outlined,
+                            label: 'Sampler',
+                            color: const Color(0xFFD7DBE2),
+                            onTap: () => unawaited(
+                              _createSamplerFromAudioClip(index),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 7,
-                  runSpacing: 7,
-                  children: [
-                    clipPanelActionPill(
-                      icon: Icons.swap_horiz_rounded,
-                      label: clip.isReversed ? 'Reversed' : 'Reverse',
-                      color: clip.isReversed
-                          ? const Color(0xFFD7DBE2)
-                          : const Color(0xFFF4F4F4),
-                      onTap: () => unawaited(
-                        _setAudioClipReversedFromPanel(index, !clip.isReversed),
-                      ),
-                    ),
-                    clipPanelActionPill(
-                      icon: Icons.auto_fix_high_rounded,
-                      label: 'Set BPM',
-                      onTap: () => unawaited(
-                        _handleDetectClipTempoAndSetProjectTempo(index),
-                      ),
-                    ),
-                    clipPanelActionPill(
-                      icon: Icons.graphic_eq_rounded,
-                      label: 'Pitch Lab',
-                      color: const Color(0xFF8BE7C8),
-                      onTap: () => unawaited(_openAudioPitchLabForClip(index)),
-                    ),
-                    clipPanelActionPill(
-                      icon: Icons.library_music_outlined,
-                      label: 'Split vocals',
-                      onTap: () =>
-                          unawaited(_handleStemSeparationForClip(index)),
-                    ),
-                    clipPanelActionPill(
-                      icon: Icons.keyboard_alt_outlined,
-                      label: 'Sampler',
-                      color: const Color(0xFFD7DBE2),
-                      onTap: () =>
-                          unawaited(_createSamplerFromAudioClip(index)),
-                    ),
-                  ],
-                ),
-              ],
-            ),
           ),
         ],
       );
