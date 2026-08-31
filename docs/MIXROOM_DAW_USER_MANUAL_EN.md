@@ -231,7 +231,7 @@ When magnet is on, timeline edits snap to the selected musical grid. This helps 
 
 When magnet is off, users can place and edit items freely without grid snapping. This is better for dialogue, sound design, loose performances, or detailed cleanup.
 
-Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. The arrangement can zoom to waveform-detail level and Auto can continue through 1/64, 1/128, 1/256, and 1/512. The piano roll keeps its own current zoom range. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting. Fixed choices remain available through 1/32 and do not change with zoom.
+Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. Both editors can continue through 1/64, 1/128, 1/256, and 1/512 when their zoom provides enough space. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting. Fixed choices remain available through 1/32 and do not change with zoom.
 
 Fixed quantize values are divisions of one bar:
 
@@ -711,6 +711,8 @@ Users can:
 - scale note lengths
 
 Tap-to-add is the fastest mobile workflow: open a MIDI clip, choose the note row and beat position, then tap the grid. Drag horizontally to move timing, drag vertically to change pitch, and resize note edges to change duration.
+
+Horizontal Piano Roll zoom supports fine Auto grid and snapping values through 1/512 in meters and zoom levels that preserve readable spacing. Zoom buttons, desktop modifier-wheel zoom, macOS trackpad pinch, and touch pinch zoom keep the musical position beneath the zoom focus stable. The active desktop/tablet quantize readout follows the Piano Roll while it is open. Explicit fixed grid choices remain available through 1/32.
 
 ### Piano Roll Tools
 

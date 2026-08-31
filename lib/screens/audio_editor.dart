@@ -5922,6 +5922,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _timelineMagnetEnabled = true;
   TimelineGridMode _timelineGridMode = TimelineGridMode.adaptive;
   int _timelineFixedQuantizeDivisionsPerBar = 4;
+  final ValueNotifier<({String clipId, int divisionsPerBar})?>
+      _activePianoRollGridResolution =
+          ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
 
   bool _loopEnabled = false;
   int _loopStartMs = 0;
@@ -12773,6 +12776,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _meterDecayTimer?.cancel();
     _meters.dispose();
     _transportClock.dispose();
+    _activePianoRollGridResolution.dispose();
     _timelineController.dispose();
     unawaited(_shutdownAudioEngineV2Aware());
     super.dispose();
@@ -14845,6 +14849,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     return -1;
+  }
+
+  void _handlePianoRollGridResolutionChanged(
+    String clipId,
+    int divisionsPerBar,
+  ) {
+    if (!_showPianoRoll || divisionsPerBar <= 0) return;
+    final activeIndex = _activeMidiClipEditorIndex();
+    if (activeIndex < 0 || activeIndex >= _audioTracks.length) return;
+    final activeClip = _audioTracks[activeIndex];
+    if (!activeClip.isMidi || activeClip.clipId != clipId) return;
+    final next = (clipId: clipId, divisionsPerBar: divisionsPerBar);
+    if (_activePianoRollGridResolution.value == next) return;
+    _activePianoRollGridResolution.value = next;
+  }
+
+  void _clearPianoRollGridResolution() {
+    if (_activePianoRollGridResolution.value == null) return;
+    _activePianoRollGridResolution.value = null;
   }
 
   int _activePitchLabEditorIndex() {
@@ -40107,10 +40130,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
     }
 
-    return ValueListenableBuilder<TimelineTopControlsState>(
-      valueListenable: _timelineController.topControlsListenable,
-      builder: (context, controls, _) {
-        final rawQuantizeLabel = controls.quantizeLabel.trim();
+    return AnimatedBuilder(
+      animation: Listenable.merge(<Listenable>[
+        _timelineController.topControlsListenable,
+        _activePianoRollGridResolution,
+      ]),
+      builder: (context, _) {
+        final controls = _timelineController.topControlsState;
+        final pianoRollGrid = _activePianoRollGridResolution.value;
+        final pianoRollDivisions = _showPianoRoll &&
+                controls.gridMode == TimelineGridMode.adaptive
+            ? pianoRollGrid?.divisionsPerBar
+            : null;
+        final rawQuantizeLabel = pianoRollDivisions != null
+            ? '1/$pianoRollDivisions'
+            : controls.quantizeLabel.trim();
         final quantizePrimary = rawQuantizeLabel.isEmpty
             ? controls.quantizeLabel
             : rawQuantizeLabel
@@ -41229,6 +41263,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     gridMode: _timelineGridMode,
                     fixedQuantizeDivisionsPerBar:
                         _timelineFixedQuantizeDivisionsPerBar,
+                    onEffectiveGridResolutionChanged:
+                        _handlePianoRollGridResolutionChanged,
                     fullscreen: _pianoRollFullscreen,
                     isRecording: _isMidiClipRecordingForEditor(idx, clip),
                     onFullscreenChanged: (v) {
@@ -64054,6 +64090,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _startWaveformExtraction(sourceClip);
     }
     unawaited(_stopPitchLabAudioPreview(deleteFile: true));
+    _clearPianoRollGridResolution();
     setState(() {
       _pitchLabAudioAnalyzing = true;
       _pitchLabAudioRendering = false;
@@ -80314,6 +80351,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _openCaptureDeck() {
     if (_showCaptureDeck) return;
+    _clearPianoRollGridResolution();
     setState(() {
       _showCaptureDeck = true;
       _sampleBrowserVisible = false;
@@ -81065,6 +81103,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _activeMidiClipEngineId == clip.engineClipId) {
       return;
     }
+    _clearPianoRollGridResolution();
     setState(() {
       if (_rowCount > 0) {
         _selectedRow = clip.rowIndex.clamp(0, _rowCount - 1).toInt();
@@ -81078,6 +81117,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
+    _clearPianoRollGridResolution();
     setState(() {
       if (_rowCount > 0) {
         _selectedRow = clip.rowIndex.clamp(0, _rowCount - 1).toInt();
@@ -81098,6 +81138,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _closeMidiClipEditor() {
     _closingPianoRollPreview = true;
+    _clearPianoRollGridResolution();
     final desktopRelease = _releaseAllDesktopMidiNotes();
     final pianoRollRelease = _releaseAllPianoRollPreviewNotes();
     setState(() {
@@ -81125,6 +81166,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
     unawaited(_stopPitchLabAudioPreview(deleteFile: true));
+    _clearPianoRollGridResolution();
     setState(() {
       if (_rowCount > 0) {
         _selectedRow = clip.rowIndex.clamp(0, _rowCount - 1).toInt();
@@ -85304,6 +85346,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           gridMode: _timelineGridMode,
                                           fixedQuantizeDivisionsPerBar:
                                               _timelineFixedQuantizeDivisionsPerBar,
+                                          onEffectiveGridResolutionChanged:
+                                              _handlePianoRollGridResolutionChanged,
                                           fullscreen: _pianoRollFullscreen,
                                           isRecording:
                                               _isMidiClipRecordingForEditor(
