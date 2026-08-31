@@ -1457,9 +1457,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       3.0 + _kTabletStickyFooterBottomInset;
   static const double _kTabletFooterButtonHeight = 38.0;
   static const double _kTabletFooterRowGap = 6.0;
-  static const double _kTabletRowHeightMax = 84.0;
+  static const double _kTabletRowHeightDefault = 84.0;
   static const double _kTabletRowHeightMinScale = 0.62;
-  static const double _kTabletRowHeightMaxScale = 1.0;
+  static const double _kTabletRowHeightDefaultScale = 1.0;
+  static const double _kTabletRowHeightMaxScale = 1.5;
   static const double _kTabletRailWheelResizeSensitivity = 0.0015;
   static const double _kTabletHeaderLedgeX = 27.0;
   static const double _kTabletRailCenterX = _kTabletHeaderLedgeX / 2.0;
@@ -1518,7 +1519,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool get _allowsMultipleExpandedRows =>
       _usesDesktopOrTabletDawLayout && widget.allowMultipleExpandedRows;
   double get _rowHeight => _usesTabletDawLayout
-      ? _kTabletRowHeightMax * _tabletRowHeightScale
+      ? _kTabletRowHeightDefault * _tabletRowHeightScale
       : kRowHeight;
   double get _expandedRowHeight => (_rowHeight * 3.0) + 40.0;
   double get _timeRulerHeight => PlatformCapabilities.current.isDesktop
@@ -1608,9 +1609,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   // Pan/Zoom state
   double? _initialPixelsPerMs;
   double? _initialScrollMs;
-  double _tabletRowHeightScale = _kTabletRowHeightMaxScale;
+  double _tabletRowHeightScale = _kTabletRowHeightDefaultScale;
   String? _tabletRailDragMode;
-  double _tabletRailDragStartScale = _kTabletRowHeightMaxScale;
+  double _tabletRailDragStartScale = _kTabletRowHeightDefaultScale;
   double _tabletRailDragStartScrollOffset = 0.0;
   double _tabletRailDragStartGlobalY = 0.0;
   bool _horizontalScrollbarDragging = false;
@@ -14584,9 +14585,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         : (_verticalScrollOffset / maxScroll * thumbTravel)
               .clamp(0.0, thumbTravel)
               .toDouble();
+    final minRowHeightPercent = (_kTabletRowHeightMinScale * 100.0).round();
+    final maxRowHeightPercent = (_kTabletRowHeightMaxScale * 100.0).round();
     final rowHeightPercent = (_tabletRowHeightScale * 100.0).round().clamp(
-      62,
-      100,
+      minRowHeightPercent,
+      maxRowHeightPercent,
     );
     final dragMode = _tabletRailDragMode;
     final anyActive = dragMode != null;
@@ -14606,8 +14609,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       slider: true,
       label: L10n.translate(context, 'Rows scrollbar and height'),
       value: '$rowHeightPercent%',
-      increasedValue: '${(rowHeightPercent + 8).clamp(62, 100)}%',
-      decreasedValue: '${(rowHeightPercent - 8).clamp(62, 100)}%',
+      increasedValue:
+          '${(rowHeightPercent + 8).clamp(minRowHeightPercent, maxRowHeightPercent)}%',
+      decreasedValue:
+          '${(rowHeightPercent - 8).clamp(minRowHeightPercent, maxRowHeightPercent)}%',
       onIncrease: () => _setTabletRowHeightScale(_tabletRowHeightScale + 0.08),
       onDecrease: () => _setTabletRowHeightScale(_tabletRowHeightScale - 0.08),
       child: Listener(

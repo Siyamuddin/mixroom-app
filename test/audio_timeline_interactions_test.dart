@@ -775,6 +775,42 @@ void main() {
     }
   });
 
+  testWidgets('desktop and tablet row scaling keeps its default and reaches 150%',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    final semantics = tester.ensureSemantics();
+    try {
+      final clip = await _buildClip();
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[clip],
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rowHeader =
+          find.byKey(const ValueKey('timeline_tablet_row_header_0'));
+      final heightControl = find.bySemanticsLabel('Rows scrollbar and height');
+      final semanticsHeightControl =
+          find.semantics.byLabel('Rows scrollbar and height');
+      expect(tester.getSize(rowHeader).height, 84.0);
+      expect(tester.getSemantics(heightControl).value, '100%');
+
+      for (var i = 0; i < 8; i++) {
+        tester.semantics.increase(semanticsHeightControl);
+        await tester.pumpAndSettle();
+      }
+
+      expect(tester.getSize(rowHeader).height, 126.0);
+      expect(tester.getSemantics(heightControl).value, '150%');
+    } finally {
+      semantics.dispose();
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('swiping an unselected clip does not select or move it',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
