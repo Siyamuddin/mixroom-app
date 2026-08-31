@@ -4519,4 +4519,70 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets('desktop panByMs scrolls the timeline view', (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final clips = <AudioTrack>[await _buildClip()];
+      var scrollEvents = 0;
+      await tester.pumpWidget(
+        _buildHarness(
+          controller: controller,
+          clips: clips,
+          onMoveClipCommit: (_, __, ___) async {},
+          onTutorialTimelineScrolled: () => scrollEvents++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final thumbLeftBefore = controller.horizontalScrollbarState.thumbLeft;
+      controller.panByMs(2000);
+      await tester.pump();
+
+      expect(scrollEvents, greaterThan(0));
+      expect(
+        controller.horizontalScrollbarState.thumbLeft,
+        greaterThan(thumbLeftBefore),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop panByMs clamps extreme negative scroll', (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final clips = <AudioTrack>[await _buildClip()];
+      await tester.pumpWidget(
+        _buildHarness(
+          controller: controller,
+          clips: clips,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller.panByMs(-1000000);
+      await tester.pump();
+      final thumbLeftAtMin = controller.horizontalScrollbarState.thumbLeft;
+      expect(thumbLeftAtMin.isFinite, isTrue);
+
+      controller.panByMs(-1000000);
+      await tester.pump();
+      expect(
+        controller.horizontalScrollbarState.thumbLeft,
+        closeTo(thumbLeftAtMin, 0.5),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
 }
