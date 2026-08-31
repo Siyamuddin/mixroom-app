@@ -94392,7 +94392,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
   static const int _waveformSampleCount = 2048;
   static const Duration _pollInterval = Duration(milliseconds: 33);
   static const Duration _modeMenuPressDelay = Duration(milliseconds: 240);
-  List<double> _waveformSamples = const <double>[];
+  List<double> _stereoWaveformSamples = const <double>[];
   List<double> _spectrumDb = const <double>[];
   double _sampleRate = 44100.0;
   double _level = 0.0;
@@ -94452,20 +94452,26 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
     if (!mounted || _pollInFlight) return;
     _pollInFlight = true;
     try {
-      final waveform = await JuceAudioEngine.getRecentMasterWaveform(
-        sampleCount: _waveformSampleCount,
-      );
+      final stereoWaveform =
+          await JuceAudioEngine.getRecentMasterStereoWaveform(
+            sampleCount: _waveformSampleCount,
+          );
       if (!mounted) return;
-      final waveformSamples = List<double>.from(waveform, growable: false);
-      final nextSpectrum = _TopBarSpectrumAnalyzer.computeSpectrumDb(waveform);
+      final waveformSamples = List<double>.from(
+        stereoWaveform,
+        growable: false,
+      );
+      final nextSpectrum = _TopBarSpectrumAnalyzer.computeSpectrumDb(
+        stereoWaveform,
+      );
       final smoothedSpectrum = _TopBarSpectrumAnalyzer.smoothSpectrum(
         current: _spectrumDb,
         next: nextSpectrum,
       );
       if (!listEquals(smoothedSpectrum, _spectrumDb) ||
-          !listEquals(waveformSamples, _waveformSamples)) {
+          !listEquals(waveformSamples, _stereoWaveformSamples)) {
         setState(() {
-          _waveformSamples = waveformSamples;
+          _stereoWaveformSamples = waveformSamples;
           _spectrumDb = smoothedSpectrum;
         });
       }
@@ -94704,7 +94710,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
                 child: RepaintBoundary(
                   child: CustomPaint(
                     painter: _TopBarMasterVisualizerPainter(
-                      waveformSamples: _waveformSamples,
+                      stereoWaveformSamples: _stereoWaveformSamples,
                       spectrumDb: _spectrumDb,
                       analyzerSampleRate: _sampleRate,
                       level: _level,
@@ -94724,7 +94730,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
 }
 
 class _TopBarMasterVisualizerPainter extends CustomPainter {
-  final List<double> waveformSamples;
+  final List<double> stereoWaveformSamples;
   final List<double> spectrumDb;
   final double analyzerSampleRate;
   final double level;
@@ -94733,7 +94739,7 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
   final TopBarVisualizerMode mode;
 
   const _TopBarMasterVisualizerPainter({
-    required this.waveformSamples,
+    required this.stereoWaveformSamples,
     required this.spectrumDb,
     required this.analyzerSampleRate,
     required this.level,
@@ -95071,9 +95077,10 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       axisPaint,
     );
 
-    final samples = waveformSamples;
+    final samples = stereoWaveformSamples;
     final path = Path();
-    final points = math.min(420, samples.length);
+    final frameCount = samples.length ~/ 2;
+    final points = math.min(420, frameCount);
     if (points < 8) {
       final idleRect = Rect.fromCenter(
         center: center,
@@ -95082,35 +95089,22 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       );
       path.addOval(idleRect);
     } else {
-      final step = math.max(1, (samples.length / points).floor());
+      final step = math.max(1, (frameCount / points).floor());
       final gain = _waveformAutoGain(samples);
-      final panSkew =
-          ((meterFrame.peakR + meterFrame.rmsR) -
-                  (meterFrame.peakL + meterFrame.rmsL))
-              .clamp(-1.0, 1.0)
-              .toDouble();
-      final spread = (0.34 + (level * 0.42) + (panSkew.abs() * 0.20)).clamp(
-        0.26,
-        0.84,
-      );
       final radiusX = drawRect.width * 0.45;
       final radiusY = drawRect.height * 0.46;
+      final msScale = math.sqrt(0.5);
       var moved = false;
       for (int i = 0; i < points; i++) {
-        final sampleIndex = math.min(samples.length - 1, i * step);
-        final prevIndex = math.max(0, sampleIndex - step);
-        final sample = (samples[sampleIndex] * gain)
+        final frameIndex = math.min(frameCount - 1, i * step);
+        final left = (samples[frameIndex * 2] * gain)
             .clamp(-1.0, 1.0)
             .toDouble();
-        final prev = (samples[prevIndex] * gain).clamp(-1.0, 1.0).toDouble();
-        final delta = ((sample - prev) * 2.2).clamp(-1.0, 1.0).toDouble();
-        final shimmer = math.sin((i / points) * math.pi * 2.0) * 0.06;
-        final left =
-            (sample * (1.0 - (panSkew * 0.28))) + ((delta + shimmer) * spread);
-        final right =
-            (sample * (1.0 + (panSkew * 0.28))) - ((delta - shimmer) * spread);
-        final mid = ((left + right) * 0.5).clamp(-1.0, 1.0).toDouble();
-        final side = ((left - right) * 0.5).clamp(-1.0, 1.0).toDouble();
+        final right = (samples[frameIndex * 2 + 1] * gain)
+            .clamp(-1.0, 1.0)
+            .toDouble();
+        final mid = ((left + right) * msScale).clamp(-1.0, 1.0).toDouble();
+        final side = ((left - right) * msScale).clamp(-1.0, 1.0).toDouble();
         final x = center.dx + (side * radiusX);
         final y = center.dy - (mid * radiusY);
         if (!moved) {
@@ -95151,13 +95145,11 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
 
   void _paintWaveform(Canvas canvas, Rect drawRect) {
     final centerY = drawRect.center.dy;
-    final samples = waveformSamples;
+    final samples = stereoWaveformSamples;
     final path = Path();
     final fillPath = Path();
-    final points = math.min(
-      math.max(96, drawRect.width.floor()),
-      samples.length,
-    );
+    final frameCount = samples.length ~/ 2;
+    final points = math.min(math.max(96, drawRect.width.floor()), frameCount);
     if (points < 8) {
       canvas.drawLine(
         Offset(drawRect.left, centerY),
@@ -95171,11 +95163,14 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
     }
 
     final gain = _waveformAutoGain(samples);
-    final step = math.max(1, (samples.length / points).floor());
+    final step = math.max(1, (frameCount / points).floor());
     var moved = false;
     for (int i = 0; i < points; i++) {
-      final sampleIndex = math.min(samples.length - 1, i * step);
-      final sample = (samples[sampleIndex] * gain).clamp(-1.0, 1.0).toDouble();
+      final frameIndex = math.min(frameCount - 1, i * step);
+      final sample =
+          ((samples[frameIndex * 2] + samples[frameIndex * 2 + 1]) * 0.5 * gain)
+              .clamp(-1.0, 1.0)
+              .toDouble();
       final t = points <= 1 ? 0.0 : i / (points - 1);
       final x = drawRect.left + (drawRect.width * t);
       final y = centerY - (sample * drawRect.height * 0.43);
@@ -95248,12 +95243,12 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
     late final List<double> oldWaveformSamples;
     late final List<double> oldSpectrumDb;
     try {
-      oldWaveformSamples = oldDelegate.waveformSamples;
+      oldWaveformSamples = oldDelegate.stereoWaveformSamples;
       oldSpectrumDb = oldDelegate.spectrumDb;
     } catch (_) {
       return true;
     }
-    return !listEquals(oldWaveformSamples, waveformSamples) ||
+    return !listEquals(oldWaveformSamples, stereoWaveformSamples) ||
         !listEquals(oldSpectrumDb, spectrumDb) ||
         oldDelegate.analyzerSampleRate != analyzerSampleRate ||
         oldDelegate.level != level ||
@@ -95267,7 +95262,7 @@ class _TopBarSpectrumAnalyzer {
   static const double _minDb = -90.0;
   static const double _maxDb = 0.0;
   static const double _minHz = 30.0;
-  static const double _maxHz = 18000.0;
+  static const double _maxHz = 20000.0;
   static const List<double> bandMarkerHz = <double>[
     80.0,
     300.0,
@@ -95290,34 +95285,55 @@ class _TopBarSpectrumAnalyzer {
 
   static double _log10(num x) => math.log(x) / math.ln10;
 
-  static List<double> computeSpectrumDb(List<double> samples) {
-    if (samples.length < 64) return const <double>[];
+  static List<double> computeSpectrumDb(List<double> interleavedSamples) {
+    final frameCount = interleavedSamples.length ~/ 2;
+    if (frameCount < 64) return const <double>[];
 
-    var fftSize = _nextPowerOfTwo(samples.length);
+    var fftSize = _nextPowerOfTwo(frameCount);
     fftSize = fftSize.clamp(256, 2048);
 
-    final input = List<double>.filled(fftSize, 0.0, growable: false);
-    final copyLen = math.min(fftSize, samples.length);
-    final readOffset = samples.length - copyLen;
+    final inputL = List<double>.filled(fftSize, 0.0, growable: false);
+    final inputR = List<double>.filled(fftSize, 0.0, growable: false);
+    final copyLen = math.min(fftSize, frameCount);
+    final readOffset = frameCount - copyLen;
     for (int i = 0; i < copyLen; i++) {
       final window =
           0.5 - 0.5 * math.cos((2.0 * math.pi * i) / (copyLen - 1).toDouble());
-      input[i] = samples[readOffset + i] * window;
+      final sourceIndex = (readOffset + i) * 2;
+      inputL[i] = interleavedSamples[sourceIndex] * window;
+      inputR[i] = interleavedSamples[sourceIndex + 1] * window;
     }
 
     final fft = _fftForSize(fftSize);
-    final freqDomain = fft.realFft(input);
-    if (freqDomain.length <= 1) return const <double>[];
-
-    final out = List<double>.filled(freqDomain.length, _minDb, growable: false);
-    for (int i = 1; i < freqDomain.length; i++) {
-      final c = freqDomain[i];
-      final mag = math.sqrt(c.x * c.x + c.y * c.y) / (fftSize * 0.5);
-      out[i] = (20.0 * _log10(mag + 1.0e-12)).clamp(_minDb, 6.0);
+    final freqDomainL = fft.realFft(inputL);
+    final freqDomainR = fft.realFft(inputR);
+    if (freqDomainL.length <= 1 || freqDomainR.length != freqDomainL.length) {
+      return const <double>[];
     }
 
-    for (int i = 1; i < out.length - 1; i++) {
-      out[i] = ((out[i - 1] * 0.2) + (out[i] * 0.6) + (out[i + 1] * 0.2)).clamp(
+    // fftea returns the full conjugate-symmetric FFT. Keep only DC through
+    // Nyquist so the renderer can infer the original FFT size correctly.
+    final uniqueBinCount = (fftSize ~/ 2) + 1;
+    final raw = List<double>.filled(uniqueBinCount, _minDb, growable: false);
+    // A Hann window has a coherent gain of 0.5, so a full-scale,
+    // bin-centred sine produces fftSize / 4 in its positive-frequency bin.
+    final magnitudeScale = fftSize * 0.25;
+    for (int i = 1; i < uniqueBinCount; i++) {
+      final left = freqDomainL[i];
+      final right = freqDomainR[i];
+      final magL =
+          math.sqrt(left.x * left.x + left.y * left.y) / magnitudeScale;
+      final magR =
+          math.sqrt(right.x * right.x + right.y * right.y) / magnitudeScale;
+      final combinedMagnitude = math.sqrt(
+        ((magL * magL) + (magR * magR)) * 0.5,
+      );
+      raw[i] = (20.0 * _log10(combinedMagnitude + 1.0e-12)).clamp(_minDb, 6.0);
+    }
+
+    final out = List<double>.from(raw, growable: false);
+    for (int i = 1; i < raw.length - 1; i++) {
+      out[i] = ((raw[i - 1] * 0.2) + (raw[i] * 0.6) + (raw[i + 1] * 0.2)).clamp(
         _minDb,
         6.0,
       );
@@ -95407,7 +95423,7 @@ class _TopBarSpectrumAnalyzer {
 
   static double _displayMaxHz(double sampleRate) {
     final nyquist = sampleRate > 1000.0 ? sampleRate * 0.5 : 22050.0;
-    return math.min(_maxHz, math.max(12000.0, nyquist * 0.82)).toDouble();
+    return math.min(_maxHz, nyquist * 0.98).toDouble();
   }
 
   static double dbToY(double db, Rect rect) {

@@ -15400,8 +15400,10 @@ void JuceEngine::pushMasterWaveformSamples(const float *const *out,
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const float mono = juce::jlimit(-1.0f, 1.0f, 0.5f * (outL[i] + outR[i]));
-        masterWaveformRing[(size_t)writePos] = mono;
+        const float left = std::isfinite(outL[i]) ? outL[i] : 0.0f;
+        const float right = std::isfinite(outR[i]) ? outR[i] : 0.0f;
+        masterWaveformRingL[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, left);
+        masterWaveformRingR[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, right);
         writePos = (writePos + 1) % kMasterWaveformRingSize;
     }
 
@@ -15559,7 +15561,28 @@ std::vector<float> JuceEngine::getRecentMasterWaveform(int sampleCount) const
 
     for (int i = 0; i < count; ++i)
     {
-        out[(size_t)i] = masterWaveformRing[(size_t)readPos];
+        out[(size_t)i] = 0.5f * (masterWaveformRingL[(size_t)readPos] +
+                                 masterWaveformRingR[(size_t)readPos]);
+        readPos = (readPos + 1) % kMasterWaveformRingSize;
+    }
+
+    return out;
+}
+
+std::vector<float> JuceEngine::getRecentMasterStereoWaveform(int sampleCount) const
+{
+    const int count = juce::jlimit(64, kMasterWaveformRingSize, sampleCount);
+    std::vector<float> out((size_t)(count * 2), 0.0f);
+
+    const int writePos = masterWaveformWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kMasterWaveformRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)(i * 2)] = masterWaveformRingL[(size_t)readPos];
+        out[(size_t)(i * 2 + 1)] = masterWaveformRingR[(size_t)readPos];
         readPos = (readPos + 1) % kMasterWaveformRingSize;
     }
 

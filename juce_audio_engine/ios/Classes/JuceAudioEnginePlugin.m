@@ -8057,6 +8057,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSArray* arr = [JuceBridge getRecentMasterWaveformObjC:sampleCount];
         result(arr);
     }
+    else if ([call.method isEqualToString:@"getRecentMasterStereoWaveform"]) {
+        NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
+        NSArray* arr = [JuceBridge getRecentMasterStereoWaveformObjC:sampleCount];
+        result(arr);
+    }
     else if ([call.method isEqualToString:@"getRowEqWaveform"]) {
         NSInteger row = [call.arguments[@"row"] integerValue];
         NSInteger effect = [call.arguments[@"effect"] integerValue];

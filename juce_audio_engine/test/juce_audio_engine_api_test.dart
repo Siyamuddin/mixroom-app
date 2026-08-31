@@ -107,6 +107,8 @@ void main() {
           ];
         case 'getTransportSeconds':
           return 12.5;
+        case 'getRecentMasterStereoWaveform':
+          return <double>[0.25, -0.25, 0.5, -0.5];
         case 'getOutputDevices':
           return <String>['MacBook Pro Speakers', 'WH-1000XM4'];
         case 'selectOutputDevice':
@@ -1209,6 +1211,16 @@ void main() {
     expect(selected, isTrue);
     expect(calls.single.method, 'selectOutputDevice');
     expect(calls.single.arguments, <String, dynamic>{'name': 'WH-1000XM4'});
+  });
+
+  test('gets interleaved post-master stereo analyzer samples', () async {
+    final samples = await JuceAudioEngine.getRecentMasterStereoWaveform(
+      sampleCount: 2,
+    );
+
+    expect(samples, <double>[0.25, -0.25, 0.5, -0.5]);
+    expect(calls.single.method, 'getRecentMasterStereoWaveform');
+    expect(calls.single.arguments, <String, dynamic>{'sampleCount': 2});
   });
 
   test('capabilities + plugin scan normalization', () async {

@@ -3693,6 +3693,23 @@ class JuceAudioEngine {
     }
   }
 
+  /// Returns interleaved post-master samples: L0, R0, L1, R1, ...
+  static Future<List<double>> getRecentMasterStereoWaveform({
+    int sampleCount = 2048,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRecentMasterStereoWaveform',
+        {'sampleCount': sampleCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRecentMasterStereoWaveform', e);
+      return const <double>[];
+    }
+  }
+
   static Future<List<double>> getRowEqWaveform(
     int row,
     int effect, {
