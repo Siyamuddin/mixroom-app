@@ -30,6 +30,7 @@ import 'package:mixroom/helpers/automation_target_labels.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
+import 'package:mixroom/helpers/timeline_bar_navigation.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -4049,6 +4050,10 @@ const String _kDesktopShortcutPlayPause = 'play_pause';
 const String _kDesktopShortcutToggleRecord = 'toggle_record';
 const String _kDesktopShortcutToggleMagnet = 'toggle_magnet';
 const String _kDesktopShortcutRestart = 'restart_song';
+const String _kDesktopShortcutSeekBarLeft = 'seek_bar_left';
+const String _kDesktopShortcutSeekBarRight = 'seek_bar_right';
+const String _kDesktopShortcutScrollTimelineLeft = 'scroll_timeline_left';
+const String _kDesktopShortcutScrollTimelineRight = 'scroll_timeline_right';
 const String _kDesktopShortcutOpenFileBrowser = 'open_file_browser';
 const String _kDesktopShortcutAddAudio = 'add_audio_track';
 const String _kDesktopShortcutAddInstrument = 'add_instrument_clip';
@@ -8930,6 +8935,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return true;
     }
 
+    final isPress = isKeyDown || isKeyRepeat;
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutSeekBarLeft, event)) {
+      _nudgePlayheadByBar(forward: false);
+      return true;
+    }
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutSeekBarRight, event)) {
+      _nudgePlayheadByBar(forward: true);
+      return true;
+    }
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutScrollTimelineLeft, event)) {
+      if (!_canHandleTimelineViewPanShortcut()) return false;
+      _nudgeTimelineViewByBar(forward: false);
+      return true;
+    }
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutScrollTimelineRight, event)) {
+      if (!_canHandleTimelineViewPanShortcut()) return false;
+      _nudgeTimelineViewByBar(forward: true);
+      return true;
+    }
+
     final keyboard = HardwareKeyboard.instance;
     if (!keyboard.isMetaPressed &&
         !keyboard.isControlPressed &&
@@ -9425,6 +9454,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return DesktopShortcutBinding(keyId: LogicalKeyboardKey.keyQ.keyId);
       case _kDesktopShortcutRestart:
         return DesktopShortcutBinding(keyId: LogicalKeyboardKey.keyA.keyId);
+      case _kDesktopShortcutSeekBarLeft:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.comma.keyId);
+      case _kDesktopShortcutSeekBarRight:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.period.keyId);
+      case _kDesktopShortcutScrollTimelineLeft:
+        return DesktopShortcutBinding(
+          keyId: LogicalKeyboardKey.arrowLeft.keyId,
+        );
+      case _kDesktopShortcutScrollTimelineRight:
+        return DesktopShortcutBinding(
+          keyId: LogicalKeyboardKey.arrowRight.keyId,
+        );
       case _kDesktopShortcutOpenFileBrowser:
         return DesktopShortcutBinding(keyId: LogicalKeyboardKey.keyF.keyId);
       case _kDesktopShortcutAddInstrument:
@@ -9473,8 +9514,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   get _desktopShortcutEntries => const <MapEntry<String, String>>[
     MapEntry(_kDesktopShortcutPlayPause, 'Play / Pause'),
     MapEntry(_kDesktopShortcutToggleRecord, 'Record'),
-    MapEntry(_kDesktopShortcutToggleMagnet, 'Toggle Snap to Grid'),
     MapEntry(_kDesktopShortcutRestart, 'Restart Song'),
+    MapEntry(_kDesktopShortcutSeekBarLeft, 'Seek Left 1 Bar'),
+    MapEntry(_kDesktopShortcutSeekBarRight, 'Seek Right 1 Bar'),
+    MapEntry(_kDesktopShortcutScrollTimelineLeft, 'Scroll Timeline Left'),
+    MapEntry(_kDesktopShortcutScrollTimelineRight, 'Scroll Timeline Right'),
+    MapEntry(_kDesktopShortcutToggleMagnet, 'Toggle Snap to Grid'),
     MapEntry(_kDesktopShortcutOpenFileBrowser, 'Open File Browser'),
     MapEntry(_kDesktopShortcutAddInstrument, 'Add Instrument Clip'),
     MapEntry(_kDesktopShortcutToggleSoloSelectedRow, 'Toggle Selected Solo'),
@@ -9771,6 +9816,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (key == null) return '?';
       if (key == LogicalKeyboardKey.space) return 'Space';
       if (key == LogicalKeyboardKey.escape) return 'Esc';
+      if (key == LogicalKeyboardKey.comma) return ',';
+      if (key == LogicalKeyboardKey.period) return '.';
+      if (key == LogicalKeyboardKey.arrowLeft) return '←';
+      if (key == LogicalKeyboardKey.arrowRight) return '→';
+      if (key == LogicalKeyboardKey.arrowUp) return '↑';
+      if (key == LogicalKeyboardKey.arrowDown) return '↓';
       final raw = key.keyLabel.trim();
       if (raw.isNotEmpty) return raw.toUpperCase();
       final debug = key.debugName ?? '';
@@ -9818,6 +9869,85 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     return null;
+  }
+
+  String _desktopShortcutSectionTitle(String actionId) {
+    switch (actionId) {
+      case _kDesktopShortcutPlayPause:
+      case _kDesktopShortcutToggleRecord:
+      case _kDesktopShortcutRestart:
+      case _kDesktopShortcutSeekBarLeft:
+      case _kDesktopShortcutSeekBarRight:
+        return 'Transport';
+      case _kDesktopShortcutScrollTimelineLeft:
+      case _kDesktopShortcutScrollTimelineRight:
+        return 'Timeline view';
+      default:
+        return 'Editor';
+    }
+  }
+
+  bool _isSampleBrowserTreeFocused() {
+    final BuildContext? focusContext =
+        FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) return false;
+    return focusContext.findAncestorWidgetOfExactType<SampleBrowserPanel>() !=
+        null;
+  }
+
+  bool _canHandleTimelineViewPanShortcut() {
+    if (_showPianoRoll) return false;
+    if (_isSampleBrowserTreeFocused()) return false;
+    return true;
+  }
+
+  void _nudgePlayheadByBar({required bool forward}) {
+    if (_isRecording) return;
+    final double currentMs = _globalAudioClock.inMilliseconds.toDouble();
+    final double targetMs = forward
+        ? timelineNextBarMs(
+            currentMs,
+            bpm: _tempo,
+            beatsPerBar: _timeSignatureNumerator,
+            beatUnit: _timeSignatureDenominator,
+          )
+        : timelinePreviousBarMs(
+            currentMs,
+            bpm: _tempo,
+            beatsPerBar: _timeSignatureNumerator,
+            beatUnit: _timeSignatureDenominator,
+          );
+    if ((targetMs - currentMs).abs() < 0.01) {
+      _timelineController.ensurePlayheadVisible();
+      return;
+    }
+    _scrubProjectTransport(targetMs);
+    _timelineController.ensurePlayheadVisible();
+  }
+
+  void _nudgeTimelineViewByBar({required bool forward}) {
+    final double barMs = timelineMsPerBar(
+      bpm: _tempo,
+      beatsPerBar: _timeSignatureNumerator,
+      beatUnit: _timeSignatureDenominator,
+    );
+    _timelineController.panByMs(forward ? barMs : -barMs);
+  }
+
+  Widget _buildDesktopShortcutSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.54),
+          fontFamily: 'Pretendard',
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
   }
 
   Widget _buildDesktopPopupSurface({
@@ -10385,6 +10515,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ) !=
                     null;
               });
+              String? lastShortcutSection;
               return Focus(
                 autofocus: true,
                 onKeyEvent: (_, event) {
@@ -10490,7 +10621,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         child: SingleChildScrollView(
                           child: Column(
                             children: [
-                              ..._desktopShortcutEntries.map((entry) {
+                              ..._desktopShortcutEntries.expand((entry) {
+                                final sectionTitle =
+                                    _desktopShortcutSectionTitle(entry.key);
+                                final showSectionHeader =
+                                    sectionTitle != lastShortcutSection;
+                                lastShortcutSection = sectionTitle;
                                 final binding =
                                     updatedBindings[entry.key] ??
                                     _defaultDesktopShortcutBinding(entry.key);
@@ -10501,7 +10637,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       binding,
                                       updatedBindings,
                                     );
-                                return Container(
+                                return <Widget>[
+                                  if (showSectionHeader)
+                                    _buildDesktopShortcutSectionHeader(
+                                      L10n.translate(context, sectionTitle),
+                                    ),
+                                  Container(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   padding: const EdgeInsets.fromLTRB(
                                     14,
@@ -10530,7 +10671,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              entry.value,
+                                              L10n.translate(
+                                                context,
+                                                entry.value,
+                                              ),
                                               style: const TextStyle(
                                                 color: Color(0xFFF4F4F4),
                                                 fontFamily: 'Pretendard',
@@ -10599,7 +10743,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ],
                                     ],
                                   ),
-                                );
+                                ),
+                                ];
                               }),
                               const SizedBox(height: 4),
                               _buildDesktopKeyboardMidiReferenceSection(

@@ -22,6 +22,7 @@ import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/trackpad_touch_count.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/timeline_bar_navigation.dart';
 import 'package:mixroom/helpers/track_group_reconciler.dart';
 import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
@@ -991,6 +992,8 @@ class AudioCanvasTimelineController {
   VoidCallback? _clearExternalSampleDropPreview;
   SampleDropPlacement? Function(Offset globalOffset, {SampleDragData? data})?
   _placementForExternalSampleDrop;
+  void Function(double deltaMs)? _panByMs;
+  VoidCallback? _ensurePlayheadVisible;
   final ValueNotifier<TimelineTopControlsState> _topControls =
       ValueNotifier<TimelineTopControlsState>(TimelineTopControlsState.initial);
   final ValueNotifier<TimelineHorizontalScrollbarState> _horizontalScrollbar =
@@ -1032,6 +1035,8 @@ class AudioCanvasTimelineController {
       SampleDragData? data,
     })
     placementForExternalSampleDrop,
+    required void Function(double deltaMs) panByMs,
+    required VoidCallback ensurePlayheadVisible,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
     _showMasterAutomationLane = showMasterAutomationLane;
@@ -1050,6 +1055,8 @@ class AudioCanvasTimelineController {
     _updateExternalSampleDropPreview = updateExternalSampleDropPreview;
     _clearExternalSampleDropPreview = clearExternalSampleDropPreview;
     _placementForExternalSampleDrop = placementForExternalSampleDrop;
+    _panByMs = panByMs;
+    _ensurePlayheadVisible = ensurePlayheadVisible;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _publishTopControlsState?.call();
     });
@@ -1078,6 +1085,8 @@ class AudioCanvasTimelineController {
       SampleDragData? data,
     })
     placementForExternalSampleDrop,
+    required void Function(double deltaMs) panByMs,
+    required VoidCallback ensurePlayheadVisible,
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
       _ensureRowExpanded = null;
@@ -1144,6 +1153,12 @@ class AudioCanvasTimelineController {
       placementForExternalSampleDrop,
     )) {
       _placementForExternalSampleDrop = null;
+    }
+    if (identical(_panByMs, panByMs)) {
+      _panByMs = null;
+    }
+    if (identical(_ensurePlayheadVisible, ensurePlayheadVisible)) {
+      _ensurePlayheadVisible = null;
     }
   }
 
@@ -1219,6 +1234,16 @@ class AudioCanvasTimelineController {
     SampleDragData? data,
   }) {
     return _placementForExternalSampleDrop?.call(globalOffset, data: data);
+  }
+
+  /// Scrolls the arrange view by [deltaMs] without moving the playhead.
+  void panByMs(double deltaMs) {
+    _panByMs?.call(deltaMs);
+  }
+
+  /// Nudges the view if the playhead would otherwise leave the viewport.
+  void ensurePlayheadVisible() {
+    _ensurePlayheadVisible?.call();
   }
 
   void _setHorizontalScrollbarState(TimelineHorizontalScrollbarState state) {
@@ -3383,10 +3408,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double _msPerBar() {
-    final msPerQuarter = 60000 / widget.bpm;
-    final safeNumerator = math.max(1, widget.beatsPerBar);
-    final safeDenominator = math.max(1, widget.beatUnit);
-    return msPerQuarter * safeNumerator * 4.0 / safeDenominator;
+    return timelineMsPerBar(
+      bpm: widget.bpm,
+      beatsPerBar: widget.beatsPerBar,
+      beatUnit: widget.beatUnit,
+    );
   }
 
   double _quantizeIntervalMs() {
@@ -5845,6 +5871,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _updateExternalSampleDropPreviewForOsDrag,
       clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
       placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
+      panByMs: _panTimelineByMs,
+      ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
     );
     _syncRowUiState();
     _verticalScrollController.addListener(() {
@@ -5900,6 +5928,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             _updateExternalSampleDropPreviewForOsDrag,
         clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
+        panByMs: _panTimelineByMs,
+        ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
       );
       widget.controller?._bind(
         ensureRowExpanded: ensureRowExpanded,
@@ -5920,6 +5950,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             _updateExternalSampleDropPreviewForOsDrag,
         clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
+        panByMs: _panTimelineByMs,
+        ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
       );
     }
     if (oldWidget.clips.length != widget.clips.length) {
@@ -6053,6 +6085,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _updateExternalSampleDropPreviewForOsDrag,
       clearExternalSampleDropPreview: _clearExternalSampleDropPreview,
       placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
+      panByMs: _panTimelineByMs,
+      ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
     );
     widget.controller?._setHorizontalScrollbarState(
       TimelineHorizontalScrollbarState.hidden,
@@ -6810,6 +6844,38 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     });
     _publishHorizontalScrollbarState(viewportWidth: viewportWidth);
     widget.onTutorialTimelineScrolled?.call();
+  }
+
+  /// Pans the arrange view by a musical time delta without moving the playhead.
+  void _panTimelineByMs(double deltaMs) {
+    if (!deltaMs.isFinite || deltaMs == 0.0) return;
+    final double viewportWidth = _getViewportWidth(context);
+    _setScrollOffsetFromHorizontalScrollbar(
+      viewportWidth: viewportWidth,
+      targetScrollMs: _scrollOffsetMs + deltaMs,
+    );
+  }
+
+  /// Keeps the playhead on-screen with a small edge inset; does not re-center.
+  void _ensurePlayheadVisibleInViewport() {
+    final double viewportWidth = _getViewportWidth(context);
+    if (viewportWidth <= 0.0 || _pixelsPerMs <= 0.0) return;
+    final double viewportMs = viewportWidth / _pixelsPerMs;
+    final double playheadMs = _currentPlayheadMs;
+    final double paddingMs = viewportMs * 0.08;
+    final double visibleStartMs = _scrollOffsetMs;
+    final double visibleEndMs = _scrollOffsetMs + viewportMs;
+    if (playheadMs >= visibleStartMs + paddingMs &&
+        playheadMs <= visibleEndMs - paddingMs) {
+      return;
+    }
+    final double targetScrollMs = playheadMs < visibleStartMs + paddingMs
+        ? playheadMs - paddingMs
+        : playheadMs + paddingMs - viewportMs;
+    _setScrollOffsetFromHorizontalScrollbar(
+      viewportWidth: viewportWidth,
+      targetScrollMs: targetScrollMs,
+    );
   }
 
   void _beginHorizontalScrollbarDrag(double localX) {
@@ -17552,10 +17618,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double msFor128Bars(double bpm) {
-    final msPerQuarter = 60000 / bpm;
-    final safeNumerator = math.max(1, widget.beatsPerBar);
-    final safeDenominator = math.max(1, widget.beatUnit);
-    return 128 * msPerQuarter * safeNumerator * 4.0 / safeDenominator;
+    return 128 *
+        timelineMsPerBar(
+          bpm: bpm,
+          beatsPerBar: widget.beatsPerBar,
+          beatUnit: widget.beatUnit,
+        );
   }
 
   void _clampScroll() {

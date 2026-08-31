@@ -165,6 +165,17 @@ The transport controls are available at the bottom of the editor. On desktop, th
 | Record/Stop | Starts recording on the selected row, or stops the active recording. |
 | One-Button Mix | Runs an automatic Mixroom mix pass. |
 
+On desktop, the playhead and timeline view also have keyboard shortcuts. These can be remapped in Project Settings → Keyboard Shortcuts.
+
+| Shortcut | Function |
+| --- | --- |
+| `,` | Moves the playhead to the previous bar line. |
+| `.` | Moves the playhead to the next bar line. |
+| Left arrow | Scrolls the timeline view left by one bar, without moving the playhead. |
+| Right arrow | Scrolls the timeline view right by one bar, without moving the playhead. |
+
+Hold `,` `.` or the arrow keys to repeat. Arrow-key scrolling is skipped while typing, while the file browser tree is focused, or while the piano roll is open.
+
 Recording requires a selected row and an available input device. If input access is not available, Mixroom shows a permission or input warning.
 
 ### One-Button Mix
@@ -386,7 +397,7 @@ On desktop:
 - right-click the ruler to create or clear a loop region
 - right-drag on the ruler to create, resize, or move the loop region
 
-When looping is active, Restart returns to the loop start. During playback, Mixroom wraps from the loop end back to the loop start.
+When looping is active, Restart returns to the loop start. During playback, Mixroom wraps from the loop end back to the loop start, including short regions around 0.1 to 0.5 seconds. The playhead stays inside the loop markers instead of running past them.
 
 ### Crossfades
 
