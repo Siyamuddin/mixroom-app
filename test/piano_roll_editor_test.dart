@@ -40,6 +40,8 @@ Widget _buildEditor({
   PianoKeyDownCallback? onKeyboardNoteDown,
   PianoKeyUpCallback? onKeyboardNoteUp,
   PlayableMidiPitchesResolver? resolvePlayablePitches,
+  int initialTab = 0,
+  int tabRequestRevision = 0,
   List<Map<String, dynamic>> availableInstruments =
       const <Map<String, dynamic>>[],
 }) {
@@ -68,6 +70,8 @@ Widget _buildEditor({
             onKeyboardNoteDown: onKeyboardNoteDown,
             onKeyboardNoteUp: onKeyboardNoteUp,
             resolvePlayablePitches: resolvePlayablePitches,
+            initialTab: initialTab,
+            tabRequestRevision: tabRequestRevision,
           ),
         ),
       ),
@@ -97,6 +101,43 @@ MidiNote _noteById(List<MidiNote> notes, String id) {
 }
 
 void main() {
+  testWidgets('supports direct instrument-tab requests', (tester) async {
+    final clip = await _buildMidiTrack(const <MidiNote>[]);
+    var requestedTab = 2;
+    var revision = 1;
+    late StateSetter rebuild;
+
+    await tester.pumpWidget(
+      StatefulBuilder(
+        builder: (context, setState) {
+          rebuild = setState;
+          return _buildEditor(
+            clip: clip,
+            onCommit: ({
+              required notes,
+              required instrumentParams,
+              required instrumentId,
+              required instrumentName,
+            }) async {},
+            initialTab: requestedTab,
+            tabRequestRevision: revision,
+          );
+        },
+      ),
+    );
+
+    expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 2);
+
+    rebuild(() {
+      requestedTab = 0;
+      revision += 1;
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+
+    expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 0);
+  });
+
   testWidgets(
     'guitar instrument panel uses the shared guitar visual treatment',
     (tester) async {

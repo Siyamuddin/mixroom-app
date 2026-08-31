@@ -131,6 +131,8 @@ class PianoRollEditor extends StatefulWidget {
     this.onOpenCurrentInstrumentUi,
     this.canReplaceSamplerSource = false,
     this.onReplaceSamplerSource,
+    this.initialTab = 0,
+    this.tabRequestRevision = 0,
   });
 
   final AudioTrack clip;
@@ -156,6 +158,8 @@ class PianoRollEditor extends StatefulWidget {
   final Future<bool> Function()? onOpenCurrentInstrumentUi;
   final bool canReplaceSamplerSource;
   final Future<void> Function()? onReplaceSamplerSource;
+  final int initialTab;
+  final int tabRequestRevision;
 
   @override
   State<PianoRollEditor> createState() => _PianoRollEditorState();
@@ -295,7 +299,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(
+      length: 3,
+      initialIndex: widget.initialTab.clamp(0, 2).toInt(),
+      vsync: this,
+    );
     _tabController.addListener(_handleTabChanged);
     _followViewportTicker = createTicker((_) {
       if (!mounted || !_followPlayhead) {
@@ -321,6 +329,17 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   @override
   void didUpdateWidget(covariant PianoRollEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.tabRequestRevision != widget.tabRequestRevision) {
+      final requestedTab = widget.initialTab.clamp(0, 2).toInt();
+      if (_tabController.index != requestedTab) {
+        _lastTabIndex = requestedTab;
+        _tabController.animateTo(
+          requestedTab,
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOutCubic,
+        );
+      }
+    }
     if (!oldWidget.isRecording && widget.isRecording) {
       _commitDebounce?.cancel();
       _commitQueued = false;

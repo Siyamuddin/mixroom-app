@@ -712,6 +712,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final void Function(int clipIndex)? onOpenMidiClip;
   final bool Function(int clipIndex)? canOpenMidiInstrumentUi;
   final Future<bool> Function(int clipIndex)? onOpenMidiInstrumentUi;
+  final bool Function(int row)? canOpenInstrumentUi;
+  final Future<void> Function(int row)? onOpenInstrumentUi;
   final Future<void> Function(int row, double timeMs)?
   onCreateMidiClipInInstrumentLane;
   final Future<void> Function(int clipIndex)? onStemSeparation;
@@ -920,6 +922,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onOpenMidiClip,
     this.canOpenMidiInstrumentUi,
     this.onOpenMidiInstrumentUi,
+    this.canOpenInstrumentUi,
+    this.onOpenInstrumentUi,
     this.onCreateMidiClipInInstrumentLane,
     this.onStemSeparation,
     this.onSelectionChanged,
@@ -1791,6 +1795,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _headerMoved = false;
   bool _headerMenuOpened = false;
   final Map<int, int> _groupFoldHeaderPointerRows = <int, int>{};
+  final Set<int> _instrumentUiHeaderPointers = <int>{};
   Timer? _deadZoneHoldTimer;
   int? _deadZonePointer;
   int? _deadZoneRow;
@@ -6167,6 +6172,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
+  void _markInstrumentUiHeaderPointer(PointerDownEvent event) {
+    _instrumentUiHeaderPointers.add(event.pointer);
+    if (_headerPointer == event.pointer) {
+      _cancelHeaderHoldTimer();
+      _resetHeaderPointerState();
+    }
+  }
+
   bool _isGroupFoldHeaderHit(int row, Offset localPosition) {
     final rowGroup = _groupForRow(row);
     final visibilityEntry = _visibilityEntryForSourceRow(row);
@@ -6209,6 +6222,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _handleHeaderPointerDown(int row, PointerDownEvent event) {
     _requestTimelineFocus();
+    if (_instrumentUiHeaderPointers.contains(event.pointer)) {
+      _cancelHeaderHoldTimer();
+      _resetHeaderPointerState();
+      return;
+    }
     if (_groupFoldHeaderPointerRows.containsKey(event.pointer) ||
         _isGroupFoldHeaderHit(row, event.localPosition)) {
       _groupFoldHeaderPointerRows[event.pointer] = row;
@@ -6252,6 +6270,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onHeaderPointerUp(PointerUpEvent e) {
+    if (_instrumentUiHeaderPointers.remove(e.pointer)) {
+      _cancelHeaderHoldTimer();
+      _resetHeaderPointerState();
+      return;
+    }
     final groupFoldRow = _groupFoldHeaderPointerRows.remove(e.pointer);
     if (groupFoldRow != null) {
       _cancelHeaderHoldTimer();
@@ -6284,6 +6307,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _onHeaderPointerCancel(PointerCancelEvent e) {
+    if (_instrumentUiHeaderPointers.remove(e.pointer)) {
+      _cancelHeaderHoldTimer();
+      _resetHeaderPointerState();
+      return;
+    }
     if (_groupFoldHeaderPointerRows.remove(e.pointer) != null) {
       _cancelHeaderHoldTimer();
       _resetHeaderPointerState();
@@ -15089,8 +15117,66 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
+  Widget _buildInstrumentUiHeaderButton({
+    required int row,
+    required bool compact,
+  }) {
+    final size = compact ? 22.0 : 26.0;
+    return Tooltip(
+      message: L10n.translate(context, 'Open instrument UI'),
+      child: Semantics(
+        button: true,
+        label: L10n.translate(context, 'Open instrument UI'),
+        child: Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: _markInstrumentUiHeaderPointer,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              key: ValueKey('timeline_row_instrument_ui_$row'),
+              borderRadius: BorderRadius.circular(6),
+              onTap: widget.onOpenInstrumentUi == null
+                  ? null
+                  : () {
+                      unawaited(AppHaptics.impact(AppHapticImpact.light));
+                      unawaited(widget.onOpenInstrumentUi!(row));
+                    },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 100),
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.09),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.34),
+                  ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.white.withValues(alpha: 0.06),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  Icons.open_in_new_rounded,
+                  color: Colors.white,
+                  size: compact ? 14.0 : 16.0,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTabletOneTrackHeader(int row, bool isSelected) {
     final isInstrumentLane = _isInstrumentLane(row);
+    final showsInstrumentUiButton =
+        isInstrumentLane &&
+        (widget.canOpenInstrumentUi?.call(row) ?? false);
     final groupingMode = widget.rowGroupingSelectionMode;
     final isGroupingSelected = widget.groupingSelectedRows.contains(row);
     final rowGroup = _groupForRow(row);
@@ -15614,7 +15700,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                               ),
                                             ),
                                           ),
-                                          if (isSelected && !groupingMode) ...[
+                                          if (showsInstrumentUiButton &&
+                                              !groupingMode) ...[
+                                            const SizedBox(width: 4),
+                                            _buildInstrumentUiHeaderButton(
+                                              row: row,
+                                              compact: compactHeader,
+                                            ),
+                                          ] else if (isSelected &&
+                                              !groupingMode) ...[
                                             const SizedBox(width: 4),
                                             selectedExpandCaret(),
                                           ],
@@ -15815,6 +15909,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return _buildTabletOneTrackHeader(row, isSelected);
     }
     final isInstrumentLane = _isInstrumentLane(row);
+    final showsInstrumentUiButton =
+        isInstrumentLane &&
+        (widget.canOpenInstrumentUi?.call(row) ?? false);
     final groupingMode = widget.rowGroupingSelectionMode;
     final isGroupingSelected = widget.groupingSelectedRows.contains(row);
     final rowGroup = _groupForRow(row);
@@ -16005,10 +16102,23 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                         ),
                       ),
                     isInstrumentLane
-                        ? const Icon(
-                            Icons.piano_outlined,
-                            color: Colors.white,
-                            size: 20,
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.piano_outlined,
+                                color: Colors.white,
+                                size: showsInstrumentUiButton ? 17 : 20,
+                              ),
+                              if (showsInstrumentUiButton && !groupingMode) ...[
+                                const SizedBox(width: 2),
+                                _buildInstrumentUiHeaderButton(
+                                  row: row,
+                                  compact: true,
+                                ),
+                              ],
+                            ],
                           )
                         : buildTrackRowIcon(
                             widget.rows[row].iconId,
@@ -16025,18 +16135,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                             Icons.info_outline_rounded,
                             color: Colors.white.withValues(alpha: 0.92),
                             size: 14,
-                          ),
-                        ),
-                      ),
-                    if (isInstrumentLane)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 3),
-                        child: Container(
-                          width: 18,
-                          height: 3,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.82),
-                            borderRadius: BorderRadius.circular(99),
                           ),
                         ),
                       ),
@@ -16067,7 +16165,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               )
                             : null,
                       ),
-                    ] else if (isSelected) ...[
+                    ] else if (isSelected && !showsInstrumentUiButton) ...[
                       const SizedBox(height: 1),
                       Icon(
                         _rowExpanded[row]

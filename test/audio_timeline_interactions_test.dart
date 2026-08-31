@@ -342,6 +342,8 @@ Widget _buildHarness({
   Future<void> Function(int row)? onChangeInstrumentLane,
   Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane,
+  Future<void> Function(int row)? onOpenInstrumentUi,
+  bool Function(int row)? canOpenInstrumentUi,
   void Function(int clipIndex)? onOpenMidiClip,
   void Function(int clipIndex)? onOpenAudioClipOptionsPanel,
   void Function(int clipIndex)? onCopyClip,
@@ -575,6 +577,8 @@ Widget _buildHarness({
           onDeleteClips: null,
           onCutClipAt: null,
           onOpenMidiClip: onOpenMidiClip,
+          onOpenInstrumentUi: onOpenInstrumentUi,
+          canOpenInstrumentUi: canOpenInstrumentUi,
           onOpenAudioClipOptionsPanel: onOpenAudioClipOptionsPanel,
           onCreateMidiClipInInstrumentLane: onCreateMidiClipInInstrumentLane,
           onStemSeparation: null,
@@ -1783,6 +1787,59 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(createRequests, isEmpty);
+  });
+
+  testWidgets('third-party instrument header alone exposes a UI button',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(
+        rowId: 1,
+        name: 'Keys',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'vst3:/Library/Audio/Plug-Ins/VST3/Vital.vst3',
+        instrumentName: 'Vital',
+      ),
+      TimelineRow(
+        rowId: 2,
+        name: 'Mixroom Keys',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'sfz.vsco.upright_piano',
+        instrumentName: 'Upright Piano',
+      ),
+      TimelineRow(rowId: 3, name: 'Audio', iconId: 0),
+    ];
+    final openedRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onMoveClipCommit: (_, __, ___) async {},
+        canOpenInstrumentUi: (row) => row == 0,
+        onOpenInstrumentUi: (row) async => openedRows.add(row),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(
+      const ValueKey('timeline_row_instrument_ui_0'),
+    );
+    expect(button, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('timeline_row_instrument_ui_1')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline_row_instrument_ui_2')),
+      findsNothing,
+    );
+
+    await tester.tap(button);
+    await tester.pump();
+
+    expect(openedRows, <int>[0]);
   });
 
   testWidgets('empty instrument lane menu can create a MIDI clip',
