@@ -9,6 +9,7 @@ import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/helpers/trackpad_touch_count.dart';
+import 'package:mixroom/helpers/waveform_detail.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -419,6 +420,7 @@ Widget _buildHarness({
   int loopEndMs = 0,
   VoidCallback? onTutorialTimelineScrolled,
   VoidCallback? onTutorialTimelineZoomed,
+  ValueChanged<WaveformDetailViewport>? onWaveformDetailViewportSettled,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
@@ -495,6 +497,7 @@ Widget _buildHarness({
           getFullDurationMs: (clip) =>
               clip.audioDuration.inMilliseconds.toDouble(),
           getPeaks: (_) => List<double>.filled(32, 0.35, growable: false),
+          onWaveformDetailViewportSettled: onWaveformDetailViewportSettled,
           getY: (clip) => clip.y,
           onSelectRow: onSelectRow ?? (_) {},
           recordingInProgress: false,
@@ -1202,6 +1205,58 @@ void main() {
 
       expect(moveCommits, hasLength(1));
       expect(moveCommits.single, closeTo(62.5, 0.01));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('waveform detail viewport waits for settled final zoom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clip = await _buildClip();
+      final viewports = <WaveformDetailViewport>[];
+      Widget buildTimeline() => _buildHarness(
+        clips: <AudioTrack>[clip],
+        onMoveClipCommit: (_, __, ___) async {},
+        onWaveformDetailViewportSettled: viewports.add,
+      );
+      await tester.pumpWidget(buildTimeline());
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pumpWidget(buildTimeline());
+      await tester.pump(const Duration(milliseconds: 121));
+      expect(viewports, hasLength(1));
+      expect(viewports.single.pixelsPerMs, _kInitialPixelsPerMs);
+      expect(viewports.single.visibleClipIds, <String>[clip.clipId]);
+      viewports.clear();
+
+      final center = _desktopClipCenter(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -600),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -600),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+
+      await tester.pump(const Duration(milliseconds: 179));
+      expect(viewports, isEmpty);
+      await tester.pump(const Duration(milliseconds: 2));
+      expect(viewports, hasLength(1));
+      expect(
+        viewports.single.pixelsPerMs,
+        greaterThanOrEqualTo(kWaveformDetailMinimumPixelsPerMs),
+      );
+      expect(viewports.single.visibleClipIds, <String>[clip.clipId]);
     } finally {
       _setTestTargetPlatform(null);
     }

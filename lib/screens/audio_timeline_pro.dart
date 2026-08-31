@@ -24,6 +24,7 @@ import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/helpers/track_group_reconciler.dart';
 import 'package:mixroom/helpers/track_row_icons.dart';
+import 'package:mixroom/helpers/waveform_detail.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
@@ -583,6 +584,8 @@ class AudioCanvasTimeline extends StatefulWidget {
   final double Function(AudioTrack)
   getFullDurationMs; // === FIX ===: Added this helper
   final List<double> Function(AudioTrack) getPeaks;
+  final WaveformDetailLookup? waveformDetailLookup;
+  final ValueChanged<WaveformDetailViewport>? onWaveformDetailViewportSettled;
   final double Function(AudioTrack) getY; // This doesn't seem to be used?
   final void Function(int row) onSelectRow;
   final void Function(int row) onToggleExpanded;
@@ -849,6 +852,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.getTrimEndMs,
     required this.getFullDurationMs, // === FIX ===
     required this.getPeaks,
+    this.waveformDetailLookup,
+    this.onWaveformDetailViewportSettled,
     required this.getY,
     required this.onSelectRow,
     required this.recordingInProgress,
@@ -1679,6 +1684,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   _TimelineTrackpadPanAxis? _timelineTrackpadPanAxis;
   PointerPanZoomUpdateEvent? _lastTimelinePointerPanZoomUpdateEvent;
   Timer? _timelineTrackpadHorizontalInertiaTimer;
+  Timer? _waveformDetailViewportTimer;
+  String? _pendingWaveformDetailViewportSignature;
+  String? _lastWaveformDetailViewportSignature;
   Duration? _timelineTrackpadLastHorizontalPanTime;
   double _timelineTrackpadHorizontalVelocityPxPerSecond = 0.0;
   bool _timelineTrackpadHorizontalInertiaEligible = false;
@@ -6170,6 +6178,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _cancelDeadZoneHoldTimer();
     _cancelMagnetHoldTimer();
     _stopTimelineTrackpadHorizontalInertia();
+    _waveformDetailViewportTimer?.cancel();
+    _waveformDetailViewportTimer = null;
+    _pendingWaveformDetailViewportSignature = null;
     widget.controller?._unbind(
       ensureRowExpanded: ensureRowExpanded,
       showMasterAutomationLane: showMasterAutomationLane,
@@ -10637,6 +10648,67 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
+  void _scheduleWaveformDetailViewport({
+    required double viewportWidth,
+    required List<int> visibleClipIndices,
+  }) {
+    final callback = widget.onWaveformDetailViewportSettled;
+    if (callback == null || viewportWidth <= 0.0 || _pixelsPerMs <= 0.0) {
+      _waveformDetailViewportTimer?.cancel();
+      _waveformDetailViewportTimer = null;
+      _pendingWaveformDetailViewportSignature = null;
+      return;
+    }
+    final startMs = math.max(0.0, _scrollOffsetMs);
+    final endMs = math.max(
+      startMs,
+      _scrollOffsetMs + viewportWidth / _pixelsPerMs,
+    );
+    final visibleClipIds = <String>[];
+    final visibleClipSignatures = <String>[];
+    for (final index in visibleClipIndices) {
+      if (index < 0 || index >= widget.clips.length) continue;
+      final clip = widget.clips[index];
+      if (clip.isMidi || clip.clipId.trim().isEmpty) continue;
+      final clipStartMs = widget.getStartMs(clip);
+      final clipEndMs = clipStartMs + widget.getTimelineDurationMs(clip);
+      if (clipEndMs <= startMs || clipStartMs >= endMs) continue;
+      visibleClipIds.add(clip.clipId);
+      visibleClipSignatures.add(
+        '${clip.clipId}:${clip.file.path}:'
+        '${clipStartMs.toStringAsFixed(3)}:'
+        '${clipEndMs.toStringAsFixed(3)}:'
+        '${widget.getTrimStartMs(clip).toStringAsFixed(3)}:'
+        '${widget.getTrimEndMs(clip).toStringAsFixed(3)}:'
+        '${clip.isReversed}',
+      );
+    }
+    final pixelsPerMs = _pixelsPerMs;
+    final signature =
+        '${startMs.toStringAsFixed(2)}|'
+        '${endMs.toStringAsFixed(2)}|${_pixelsPerMs.toStringAsFixed(5)}|'
+        '${visibleClipSignatures.join(',')}';
+    if (signature == _lastWaveformDetailViewportSignature ||
+        signature == _pendingWaveformDetailViewportSignature) {
+      return;
+    }
+    _waveformDetailViewportTimer?.cancel();
+    _pendingWaveformDetailViewportSignature = signature;
+    _waveformDetailViewportTimer = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      _pendingWaveformDetailViewportSignature = null;
+      _lastWaveformDetailViewportSignature = signature;
+      callback(
+        WaveformDetailViewport(
+          timelineStartMs: startMs,
+          timelineEndMs: endMs,
+          pixelsPerMs: pixelsPerMs,
+          visibleClipIds: List<String>.unmodifiable(visibleClipIds),
+        ),
+      );
+    });
+  }
+
   Widget _buildPlaybackDrivenTimelineLayers({
     required double viewportWidth,
     required double visibleTimelineHeight,
@@ -10661,6 +10733,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       viewportWidth: viewportWidth,
       visibleTimelineHeight: visibleTimelineHeight,
       leftExtensionPx: _headerWidth,
+    );
+    _scheduleWaveformDetailViewport(
+      viewportWidth: viewportWidth,
+      visibleClipIndices: visibleClipIndices,
     );
 
     return Stack(
@@ -10693,6 +10769,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           getTrimEndMs: widget.getTrimEndMs,
                           getFullDurationMs: widget.getFullDurationMs,
                           getPeaks: widget.getPeaks,
+                          waveformDetailLookup: widget.waveformDetailLookup,
                           pixelsPerMs: _pixelsPerMs,
                           scrollOffsetMs:
                               _scrollOffsetMs -
@@ -10817,6 +10894,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               getTrimEndMs: widget.getTrimEndMs,
                               getFullDurationMs: widget.getFullDurationMs,
                               getPeaks: widget.getPeaks,
+                              waveformDetailLookup: widget.waveformDetailLookup,
                               pixelsPerMs: _pixelsPerMs,
                               scrollOffsetMs: _scrollOffsetMs,
                               viewportWidth: viewportWidth,
@@ -18879,6 +18957,7 @@ class _TimelinePainter extends CustomPainter {
   final double Function(AudioTrack) getTrimEndMs;
   final double Function(AudioTrack) getFullDurationMs;
   final List<double> Function(AudioTrack) getPeaks;
+  final WaveformDetailLookup? waveformDetailLookup;
   final double pixelsPerMs;
   final double scrollOffsetMs;
   final double viewportWidth;
@@ -18956,6 +19035,7 @@ class _TimelinePainter extends CustomPainter {
     required this.getTrimEndMs,
     required this.getFullDurationMs,
     required this.getPeaks,
+    required this.waveformDetailLookup,
     required this.pixelsPerMs,
     required this.scrollOffsetMs,
     required this.viewportWidth,
@@ -19028,7 +19108,8 @@ class _TimelinePainter extends CustomPainter {
          rows
              .map((row) => Object.hash(row.rowId, row.color, row.groupId))
              .toList(growable: false),
-       );
+       ),
+       super(repaint: waveformDetailLookup);
 
   static int _computeAutomationClipHash(
     List<_TimelineAutomationClipVisual> clips,
@@ -19661,6 +19742,7 @@ class _TimelinePainter extends CustomPainter {
               timelineVisibleMs / rawVisibleMs,
               gainScale: _clipEffectiveGainLinear(clip),
               isReversed: clip.isReversed,
+              sourcePath: clip.file.path,
               color: Colors.white.withValues(alpha: 0.78),
             );
           }
@@ -20194,6 +20276,7 @@ class _TimelinePainter extends CustomPainter {
         stretchScale,
         gainScale: _clipEffectiveGainLinear(clip),
         isReversed: clip.isReversed,
+        sourcePath: clip.file.path,
       );
 
       canvas.restore();
@@ -20568,6 +20651,7 @@ class _TimelinePainter extends CustomPainter {
     double stretchScale, {
     required double gainScale,
     required bool isReversed,
+    required String sourcePath,
     Color? color,
   }) {
     if (peaks.isEmpty || rect.width <= 0 || rect.height <= 0) return;
@@ -20635,11 +20719,38 @@ class _TimelinePainter extends CustomPainter {
         i1 = math.min(peaks.length, i0 + 1);
       }
 
-      double maxAmp = 0.0;
-      for (int i = i0; i < i1; i++) {
-        final amp = peaks[i].abs() * safeGainScale;
-        if (amp > maxAmp) {
-          maxAmp = amp;
+      double? detailPeak;
+      final detailLookup = waveformDetailLookup;
+      if (detailLookup != null &&
+          pixelsPerMs >= kWaveformDetailMinimumPixelsPerMs) {
+        final detailStartMs = isReversed
+            ? (trimEndMs - (col + 1.0) * sourceMsPerPixel)
+            : (trimStartMs + col.toDouble() * sourceMsPerPixel);
+        final detailEndMs = isReversed
+            ? (trimEndMs - col.toDouble() * sourceMsPerPixel)
+            : (trimStartMs + (col + 1.0) * sourceMsPerPixel);
+        final clampedDetailStart = detailStartMs
+            .clamp(0.0, safeFullDurationMs)
+            .toDouble();
+        final clampedDetailEnd = detailEndMs
+            .clamp(clampedDetailStart, safeFullDurationMs)
+            .toDouble();
+        if (clampedDetailEnd > clampedDetailStart) {
+          detailPeak = detailLookup.peakForSourceRange(
+            sourcePath,
+            clampedDetailStart,
+            clampedDetailEnd,
+          );
+        }
+      }
+
+      var maxAmp = (detailPeak ?? 0.0) * safeGainScale;
+      if (detailPeak == null) {
+        for (int i = i0; i < i1; i++) {
+          final amp = peaks[i].abs() * safeGainScale;
+          if (amp > maxAmp) {
+            maxAmp = amp;
+          }
         }
       }
       if (maxAmp <= 0.0001) continue;

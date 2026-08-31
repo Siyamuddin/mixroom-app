@@ -31,6 +31,7 @@ import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
 import 'package:mixroom/helpers/timeline_grid_policy.dart';
+import 'package:mixroom/helpers/waveform_detail.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -6231,6 +6232,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       <String, Set<AudioTrack>>{};
   final Map<String, int> _waveformFailureCountByPath = <String, int>{};
   Future<void> _waveformExtractionLane = Future<void>.value();
+  late final WaveformDetailProvider _waveformDetailProvider;
+  int _waveformDetailViewportGeneration = 0;
   static const int _maxWaveformExtractionAttempts = 3;
   String _aiLibrarySnapshotCache = '';
   String? _aiLibrarySnapshotCacheKey;
@@ -9249,6 +9252,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   @override
   void initState() {
     super.initState();
+    _waveformDetailProvider = WaveformDetailProvider(
+      loadTile: _extractWaveformDetailTile,
+      overviewWorkPending: () => _waveformFutureByPath.isNotEmpty,
+    );
     if (PlatformCapabilities.current.isDesktop) {
       HardwareKeyboard.instance.addHandler(_handleMacEditorKeyEvent);
     }
@@ -12662,6 +12669,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   @override
   void dispose() {
+    _waveformDetailViewportGeneration++;
+    _waveformDetailProvider.dispose();
     _chatMutationDisposed = true;
     _chatScrollRequest++;
     _pendingChatInsertions.clear();
@@ -13722,6 +13731,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _waveformFutureByPath.clear();
       _waveformPendingTracksByPath.clear();
       _waveformFailureCountByPath.clear();
+      _waveformDetailViewportGeneration++;
+      _waveformDetailProvider.clear();
       _indexedClipRowId.clear();
       _clipsByRowId.clear();
       _indexedClipEndMs.clear();
@@ -29912,8 +29923,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String inputPath, {
     required double durSec,
     required int target,
-  }) {
-    final result = Completer<List<double>?>();
+  }) => _runWaveformExtractionJob(
+    () => _extractWaveformDataNow(inputPath, durSec: durSec, target: target),
+  );
+
+  Future<T> _runWaveformExtractionJob<T>(Future<T> Function() work) {
+    final result = Completer<T>();
     final previous = _waveformExtractionLane;
     _waveformExtractionLane = () async {
       try {
@@ -29922,18 +29937,111 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         // A failed job must not poison the lane for later clips.
       }
       try {
-        result.complete(
-          await _extractWaveformDataNow(
-            inputPath,
-            durSec: durSec,
-            target: target,
-          ),
-        );
+        result.complete(await work());
       } catch (error, stackTrace) {
         result.completeError(error, stackTrace);
       }
     }();
     return result.future;
+  }
+
+  Future<WaveformDetailTile?> _extractWaveformDetailTile(
+    WaveformDetailTileRequest request,
+  ) => _runWaveformExtractionJob(() => _extractWaveformDetailTileNow(request));
+
+  Future<WaveformDetailTile?> _extractWaveformDetailTileNow(
+    WaveformDetailTileRequest request,
+  ) async {
+    final durationMs = request.durationMs;
+    if (durationMs <= 0.0 ||
+        durationMs > kWaveformDetailTileDurationMs ||
+        request.source.path.trim().isEmpty) {
+      return null;
+    }
+    const channels = 2;
+    const bytesPerSample = 2;
+    const bytesPerFrame = channels * bytesPerSample;
+    final maximumFrames =
+        (durationMs * kWaveformDetailSampleRate / 1000.0).ceil() + 1;
+    final maximumBytes = maximumFrames * bytesPerFrame;
+    final tmpDir = await getTemporaryDirectory();
+    final rawFile = File(
+      p.join(
+        tmpDir.path,
+        'wf_detail_${request.source.cacheKey.hashCode}_${request.tileIndex}.raw',
+      ),
+    );
+    try {
+      if (await rawFile.exists()) await rawFile.delete();
+      final session = await FFmpegKit.executeWithArguments(<String>[
+        '-hide_banner',
+        '-nostdin',
+        '-ss',
+        (request.startMs / 1000.0).toStringAsFixed(6),
+        '-i',
+        request.source.path,
+        '-t',
+        (durationMs / 1000.0).toStringAsFixed(6),
+        '-vn',
+        '-ac',
+        '$channels',
+        '-ar',
+        '$kWaveformDetailSampleRate',
+        '-f',
+        's16le',
+        '-y',
+        rawFile.path,
+      ]);
+      final returnCode = await session.getReturnCode();
+      if (!ReturnCode.isSuccess(returnCode) || !await rawFile.exists()) {
+        debugPrint(
+          'Waveform detail extraction failed for '
+          '${p.basename(request.source.path)} tile ${request.tileIndex} '
+          'with code ${returnCode?.getValue()}',
+        );
+        return null;
+      }
+      final byteLength = await rawFile.length();
+      if (byteLength < bytesPerFrame || byteLength > maximumBytes) {
+        debugPrint(
+          'Waveform detail output had an invalid bounded size: $byteLength',
+        );
+        return null;
+      }
+      final bytes = await rawFile.readAsBytes();
+      final frameCount = bytes.length ~/ bytesPerFrame;
+      if (frameCount <= 0) return null;
+      final amplitudes = Float32List(frameCount);
+      for (var frame = 0; frame < frameCount; frame++) {
+        final frameBase = frame * bytesPerFrame;
+        var peak = 0.0;
+        for (var channel = 0; channel < channels; channel++) {
+          final byteIndex = frameBase + channel * bytesPerSample;
+          var value = bytes[byteIndex] | (bytes[byteIndex + 1] << 8);
+          if ((value & 0x8000) != 0) value -= 0x10000;
+          final amplitude = (value / 32768.0).abs();
+          if (amplitude > peak) peak = amplitude;
+        }
+        amplitudes[frame] = peak.clamp(0.0, 1.0).toDouble();
+      }
+      return WaveformDetailTile(
+        sourceKey: request.source.cacheKey,
+        tileIndex: request.tileIndex,
+        startMs: request.startMs,
+        sampleRate: kWaveformDetailSampleRate,
+        amplitudes: amplitudes,
+      );
+    } catch (error) {
+      debugPrint(
+        'Waveform detail extraction failed for '
+        '${p.basename(request.source.path)} tile ${request.tileIndex}: $error',
+      );
+      return null;
+    } finally {
+      try {
+        if (await rawFile.exists()) await rawFile.delete();
+      } catch (_) {}
+    }
   }
 
   Future<List<double>?> _extractWaveformDataNow(
@@ -30144,6 +30252,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     })
                     .whenComplete(() {
                       _waveformFutureByPath.remove(cacheKey);
+                      _waveformDetailProvider.resumeAfterOverviewWork();
                     });
             _waveformFutureByPath[cacheKey] = future;
             return future;
@@ -30170,6 +30279,88 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _waveformPendingTracksByPath.remove(cacheKey) ?? <AudioTrack>{c};
       _markWaveformExtractionFailed(cacheKey, waitingTracks, e);
     }
+  }
+
+  Future<void> _handleWaveformDetailViewport(
+    WaveformDetailViewport viewport,
+  ) async {
+    final generation = ++_waveformDetailViewportGeneration;
+    if (viewport.pixelsPerMs < kWaveformDetailMinimumPixelsPerMs ||
+        viewport.timelineEndMs <= viewport.timelineStartMs ||
+        viewport.visibleClipIds.isEmpty) {
+      _waveformDetailProvider.requestTiles(const <WaveformDetailTileRequest>[]);
+      return;
+    }
+
+    final clipById = <String, AudioTrack>{
+      for (final clip in _audioTracks)
+        if (!clip.isMidi && clip.clipId.trim().isNotEmpty) clip.clipId: clip,
+    };
+    final statByPath = <String, Future<FileStat>>{};
+    final requestGroups = await Future.wait(
+      viewport.visibleClipIds.map((clipId) async {
+        final clip = clipById[clipId];
+        if (clip == null) return const <WaveformDetailTileRequest>[];
+        final clipStartMs = clip.offset * 1000.0;
+        final timelineDurationMs = _clipTimelineDurationMs(clip);
+        final path = clip.file.path;
+        final statFuture = statByPath.putIfAbsent(path, () => clip.file.stat());
+        final FileStat stat;
+        try {
+          stat = await statFuture;
+        } catch (_) {
+          return const <WaveformDetailTileRequest>[];
+        }
+        if (stat.type == FileSystemEntityType.notFound) {
+          return const <WaveformDetailTileRequest>[];
+        }
+        final normalizedPath = _normalizedClipPath(path);
+        final durationMs = clip.audioDuration.inMicroseconds / 1000.0;
+        if (durationMs <= 0.0) return const <WaveformDetailTileRequest>[];
+        final source = WaveformDetailSource(
+          path: path,
+          cacheKey:
+              '$normalizedPath|${stat.size}|${stat.modified.millisecondsSinceEpoch}',
+          durationMs: durationMs,
+        );
+        final sourceRange =
+            waveformDetailSourceRangeForTimelineIntersection(
+              clipStartMs: clipStartMs,
+              timelineDurationMs: timelineDurationMs,
+              trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
+              trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
+              sourceDurationMs: durationMs,
+              isReversed: clip.isReversed,
+              viewportStartMs: viewport.timelineStartMs,
+              viewportEndMs: viewport.timelineEndMs,
+            );
+        if (sourceRange == null) {
+          return const <WaveformDetailTileRequest>[];
+        }
+        return waveformDetailTileIndicesForRange(
+          sourceStartMs: sourceRange.startMs,
+          sourceEndMs: sourceRange.endMs,
+          sourceDurationMs: durationMs,
+        )
+            .map(
+              (tileIndex) => WaveformDetailTileRequest(
+                source: source,
+                tileIndex: tileIndex,
+              ),
+            )
+            .toList(growable: false);
+      }),
+    );
+    if (!mounted || generation != _waveformDetailViewportGeneration) return;
+    final liveClipIds = _audioTracks.map((clip) => clip.clipId).toSet();
+    final deduplicated = LinkedHashMap<String, WaveformDetailTileRequest>();
+    for (var groupIndex = 0; groupIndex < requestGroups.length; groupIndex++) {
+      if (!liveClipIds.contains(viewport.visibleClipIds[groupIndex])) continue;
+      for (final request in requestGroups[groupIndex]) {
+        deduplicated.putIfAbsent(request.key, () => request);
+      }
+    }
+    _waveformDetailProvider.requestTiles(deduplicated.values);
   }
 
   Future<void> _exportAndNavigate({
@@ -83304,6 +83495,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           getPeaks: (c) {
                                             return c.displayWaveformData;
                                           },
+                                          waveformDetailLookup:
+                                              _waveformDetailProvider,
+                                          onWaveformDetailViewportSettled:
+                                              _handleWaveformDetailViewport,
                                           getY: (c) => c
                                               .y, // store a visual Y in your model
                                           // commit (persist in your model, then setState)
