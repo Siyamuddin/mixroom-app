@@ -426,6 +426,7 @@
 + (NSArray<NSNumber *> *)getMasterCompressorMeterObjC:(NSInteger)effectIndex;
 + (double)getHostSampleRateObjC;
 + (NSArray<NSNumber *> *)getRecentMasterWaveformObjC:(NSInteger)sampleCount;
++ (NSArray<NSNumber *> *)getRecentMasterStereoWaveformObjC:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getRowEqWaveformObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getMasterEqWaveformObjC:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount;
 + (NSArray<NSNumber *> *)getRowStereoScopeObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex pointCount:(NSInteger)pointCount;

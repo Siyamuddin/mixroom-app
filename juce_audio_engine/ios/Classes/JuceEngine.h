@@ -6701,6 +6701,8 @@ public:
     // Gets master + all row meters
     std::vector<float> getAllMeterValues() const;
     std::vector<float> getRecentMasterWaveform(int sampleCount) const;
+    // Interleaved post-master samples: [L0, R0, L1, R1, ...].
+    std::vector<float> getRecentMasterStereoWaveform(int sampleCount) const;
 
     // Compressor meter strip (white-box only)
     const std::array<float, 5> getClipCompressorMeter(int clipIndex, int effectIndex);
@@ -7076,7 +7078,8 @@ private:
     std::atomic<bool> masterMeterEnabled{true};
     std::atomic<bool> masterClipLatched{false};
     static constexpr int kMasterWaveformRingSize = 8192;
-    std::array<float, kMasterWaveformRingSize> masterWaveformRing{};
+    std::array<float, kMasterWaveformRingSize> masterWaveformRingL{};
+    std::array<float, kMasterWaveformRingSize> masterWaveformRingR{};
     std::atomic<int> masterWaveformWritePos{0};
     std::array<float, 2> outputSafetyLastSample{0.0f, 0.0f};
     int outputSafetyMuteSamplesRemaining = 0;

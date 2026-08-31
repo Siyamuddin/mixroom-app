@@ -4683,6 +4683,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "getHostSampleRate" -> {
           result.success(JuceBridge.getHostSampleRateJNI())
         }
+        "getRecentMasterStereoWaveform" -> {
+          result.success(
+            JuceBridge.getRecentMasterStereoWaveformJNI(
+              args.intValue("sampleCount", 2048),
+            ).toList(),
+          )
+        }
         "getRowEqWaveform" -> {
           result.success(
             JuceBridge.getRowEqWaveformJNI(

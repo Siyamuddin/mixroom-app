@@ -301,6 +301,7 @@ object JuceBridge {
     @JvmStatic external fun getRowCompressorMeterJNI(row: Int, effectIndex: Int): DoubleArray
     @JvmStatic external fun getMasterCompressorMeterJNI(effectIndex: Int): DoubleArray
     @JvmStatic external fun getHostSampleRateJNI(): Double
+    @JvmStatic external fun getRecentMasterStereoWaveformJNI(sampleCount: Int): DoubleArray
     @JvmStatic external fun getRowEqWaveformJNI(row: Int, effectIndex: Int, sampleCount: Int): DoubleArray
     @JvmStatic external fun getMasterEqWaveformJNI(effectIndex: Int, sampleCount: Int): DoubleArray
     @JvmStatic external fun getRowStereoScopeJNI(row: Int, effectIndex: Int, pointCount: Int): DoubleArray

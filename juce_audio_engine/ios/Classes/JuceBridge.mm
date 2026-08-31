@@ -6045,6 +6045,15 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return arr;
 }
 
++ (NSArray<NSNumber*>*)getRecentMasterStereoWaveformObjC:(NSInteger)sampleCount
+{
+    const auto v = JuceEngine::get().getRecentMasterStereoWaveform((int)sampleCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
 + (NSArray<NSNumber*>*)getRowEqWaveformObjC:(NSInteger)row effectIndex:(NSInteger)effectIndex sampleCount:(NSInteger)sampleCount
 {
     const auto v = JuceEngine::get().getRowEqWaveform((int)row, (int)effectIndex, (int)sampleCount);
