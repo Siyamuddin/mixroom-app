@@ -22,11 +22,12 @@ void main() {
 
   Widget buildPanel({
     required SampleBrowserDirectoryReader directoryReader,
+    double width = 420,
   }) {
     return MaterialApp(
       home: Scaffold(
         body: SizedBox(
-          width: 420,
+          width: width,
           height: 680,
           child: SampleBrowserPanel(
             rootFolders: <String>[root.path],
@@ -94,6 +95,30 @@ void main() {
         listBounds.right - insertButtonBounds.right,
         greaterThanOrEqualTo(16),
       );
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      PlatformCapabilities.debugResetForCurrentPlatform();
+    }
+  });
+
+  testWidgets('keeps file duration visible at minimum desktop panel width',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    PlatformCapabilities.debugResetForCurrentPlatform();
+    try {
+      final sample = File('${root.path}/kick.wav');
+      await tester.pumpWidget(
+        buildPanel(
+          width: 344,
+          directoryReader: (_) async => <FileSystemEntity>[sample],
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('--:--'), findsOneWidget);
+      expect(find.byIcon(Icons.add_circle_outline), findsOneWidget);
+      expect(tester.takeException(), isNull);
     } finally {
       debugDefaultTargetPlatformOverride = null;
       PlatformCapabilities.debugResetForCurrentPlatform();

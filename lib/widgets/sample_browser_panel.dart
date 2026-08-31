@@ -1329,7 +1329,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
 
     final tile = LayoutBuilder(
       builder: (context, constraints) {
-        final showDuration = constraints.maxWidth > 340;
+        final showDuration = constraints.maxWidth >= 300;
         final showInsertButton = constraints.maxWidth > 280;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
