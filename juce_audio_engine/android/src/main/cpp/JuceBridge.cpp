@@ -2198,6 +2198,18 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *env
 }
 
 extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecentMasterStereoWaveformJNI(JNIEnv *env, jclass, jint sampleCount)
+{
+    if (!ensureJuceAndroidRuntimeInitialised(env))
+        return env->NewDoubleArray(0);
+
+    std::vector<float> waveform;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { waveform = JuceEngine::get().getRecentMasterStereoWaveform((int)sampleCount); });
+    return floatVectorToJDoubleArray(env, waveform);
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackCompressorMeterJNI(JNIEnv *env, jclass, jint trackIndex, jint effectIndex)
 {
     std::array<float, 5> meter{0, 0, 0, 0, 0};
@@ -2704,6 +2716,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTransportSecondsJNI(JNIEnv *,
     juce::MessageManager::getInstance()->callSync([&]
                                                   { value = JuceEngine::get().getTransportSeconds(); });
     return value.load();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLoopRegionJNI(
+    JNIEnv *, jclass, jboolean enabled, jdouble startSeconds, jdouble endSeconds)
+{
+    const bool loopEnabled = enabled != JNI_FALSE;
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([loopEnabled, startSeconds, endSeconds]
+                     { JuceEngine::get().setLoopRegion(
+                           loopEnabled, (double)startSeconds, (double)endSeconds); });
+        return;
+    }
+    JuceEngine::get().setLoopRegion(
+        loopEnabled, (double)startSeconds, (double)endSeconds);
 }
 
 extern "C" JNIEXPORT void JNICALL

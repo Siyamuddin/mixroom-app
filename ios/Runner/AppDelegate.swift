@@ -3,7 +3,9 @@ import UIKit
 import AVFAudio
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, UIDocumentInteractionControllerDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate,
+  UIDocumentInteractionControllerDelegate
+{
 
   private let channelName = "mixroom/open_file"
   private var channel: FlutterMethodChannel?
@@ -23,9 +25,14 @@ import AVFAudio
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    bindChannelsIfNeeded()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(
+    _ engineBridge: FlutterImplicitEngineBridge
+  ) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    bindChannelsIfNeeded()
   }
 
   override func application(

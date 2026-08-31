@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
@@ -14,6 +15,8 @@ const String kMixroomSignInBackgroundAsset =
     'assets/auth/sign_in_background.webp';
 const String kMixroomSignInBackgroundTileAsset =
     'assets/auth/sign_in_background_tile.png';
+const String kMixroomDesktopAuthBackgroundAsset =
+    'assets/auth/desktop_auth_background.webp';
 const String kMixroomLaunchBackgroundNoLogoTabletAsset =
     'assets/auth/launch_background_no_logo_tablet.png';
 const String kMixroomLaunchSplashAsset = 'assets/mixroom_launch_screen.webp';
@@ -54,6 +57,10 @@ bool mixroomUseTabletDesktopAuthBackground(BuildContext context) {
   final platform = PlatformCapabilities.current;
   final size = MediaQuery.sizeOf(context);
   return platform.isDesktop || (platform.isMobile && isTabletLogicalSize(size));
+}
+
+double mixroomAuthCornerBackButtonTopInset() {
+  return !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS ? 42 : 10;
 }
 
 class MixroomAuthBackground extends StatelessWidget {
@@ -152,10 +159,14 @@ class _MixroomLaunchBackgroundWithoutLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final assetPath = PlatformCapabilities.current.isDesktop
+        ? kMixroomDesktopAuthBackgroundAsset
+        : kMixroomLaunchBackgroundNoLogoTabletAsset;
+
     return ColoredBox(
       color: const Color(0xFF020402),
       child: Image.asset(
-        kMixroomLaunchBackgroundNoLogoTabletAsset,
+        assetPath,
         fit: BoxFit.cover,
         width: double.infinity,
         height: double.infinity,

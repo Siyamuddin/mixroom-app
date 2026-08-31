@@ -4410,6 +4410,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.setTransportSecondsJNI(args.doubleValue("timeSeconds"))
           result.success(null)
         }
+        "setLoopRegion" -> {
+          JuceBridge.setLoopRegionJNI(
+            args.boolValue("enabled"),
+            args.doubleValue("startSeconds"),
+            args.doubleValue("endSeconds"),
+          )
+          result.success(null)
+        }
         "insertTrackEffect" -> {
           val ok = JuceBridge.insertTrackEffectJNI(
             args.intValue("row"),
@@ -4682,6 +4690,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "getHostSampleRate" -> {
           result.success(JuceBridge.getHostSampleRateJNI())
+        }
+        "getRecentMasterStereoWaveform" -> {
+          result.success(
+            JuceBridge.getRecentMasterStereoWaveformJNI(
+              args.intValue("sampleCount", 2048),
+            ).toList(),
+          )
         }
         "getRowEqWaveform" -> {
           result.success(

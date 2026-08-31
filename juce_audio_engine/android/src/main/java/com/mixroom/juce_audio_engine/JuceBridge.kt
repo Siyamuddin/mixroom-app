@@ -144,6 +144,11 @@ object JuceBridge {
     // Transport
     @JvmStatic external fun setTransportSecondsJNI(timeSeconds: Double)
     @JvmStatic external fun getTransportSecondsJNI(): Double
+    @JvmStatic external fun setLoopRegionJNI(
+        enabled: Boolean,
+        startSeconds: Double,
+        endSeconds: Double,
+    )
     @JvmStatic external fun setAutomationTransportJNI(timeSeconds: Double)
 
     // Volume & bypass (legacy)
@@ -301,6 +306,7 @@ object JuceBridge {
     @JvmStatic external fun getRowCompressorMeterJNI(row: Int, effectIndex: Int): DoubleArray
     @JvmStatic external fun getMasterCompressorMeterJNI(effectIndex: Int): DoubleArray
     @JvmStatic external fun getHostSampleRateJNI(): Double
+    @JvmStatic external fun getRecentMasterStereoWaveformJNI(sampleCount: Int): DoubleArray
     @JvmStatic external fun getRowEqWaveformJNI(row: Int, effectIndex: Int, sampleCount: Int): DoubleArray
     @JvmStatic external fun getMasterEqWaveformJNI(effectIndex: Int, sampleCount: Int): DoubleArray
     @JvmStatic external fun getRowStereoScopeJNI(row: Int, effectIndex: Int, pointCount: Int): DoubleArray

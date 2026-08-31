@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
 
 enum DesktopPanelPreset {
@@ -55,6 +57,8 @@ class DesktopPanelShell extends StatefulWidget {
     this.outerShadowBorderRadius = 18,
     this.resizeCornerHandleSize = 32,
     this.onResetLayout,
+    this.ignoringPointers = false,
+    this.ignoringPointersListenable,
   });
 
   final Rect availableBounds;
@@ -74,15 +78,20 @@ class DesktopPanelShell extends StatefulWidget {
   final double resizeCornerHandleSize;
   final VoidCallback? onResetLayout;
 
+  /// When true, the shell keeps its layout but passes hits through so a
+  /// sample drag can land on the timeline underneath.
+  final bool ignoringPointers;
+
+  /// Read during hit testing so pass-through can start on the same
+  /// pointer event that began the drag, without waiting for a rebuild.
+  final ValueListenable<bool>? ignoringPointersListenable;
+
   @override
   State<DesktopPanelShell> createState() => _DesktopPanelShellState();
 }
 
 class _DesktopPanelMenuRow extends StatelessWidget {
-  const _DesktopPanelMenuRow({
-    required this.label,
-    required this.icon,
-  });
+  const _DesktopPanelMenuRow({required this.label, required this.icon});
 
   final String label;
   final Widget icon;
@@ -94,12 +103,7 @@ class _DesktopPanelMenuRow extends StatelessWidget {
       children: <Widget>[
         icon,
         const SizedBox(width: 10),
-        Flexible(
-          child: Text(
-            label,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
+        Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
       ],
     );
   }
@@ -332,16 +336,26 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
 
   Rect _rectFromLayout(DesktopEditorWindowLayout layout) {
     final bounds = widget.availableBounds;
-    final width = (bounds.width * layout.widthFraction)
-        .clamp(widget.minWidth, bounds.width);
-    final height = (bounds.height * layout.heightFraction)
-        .clamp(widget.minHeight, bounds.height);
-    final left = bounds.left +
-        ((bounds.width - width) * layout.leftFraction)
-            .clamp(0.0, bounds.width - width);
-    final top = bounds.top +
-        ((bounds.height - height) * layout.topFraction)
-            .clamp(0.0, bounds.height - height);
+    final width = (bounds.width * layout.widthFraction).clamp(
+      widget.minWidth,
+      bounds.width,
+    );
+    final height = (bounds.height * layout.heightFraction).clamp(
+      widget.minHeight,
+      bounds.height,
+    );
+    final left =
+        bounds.left +
+        ((bounds.width - width) * layout.leftFraction).clamp(
+          0.0,
+          bounds.width - width,
+        );
+    final top =
+        bounds.top +
+        ((bounds.height - height) * layout.topFraction).clamp(
+          0.0,
+          bounds.height - height,
+        );
     return _clampRect(Rect.fromLTWH(left, top, width, height));
   }
 
@@ -353,12 +367,16 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     final heightFraction = (rect.height / safeHeight).clamp(0.15, 1.0);
     final leftFraction = safeWidth <= rect.width
         ? 0.0
-        : ((rect.left - bounds.left) / (safeWidth - rect.width))
-            .clamp(0.0, 1.0);
+        : ((rect.left - bounds.left) / (safeWidth - rect.width)).clamp(
+            0.0,
+            1.0,
+          );
     final topFraction = safeHeight <= rect.height
         ? 0.0
-        : ((rect.top - bounds.top) / (safeHeight - rect.height))
-            .clamp(0.0, 1.0);
+        : ((rect.top - bounds.top) / (safeHeight - rect.height)).clamp(
+            0.0,
+            1.0,
+          );
     return DesktopEditorWindowLayout(
       leftFraction: leftFraction,
       topFraction: topFraction,
@@ -439,9 +457,7 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     }
     final delta = details.globalPosition - _interactionStartGlobal!;
     setState(() {
-      _liveRect = _clampRect(
-        _interactionStartRect!.shift(delta),
-      );
+      _liveRect = _clampRect(_interactionStartRect!.shift(delta));
     });
   }
 
@@ -656,9 +672,7 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
           value: _DesktopPanelMenuAction.topHalf,
           child: _DesktopPanelMenuRow(
             label: 'Top Half',
-            icon: _DesktopPanelPresetIcon(
-              preset: DesktopPanelPreset.topHalf,
-            ),
+            icon: _DesktopPanelPresetIcon(preset: DesktopPanelPreset.topHalf),
           ),
         ),
         PopupMenuItem<_DesktopPanelMenuAction>(
@@ -674,27 +688,21 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
           value: _DesktopPanelMenuAction.leftHalf,
           child: _DesktopPanelMenuRow(
             label: 'Left 1/2',
-            icon: _DesktopPanelPresetIcon(
-              preset: DesktopPanelPreset.leftHalf,
-            ),
+            icon: _DesktopPanelPresetIcon(preset: DesktopPanelPreset.leftHalf),
           ),
         ),
         PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.leftThird,
           child: _DesktopPanelMenuRow(
             label: 'Left 1/3',
-            icon: _DesktopPanelPresetIcon(
-              preset: DesktopPanelPreset.leftThird,
-            ),
+            icon: _DesktopPanelPresetIcon(preset: DesktopPanelPreset.leftThird),
           ),
         ),
         PopupMenuItem<_DesktopPanelMenuAction>(
           value: _DesktopPanelMenuAction.rightHalf,
           child: _DesktopPanelMenuRow(
             label: 'Right 1/2',
-            icon: _DesktopPanelPresetIcon(
-              preset: DesktopPanelPreset.rightHalf,
-            ),
+            icon: _DesktopPanelPresetIcon(preset: DesktopPanelPreset.rightHalf),
           ),
         ),
         PopupMenuItem<_DesktopPanelMenuAction>(
@@ -780,10 +788,7 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
           onPanStart: (details) => _beginResize(edge, details),
           onPanUpdate: _updateResize,
           onPanEnd: _endResize,
-          child: SizedBox(
-            width: width ?? 16,
-            height: height ?? 16,
-          ),
+          child: SizedBox(width: width ?? 16, height: height ?? 16),
         ),
       ),
     );
@@ -795,19 +800,23 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     required double size,
   }) {
     return Positioned(
-      left: edge == _DesktopPanelEdge.topLeft ||
+      left:
+          edge == _DesktopPanelEdge.topLeft ||
               edge == _DesktopPanelEdge.bottomLeft
           ? 0
           : null,
-      right: edge == _DesktopPanelEdge.topRight ||
+      right:
+          edge == _DesktopPanelEdge.topRight ||
               edge == _DesktopPanelEdge.bottomRight
           ? 0
           : null,
-      top: edge == _DesktopPanelEdge.topLeft ||
+      top:
+          edge == _DesktopPanelEdge.topLeft ||
               edge == _DesktopPanelEdge.topRight
           ? 0
           : null,
-      bottom: edge == _DesktopPanelEdge.bottomLeft ||
+      bottom:
+          edge == _DesktopPanelEdge.bottomLeft ||
               edge == _DesktopPanelEdge.bottomRight
           ? 0
           : null,
@@ -832,13 +841,15 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
     final rect = widget.fullscreen
         ? widget.availableBounds
         : (_liveRect ?? _rectFromLayout(widget.layout));
-    final shellPadding =
-        widget.fullscreen ? EdgeInsets.zero : const EdgeInsets.all(8);
+    final shellPadding = widget.fullscreen
+        ? EdgeInsets.zero
+        : const EdgeInsets.all(8);
     final dragStripHeight = widget.fullscreen
         ? 0.0
         : (widget.dragHandleHeight ?? 10.0).clamp(0.0, rect.height).toDouble();
-    final topMenuHeight =
-        widget.topContextMenuHeight.clamp(0.0, rect.height).toDouble();
+    final topMenuHeight = widget.topContextMenuHeight
+        .clamp(0.0, rect.height)
+        .toDouble();
     const sideHandleSize = 14.0;
     final cornerHandleSize = widget.resizeCornerHandleSize
         .clamp(16.0, math.min(rect.width, rect.height))
@@ -846,117 +857,190 @@ class _DesktopPanelShellState extends State<DesktopPanelShell> {
 
     return Positioned.fromRect(
       rect: rect,
-      child: MouseRegion(
-        cursor: _cursorForEdge(_hoverResizeEdge),
-        onExit: (_) => _clearHoverResizeEdge(),
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerHover: (event) {
-            _updateHoverResizeEdge(
-              position: event.localPosition,
-              size: rect.size,
-              sideHandleSize: sideHandleSize,
-              cornerHandleSize: cornerHandleSize,
-            );
-          },
-          onPointerMove: (event) {
-            _updateHoverResizeEdge(
-              position: event.localPosition,
-              size: rect.size,
-              sideHandleSize: sideHandleSize,
-              cornerHandleSize: cornerHandleSize,
-            );
-          },
-          onPointerDown: (event) {
-            if (event.localPosition.dy <= topMenuHeight &&
-                event.kind == PointerDeviceKind.mouse &&
-                event.buttons == kSecondaryMouseButton) {
-              _showPanelMenu(event.position);
-            }
-          },
-          child: Stack(
-            clipBehavior: Clip.none,
-            children: <Widget>[
-              Padding(
-                padding: shellPadding,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(
-                      widget.outerShadowBorderRadius,
+      child: PassThroughIgnorePointer(
+        ignoring: widget.ignoringPointers,
+        ignoringListenable: widget.ignoringPointersListenable,
+        child: MouseRegion(
+          cursor: _cursorForEdge(_hoverResizeEdge),
+          onExit: (_) => _clearHoverResizeEdge(),
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerHover: (event) {
+              _updateHoverResizeEdge(
+                position: event.localPosition,
+                size: rect.size,
+                sideHandleSize: sideHandleSize,
+                cornerHandleSize: cornerHandleSize,
+              );
+            },
+            onPointerMove: (event) {
+              _updateHoverResizeEdge(
+                position: event.localPosition,
+                size: rect.size,
+                sideHandleSize: sideHandleSize,
+                cornerHandleSize: cornerHandleSize,
+              );
+            },
+            onPointerDown: (event) {
+              if (event.localPosition.dy <= topMenuHeight &&
+                  event.kind == PointerDeviceKind.mouse &&
+                  event.buttons == kSecondaryMouseButton) {
+                _showPanelMenu(event.position);
+              }
+            },
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                Padding(
+                  padding: shellPadding,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(
+                        widget.outerShadowBorderRadius,
+                      ),
+                      boxShadow: widget.outerShadows,
                     ),
-                    boxShadow: widget.outerShadows,
-                  ),
-                  child: widget.child,
-                ),
-              ),
-              if (!widget.fullscreen)
-                Positioned(
-                  left: widget.dragHandleLeftInset,
-                  right: widget.dragHandleRightInset,
-                  top: 0,
-                  height: dragStripHeight,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onPanStart: _beginDrag,
-                    onPanUpdate: _updateDrag,
-                    onPanEnd: _endDrag,
-                    child: const SizedBox.expand(),
+                    child: widget.child,
                   ),
                 ),
-              if (!widget.fullscreen) ...<Widget>[
-                _buildResizeHandle(
-                  alignment: Alignment.centerLeft,
-                  cursor: SystemMouseCursors.resizeLeftRight,
-                  edge: _DesktopPanelEdge.left,
-                  width: sideHandleSize,
-                  height: double.infinity,
-                ),
-                _buildResizeHandle(
-                  alignment: Alignment.centerRight,
-                  cursor: SystemMouseCursors.resizeLeftRight,
-                  edge: _DesktopPanelEdge.right,
-                  width: sideHandleSize,
-                  height: double.infinity,
-                ),
-                _buildResizeHandle(
-                  alignment: Alignment.topCenter,
-                  cursor: SystemMouseCursors.resizeUpDown,
-                  edge: _DesktopPanelEdge.top,
-                  width: double.infinity,
-                  height: sideHandleSize,
-                ),
-                _buildResizeHandle(
-                  alignment: Alignment.bottomCenter,
-                  cursor: SystemMouseCursors.resizeUpDown,
-                  edge: _DesktopPanelEdge.bottom,
-                  width: double.infinity,
-                  height: sideHandleSize,
-                ),
-                _buildCornerResizeHandle(
-                  cursor: SystemMouseCursors.resizeUpLeft,
-                  edge: _DesktopPanelEdge.topLeft,
-                  size: cornerHandleSize,
-                ),
-                _buildCornerResizeHandle(
-                  cursor: SystemMouseCursors.resizeUpRight,
-                  edge: _DesktopPanelEdge.topRight,
-                  size: cornerHandleSize,
-                ),
-                _buildCornerResizeHandle(
-                  cursor: SystemMouseCursors.resizeDownLeft,
-                  edge: _DesktopPanelEdge.bottomLeft,
-                  size: cornerHandleSize,
-                ),
-                _buildCornerResizeHandle(
-                  cursor: SystemMouseCursors.resizeDownRight,
-                  edge: _DesktopPanelEdge.bottomRight,
-                  size: cornerHandleSize,
-                ),
+                if (!widget.fullscreen)
+                  Positioned(
+                    left: widget.dragHandleLeftInset,
+                    right: widget.dragHandleRightInset,
+                    top: 0,
+                    height: dragStripHeight,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onPanStart: _beginDrag,
+                      onPanUpdate: _updateDrag,
+                      onPanEnd: _endDrag,
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                if (!widget.fullscreen) ...<Widget>[
+                  _buildResizeHandle(
+                    alignment: Alignment.centerLeft,
+                    cursor: SystemMouseCursors.resizeLeftRight,
+                    edge: _DesktopPanelEdge.left,
+                    width: sideHandleSize,
+                    height: double.infinity,
+                  ),
+                  _buildResizeHandle(
+                    alignment: Alignment.centerRight,
+                    cursor: SystemMouseCursors.resizeLeftRight,
+                    edge: _DesktopPanelEdge.right,
+                    width: sideHandleSize,
+                    height: double.infinity,
+                  ),
+                  _buildResizeHandle(
+                    alignment: Alignment.topCenter,
+                    cursor: SystemMouseCursors.resizeUpDown,
+                    edge: _DesktopPanelEdge.top,
+                    width: double.infinity,
+                    height: sideHandleSize,
+                  ),
+                  _buildResizeHandle(
+                    alignment: Alignment.bottomCenter,
+                    cursor: SystemMouseCursors.resizeUpDown,
+                    edge: _DesktopPanelEdge.bottom,
+                    width: double.infinity,
+                    height: sideHandleSize,
+                  ),
+                  _buildCornerResizeHandle(
+                    cursor: SystemMouseCursors.resizeUpLeft,
+                    edge: _DesktopPanelEdge.topLeft,
+                    size: cornerHandleSize,
+                  ),
+                  _buildCornerResizeHandle(
+                    cursor: SystemMouseCursors.resizeUpRight,
+                    edge: _DesktopPanelEdge.topRight,
+                    size: cornerHandleSize,
+                  ),
+                  _buildCornerResizeHandle(
+                    cursor: SystemMouseCursors.resizeDownLeft,
+                    edge: _DesktopPanelEdge.bottomLeft,
+                    size: cornerHandleSize,
+                  ),
+                  _buildCornerResizeHandle(
+                    cursor: SystemMouseCursors.resizeDownRight,
+                    edge: _DesktopPanelEdge.bottomRight,
+                    size: cornerHandleSize,
+                  ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
     );
+  }
+}
+
+/// [IgnorePointer] that can also read a [ValueListenable] during hit testing.
+///
+/// A parent `setState` on a large editor can lag several frames. Sample
+/// drags need pass-through on the next pointer move, so this reads the
+/// flag live instead of waiting for `ignoring` to rebuild.
+class PassThroughIgnorePointer extends SingleChildRenderObjectWidget {
+  const PassThroughIgnorePointer({
+    super.key,
+    this.ignoring = false,
+    this.ignoringListenable,
+    super.child,
+  });
+
+  final bool ignoring;
+  final ValueListenable<bool>? ignoringListenable;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _RenderPassThroughIgnorePointer(
+      ignoring: ignoring,
+      ignoringListenable: ignoringListenable,
+    );
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _RenderPassThroughIgnorePointer renderObject,
+  ) {
+    renderObject
+      ..ignoring = ignoring
+      ..ignoringListenable = ignoringListenable;
+  }
+}
+
+class _RenderPassThroughIgnorePointer extends RenderProxyBox {
+  _RenderPassThroughIgnorePointer({
+    required bool ignoring,
+    ValueListenable<bool>? ignoringListenable,
+  }) : _ignoring = ignoring,
+       _ignoringListenable = ignoringListenable;
+
+  bool _ignoring;
+  bool get ignoring => _ignoring;
+  set ignoring(bool value) {
+    if (_ignoring == value) {
+      return;
+    }
+    _ignoring = value;
+  }
+
+  ValueListenable<bool>? _ignoringListenable;
+  ValueListenable<bool>? get ignoringListenable => _ignoringListenable;
+  set ignoringListenable(ValueListenable<bool>? value) {
+    _ignoringListenable = value;
+  }
+
+  bool get _shouldIgnore =>
+      _ignoring || (_ignoringListenable?.value ?? false);
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    if (_shouldIgnore) {
+      return false;
+    }
+    return super.hitTest(result, position: position);
   }
 }

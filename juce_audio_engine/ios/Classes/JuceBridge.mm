@@ -4218,6 +4218,12 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return result.load();
 }
 
++ (void)setLoopRegionObjC:(BOOL)enabled startSeconds:(double)startSeconds endSeconds:(double)endSeconds
+{
+    JuceEngine::get().setLoopRegion(
+        enabled != NO, startSeconds, endSeconds);
+}
+
 + (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath forceIndividualRow:(BOOL)forceIndividualRow
 {
     if (pluginPath == nil || pluginPath.length == 0)
@@ -6039,6 +6045,15 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 + (NSArray<NSNumber*>*)getRecentMasterWaveformObjC:(NSInteger)sampleCount
 {
     const auto v = JuceEngine::get().getRecentMasterWaveform((int)sampleCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getRecentMasterStereoWaveformObjC:(NSInteger)sampleCount
+{
+    const auto v = JuceEngine::get().getRecentMasterStereoWaveform((int)sampleCount);
     NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
     for (float s : v)
         [arr addObject:@(s)];

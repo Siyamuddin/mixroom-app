@@ -943,6 +943,22 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setLoopRegion({
+    required bool enabled,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    try {
+      await _ch.invokeMethod('setLoopRegion', {
+        'enabled': enabled,
+        'startSeconds': startSeconds,
+        'endSeconds': endSeconds,
+      });
+    } on PlatformException catch (e) {
+      _logError('setLoopRegion', e);
+    }
+  }
+
   static Future<double> getCurrentPosition(int track) async {
     try {
       final pos = await _ch.invokeMethod<double>(
@@ -3689,6 +3705,23 @@ class JuceAudioEngine {
       return raw.map((e) => (e as num).toDouble()).toList(growable: false);
     } on PlatformException catch (e) {
       _logError('getRecentMasterWaveform', e);
+      return const <double>[];
+    }
+  }
+
+  /// Returns interleaved post-master samples: L0, R0, L1, R1, ...
+  static Future<List<double>> getRecentMasterStereoWaveform({
+    int sampleCount = 2048,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRecentMasterStereoWaveform',
+        {'sampleCount': sampleCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRecentMasterStereoWaveform', e);
       return const <double>[];
     }
   }

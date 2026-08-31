@@ -1744,6 +1744,17 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "setLoopRegion") {
+      const bool enabled = FindBool(args, "enabled", false);
+      const double start_seconds = FindDouble(args, "startSeconds", 0.0);
+      const double end_seconds = FindDouble(args, "endSeconds", 0.0);
+      CallOnMessageThreadSync([enabled, start_seconds, end_seconds] {
+        JuceEngine::get().setLoopRegion(enabled, start_seconds, end_seconds);
+      });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
     if (method_call.method_name() == "insertTrackEffect") {
       const int row = FindInt(args, "row", 0);
       const std::string path = FindString(args, "path");
@@ -2155,6 +2166,15 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const double sample_rate =
           CallOnMessageThreadSync([] { return JuceEngine::get().getHostSampleRate(); });
       result->Success(flutter::EncodableValue(sample_rate));
+      return;
+    }
+
+    if (method_call.method_name() == "getRecentMasterStereoWaveform") {
+      const int sample_count = FindInt(args, "sampleCount", 2048);
+      const auto values = CallOnMessageThreadSync([sample_count] {
+        return JuceEngine::get().getRecentMasterStereoWaveform(sample_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
       return;
     }
 

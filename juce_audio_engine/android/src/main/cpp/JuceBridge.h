@@ -67,6 +67,7 @@ extern "C"
     // Transport
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTransportSecondsJNI(JNIEnv *, jclass, jdouble);
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTransportSecondsJNI(JNIEnv *, jclass);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLoopRegionJNI(JNIEnv *, jclass, jboolean, jdouble, jdouble);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAutomationTransportJNI(JNIEnv *, jclass, jdouble);
 
     // Legacy FX API (clip/track-indexed)
@@ -185,6 +186,7 @@ extern "C"
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowCompressorMeterJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterCompressorMeterJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *, jclass);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecentMasterStereoWaveformJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowEqWaveformJNI(JNIEnv *, jclass, jint, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEqWaveformJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowStereoScopeJNI(JNIEnv *, jclass, jint, jint, jint);

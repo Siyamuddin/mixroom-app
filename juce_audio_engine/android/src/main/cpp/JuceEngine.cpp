@@ -11114,10 +11114,35 @@ const std::array<float, 4> JuceEngine::getMasterMeterValues()
     };
 }
 
+void JuceEngine::pushMasterWaveformSamples(const float *const *out,
+                                           int numOutCh,
+                                           int numSamples) noexcept
+{
+    if (numOutCh <= 0 || out == nullptr || out[0] == nullptr || numSamples <= 0)
+        return;
+
+    const float *outL = out[0];
+    const float *outR = (numOutCh > 1 && out[1] != nullptr) ? out[1] : outL;
+    int writePos = masterWaveformWritePos.load(std::memory_order_relaxed);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float left = std::isfinite(outL[i]) ? outL[i] : 0.0f;
+        const float right = std::isfinite(outR[i]) ? outR[i] : 0.0f;
+        masterWaveformRingL[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, left);
+        masterWaveformRingR[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, right);
+        writePos = (writePos + 1) % kMasterWaveformRingSize;
+    }
+
+    masterWaveformWritePos.store(writePos, std::memory_order_release);
+}
+
 void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
                                              int numOutCh,
                                              int numSamples) noexcept
 {
+    pushMasterWaveformSamples(out, numOutCh, numSamples);
+
     if (!masterMeterEnabled.load(std::memory_order_relaxed))
         return;
     if (numOutCh <= 0 || out == nullptr || out[0] == nullptr)
@@ -11247,6 +11272,26 @@ std::vector<float> JuceEngine::getAllMeterValues() const
         out[base + 4] = 0.0f;
         // If you DO have it:
         // out[base + 4] = rowMeters[row].clip.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+    }
+
+    return out;
+}
+
+std::vector<float> JuceEngine::getRecentMasterStereoWaveform(int sampleCount) const
+{
+    const int count = juce::jlimit(64, kMasterWaveformRingSize, sampleCount);
+    std::vector<float> out((size_t)(count * 2), 0.0f);
+
+    const int writePos = masterWaveformWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kMasterWaveformRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)(i * 2)] = masterWaveformRingL[(size_t)readPos];
+        out[(size_t)(i * 2 + 1)] = masterWaveformRingR[(size_t)readPos];
+        readPos = (readPos + 1) % kMasterWaveformRingSize;
     }
 
     return out;

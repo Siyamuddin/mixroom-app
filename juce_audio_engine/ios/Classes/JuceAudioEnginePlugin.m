@@ -7652,6 +7652,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         double t = [args[@"timeSeconds"] doubleValue];
         [JuceBridge setTransportSecondsObjC:t];
         result(nil);
+    } else if ([call.method isEqualToString:@"setLoopRegion"]) {
+        BOOL enabled = [args[@"enabled"] boolValue];
+        double startSeconds = [args[@"startSeconds"] doubleValue];
+        double endSeconds = [args[@"endSeconds"] doubleValue];
+        [JuceBridge setLoopRegionObjC:enabled
+                         startSeconds:startSeconds
+                           endSeconds:endSeconds];
+        result(nil);
 
     // ----------------------------------------
     // NEW ROW (TRACK BUS) API
@@ -8055,6 +8063,11 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     else if ([call.method isEqualToString:@"getRecentMasterWaveform"]) {
         NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
         NSArray* arr = [JuceBridge getRecentMasterWaveformObjC:sampleCount];
+        result(arr);
+    }
+    else if ([call.method isEqualToString:@"getRecentMasterStereoWaveform"]) {
+        NSInteger sampleCount = [call.arguments[@"sampleCount"] integerValue];
+        NSArray* arr = [JuceBridge getRecentMasterStereoWaveformObjC:sampleCount];
         result(arr);
     }
     else if ([call.method isEqualToString:@"getRowEqWaveform"]) {

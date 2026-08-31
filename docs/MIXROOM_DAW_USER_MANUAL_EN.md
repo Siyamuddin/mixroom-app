@@ -165,6 +165,17 @@ The transport controls are available at the bottom of the editor. On desktop, th
 | Record/Stop | Starts recording on the selected row, or stops the active recording. |
 | One-Button Mix | Runs an automatic Mixroom mix pass. |
 
+On desktop, the playhead and timeline view also have keyboard shortcuts. These can be remapped in Project Settings → Keyboard Shortcuts.
+
+| Shortcut | Function |
+| --- | --- |
+| `,` | Moves the playhead to the previous bar line. |
+| `.` | Moves the playhead to the next bar line. |
+| Left arrow | Scrolls the timeline view left by one bar, without moving the playhead. |
+| Right arrow | Scrolls the timeline view right by one bar, without moving the playhead. |
+
+Hold `,` `.` or the arrow keys to repeat. Arrow-key scrolling is skipped while typing, while the file browser tree is focused, or while the piano roll is open.
+
 Recording requires a selected row and an available input device. If input access is not available, Mixroom shows a permission or input warning.
 
 ### One-Button Mix
@@ -390,7 +401,7 @@ On desktop:
 - right-click the ruler to create or clear a loop region
 - right-drag on the ruler to create, resize, or move the loop region
 
-When looping is active, Restart returns to the loop start. During playback, Mixroom wraps from the loop end back to the loop start.
+When looping is active, Restart returns to the loop start. During playback, Mixroom wraps from the loop end back to the loop start. Short loop regions, including ranges around 0.1 to 0.5 seconds, stay inside the markers. The playhead does not run past the loop end, and playback wraps without a pause.
 
 ### Crossfades
 
@@ -1283,7 +1294,7 @@ Use screenshots from the latest production-like build so labels and layout match
 | Clip popover | Copy, clone, settings, split, delete |
 | Clip settings | Rename, gain, pitch. Audio also has normalize, tempo mode, reverse, detect tempo, split vocals. Desktop/tablet opens the right inspector for audio and MIDI. |
 | Tempo stretching | Project Tempo Mode plus per-clip Stretch/Resample setting |
-| Loops | Create on ruler, drag handles, move loop region, restart from loop start |
+| Loops | Create on ruler, drag handles, move loop region, restart from loop start, playhead stays inside markers |
 | Row effects | Presets, add, reorder, bypass, delete, copy, paste, clear |
 | Master bus | Master gain, master pan, level metering, master effects, FX bypass |
 | Automation | Points, ramps, copy/paste, range copy, automation clips |
