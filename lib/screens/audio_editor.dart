@@ -163,6 +163,41 @@ bool shouldMidiClipLabelFollowInstrument({
   return normalizedLabel.isEmpty || normalizedLabel == instrumentName.trim();
 }
 
+@visibleForTesting
+String? audioEditorClipInspectorTargetAfterSelection({
+  required String? currentTargetId,
+  required bool currentTargetExists,
+  required String? primarySelectedClipId,
+  required TimelineSelectionChangeOrigin origin,
+}) {
+  if (currentTargetId == null) return null;
+  if (origin == TimelineSelectionChangeOrigin.reconciliation &&
+      currentTargetExists) {
+    return currentTargetId;
+  }
+  if (primarySelectedClipId != null) return primarySelectedClipId;
+  return currentTargetExists ? currentTargetId : null;
+}
+
+@visibleForTesting
+String? audioEditorNormalizedClipInspectorRename({
+  required String currentLabel,
+  required String draft,
+}) {
+  final normalizedDraft = draft.trim();
+  if (normalizedDraft.isEmpty || normalizedDraft == currentLabel) return null;
+  return normalizedDraft;
+}
+
+@visibleForTesting
+bool audioEditorShouldApplyScheduledMissingClipResolution({
+  required String expectedMissingClipId,
+  required String? currentTargetId,
+  required bool expectedTargetExists,
+}) {
+  return currentTargetId == expectedMissingClipId && !expectedTargetExists;
+}
+
 Completer<void> _cancelSignal = Completer();
 
 const List<String> kMixroomBuiltInEffects = [
@@ -3966,6 +4001,10 @@ class AudioEditorEvaluationController {
   Map<String, dynamic> Function()? _snapshot;
   String Function()? _stateDigest;
   bool Function()? _hasPendingPlan;
+  void Function(String clipId)? _openClipInspector;
+  void Function(String? clipId, bool reconciliation)? _selectClipForInspector;
+  VoidCallback? _closeClipInspector;
+  Future<void> Function(String clipId)? _deleteClip;
 
   bool get isAttached => _submit != null;
   bool get hasPendingPlan => _hasPendingPlan?.call() ?? false;
@@ -4007,6 +4046,30 @@ class AudioEditorEvaluationController {
     return callback(row);
   }
 
+  void openClipInspector(String clipId) {
+    final callback = _openClipInspector;
+    if (callback == null) throw StateError('audio_editor_eval_not_attached');
+    callback(clipId);
+  }
+
+  void selectClipForInspector(String? clipId, {bool reconciliation = false}) {
+    final callback = _selectClipForInspector;
+    if (callback == null) throw StateError('audio_editor_eval_not_attached');
+    callback(clipId, reconciliation);
+  }
+
+  void closeClipInspector() {
+    final callback = _closeClipInspector;
+    if (callback == null) throw StateError('audio_editor_eval_not_attached');
+    callback();
+  }
+
+  Future<void> deleteClip(String clipId) async {
+    final callback = _deleteClip;
+    if (callback == null) throw StateError('audio_editor_eval_not_attached');
+    await callback(clipId);
+  }
+
   void _attach({
     required Future<void> Function(String prompt) submit,
     required Future<void> Function() undo,
@@ -4016,6 +4079,11 @@ class AudioEditorEvaluationController {
     required Map<String, dynamic> Function() snapshot,
     required String Function() stateDigest,
     required bool Function() hasPendingPlan,
+    required void Function(String clipId) openClipInspector,
+    required void Function(String? clipId, bool reconciliation)
+    selectClipForInspector,
+    required VoidCallback closeClipInspector,
+    required Future<void> Function(String clipId) deleteClip,
   }) {
     _submit = submit;
     _undo = undo;
@@ -4025,6 +4093,10 @@ class AudioEditorEvaluationController {
     _snapshot = snapshot;
     _stateDigest = stateDigest;
     _hasPendingPlan = hasPendingPlan;
+    _openClipInspector = openClipInspector;
+    _selectClipForInspector = selectClipForInspector;
+    _closeClipInspector = closeClipInspector;
+    _deleteClip = deleteClip;
   }
 
   void _detach() {
@@ -4036,6 +4108,10 @@ class AudioEditorEvaluationController {
     _snapshot = null;
     _stateDigest = null;
     _hasPendingPlan = null;
+    _openClipInspector = null;
+    _selectClipForInspector = null;
+    _closeClipInspector = null;
+    _deleteClip = null;
   }
 }
 
@@ -4928,68 +5004,214 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return L10n.translate(context, clip.isMidi ? 'MIDI Clip' : 'Audio Clip');
   }
 
-  bool _isValidAudioClipOptionsIndex(int? clipIndex) {
-    return clipIndex != null &&
-        clipIndex >= 0 &&
-        clipIndex < _audioTracks.length;
+  void _setTabletAudioClipNameField(String value) {
+    _tabletAudioClipOptionsNameDraft = value;
+    if (_tabletAudioClipNameController.text == value) return;
+    _tabletAudioClipNameController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
+  int? _tabletAudioClipOptionsIndex() {
+    final clipId = _tabletAudioClipOptionsClipId;
+    if (clipId == null) return null;
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    return clipIndex >= 0 ? clipIndex : null;
   }
 
   void _openTabletAudioClipOptions(int clipIndex) {
-    if (!_isValidAudioClipOptionsIndex(clipIndex)) return;
+    if (!_isValidClipIndex(clipIndex)) return;
     final clip = _audioTracks[clipIndex];
+    _setTabletAudioClipNameField(_audioClipDisplayName(clip));
+    _cancelPendingMissingClipInspectorResolution();
     setState(() {
       _selectedRow = clip.rowIndex.clamp(0, math.max(0, _rowCount - 1)).toInt();
       _tabletRightPanelTab = 'inspector';
       _tabletRightPanelCollapsed = false;
-      _tabletAudioClipOptionsIndex = clipIndex;
-      _tabletAudioClipOptionsNameDraft = _audioClipDisplayName(clip);
+      _tabletAudioClipOptionsClipId = clip.clipId;
       _tabletAudioClipOptionsRenaming = false;
       _tabletAudioClipOptionsGainStart = null;
+      _tabletAudioClipOptionsGainStartClipId = null;
       _tabletAudioClipOptionsPitchStart = null;
+      _tabletAudioClipOptionsPitchStartClipId = null;
     });
     _tabletAudioClipNameFocusNode.unfocus();
   }
 
   void _closeTabletAudioClipOptions() {
-    if (_tabletAudioClipOptionsIndex == null) return;
+    if (_tabletAudioClipOptionsClipId == null) return;
+    _setTabletAudioClipNameField('');
+    _cancelPendingMissingClipInspectorResolution();
     setState(() {
-      _tabletAudioClipOptionsIndex = null;
-      _tabletAudioClipOptionsNameDraft = '';
+      _tabletAudioClipOptionsClipId = null;
       _tabletAudioClipOptionsRenaming = false;
       _tabletAudioClipOptionsGainStart = null;
+      _tabletAudioClipOptionsGainStartClipId = null;
       _tabletAudioClipOptionsPitchStart = null;
+      _tabletAudioClipOptionsPitchStartClipId = null;
     });
     _tabletAudioClipNameFocusNode.unfocus();
   }
 
-  Future<void> _renameAudioClipFromPanel(int clipIndex, String rawName) async {
-    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
-    final oldLabel = _audioTracks[clipIndex].label;
-    final nextLabel = rawName.trim();
-    if (nextLabel.isEmpty || oldLabel == nextLabel) return;
+  void _switchOpenClipInspectorTarget(
+    String previousClipId,
+    String nextClipId,
+  ) {
+    if (_tabletAudioClipOptionsClipId != previousClipId ||
+        nextClipId == previousClipId) {
+      return;
+    }
+    final nextClipIndex = _clipIndexForPersistentId(nextClipId);
+    if (!_isValidClipIndex(nextClipIndex)) return;
+    final nextClip = _audioTracks[nextClipIndex];
+    _cancelPendingMissingClipInspectorResolution();
 
-    await _undoManager.execute(
-      SetClipLabelAction(
-        tracks: _audioTracks,
-        originalIndex: clipIndex,
-        oldLabel: oldLabel,
-        newLabel: nextLabel,
-        applyToState: (clip, label) {
-          clip.label = label;
-          setState(() {});
-        },
-      ),
-    );
+    final previousNameDraft = _tabletAudioClipOptionsNameDraft;
+    if (_tabletAudioClipOptionsRenaming) {
+      unawaited(_renameAudioClipFromPanel(previousClipId, previousNameDraft));
+    }
+    if (_tabletAudioClipOptionsGainStartClipId == previousClipId) {
+      unawaited(_commitTabletAudioClipGain(previousClipId));
+    }
+    if (_tabletAudioClipOptionsPitchStartClipId == previousClipId) {
+      unawaited(_commitTabletAudioClipPitch(previousClipId));
+    }
 
-    _recordProducerManualEdit('clip_rename', {
-      'clip': clipIndex,
-      'old_label': oldLabel,
-      'new_label': nextLabel,
+    _setTabletAudioClipNameField(_audioClipDisplayName(nextClip));
+    setState(() {
+      _selectedRow = nextClip.rowIndex
+          .clamp(0, math.max(0, _rowCount - 1))
+          .toInt();
+      _tabletAudioClipOptionsClipId = nextClip.clipId;
+      _tabletAudioClipOptionsRenaming = false;
+      _tabletAudioClipOptionsGainStart = null;
+      _tabletAudioClipOptionsGainStartClipId = null;
+      _tabletAudioClipOptionsPitchStart = null;
+      _tabletAudioClipOptionsPitchStartClipId = null;
+    });
+    _tabletAudioClipNameFocusNode.unfocus();
+  }
+
+  void _scheduleMissingClipInspectorResolution(
+    String expectedMissingClipId, {
+    String? replacementClipId,
+  }) {
+    if (_pendingMissingClipInspectorId != expectedMissingClipId) {
+      _pendingMissingClipInspectorId = expectedMissingClipId;
+      _pendingMissingClipInspectorReplacementId = replacementClipId;
+    } else if (replacementClipId != null) {
+      // Rendering can request a close before or after reconciliation supplies a
+      // replacement. Never let the render-only request discard that replacement.
+      _pendingMissingClipInspectorReplacementId = replacementClipId;
+    }
+    if (_missingClipInspectorResolutionScheduled) return;
+    _missingClipInspectorResolutionScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _missingClipInspectorResolutionScheduled = false;
+      if (!mounted) return;
+      final pendingMissingClipId = _pendingMissingClipInspectorId;
+      final pendingReplacementClipId =
+          _pendingMissingClipInspectorReplacementId;
+      _pendingMissingClipInspectorId = null;
+      _pendingMissingClipInspectorReplacementId = null;
+      if (pendingMissingClipId == null) return;
+      if (!audioEditorShouldApplyScheduledMissingClipResolution(
+        expectedMissingClipId: pendingMissingClipId,
+        currentTargetId: _tabletAudioClipOptionsClipId,
+        expectedTargetExists:
+            _clipIndexForPersistentId(pendingMissingClipId) >= 0,
+      )) {
+        return;
+      }
+      if (pendingReplacementClipId != null &&
+          _isValidClipIndex(
+            _clipIndexForPersistentId(pendingReplacementClipId),
+          )) {
+        _switchOpenClipInspectorTarget(
+          pendingMissingClipId,
+          pendingReplacementClipId,
+        );
+        return;
+      }
+      _closeTabletAudioClipOptions();
     });
   }
 
+  void _cancelPendingMissingClipInspectorResolution() {
+    _pendingMissingClipInspectorId = null;
+    _pendingMissingClipInspectorReplacementId = null;
+  }
+
+  void _retargetOpenClipInspectorToSelection(
+    int primaryClipIndex,
+    TimelineSelectionChangeOrigin origin,
+  ) {
+    final previousClipId = _tabletAudioClipOptionsClipId;
+    if (previousClipId == null) return;
+
+    final currentTargetExists = _clipIndexForPersistentId(previousClipId) >= 0;
+    final primarySelectedClipId = _isValidClipIndex(primaryClipIndex)
+        ? _audioTracks[primaryClipIndex].clipId
+        : null;
+    final nextClipId = audioEditorClipInspectorTargetAfterSelection(
+      currentTargetId: previousClipId,
+      currentTargetExists: currentTargetExists,
+      primarySelectedClipId: primarySelectedClipId,
+      origin: origin,
+    );
+    if (origin == TimelineSelectionChangeOrigin.reconciliation &&
+        !currentTargetExists) {
+      _scheduleMissingClipInspectorResolution(
+        previousClipId,
+        replacementClipId: nextClipId,
+      );
+      return;
+    }
+    if (nextClipId == null) {
+      _scheduleMissingClipInspectorResolution(previousClipId);
+      return;
+    }
+    _switchOpenClipInspectorTarget(previousClipId, nextClipId);
+  }
+
+  Future<void> _renameAudioClipFromPanel(String clipId, String rawName) async {
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (!_isValidClipIndex(clipIndex)) return;
+    final oldLabel = _audioTracks[clipIndex].label;
+    final nextLabel = audioEditorNormalizedClipInspectorRename(
+      currentLabel: oldLabel,
+      draft: rawName,
+    );
+    if (nextLabel == null) return;
+    if (!_clipInspectorRenameCommitsInFlight.add(clipId)) return;
+
+    try {
+      await _undoManager.execute(
+        SetClipLabelAction(
+          tracks: _audioTracks,
+          originalIndex: clipIndex,
+          clipId: clipId,
+          oldLabel: oldLabel,
+          newLabel: nextLabel,
+          applyToState: (clip, label) {
+            _applyPersistedClipLabelState(clip, label);
+          },
+        ),
+      );
+
+      _recordProducerManualEdit('clip_rename', {
+        'clip': clipIndex,
+        'old_label': oldLabel,
+        'new_label': nextLabel,
+      });
+    } finally {
+      _clipInspectorRenameCommitsInFlight.remove(clipId);
+    }
+  }
+
   void _beginTabletAudioClipRename() {
-    if (_tabletAudioClipOptionsIndex == null) return;
+    if (_tabletAudioClipOptionsIndex() == null) return;
     setState(() {
       _tabletAudioClipOptionsRenaming = true;
     });
@@ -5000,39 +5222,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _finishTabletAudioClipRename(
-    int clipIndex,
+    String clipId,
     String rawName,
   ) async {
-    await _renameAudioClipFromPanel(clipIndex, rawName);
-    if (!mounted) return;
+    await _renameAudioClipFromPanel(clipId, rawName);
+    if (!mounted || _tabletAudioClipOptionsClipId != clipId) return;
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (_isValidClipIndex(clipIndex)) {
+      _setTabletAudioClipNameField(
+        _audioClipDisplayName(_audioTracks[clipIndex]),
+      );
+    }
     setState(() {
       _tabletAudioClipOptionsRenaming = false;
-      if (_isValidAudioClipOptionsIndex(clipIndex)) {
-        _tabletAudioClipOptionsNameDraft = _audioClipDisplayName(
-          _audioTracks[clipIndex],
-        );
-      }
     });
     _tabletAudioClipNameFocusNode.unfocus();
   }
 
-  Future<void> _commitTabletAudioClipGain(int clipIndex) async {
+  Future<void> _commitTabletAudioClipGain(String clipId) async {
+    if (_tabletAudioClipOptionsGainStartClipId != clipId) return;
     final oldGain = _tabletAudioClipOptionsGainStart;
     _tabletAudioClipOptionsGainStart = null;
-    if (oldGain == null || clipIndex < 0 || clipIndex >= _audioTracks.length) {
-      return;
-    }
+    _tabletAudioClipOptionsGainStartClipId = null;
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (oldGain == null || !_isValidClipIndex(clipIndex)) return;
     final newGain = _audioTracks[clipIndex].gain.clamp(0.0, 3.0).toDouble();
     if ((oldGain - newGain).abs() < 0.0001) return;
     await _undoManager.execute(
       SetClipGainAction(
         tracks: _audioTracks,
         originalIndex: clipIndex,
+        clipId: clipId,
         oldGain: oldGain,
         newGain: newGain,
         applyToState: (clip, gain) {
-          clip.gain = gain;
-          setState(() {});
+          _applyPersistedClipGainState(clip, gain);
         },
       ),
     );
@@ -5043,12 +5267,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
-  Future<void> _commitTabletAudioClipPitch(int clipIndex) async {
+  Future<void> _commitTabletAudioClipPitch(String clipId) async {
+    if (_tabletAudioClipOptionsPitchStartClipId != clipId) return;
     final oldPitch = _tabletAudioClipOptionsPitchStart;
     _tabletAudioClipOptionsPitchStart = null;
-    if (oldPitch == null || clipIndex < 0 || clipIndex >= _audioTracks.length) {
-      return;
-    }
+    _tabletAudioClipOptionsPitchStartClipId = null;
+    final clipIndex = _clipIndexForPersistentId(clipId);
+    if (oldPitch == null || !_isValidClipIndex(clipIndex)) return;
     final newPitch = _audioTracks[clipIndex].pitchSemitones
         .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones)
         .toDouble();
@@ -5057,11 +5282,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       SetClipPitchAction(
         tracks: _audioTracks,
         originalIndex: clipIndex,
+        clipId: clipId,
         oldPitch: oldPitch,
         newPitch: newPitch,
         applyToState: (clip, pitch) {
-          clip.pitchSemitones = pitch;
-          setState(() {});
+          _applyPersistedClipPitchState(clip, pitch);
         },
       ),
     );
@@ -5727,12 +5952,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   _masterParameterRevealer;
   int? _tabletSelectedRowFxRow;
   int? _tabletSelectedRowFxIndex;
-  int? _tabletAudioClipOptionsIndex;
+  String? _tabletAudioClipOptionsClipId;
+  String? _pendingMissingClipInspectorId;
+  String? _pendingMissingClipInspectorReplacementId;
+  bool _missingClipInspectorResolutionScheduled = false;
   String _tabletAudioClipOptionsNameDraft = '';
   bool _tabletAudioClipOptionsRenaming = false;
+  final Set<String> _clipInspectorRenameCommitsInFlight = <String>{};
+  final TextEditingController _tabletAudioClipNameController =
+      TextEditingController();
   final FocusNode _tabletAudioClipNameFocusNode = FocusNode();
   double? _tabletAudioClipOptionsGainStart;
+  String? _tabletAudioClipOptionsGainStartClipId;
   double? _tabletAudioClipOptionsPitchStart;
+  String? _tabletAudioClipOptionsPitchStartClipId;
   final Set<int> _tabletMixerExpandedRows = <int>{};
   final Map<int, double> _tabletMixerRowGainDragStart = <int, double>{};
   final Map<int, double> _tabletMixerRowPanDragStart = <int, double>{};
@@ -9154,6 +9387,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       snapshot: _aiEvaluationSnapshot,
       stateDigest: _freshAiV3StateFingerprint,
       hasPendingPlan: _chatPipeline.hasActiveAiV3PendingPlan,
+      openClipInspector: (clipId) {
+        final clipIndex = _clipIndexForPersistentId(clipId);
+        if (_isValidClipIndex(clipIndex)) {
+          _openTabletAudioClipOptions(clipIndex);
+        }
+      },
+      selectClipForInspector: (clipId, reconciliation) {
+        final clipIndex = clipId == null
+            ? -1
+            : _clipIndexForPersistentId(clipId);
+        _retargetOpenClipInspectorToSelection(
+          clipIndex,
+          reconciliation
+              ? TimelineSelectionChangeOrigin.reconciliation
+              : TimelineSelectionChangeOrigin.interaction,
+        );
+      },
+      closeClipInspector: _closeTabletAudioClipOptions,
+      deleteClip: (clipId) async {
+        final clipIndex = _clipIndexForPersistentId(clipId);
+        if (_isValidClipIndex(clipIndex)) {
+          await _handleDeleteClip(clipIndex);
+        }
+      },
     );
 
     _tempoPickerController = FixedExtentScrollController(
@@ -12439,6 +12696,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatTextController.dispose();
     _chatFocusNode.dispose();
     _tabletAudioClipNameFocusNode.dispose();
+    _tabletAudioClipNameController.dispose();
     _chatController.dispose();
     _chatListScrollController.dispose();
     _cloudAutoSyncTimer?.cancel();
@@ -17641,6 +17899,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _applyPersistedClipLabelState(AudioTrack clip, String label) {
     clip.label = label;
+    if (mounted &&
+        _tabletAudioClipOptionsClipId == clip.clipId &&
+        !_tabletAudioClipOptionsRenaming) {
+      _setTabletAudioClipNameField(_audioClipDisplayName(clip));
+    }
     _markClipVisualMutation();
     if (mounted) setState(() {});
   }
@@ -34453,17 +34716,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     Widget selectedAudioClipOptions() {
-      final clipIndex = _tabletAudioClipOptionsIndex;
-      if (!_isValidAudioClipOptionsIndex(clipIndex)) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _tabletAudioClipOptionsIndex != null) {
-            _closeTabletAudioClipOptions();
-          }
-        });
+      final clipIndex = _tabletAudioClipOptionsIndex();
+      if (clipIndex == null) {
+        final missingClipId = _tabletAudioClipOptionsClipId;
+        if (missingClipId != null) {
+          _scheduleMissingClipInspectorResolution(missingClipId);
+        }
         return const SizedBox.shrink();
       }
-      final index = clipIndex!;
+      final index = clipIndex;
       final clip = _audioTracks[index];
+      final clipId = clip.clipId;
       final isMidi = clip.isMidi;
       final accent = const Color(0xFF8A919D);
       final pitch = clip.pitchSemitones
@@ -34474,8 +34737,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           '${pitch >= 0 ? '+' : ''}${pitch.toStringAsFixed(1)}st';
 
       Future<void> applyPitch(double next) async {
+        final currentIndex = _clipIndexForPersistentId(clipId);
+        if (!_isValidClipIndex(currentIndex)) return;
         await _setClipPitchLive(
-          index,
+          currentIndex,
           next
               .clamp(_kClipPitchMinSemitones, _kClipPitchMaxSemitones)
               .toDouble(),
@@ -34507,6 +34772,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       return ListView(
+        key: ValueKey('tablet_clip_options_$clipId'),
         physics: const ClampingScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
         children: [
@@ -34541,9 +34807,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       child: Text(
                         L10n.translate(
                           context,
-                          isMidi
-                              ? 'MIDI Clip Options'
-                              : 'Audio Clip Options',
+                          isMidi ? 'MIDI Clip Options' : 'Audio Clip Options',
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -34583,11 +34847,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
-                  key: ValueKey(
-                    'tablet_audio_clip_name_${clip.engineClipId}_${clip.label}',
-                  ),
+                  key: ValueKey('tablet_audio_clip_name_$clipId'),
+                  controller: _tabletAudioClipNameController,
                   focusNode: _tabletAudioClipNameFocusNode,
-                  initialValue: _audioClipDisplayName(clip),
                   readOnly: !_tabletAudioClipOptionsRenaming,
                   maxLength: 48,
                   onTap: () {
@@ -34599,7 +34861,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     _tabletAudioClipOptionsNameDraft = value;
                   },
                   onFieldSubmitted: (value) {
-                    unawaited(_finishTabletAudioClipRename(index, value));
+                    unawaited(_finishTabletAudioClipRename(clipId, value));
                   },
                   style: const TextStyle(
                     fontFamily: 'Pretendard',
@@ -34636,7 +34898,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       onPressed: _tabletAudioClipOptionsRenaming
                           ? () => unawaited(
                               _finishTabletAudioClipRename(
-                                index,
+                                clipId,
                                 _tabletAudioClipOptionsNameDraft,
                               ),
                             )
@@ -34732,18 +34994,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 PrettyGainSlider(
+                  key: ValueKey('tablet_clip_gain_$clipId'),
                   value: gain,
                   trackColor: accent,
                   inactiveTrackColor: Colors.white.withValues(alpha: 0.16),
                   thumbColor: const Color(0xFFF4F4F4),
                   onChangeStart: (_) {
                     _tabletAudioClipOptionsGainStart = gain;
+                    _tabletAudioClipOptionsGainStartClipId = clipId;
                   },
                   onChanged: (value) {
-                    unawaited(_setClipGainLive(index, value));
+                    final currentIndex = _clipIndexForPersistentId(clipId);
+                    if (_isValidClipIndex(currentIndex)) {
+                      unawaited(_setClipGainLive(currentIndex, value));
+                    }
                   },
                   onChangeEnd: (_) {
-                    unawaited(_commitTabletAudioClipGain(index));
+                    unawaited(_commitTabletAudioClipGain(clipId));
                   },
                 ),
                 const SizedBox(height: 10),
@@ -34777,10 +35044,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       icon: Icons.remove_rounded,
                       onTap: () {
                         _tabletAudioClipOptionsPitchStart ??= pitch;
+                        _tabletAudioClipOptionsPitchStartClipId ??= clipId;
                         unawaited(
                           applyPitch(
                             pitch - 0.5,
-                          ).then((_) => _commitTabletAudioClipPitch(index)),
+                          ).then((_) => _commitTabletAudioClipPitch(clipId)),
                         );
                       },
                     ),
@@ -34797,18 +35065,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           overlayShape: SliderComponentShape.noOverlay,
                         ),
                         child: DesktopScrollableSlider(
+                          key: ValueKey('tablet_clip_pitch_$clipId'),
                           value: pitch,
                           min: _kClipPitchMinSemitones,
                           max: _kClipPitchMaxSemitones,
                           divisions: 48,
                           onChangeStart: (_) {
                             _tabletAudioClipOptionsPitchStart = pitch;
+                            _tabletAudioClipOptionsPitchStartClipId = clipId;
                           },
                           onChanged: (value) {
                             unawaited(applyPitch(value));
                           },
                           onChangeEnd: (_) {
-                            unawaited(_commitTabletAudioClipPitch(index));
+                            unawaited(_commitTabletAudioClipPitch(clipId));
                           },
                         ),
                       ),
@@ -34818,10 +35088,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       icon: Icons.add_rounded,
                       onTap: () {
                         _tabletAudioClipOptionsPitchStart ??= pitch;
+                        _tabletAudioClipOptionsPitchStartClipId ??= clipId;
                         unawaited(
                           applyPitch(
                             pitch + 0.5,
-                          ).then((_) => _commitTabletAudioClipPitch(index)),
+                          ).then((_) => _commitTabletAudioClipPitch(clipId)),
                         );
                       },
                     ),
@@ -34965,11 +35236,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     Widget selectedRowInspector() {
-      if (_rowCount == 0) return const SizedBox.shrink();
-      if (_tabletAudioClipOptionsIndex != null) {
+      if (_tabletAudioClipOptionsClipId != null) {
         final clipOptions = selectedAudioClipOptions();
         if (clipOptions is! SizedBox) return clipOptions;
       }
+      if (_rowCount == 0) return const SizedBox.shrink();
       final row = _selectedRow.clamp(0, _rowCount - 1).toInt();
       final rowInfo = _rows[row];
       final group = rowInfo.groupId.trim().isEmpty
@@ -68141,6 +68412,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .toDouble(),
           'trim_end_ms': _audioTracks[index].trimEnd.inMilliseconds.toDouble(),
           'alignment_offset_ms': _audioTracks[index].alignmentOffsetMs,
+          'gain': _audioTracks[index].gain,
           'pitch_semitones': _audioTracks[index].pitchSemitones,
           'source_tempo_bpm': _audioTracks[index].sourceTempoBpm,
           'stretch_to_project_tempo': _audioTracks[index].stretchToProjectTempo,
@@ -83871,6 +84143,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               (
                                                 selectedClipIndices,
                                                 primaryClipIndex,
+                                                origin,
                                               ) {
                                                 _timelineSelectedClipIndices =
                                                     List<int>.from(
@@ -83878,6 +84151,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     );
                                                 _timelinePrimarySelectedClipIndex =
                                                     primaryClipIndex;
+                                                _retargetOpenClipInspectorToSelection(
+                                                  primaryClipIndex,
+                                                  origin,
+                                                );
                                                 _retargetOpenMidiClipEditorToSelection(
                                                   primaryClipIndex,
                                                 );

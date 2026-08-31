@@ -497,6 +497,8 @@ class TimelineHorizontalScrollbarState {
   );
 }
 
+enum TimelineSelectionChangeOrigin { interaction, reconciliation }
+
 class AudioCanvasTimeline extends StatefulWidget {
   final AudioCanvasTimelineController? controller;
   final List<TimelineRow> rows;
@@ -713,7 +715,11 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int row, double timeMs)?
   onCreateMidiClipInInstrumentLane;
   final Future<void> Function(int clipIndex)? onStemSeparation;
-  final void Function(List<int> selectedClipIndices, int primaryClipIndex)?
+  final void Function(
+    List<int> selectedClipIndices,
+    int primaryClipIndex,
+    TimelineSelectionChangeOrigin origin,
+  )?
   onSelectionChanged;
   final void Function(int loopStartMs, int loopEndMs)? onLoopRegionChanged;
   final void Function(bool enabled)? onLoopToggle;
@@ -4122,7 +4128,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         primaryClipIndex: _selectedClipIndex >= 0 ? _selectedClipIndex : null,
       );
     }
-    _emitSelectionChanged();
+    _emitSelectionChanged(
+      origin: TimelineSelectionChangeOrigin.reconciliation,
+    );
   }
 
   void _syncSelectionFromWidgetConfig() {
@@ -5299,14 +5307,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _emitSelectionChanged();
   }
 
-  void _emitSelectionChanged() {
+  void _emitSelectionChanged({
+    TimelineSelectionChangeOrigin origin =
+        TimelineSelectionChangeOrigin.interaction,
+  }) {
     final selected = _activeSelectedClipIndices();
     final primary = selected.isEmpty
         ? -1
         : (selected.contains(_selectedClipIndex)
               ? _selectedClipIndex
               : selected.last);
-    widget.onSelectionChanged?.call(selected, primary);
+    widget.onSelectionChanged?.call(selected, primary, origin);
   }
 
   Future<void> _deleteSelectedClips() async {
@@ -5849,7 +5860,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _notifySnapSettingsChanged();
-      _emitSelectionChanged();
+      _emitSelectionChanged(
+        origin: TimelineSelectionChangeOrigin.reconciliation,
+      );
     });
   }
 
@@ -5907,7 +5920,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       );
     }
-    if (oldWidget.clips.length != widget.clips.length) {
+    final clipTopologyChanged =
+        oldWidget.clips.length != widget.clips.length ||
+        (widget.clipTopologyRevision >= 0 &&
+            oldWidget.clipTopologyRevision != widget.clipTopologyRevision);
+    if (clipTopologyChanged) {
       // Clip indices are transient. A deletion or insertion can invalidate an
       // active drag/trim before its next pointer update is delivered.
       _cancelClipGestureAfterTopologyChange();

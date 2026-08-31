@@ -320,8 +320,12 @@ Widget _buildHarness({
     double? newStartMs,
   })? onTrimClipCommit,
   void Function(int row)? onSelectRow,
-  void Function(List<int> selectedClipIndices, int primaryClipIndex)?
-      onSelectionChanged,
+  void Function(
+    List<int> selectedClipIndices,
+    int primaryClipIndex,
+    TimelineSelectionChangeOrigin origin,
+  )?
+  onSelectionChanged,
   List<String> rowEffects = const <String>[],
   List<Map<String, dynamic>> automationTargets = const <Map<String, dynamic>>[],
   Map<String, List<AutomationClipSnapshot>> initialAutomationClipsByTarget =
@@ -393,6 +397,7 @@ Widget _buildHarness({
   bool useTabletDawLayout = false,
   bool allowMultipleExpandedRows = true,
   bool expandRowsOnTrackSelect = true,
+  int clipTopologyRevision = -1,
   int selectedClipIndex = -1,
   List<int> selectedClipIndices = const <int>[],
   bool Function(int clipIndex)? canReplaceSamplerSource,
@@ -446,6 +451,7 @@ Widget _buildHarness({
           rows: rows,
           trackGroups: trackGroupsOverride ?? const <TrackGroup>[],
           clips: clips,
+          clipTopologyRevision: clipTopologyRevision,
           clipOverlapMode: 'off',
           rowGain: rowGain,
           rowPan: rowPan,
@@ -667,7 +673,7 @@ void main() {
           onMoveClipCommit: (clipIndex, _, __) async {
             moveCommits.add(clipIndex);
           },
-          onSelectionChanged: (selectedClipIndices, _) {
+          onSelectionChanged: (selectedClipIndices, _, __) {
             selectionSnapshots.add(
               selectedClipIndices.toList(growable: false),
             );
@@ -714,7 +720,7 @@ void main() {
           ],
           useTabletDawLayout: true,
           onMoveClipCommit: (_, __, ___) async {},
-          onSelectionChanged: (selectedClipIndices, _) {
+          onSelectionChanged: (selectedClipIndices, _, __) {
             selectionSnapshots.add(
               selectedClipIndices.toList(growable: false),
             );
@@ -777,7 +783,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -809,7 +815,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -844,7 +850,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -895,7 +901,7 @@ void main() {
             onMoveClipCommit: (clipIndex, _, __) async {
               moveCommits.add(clipIndex);
             },
-            onSelectionChanged: (selectedClipIndices, _) {
+            onSelectionChanged: (selectedClipIndices, _, __) {
               selectionSnapshots.add(
                 selectedClipIndices.toList(growable: false),
               );
@@ -952,7 +958,7 @@ void main() {
             onMoveClipCommit: (clipIndex, _, __) async {
               moveCommits.add(clipIndex);
             },
-            onSelectionChanged: (selectedClipIndices, _) {
+            onSelectionChanged: (selectedClipIndices, _, __) {
               selectionSnapshots.add(
                 selectedClipIndices.toList(growable: false),
               );
@@ -1019,7 +1025,7 @@ void main() {
             onMoveClipCommit: (clipIndex, _, __) async {
               moveCommits.add(clipIndex);
             },
-            onSelectionChanged: (selectedClipIndices, _) {
+            onSelectionChanged: (selectedClipIndices, _, __) {
               selectionSnapshots.add(
                 selectedClipIndices.toList(growable: false),
               );
@@ -3246,6 +3252,104 @@ void main() {
   );
 
   testWidgets(
+    'tablet selection reports a new primary after clip settings opens',
+    (tester) async {
+      final first = await _buildClip(engineClipId: 1);
+      final second = await _buildClip(engineClipId: 2);
+      second.offset = 2200.0;
+      final panelRequests = <int>[];
+      final selectionSnapshots = <
+        ({
+          List<int> selected,
+          int primary,
+          TimelineSelectionChangeOrigin origin,
+        })
+      >[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[first, second],
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+          onSelectionChanged: (selected, primary, origin) {
+            selectionSnapshots.add((
+              selected: List<int>.from(selected),
+              primary: primary,
+              origin: origin,
+            ));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+      expect(panelRequests, <int>[0]);
+      expect(selectionSnapshots.last.selected, isEmpty);
+      expect(selectionSnapshots.last.primary, -1);
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+
+      expect(selectionSnapshots.last.selected, <int>[1]);
+      expect(selectionSnapshots.last.primary, 1);
+      expect(
+        selectionSnapshots.last.origin,
+        TimelineSelectionChangeOrigin.interaction,
+      );
+    },
+  );
+
+  testWidgets(
+    'topology reconciliation is distinct from the next user selection',
+    (tester) async {
+      final first = await _buildClip(engineClipId: 1);
+      final second = await _buildClip(engineClipId: 2);
+      second.offset = 2200.0;
+      final origins = <TimelineSelectionChangeOrigin>[];
+
+      Widget harness(List<AudioTrack> clips, int topologyRevision) {
+        return _buildHarness(
+          clips: clips,
+          clipTopologyRevision: topologyRevision,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (_, __, origin) => origins.add(origin),
+        );
+      }
+
+      await tester.pumpWidget(harness(<AudioTrack>[first], 0));
+      await tester.pumpAndSettle();
+      origins.clear();
+
+      await tester.pumpWidget(harness(<AudioTrack>[first, second], 1));
+      await tester.pumpAndSettle();
+      expect(origins, contains(TimelineSelectionChangeOrigin.reconciliation));
+      origins.clear();
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+      expect(origins.last, TimelineSelectionChangeOrigin.interaction);
+
+      origins.clear();
+      await tester.pumpWidget(harness(<AudioTrack>[first, second], 2));
+      await tester.pumpAndSettle();
+      expect(
+        origins,
+        contains(TimelineSelectionChangeOrigin.reconciliation),
+      );
+
+      origins.clear();
+      await tester.tapAt(_clipCenter(tester));
+      await tester.pumpAndSettle();
+      expect(origins.last, TimelineSelectionChangeOrigin.interaction);
+    },
+  );
+
+  testWidgets(
     'phone MIDI clip settings keeps the timeline overlay',
     (tester) async {
       final clips = <AudioTrack>[await _buildMidiClip()];
@@ -3768,7 +3872,7 @@ void main() {
             'newStartMs': newStartMs,
           });
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -3951,7 +4055,7 @@ void main() {
       _buildHarness(
         clips: clips,
         onMoveClipCommit: (_, __, ___) async {},
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );

@@ -317,7 +317,7 @@ Selecting a clip opens a compact action popover.
 
 ### Clip Settings
 
-On desktop and tablet, Clip settings opens the right inspector. On phones it opens a compact overlay on the timeline.
+On desktop and tablet, Clip settings opens the right inspector. While it remains open, selecting another clip updates the inspector to that clip's properties. On phones, Clip settings opens a compact overlay on the timeline.
 
 Audio clip settings include:
 
