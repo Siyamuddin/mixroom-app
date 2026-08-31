@@ -1213,6 +1213,12 @@ class L10n {
       'Keyboard Shortcuts': 'Keyboard Shortcuts',
       'View, remap, and reset desktop shortcuts.':
           'View, remap, and reset desktop shortcuts.',
+      'Transport': 'Transport',
+      'Timeline view': 'Timeline view',
+      'Seek Left 1 Bar': 'Seek Left 1 Bar',
+      'Seek Right 1 Bar': 'Seek Right 1 Bar',
+      'Scroll Timeline Left': 'Scroll Timeline Left',
+      'Scroll Timeline Right': 'Scroll Timeline Right',
       'Plugin Manager': 'Plugin Manager',
       'Rescan, favorite, or hide desktop plugins.':
           'Rescan, favorite, or hide desktop plugins.',
@@ -3298,6 +3304,12 @@ class L10n {
       'Keyboard Shortcuts': '키보드 단축키',
       'View, remap, and reset desktop shortcuts.':
           '데스크톱 단축키를 확인하고, 다시 지정하고, 초기화합니다.',
+      'Transport': '트랜스포트',
+      'Timeline view': '타임라인 보기',
+      'Seek Left 1 Bar': '한 마디 뒤로 이동',
+      'Seek Right 1 Bar': '한 마디 앞으로 이동',
+      'Scroll Timeline Left': '타임라인 왼쪽으로 스크롤',
+      'Scroll Timeline Right': '타임라인 오른쪽으로 스크롤',
       'Plugin Manager': '플러그인 관리자',
       'Rescan, favorite, or hide desktop plugins.':
           '데스크톱 플러그인을 다시 스캔하거나 즐겨찾기/숨김 처리합니다.',
@@ -4778,6 +4790,12 @@ class L10n {
           '用空格停止播放时，跳回播放开始的位置。',
       'Keyboard Shortcuts': '键盘快捷键',
       'View, remap, and reset desktop shortcuts.': '查看、重新映射和重置桌面快捷键。',
+      'Transport': '走带',
+      'Timeline view': '时间线视图',
+      'Seek Left 1 Bar': '左跳 1 小节',
+      'Seek Right 1 Bar': '右跳 1 小节',
+      'Scroll Timeline Left': '时间线向左滚动',
+      'Scroll Timeline Right': '时间线向右滚动',
       'Plugin Manager': '插件管理器',
       'Rescan, favorite, or hide desktop plugins.': '重新扫描、收藏或隐藏桌面插件。',
       'Desktop Diagnostics': '桌面诊断',
@@ -6223,6 +6241,12 @@ class L10n {
       'Keyboard Shortcuts': 'キーボードショートカット',
       'View, remap, and reset desktop shortcuts.':
           'デスクトップショートカットの確認、割り当て変更、リセットを行います。',
+      'Transport': 'トランスポート',
+      'Timeline view': 'タイムライン表示',
+      'Seek Left 1 Bar': '1小節戻る',
+      'Seek Right 1 Bar': '1小節進む',
+      'Scroll Timeline Left': 'タイムラインを左にスクロール',
+      'Scroll Timeline Right': 'タイムラインを右にスクロール',
       'Plugin Manager': 'プラグインマネージャー',
       'Rescan, favorite, or hide desktop plugins.':
           'デスクトッププラグインを再スキャン、お気に入り登録、非表示にします。',

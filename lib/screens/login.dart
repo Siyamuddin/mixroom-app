@@ -1363,7 +1363,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         if (_isRegisterMode)
           Positioned(
-            top: 10,
+            top: mixroomAuthCornerBackButtonTopInset(),
             left: horizontalPadding,
             child: MixroomAuthBackCircleButton(
               onTap: busy ? null : () => _switchMode(LoginEntryMode.signIn),

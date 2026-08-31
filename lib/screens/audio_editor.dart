@@ -30,6 +30,7 @@ import 'package:mixroom/helpers/automation_target_labels.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
+import 'package:mixroom/helpers/timeline_bar_navigation.dart';
 import 'package:mixroom/helpers/transport_loop.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
@@ -4050,6 +4051,10 @@ const String _kDesktopShortcutPlayPause = 'play_pause';
 const String _kDesktopShortcutToggleRecord = 'toggle_record';
 const String _kDesktopShortcutToggleMagnet = 'toggle_magnet';
 const String _kDesktopShortcutRestart = 'restart_song';
+const String _kDesktopShortcutSeekBarLeft = 'seek_bar_left';
+const String _kDesktopShortcutSeekBarRight = 'seek_bar_right';
+const String _kDesktopShortcutScrollTimelineLeft = 'scroll_timeline_left';
+const String _kDesktopShortcutScrollTimelineRight = 'scroll_timeline_right';
 const String _kDesktopShortcutOpenFileBrowser = 'open_file_browser';
 const String _kDesktopShortcutAddAudio = 'add_audio_track';
 const String _kDesktopShortcutAddInstrument = 'add_instrument_clip';
@@ -5983,6 +5988,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _sampleBrowserVisible = false;
   bool _sampleBrowserExpanded = false;
   bool _sampleDragActive = false;
+  final ValueNotifier<bool> _sampleDragPassThrough = ValueNotifier<bool>(false);
   bool _filePickerInFlight = false;
   bool _suppressSampleBrowserReopenAfterDrop = false;
   bool _reopenSampleBrowserAfterDrag = false;
@@ -8959,6 +8965,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return true;
     }
 
+    final isPress = isKeyDown || isKeyRepeat;
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutSeekBarLeft, event)) {
+      _nudgePlayheadByBar(forward: false);
+      return true;
+    }
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutSeekBarRight, event)) {
+      _nudgePlayheadByBar(forward: true);
+      return true;
+    }
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutScrollTimelineLeft, event)) {
+      if (!_canHandleTimelineViewPanShortcut()) return false;
+      _nudgeTimelineViewByBar(forward: false);
+      return true;
+    }
+    if (isPress &&
+        _matchesDesktopShortcut(_kDesktopShortcutScrollTimelineRight, event)) {
+      if (!_canHandleTimelineViewPanShortcut()) return false;
+      _nudgeTimelineViewByBar(forward: true);
+      return true;
+    }
+
     final keyboard = HardwareKeyboard.instance;
     if (!keyboard.isMetaPressed &&
         !keyboard.isControlPressed &&
@@ -9452,6 +9482,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return DesktopShortcutBinding(keyId: LogicalKeyboardKey.keyQ.keyId);
       case _kDesktopShortcutRestart:
         return DesktopShortcutBinding(keyId: LogicalKeyboardKey.keyA.keyId);
+      case _kDesktopShortcutSeekBarLeft:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.comma.keyId);
+      case _kDesktopShortcutSeekBarRight:
+        return DesktopShortcutBinding(keyId: LogicalKeyboardKey.period.keyId);
+      case _kDesktopShortcutScrollTimelineLeft:
+        return DesktopShortcutBinding(
+          keyId: LogicalKeyboardKey.arrowLeft.keyId,
+        );
+      case _kDesktopShortcutScrollTimelineRight:
+        return DesktopShortcutBinding(
+          keyId: LogicalKeyboardKey.arrowRight.keyId,
+        );
       case _kDesktopShortcutOpenFileBrowser:
         return DesktopShortcutBinding(keyId: LogicalKeyboardKey.keyF.keyId);
       case _kDesktopShortcutAddInstrument:
@@ -9500,8 +9542,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   get _desktopShortcutEntries => const <MapEntry<String, String>>[
     MapEntry(_kDesktopShortcutPlayPause, 'Play / Pause'),
     MapEntry(_kDesktopShortcutToggleRecord, 'Record'),
-    MapEntry(_kDesktopShortcutToggleMagnet, 'Toggle Snap to Grid'),
     MapEntry(_kDesktopShortcutRestart, 'Restart Song'),
+    MapEntry(_kDesktopShortcutSeekBarLeft, 'Seek Left 1 Bar'),
+    MapEntry(_kDesktopShortcutSeekBarRight, 'Seek Right 1 Bar'),
+    MapEntry(_kDesktopShortcutScrollTimelineLeft, 'Scroll Timeline Left'),
+    MapEntry(_kDesktopShortcutScrollTimelineRight, 'Scroll Timeline Right'),
+    MapEntry(_kDesktopShortcutToggleMagnet, 'Toggle Snap to Grid'),
     MapEntry(_kDesktopShortcutOpenFileBrowser, 'Open File Browser'),
     MapEntry(_kDesktopShortcutAddInstrument, 'Add Instrument Clip'),
     MapEntry(_kDesktopShortcutToggleSoloSelectedRow, 'Toggle Selected Solo'),
@@ -9798,6 +9844,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (key == null) return '?';
       if (key == LogicalKeyboardKey.space) return 'Space';
       if (key == LogicalKeyboardKey.escape) return 'Esc';
+      if (key == LogicalKeyboardKey.comma) return ',';
+      if (key == LogicalKeyboardKey.period) return '.';
+      if (key == LogicalKeyboardKey.arrowLeft) return '←';
+      if (key == LogicalKeyboardKey.arrowRight) return '→';
+      if (key == LogicalKeyboardKey.arrowUp) return '↑';
+      if (key == LogicalKeyboardKey.arrowDown) return '↓';
       final raw = key.keyLabel.trim();
       if (raw.isNotEmpty) return raw.toUpperCase();
       final debug = key.debugName ?? '';
@@ -9845,6 +9897,85 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     }
     return null;
+  }
+
+  String _desktopShortcutSectionTitle(String actionId) {
+    switch (actionId) {
+      case _kDesktopShortcutPlayPause:
+      case _kDesktopShortcutToggleRecord:
+      case _kDesktopShortcutRestart:
+      case _kDesktopShortcutSeekBarLeft:
+      case _kDesktopShortcutSeekBarRight:
+        return 'Transport';
+      case _kDesktopShortcutScrollTimelineLeft:
+      case _kDesktopShortcutScrollTimelineRight:
+        return 'Timeline view';
+      default:
+        return 'Editor';
+    }
+  }
+
+  bool _isSampleBrowserTreeFocused() {
+    final BuildContext? focusContext =
+        FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) return false;
+    return focusContext.findAncestorWidgetOfExactType<SampleBrowserPanel>() !=
+        null;
+  }
+
+  bool _canHandleTimelineViewPanShortcut() {
+    if (_showPianoRoll) return false;
+    if (_isSampleBrowserTreeFocused()) return false;
+    return true;
+  }
+
+  void _nudgePlayheadByBar({required bool forward}) {
+    if (_isRecording) return;
+    final double currentMs = _globalAudioClock.inMilliseconds.toDouble();
+    final double targetMs = forward
+        ? timelineNextBarMs(
+            currentMs,
+            bpm: _tempo,
+            beatsPerBar: _timeSignatureNumerator,
+            beatUnit: _timeSignatureDenominator,
+          )
+        : timelinePreviousBarMs(
+            currentMs,
+            bpm: _tempo,
+            beatsPerBar: _timeSignatureNumerator,
+            beatUnit: _timeSignatureDenominator,
+          );
+    if ((targetMs - currentMs).abs() < 0.01) {
+      _timelineController.ensurePlayheadVisible();
+      return;
+    }
+    _scrubProjectTransport(targetMs);
+    _timelineController.ensurePlayheadVisible();
+  }
+
+  void _nudgeTimelineViewByBar({required bool forward}) {
+    final double barMs = timelineMsPerBar(
+      bpm: _tempo,
+      beatsPerBar: _timeSignatureNumerator,
+      beatUnit: _timeSignatureDenominator,
+    );
+    _timelineController.panByMs(forward ? barMs : -barMs);
+  }
+
+  Widget _buildDesktopShortcutSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 6, 4, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.54),
+          fontFamily: 'Pretendard',
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
   }
 
   Widget _buildDesktopPopupSurface({
@@ -10412,6 +10543,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     ) !=
                     null;
               });
+              String? lastShortcutSection;
               return Focus(
                 autofocus: true,
                 onKeyEvent: (_, event) {
@@ -10517,7 +10649,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         child: SingleChildScrollView(
                           child: Column(
                             children: [
-                              ..._desktopShortcutEntries.map((entry) {
+                              ..._desktopShortcutEntries.expand((entry) {
+                                final sectionTitle =
+                                    _desktopShortcutSectionTitle(entry.key);
+                                final showSectionHeader =
+                                    sectionTitle != lastShortcutSection;
+                                lastShortcutSection = sectionTitle;
                                 final binding =
                                     updatedBindings[entry.key] ??
                                     _defaultDesktopShortcutBinding(entry.key);
@@ -10528,7 +10665,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       binding,
                                       updatedBindings,
                                     );
-                                return Container(
+                                return <Widget>[
+                                  if (showSectionHeader)
+                                    _buildDesktopShortcutSectionHeader(
+                                      L10n.translate(context, sectionTitle),
+                                    ),
+                                  Container(
                                   margin: const EdgeInsets.only(bottom: 10),
                                   padding: const EdgeInsets.fromLTRB(
                                     14,
@@ -10557,7 +10699,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              entry.value,
+                                              L10n.translate(
+                                                context,
+                                                entry.value,
+                                              ),
                                               style: const TextStyle(
                                                 color: Color(0xFFF4F4F4),
                                                 fontFamily: 'Pretendard',
@@ -10626,7 +10771,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       ],
                                     ],
                                   ),
-                                );
+                                ),
+                                ];
                               }),
                               const SizedBox(height: 4),
                               _buildDesktopKeyboardMidiReferenceSection(
@@ -12435,6 +12581,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _chatScrollRequest++;
     _pendingChatInsertions.clear();
     widget.evaluationController?._detach();
+    _sampleDragPassThrough.dispose();
     if (PlatformCapabilities.current.isDesktop) {
       HardwareKeyboard.instance.removeHandler(_handleMacEditorKeyEvent);
       unawaited(JuceAudioEngine.setDesktopKeyboardMidiForwardingEnabled(false));
@@ -13500,6 +13647,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _sampleBrowserVisible = false;
       _sampleBrowserExpanded = false;
       _sampleDragActive = false;
+      _sampleDragPassThrough.value = false;
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
       _sampleBrowserViewState = const SampleBrowserPanelViewState();
@@ -30302,6 +30450,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _audioTracks.length > beforeClipCount;
   }
 
+  /// Inserts from the File Browser + control without the full-window spinner.
+  Future<void> _insertSampleFromFileBrowser(String filePath) {
+    return _insertAudioFileAtTimeline(filePath, showLoadingOverlay: false);
+  }
+
   Future<void> _pickAndInsertAudioTrack() async {
     if (!await _ensureAndroidMediaLibraryAccess()) {
       return;
@@ -31004,6 +31157,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (!_sampleDragActive) {
+      _sampleDragPassThrough.value = true;
       setState(() {
         _sampleDragActive = true;
       });
@@ -31037,6 +31191,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _finderSampleDragDurationPath = null;
     _finderSampleDragData = null;
     _timelineController.clearExternalSampleDropPreview();
+    _sampleDragPassThrough.value = false;
     if (_sampleDragActive && mounted) {
       setState(() {
         _sampleDragActive = false;
@@ -32079,6 +32234,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reopenSampleBrowserAfterDrag = false;
       _reopenSampleBrowserExpanded = false;
     });
+    _sampleDragPassThrough.value = false;
     _setDawPanelVisible('sample_browser', false);
   }
 
@@ -32088,60 +32244,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _setSampleDragActive(bool active) {
     if (!mounted) return;
-    bool shouldReopenAfterDelay = false;
-    bool reopenExpanded = false;
+    // Hit-test reads this live, so the File Browser can pass through on
+    // the next pointer move without waiting for this huge setState.
+    _sampleDragPassThrough.value = active;
+    // Desktop keeps the floating window in place. Rebuilding the editor
+    // on drop remounts the File Browser chrome and makes it blink.
+    if (PlatformCapabilities.current.isDesktop) {
+      _sampleDragActive = active;
+      return;
+    }
+    // Phone/iPad slide the sheet away while dragging, then restore it
+    // on drop or cancel so another sample can be added. Keep the panel
+    // mounted so the LongPressDraggable is not disposed mid-drag.
+    if (_sampleDragActive == active) return;
     setState(() {
       _sampleDragActive = active;
-      if (active && _sampleBrowserVisible && _sampleBrowserExpanded) {
-        _reopenSampleBrowserAfterDrag = true;
-        _reopenSampleBrowserExpanded = true;
-        _sampleBrowserExpanded = false;
-      }
-      if (!active &&
-          _reopenSampleBrowserAfterDrag &&
-          !_suppressSampleBrowserReopenAfterDrop) {
-        shouldReopenAfterDelay = true;
-        reopenExpanded = _reopenSampleBrowserExpanded;
-        _reopenSampleBrowserAfterDrag = false;
-        _reopenSampleBrowserExpanded = false;
-      } else if (!active && _suppressSampleBrowserReopenAfterDrop) {
-        _reopenSampleBrowserAfterDrag = false;
-        _reopenSampleBrowserExpanded = false;
-      }
-    });
-
-    if (!shouldReopenAfterDelay) return;
-    Future<void>.delayed(const Duration(milliseconds: 180), () {
-      if (!mounted ||
-          _sampleDragActive ||
-          _sampleBrowserRoots.isEmpty ||
-          _suppressSampleBrowserReopenAfterDrop) {
-        return;
-      }
-      setState(() {
-        _sampleBrowserVisible = true;
-        _sampleBrowserExpanded = reopenExpanded;
-      });
-      _setDawPanelVisible('sample_browser', true);
     });
   }
 
   void _cancelSampleBrowserReopenAfterSuccessfulDrop() {
     if (!mounted) return;
-    setState(() {
-      _suppressSampleBrowserReopenAfterDrop = true;
-      _reopenSampleBrowserAfterDrag = false;
-      _reopenSampleBrowserExpanded = false;
-      _sampleBrowserVisible = false;
-      _sampleBrowserExpanded = false;
-    });
-    _setDawPanelVisible('sample_browser', false);
-    Future<void>.delayed(const Duration(milliseconds: 320), () {
-      if (!mounted) return;
-      setState(() {
-        _suppressSampleBrowserReopenAfterDrop = false;
-      });
-    });
+    // Keep the File Browser available after a drop so another sample
+    // can be added. Mobile restores the sheet from _setSampleDragActive.
+    if (shouldCloseSampleBrowserAfterSuccessfulDrop()) {
+      return;
+    }
+    _reopenSampleBrowserAfterDrag = false;
+    _reopenSampleBrowserExpanded = false;
+    _suppressSampleBrowserReopenAfterDrop = false;
   }
 
   void _handleSampleDragExitedBrowserPanel() {
@@ -40605,7 +40735,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required double bottom,
     required Widget child,
     List<BoxShadow>? boxShadow,
+    bool ignoringPointers = false,
+    ValueListenable<bool>? ignoringPointersListenable,
+    bool retractForSampleDrag = false,
   }) {
+    Widget overlayChild = boxShadow == null
+        ? child
+        : DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: boxShadow,
+            ),
+            child: child,
+          );
+    overlayChild = PassThroughIgnorePointer(
+      ignoring: ignoringPointers,
+      ignoringListenable: ignoringPointersListenable,
+      child: overlayChild,
+    );
+    if (retractForSampleDrag) {
+      final retracted = shouldRetractSampleBrowserForDrag(
+        isDesktop: PlatformCapabilities.current.isDesktop,
+        isDragActive: _sampleDragActive,
+      );
+      overlayChild = AnimatedSlide(
+        offset: retracted ? const Offset(0, 1) : Offset.zero,
+        duration: kSampleBrowserDragRetractDuration,
+        curve: Curves.easeOutCubic,
+        child: AnimatedOpacity(
+          opacity: retracted ? 0 : 1,
+          duration: kSampleBrowserDragRetractDuration,
+          curve: Curves.easeOutCubic,
+          child: overlayChild,
+        ),
+      );
+    }
     return AnimatedPositioned(
       duration: const Duration(milliseconds: 190),
       curve: Curves.easeOutCubic,
@@ -40613,15 +40777,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       right: _kOverlayPanelHorizontalInset,
       top: top,
       bottom: bottom,
-      child: boxShadow == null
-          ? child
-          : DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: boxShadow,
-              ),
-              child: child,
-            ),
+      child: overlayChild,
     );
   }
 
@@ -40692,13 +40848,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   outerShadows: _kFloatingEditorWindowShadows,
                   minWidth: 360,
                   minHeight: 320,
+                  ignoringPointers: _sampleDragActive,
+                  ignoringPointersListenable: _sampleDragPassThrough,
                   child: SampleBrowserPanel(
                     rootFolders: _sampleBrowserRoots,
                     fixedRootFolders: _fixedSampleBrowserRootFolders,
                     auditioningPath: _auditioningSamplePath,
                     onAuditionTap: _auditionSampleFile,
-                    onInsertSample: (filePath) =>
-                        _insertAudioFileAtTimeline(filePath),
+                    onInsertSample: _insertSampleFromFileBrowser,
                     onAddFolder: _addSampleBrowserRootFolder,
                     onRemoveFolder: _removeSampleBrowserRoot,
                     resolveDuration: _resolveSampleDuration,
@@ -40725,13 +40882,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   top: _sampleBrowserExpanded ? 0.0 : samplePanelTop,
                   bottom: _sampleBrowserExpanded ? 0.0 : samplePanelBottom,
                   boxShadow: _kFloatingEditorWindowShadows,
+                  ignoringPointers: _sampleDragActive,
+                  ignoringPointersListenable: _sampleDragPassThrough,
+                  retractForSampleDrag: true,
                   child: SampleBrowserPanel(
                     rootFolders: _sampleBrowserRoots,
                     fixedRootFolders: _fixedSampleBrowserRootFolders,
                     auditioningPath: _auditioningSamplePath,
                     onAuditionTap: _auditionSampleFile,
-                    onInsertSample: (filePath) =>
-                        _insertAudioFileAtTimeline(filePath),
+                    onInsertSample: _insertSampleFromFileBrowser,
                     onAddFolder: _addSampleBrowserRootFolder,
                     onRemoveFolder: _removeSampleBrowserRoot,
                     resolveDuration: _resolveSampleDuration,
@@ -84029,6 +84188,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   row: row,
                                                   timeMs: timeMs,
                                                   uploadMethod: 'dragdrop',
+                                                  showLoadingOverlay: false,
                                                 );
                                               },
                                           onExternalSampleDragEntered: () {
@@ -84036,6 +84196,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           },
                                           externalSampleDragActive:
                                               _sampleDragActive,
+                                          externalSampleDragPassThrough:
+                                              _sampleDragPassThrough,
                                           onTutorialTimelineScrolled:
                                               _handleDawOnboardingTimelineScrolled,
                                           onTutorialTimelineZoomed:
@@ -84531,6 +84693,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     _kFloatingEditorWindowShadows,
                                                 minWidth: 360,
                                                 minHeight: 320,
+                                                ignoringPointers:
+                                                    _sampleDragActive,
+                                                ignoringPointersListenable:
+                                                    _sampleDragPassThrough,
                                                 child: SampleBrowserPanel(
                                                   rootFolders:
                                                       _sampleBrowserRoots,
@@ -84540,10 +84706,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       _auditioningSamplePath,
                                                   onAuditionTap:
                                                       _auditionSampleFile,
-                                                  onInsertSample: (filePath) =>
-                                                      _insertAudioFileAtTimeline(
-                                                        filePath,
-                                                      ),
+                                                  onInsertSample:
+                                                      _insertSampleFromFileBrowser,
                                                   onAddFolder:
                                                       _addSampleBrowserRootFolder,
                                                   onRemoveFolder:
@@ -84596,6 +84760,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                         _sampleBrowserExpanded
                                                     ? 0.0
                                                     : samplePanelBottom,
+                                                ignoringPointers:
+                                                    _sampleDragActive,
+                                                ignoringPointersListenable:
+                                                    _sampleDragPassThrough,
+                                                retractForSampleDrag: true,
                                                 child: SampleBrowserPanel(
                                                   rootFolders:
                                                       _sampleBrowserRoots,
@@ -84605,10 +84774,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                       _auditioningSamplePath,
                                                   onAuditionTap:
                                                       _auditionSampleFile,
-                                                  onInsertSample: (filePath) =>
-                                                      _insertAudioFileAtTimeline(
-                                                        filePath,
-                                                      ),
+                                                  onInsertSample:
+                                                      _insertSampleFromFileBrowser,
                                                   onAddFolder:
                                                       _addSampleBrowserRootFolder,
                                                   onRemoveFolder:
@@ -94277,7 +94444,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
   static const int _waveformSampleCount = 2048;
   static const Duration _pollInterval = Duration(milliseconds: 33);
   static const Duration _modeMenuPressDelay = Duration(milliseconds: 240);
-  List<double> _waveformSamples = const <double>[];
+  List<double> _stereoWaveformSamples = const <double>[];
   List<double> _spectrumDb = const <double>[];
   double _sampleRate = 44100.0;
   double _level = 0.0;
@@ -94337,20 +94504,26 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
     if (!mounted || _pollInFlight) return;
     _pollInFlight = true;
     try {
-      final waveform = await JuceAudioEngine.getRecentMasterWaveform(
-        sampleCount: _waveformSampleCount,
-      );
+      final stereoWaveform =
+          await JuceAudioEngine.getRecentMasterStereoWaveform(
+            sampleCount: _waveformSampleCount,
+          );
       if (!mounted) return;
-      final waveformSamples = List<double>.from(waveform, growable: false);
-      final nextSpectrum = _TopBarSpectrumAnalyzer.computeSpectrumDb(waveform);
+      final waveformSamples = List<double>.from(
+        stereoWaveform,
+        growable: false,
+      );
+      final nextSpectrum = _TopBarSpectrumAnalyzer.computeSpectrumDb(
+        stereoWaveform,
+      );
       final smoothedSpectrum = _TopBarSpectrumAnalyzer.smoothSpectrum(
         current: _spectrumDb,
         next: nextSpectrum,
       );
       if (!listEquals(smoothedSpectrum, _spectrumDb) ||
-          !listEquals(waveformSamples, _waveformSamples)) {
+          !listEquals(waveformSamples, _stereoWaveformSamples)) {
         setState(() {
-          _waveformSamples = waveformSamples;
+          _stereoWaveformSamples = waveformSamples;
           _spectrumDb = smoothedSpectrum;
         });
       }
@@ -94589,7 +94762,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
                 child: RepaintBoundary(
                   child: CustomPaint(
                     painter: _TopBarMasterVisualizerPainter(
-                      waveformSamples: _waveformSamples,
+                      stereoWaveformSamples: _stereoWaveformSamples,
                       spectrumDb: _spectrumDb,
                       analyzerSampleRate: _sampleRate,
                       level: _level,
@@ -94609,7 +94782,7 @@ class _TopBarMasterVisualizerState extends State<_TopBarMasterVisualizer> {
 }
 
 class _TopBarMasterVisualizerPainter extends CustomPainter {
-  final List<double> waveformSamples;
+  final List<double> stereoWaveformSamples;
   final List<double> spectrumDb;
   final double analyzerSampleRate;
   final double level;
@@ -94618,7 +94791,7 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
   final TopBarVisualizerMode mode;
 
   const _TopBarMasterVisualizerPainter({
-    required this.waveformSamples,
+    required this.stereoWaveformSamples,
     required this.spectrumDb,
     required this.analyzerSampleRate,
     required this.level,
@@ -94956,9 +95129,10 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       axisPaint,
     );
 
-    final samples = waveformSamples;
+    final samples = stereoWaveformSamples;
     final path = Path();
-    final points = math.min(420, samples.length);
+    final frameCount = samples.length ~/ 2;
+    final points = math.min(420, frameCount);
     if (points < 8) {
       final idleRect = Rect.fromCenter(
         center: center,
@@ -94967,35 +95141,22 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
       );
       path.addOval(idleRect);
     } else {
-      final step = math.max(1, (samples.length / points).floor());
+      final step = math.max(1, (frameCount / points).floor());
       final gain = _waveformAutoGain(samples);
-      final panSkew =
-          ((meterFrame.peakR + meterFrame.rmsR) -
-                  (meterFrame.peakL + meterFrame.rmsL))
-              .clamp(-1.0, 1.0)
-              .toDouble();
-      final spread = (0.34 + (level * 0.42) + (panSkew.abs() * 0.20)).clamp(
-        0.26,
-        0.84,
-      );
       final radiusX = drawRect.width * 0.45;
       final radiusY = drawRect.height * 0.46;
+      final msScale = math.sqrt(0.5);
       var moved = false;
       for (int i = 0; i < points; i++) {
-        final sampleIndex = math.min(samples.length - 1, i * step);
-        final prevIndex = math.max(0, sampleIndex - step);
-        final sample = (samples[sampleIndex] * gain)
+        final frameIndex = math.min(frameCount - 1, i * step);
+        final left = (samples[frameIndex * 2] * gain)
             .clamp(-1.0, 1.0)
             .toDouble();
-        final prev = (samples[prevIndex] * gain).clamp(-1.0, 1.0).toDouble();
-        final delta = ((sample - prev) * 2.2).clamp(-1.0, 1.0).toDouble();
-        final shimmer = math.sin((i / points) * math.pi * 2.0) * 0.06;
-        final left =
-            (sample * (1.0 - (panSkew * 0.28))) + ((delta + shimmer) * spread);
-        final right =
-            (sample * (1.0 + (panSkew * 0.28))) - ((delta - shimmer) * spread);
-        final mid = ((left + right) * 0.5).clamp(-1.0, 1.0).toDouble();
-        final side = ((left - right) * 0.5).clamp(-1.0, 1.0).toDouble();
+        final right = (samples[frameIndex * 2 + 1] * gain)
+            .clamp(-1.0, 1.0)
+            .toDouble();
+        final mid = ((left + right) * msScale).clamp(-1.0, 1.0).toDouble();
+        final side = ((left - right) * msScale).clamp(-1.0, 1.0).toDouble();
         final x = center.dx + (side * radiusX);
         final y = center.dy - (mid * radiusY);
         if (!moved) {
@@ -95036,13 +95197,11 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
 
   void _paintWaveform(Canvas canvas, Rect drawRect) {
     final centerY = drawRect.center.dy;
-    final samples = waveformSamples;
+    final samples = stereoWaveformSamples;
     final path = Path();
     final fillPath = Path();
-    final points = math.min(
-      math.max(96, drawRect.width.floor()),
-      samples.length,
-    );
+    final frameCount = samples.length ~/ 2;
+    final points = math.min(math.max(96, drawRect.width.floor()), frameCount);
     if (points < 8) {
       canvas.drawLine(
         Offset(drawRect.left, centerY),
@@ -95056,11 +95215,14 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
     }
 
     final gain = _waveformAutoGain(samples);
-    final step = math.max(1, (samples.length / points).floor());
+    final step = math.max(1, (frameCount / points).floor());
     var moved = false;
     for (int i = 0; i < points; i++) {
-      final sampleIndex = math.min(samples.length - 1, i * step);
-      final sample = (samples[sampleIndex] * gain).clamp(-1.0, 1.0).toDouble();
+      final frameIndex = math.min(frameCount - 1, i * step);
+      final sample =
+          ((samples[frameIndex * 2] + samples[frameIndex * 2 + 1]) * 0.5 * gain)
+              .clamp(-1.0, 1.0)
+              .toDouble();
       final t = points <= 1 ? 0.0 : i / (points - 1);
       final x = drawRect.left + (drawRect.width * t);
       final y = centerY - (sample * drawRect.height * 0.43);
@@ -95133,12 +95295,12 @@ class _TopBarMasterVisualizerPainter extends CustomPainter {
     late final List<double> oldWaveformSamples;
     late final List<double> oldSpectrumDb;
     try {
-      oldWaveformSamples = oldDelegate.waveformSamples;
+      oldWaveformSamples = oldDelegate.stereoWaveformSamples;
       oldSpectrumDb = oldDelegate.spectrumDb;
     } catch (_) {
       return true;
     }
-    return !listEquals(oldWaveformSamples, waveformSamples) ||
+    return !listEquals(oldWaveformSamples, stereoWaveformSamples) ||
         !listEquals(oldSpectrumDb, spectrumDb) ||
         oldDelegate.analyzerSampleRate != analyzerSampleRate ||
         oldDelegate.level != level ||
@@ -95152,7 +95314,7 @@ class _TopBarSpectrumAnalyzer {
   static const double _minDb = -90.0;
   static const double _maxDb = 0.0;
   static const double _minHz = 30.0;
-  static const double _maxHz = 18000.0;
+  static const double _maxHz = 20000.0;
   static const List<double> bandMarkerHz = <double>[
     80.0,
     300.0,
@@ -95175,34 +95337,55 @@ class _TopBarSpectrumAnalyzer {
 
   static double _log10(num x) => math.log(x) / math.ln10;
 
-  static List<double> computeSpectrumDb(List<double> samples) {
-    if (samples.length < 64) return const <double>[];
+  static List<double> computeSpectrumDb(List<double> interleavedSamples) {
+    final frameCount = interleavedSamples.length ~/ 2;
+    if (frameCount < 64) return const <double>[];
 
-    var fftSize = _nextPowerOfTwo(samples.length);
+    var fftSize = _nextPowerOfTwo(frameCount);
     fftSize = fftSize.clamp(256, 2048);
 
-    final input = List<double>.filled(fftSize, 0.0, growable: false);
-    final copyLen = math.min(fftSize, samples.length);
-    final readOffset = samples.length - copyLen;
+    final inputL = List<double>.filled(fftSize, 0.0, growable: false);
+    final inputR = List<double>.filled(fftSize, 0.0, growable: false);
+    final copyLen = math.min(fftSize, frameCount);
+    final readOffset = frameCount - copyLen;
     for (int i = 0; i < copyLen; i++) {
       final window =
           0.5 - 0.5 * math.cos((2.0 * math.pi * i) / (copyLen - 1).toDouble());
-      input[i] = samples[readOffset + i] * window;
+      final sourceIndex = (readOffset + i) * 2;
+      inputL[i] = interleavedSamples[sourceIndex] * window;
+      inputR[i] = interleavedSamples[sourceIndex + 1] * window;
     }
 
     final fft = _fftForSize(fftSize);
-    final freqDomain = fft.realFft(input);
-    if (freqDomain.length <= 1) return const <double>[];
-
-    final out = List<double>.filled(freqDomain.length, _minDb, growable: false);
-    for (int i = 1; i < freqDomain.length; i++) {
-      final c = freqDomain[i];
-      final mag = math.sqrt(c.x * c.x + c.y * c.y) / (fftSize * 0.5);
-      out[i] = (20.0 * _log10(mag + 1.0e-12)).clamp(_minDb, 6.0);
+    final freqDomainL = fft.realFft(inputL);
+    final freqDomainR = fft.realFft(inputR);
+    if (freqDomainL.length <= 1 || freqDomainR.length != freqDomainL.length) {
+      return const <double>[];
     }
 
-    for (int i = 1; i < out.length - 1; i++) {
-      out[i] = ((out[i - 1] * 0.2) + (out[i] * 0.6) + (out[i + 1] * 0.2)).clamp(
+    // fftea returns the full conjugate-symmetric FFT. Keep only DC through
+    // Nyquist so the renderer can infer the original FFT size correctly.
+    final uniqueBinCount = (fftSize ~/ 2) + 1;
+    final raw = List<double>.filled(uniqueBinCount, _minDb, growable: false);
+    // A Hann window has a coherent gain of 0.5, so a full-scale,
+    // bin-centred sine produces fftSize / 4 in its positive-frequency bin.
+    final magnitudeScale = fftSize * 0.25;
+    for (int i = 1; i < uniqueBinCount; i++) {
+      final left = freqDomainL[i];
+      final right = freqDomainR[i];
+      final magL =
+          math.sqrt(left.x * left.x + left.y * left.y) / magnitudeScale;
+      final magR =
+          math.sqrt(right.x * right.x + right.y * right.y) / magnitudeScale;
+      final combinedMagnitude = math.sqrt(
+        ((magL * magL) + (magR * magR)) * 0.5,
+      );
+      raw[i] = (20.0 * _log10(combinedMagnitude + 1.0e-12)).clamp(_minDb, 6.0);
+    }
+
+    final out = List<double>.from(raw, growable: false);
+    for (int i = 1; i < raw.length - 1; i++) {
+      out[i] = ((raw[i - 1] * 0.2) + (raw[i] * 0.6) + (raw[i + 1] * 0.2)).clamp(
         _minDb,
         6.0,
       );
@@ -95292,7 +95475,7 @@ class _TopBarSpectrumAnalyzer {
 
   static double _displayMaxHz(double sampleRate) {
     final nyquist = sampleRate > 1000.0 ? sampleRate * 0.5 : 22050.0;
-    return math.min(_maxHz, math.max(12000.0, nyquist * 0.82)).toDouble();
+    return math.min(_maxHz, nyquist * 0.98).toDouble();
   }
 
   static double dbToY(double db, Rect rect) {

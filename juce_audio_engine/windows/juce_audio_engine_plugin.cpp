@@ -2169,6 +2169,15 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "getRecentMasterStereoWaveform") {
+      const int sample_count = FindInt(args, "sampleCount", 2048);
+      const auto values = CallOnMessageThreadSync([sample_count] {
+        return JuceEngine::get().getRecentMasterStereoWaveform(sample_count);
+      });
+      result->Success(flutter::EncodableValue(FloatVectorToEncodableList(values)));
+      return;
+    }
+
     if (method_call.method_name() == "getRowEqWaveform") {
       const int row = FindInt(args, "row", 0);
       const int effect = FindInt(args, "effect", 0);
