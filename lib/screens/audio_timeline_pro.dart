@@ -21,6 +21,7 @@ import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/trackpad_touch_count.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/helpers/track_group_reconciler.dart';
 import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
@@ -391,6 +392,7 @@ extension _TimelineToolUi on _TimelineTool {
 @immutable
 class TimelineTopControlsState {
   final bool magnetEnabled;
+  final TimelineGridMode gridMode;
   final int quantizeDivisionsPerBar;
   final String quantizeLabel;
   final String toolLabel;
@@ -399,6 +401,7 @@ class TimelineTopControlsState {
 
   const TimelineTopControlsState({
     required this.magnetEnabled,
+    required this.gridMode,
     required this.quantizeDivisionsPerBar,
     required this.quantizeLabel,
     required this.toolLabel,
@@ -408,11 +411,35 @@ class TimelineTopControlsState {
 
   static const TimelineTopControlsState initial = TimelineTopControlsState(
     magnetEnabled: true,
+    gridMode: TimelineGridMode.adaptive,
     quantizeDivisionsPerBar: 4,
     quantizeLabel: '1/4',
     toolLabel: 'Select',
     toolIcon: Icons.near_me_outlined,
     toolIconFlipHorizontally: true,
+  );
+
+  @override
+  bool operator ==(Object other) {
+    return other is TimelineTopControlsState &&
+        magnetEnabled == other.magnetEnabled &&
+        gridMode == other.gridMode &&
+        quantizeDivisionsPerBar == other.quantizeDivisionsPerBar &&
+        quantizeLabel == other.quantizeLabel &&
+        toolLabel == other.toolLabel &&
+        toolIcon == other.toolIcon &&
+        toolIconFlipHorizontally == other.toolIconFlipHorizontally;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    magnetEnabled,
+    gridMode,
+    quantizeDivisionsPerBar,
+    quantizeLabel,
+    toolLabel,
+    toolIcon,
+    toolIconFlipHorizontally,
   );
 }
 
@@ -747,7 +774,11 @@ class AudioCanvasTimeline extends StatefulWidget {
   registerRowFxRefresher;
   final void Function(void Function(int row) refreshRowFxPlayback)?
   registerRowFxPlaybackRefresher;
-  final void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
+  final void Function(
+    bool magnetEnabled,
+    TimelineGridMode gridMode,
+    int fixedQuantizeDivisionsPerBar,
+  )?
   onSnapSettingsChanged;
   final VoidCallback? onTutorialTimelineScrolled;
   final VoidCallback? onTutorialTimelineZoomed;
@@ -1187,6 +1218,7 @@ class AudioCanvasTimelineController {
   }
 
   void _setTopControlsState(TimelineTopControlsState state) {
+    if (_topControls.value == state) return;
     _topControls.value = state;
   }
 
@@ -1712,7 +1744,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double? _cutPreviewMs;
 
   bool _magnetEnabled = true;
-  int _quantizeDivisionsPerBar = 4; // default: 1/4 note (legacy behavior)
+  TimelineGridMode _gridMode = TimelineGridMode.adaptive;
+  int _fixedQuantizeDivisionsPerBar = 4;
   int? _highlightedSegmentRow;
   double? _highlightedSegmentStartMs;
   double? _highlightedSegmentEndMs;
@@ -1760,6 +1793,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _QuantizePreset(divisionsPerBar: 7, label: '1/7'),
     _QuantizePreset(divisionsPerBar: 8, label: '1/8'),
     _QuantizePreset(divisionsPerBar: 16, label: '1/16'),
+    _QuantizePreset(divisionsPerBar: 32, label: '1/32'),
   ];
   int? _headerPointer;
   int? _headerRow;
@@ -1790,9 +1824,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _notifySnapSettingsChanged() {
     widget.onSnapSettingsChanged?.call(
       _magnetEnabled,
-      _quantizeDivisionsPerBar,
+      _gridMode,
+      _fixedQuantizeDivisionsPerBar,
     );
     _publishTopControlsState();
+  }
+
+  int get _effectiveQuantizeDivisionsPerBar {
+    final pixelsPerBar = TimelineGridPolicy.arrangementPixelsPerBar(
+      bpm: widget.bpm,
+      beatsPerBar: widget.beatsPerBar,
+      beatUnit: widget.beatUnit,
+      pixelsPerMs: _pixelsPerMs,
+    );
+    return TimelineGridPolicy.resolveDivisionsPerBar(
+      mode: _gridMode,
+      fixedDivisionsPerBar: _fixedQuantizeDivisionsPerBar,
+      pixelsPerBar: pixelsPerBar,
+    );
   }
 
   String _quantizeLabelForDivisions(int divisionsPerBar) {
@@ -1807,10 +1856,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _syncQuantizeToTimeSignature() {
+    if (_gridMode == TimelineGridMode.adaptive) {
+      _refreshQuantizedPreviewsForGridChange();
+      _publishTopControlsState();
+      return;
+    }
     final nextDivisions = _matchingQuantizeDivisionsForMeter();
-    if (_quantizeDivisionsPerBar == nextDivisions) return;
+    if (_fixedQuantizeDivisionsPerBar == nextDivisions) return;
     setState(() {
-      _quantizeDivisionsPerBar = nextDivisions;
+      _fixedQuantizeDivisionsPerBar = nextDivisions;
+      _refreshQuantizedPreviewsForGridChange(inSetState: true);
+    });
+    _notifySnapSettingsChanged();
+  }
+
+  void _refreshQuantizedPreviewsForGridChange({bool inSetState = false}) {
+    void refresh() {
       if (_magnetEnabled &&
           _pasteRow != null &&
           _pasteMs != null &&
@@ -1822,16 +1883,24 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _highlightedSegmentEndMs = start + _quantizeIntervalMs();
       }
       _refreshCutPreviewFromCurrentRaw(inSetState: true);
-    });
-    _notifySnapSettingsChanged();
+    }
+
+    if (inSetState) {
+      refresh();
+    } else {
+      setState(refresh);
+    }
   }
 
   void _publishTopControlsState() {
     widget.controller?._setTopControlsState(
       TimelineTopControlsState(
         magnetEnabled: _magnetEnabled,
-        quantizeDivisionsPerBar: _quantizeDivisionsPerBar,
-        quantizeLabel: _quantizeLabelForDivisions(_quantizeDivisionsPerBar),
+        gridMode: _gridMode,
+        quantizeDivisionsPerBar: _effectiveQuantizeDivisionsPerBar,
+        quantizeLabel: _quantizeLabelForDivisions(
+          _effectiveQuantizeDivisionsPerBar,
+        ),
         toolLabel: _activeTool.controllerLabel,
         toolIcon: _activeTool.icon,
         toolIconFlipHorizontally: _activeTool.flipHorizontally,
@@ -3083,6 +3152,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (rawDelta == 0) return;
 
     bool didZoom = false;
+    bool adaptiveGridChanged = false;
+    final previousGrid = _effectiveQuantizeDivisionsPerBar;
     setState(() {
       final zoomFactor = math.exp(-rawDelta * _kMacWheelZoomSensitivity);
       final newPixelsPerMs = (_pixelsPerMs * zoomFactor).clamp(
@@ -3099,9 +3170,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _pixelsPerMs = newPixelsPerMs;
       _clampScroll();
       didZoom = true;
+      adaptiveGridChanged =
+          _gridMode == TimelineGridMode.adaptive &&
+          previousGrid != _effectiveQuantizeDivisionsPerBar;
+      if (adaptiveGridChanged) {
+        _refreshQuantizedPreviewsForGridChange(inSetState: true);
+      }
     });
 
     if (didZoom) {
+      if (adaptiveGridChanged) _publishTopControlsState();
       widget.onTutorialTimelineZoomed?.call();
     }
   }
@@ -3395,7 +3473,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   double _quantizeIntervalMs() {
-    final safeDivisions = math.max(1, _quantizeDivisionsPerBar);
+    final safeDivisions = math.max(1, _effectiveQuantizeDivisionsPerBar);
     return _msPerBar() / safeDivisions;
   }
 
@@ -3439,7 +3517,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final triggerWidth =
         anchorRect?.width ?? _globalRectForKey(_magnetButtonKey)?.width ?? 30.0;
     final compactItems = triggerWidth < 72;
-    final selected = await showMenu<int>(
+    final selected = await showMenu<Object>(
       context: context,
       popUpAnimationStyle: const AnimationStyle(
         duration: Duration(milliseconds: 95),
@@ -3456,23 +3534,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
       ),
       position: position,
-      items: _quantizePresets.map((preset) {
-        final isSelected = preset.divisionsPerBar == _quantizeDivisionsPerBar;
-        return PopupMenuItem<int>(
-          key: ValueKey('timeline_quantize_menu_${preset.divisionsPerBar}'),
-          value: preset.divisionsPerBar,
+      items: <PopupMenuEntry<Object>>[
+        PopupMenuItem<Object>(
+          key: const ValueKey('timeline_quantize_menu_auto'),
+          value: TimelineGridMode.adaptive,
           height: 36,
           padding: compactItems ? EdgeInsets.zero : null,
           child: compactItems
               ? Center(
                   child: Text(
-                    preset.label,
+                    L10n.translate(context, 'Auto'),
                     style: TextStyle(
-                      color: isSelected
+                      color: _gridMode == TimelineGridMode.adaptive
                           ? _kTimelineWarmBorder
                           : _kTimelineShellMutedText,
                       fontSize: 11,
-                      fontWeight: isSelected
+                      fontWeight: _gridMode == TimelineGridMode.adaptive
                           ? FontWeight.w800
                           : FontWeight.w600,
                       fontFamily: 'Pretendard',
@@ -3483,19 +3560,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   children: [
                     Expanded(
                       child: Text(
-                        preset.label,
+                        L10n.translate(context, 'Auto'),
                         style: TextStyle(
-                          color: isSelected
+                          color: _gridMode == TimelineGridMode.adaptive
                               ? _kTimelineShellText
                               : _kTimelineShellMutedText,
-                          fontWeight: isSelected
+                          fontWeight: _gridMode == TimelineGridMode.adaptive
                               ? FontWeight.w700
                               : FontWeight.w500,
                           fontFamily: 'Pretendard',
                         ),
                       ),
                     ),
-                    if (isSelected)
+                    if (_gridMode == TimelineGridMode.adaptive)
                       const Icon(
                         Icons.check,
                         size: 16,
@@ -3503,25 +3580,77 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       ),
                   ],
                 ),
-        );
-      }).toList(),
+        ),
+        ..._quantizePresets.map((preset) {
+          final isSelected =
+              _gridMode == TimelineGridMode.fixed &&
+              preset.divisionsPerBar == _fixedQuantizeDivisionsPerBar;
+          return PopupMenuItem<Object>(
+            key: ValueKey('timeline_quantize_menu_${preset.divisionsPerBar}'),
+            value: preset.divisionsPerBar,
+            height: 36,
+            padding: compactItems ? EdgeInsets.zero : null,
+            child: compactItems
+                ? Center(
+                    child: Text(
+                      preset.label,
+                      style: TextStyle(
+                        color: isSelected
+                            ? _kTimelineWarmBorder
+                            : _kTimelineShellMutedText,
+                        fontSize: 11,
+                        fontWeight: isSelected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
+                        fontFamily: 'Pretendard',
+                      ),
+                    ),
+                  )
+                : Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          preset.label,
+                          style: TextStyle(
+                            color: isSelected
+                                ? _kTimelineShellText
+                                : _kTimelineShellMutedText,
+                            fontWeight: isSelected
+                                ? FontWeight.w700
+                                : FontWeight.w500,
+                            fontFamily: 'Pretendard',
+                          ),
+                        ),
+                      ),
+                      if (isSelected)
+                        const Icon(
+                          Icons.check,
+                          size: 16,
+                          color: _kTimelineWarmBorder,
+                        ),
+                    ],
+                  ),
+          );
+        }),
+      ],
     );
 
-    if (selected == null || selected == _quantizeDivisionsPerBar) return;
+    if (selected == null) return;
+    final nextMode = selected == TimelineGridMode.adaptive
+        ? TimelineGridMode.adaptive
+        : TimelineGridMode.fixed;
+    final nextFixedDivisions = selected is int
+        ? selected
+        : _fixedQuantizeDivisionsPerBar;
+    if (nextMode == _gridMode &&
+        nextFixedDivisions == _fixedQuantizeDivisionsPerBar) {
+      return;
+    }
     if (!mounted) return;
     setState(() {
-      _quantizeDivisionsPerBar = selected;
-      if (_magnetEnabled &&
-          _pasteRow != null &&
-          _pasteMs != null &&
-          _showPastePopup) {
-        final start = _segmentStartMsForTap(_pasteMs!);
-        _pasteMs = start;
-        _highlightedSegmentRow = _pasteRow;
-        _highlightedSegmentStartMs = start;
-        _highlightedSegmentEndMs = start + _quantizeIntervalMs();
-      }
-      _refreshCutPreviewFromCurrentRaw(inSetState: true);
+      _gridMode = nextMode;
+      _fixedQuantizeDivisionsPerBar = nextFixedDivisions;
+      _refreshQuantizedPreviewsForGridChange(inSetState: true);
     });
     _notifySnapSettingsChanged();
   }
@@ -5877,6 +6006,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (oldWidget.beatsPerBar != widget.beatsPerBar ||
         oldWidget.beatUnit != widget.beatUnit) {
       _syncQuantizeToTimeSignature();
+    } else if (oldWidget.bpm != widget.bpm &&
+        _gridMode == TimelineGridMode.adaptive) {
+      _refreshQuantizedPreviewsForGridChange();
+      _publishTopControlsState();
     }
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller?._unbind(
@@ -6892,13 +7025,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             .clamp(_kMinTimelinePixelsPerMs, _kMaxTimelinePixelsPerMs)
             .toDouble();
     if ((nextPixelsPerMs - _pixelsPerMs).abs() < 0.000001) return;
+    final previousGrid = _effectiveQuantizeDivisionsPerBar;
+    var adaptiveGridChanged = false;
     setState(() {
       _pixelsPerMs = nextPixelsPerMs;
       _scrollOffsetMs =
           _horizontalScrollbarDragAnchorMs -
           (_horizontalScrollbarDragAnchorLocalX / _pixelsPerMs);
       _clampScroll();
+      adaptiveGridChanged =
+          _gridMode == TimelineGridMode.adaptive &&
+          previousGrid != _effectiveQuantizeDivisionsPerBar;
+      if (adaptiveGridChanged) {
+        _refreshQuantizedPreviewsForGridChange(inSetState: true);
+      }
     });
+    if (adaptiveGridChanged) _publishTopControlsState();
     _publishHorizontalScrollbarState();
     widget.onTutorialTimelineZoomed?.call();
   }
@@ -10597,7 +10739,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           bpm: widget.bpm,
                           beatsPerBar: widget.beatsPerBar,
                           beatUnit: widget.beatUnit,
-                          quantizeDivisions: _quantizeDivisionsPerBar,
+                          quantizeDivisions: _effectiveQuantizeDivisionsPerBar,
                           foregroundGridEnabled: _foregroundGridEnabled,
                           highlightedSegmentRow: _highlightedSegmentRow,
                           highlightedSegmentStartMs: _highlightedSegmentStartMs,
@@ -10719,7 +10861,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               bpm: widget.bpm,
                               beatsPerBar: widget.beatsPerBar,
                               beatUnit: widget.beatUnit,
-                              quantizeDivisions: _quantizeDivisionsPerBar,
+                              quantizeDivisions:
+                                  _effectiveQuantizeDivisionsPerBar,
                               foregroundGridEnabled: _foregroundGridEnabled,
                               highlightedSegmentRow: _highlightedSegmentRow,
                               highlightedSegmentStartMs:
@@ -13343,7 +13486,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                 bpm: widget.bpm,
                                 beatsPerBar: widget.beatsPerBar,
                                 beatUnit: widget.beatUnit,
-                                quantizeDivisions: _quantizeDivisionsPerBar,
+                                quantizeDivisions:
+                                    _effectiveQuantizeDivisionsPerBar,
                                 contentYOffset: rulerContentYOffset,
                               ),
                               size: Size(viewportWidth, rulerHeight),
@@ -17479,6 +17623,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _handlePanZoomUpdate(ScaleUpdateDetails details) {
     bool didZoom = false;
     bool didScroll = false;
+    bool adaptiveGridChanged = false;
+    final previousGrid = _effectiveQuantizeDivisionsPerBar;
     final trackpadNavigationGestureActive =
         _timelineModifierTrackpadNavigationActive ||
         _timelineTrackpadPanAxis != null;
@@ -17500,6 +17646,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
         _scrollOffsetMs = focalPointMs - (focalPointPx / newPixelsPerMs);
         _pixelsPerMs = newPixelsPerMs;
+        adaptiveGridChanged =
+            _gridMode == TimelineGridMode.adaptive &&
+            previousGrid != _effectiveQuantizeDivisionsPerBar;
+        if (adaptiveGridChanged) {
+          _refreshQuantizedPreviewsForGridChange(inSetState: true);
+        }
       }
 
       // --- Handle Pan ---
@@ -17512,6 +17664,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       // gesture is active, then seek once when the gesture ends.
       _clampScroll();
     });
+
+    if (adaptiveGridChanged) _publishTopControlsState();
 
     if (!_tutorialScrollNotifiedForGesture) {
       final start = _tutorialPanStartScrollMs ?? _scrollOffsetMs;

@@ -30,6 +30,7 @@ import 'package:mixroom/helpers/automation_target_labels.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -5918,7 +5919,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       <int, String>{};
   Future<bool>? _liveMidiPreviewRoutePrepareFuture;
   bool _timelineMagnetEnabled = true;
-  int _timelineQuantizeDivisionsPerBar = 4;
+  TimelineGridMode _timelineGridMode = TimelineGridMode.adaptive;
+  int _timelineFixedQuantizeDivisionsPerBar = 4;
 
   bool _loopEnabled = false;
   int _loopStartMs = 0;
@@ -39923,8 +39925,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : rawQuantizeLabel
                   .replaceFirst(RegExp(r'\s+beat$', caseSensitive: false), '')
                   .trim();
-        final quantizeSecondary =
-            quantizePrimary.contains('/') || quantizePrimary.contains('T')
+        final quantizeSecondary = controls.gridMode == TimelineGridMode.adaptive
+            ? L10n.translate(context, 'Auto')
+            : quantizePrimary.contains('/') || quantizePrimary.contains('T')
             ? 'Beat'
             : '';
         return Container(
@@ -41032,7 +41035,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     beatsPerBar: _timeSignatureNumerator,
                     beatUnit: _timeSignatureDenominator,
                     magnetEnabled: _timelineMagnetEnabled,
-                    quantizeDivisionsPerBar: _timelineQuantizeDivisionsPerBar,
+                    gridMode: _timelineGridMode,
+                    fixedQuantizeDivisionsPerBar:
+                        _timelineFixedQuantizeDivisionsPerBar,
                     fullscreen: _pianoRollFullscreen,
                     isRecording: _isMidiClipRecordingForEditor(idx, clip),
                     onFullscreenChanged: (v) {
@@ -84168,19 +84173,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           onSnapSettingsChanged:
                                               (
                                                 magnetEnabled,
-                                                quantizeDivisionsPerBar,
+                                                gridMode,
+                                                fixedQuantizeDivisionsPerBar,
                                               ) {
                                                 if (_timelineMagnetEnabled ==
                                                         magnetEnabled &&
-                                                    _timelineQuantizeDivisionsPerBar ==
-                                                        quantizeDivisionsPerBar) {
+                                                    _timelineGridMode ==
+                                                        gridMode &&
+                                                    _timelineFixedQuantizeDivisionsPerBar ==
+                                                        fixedQuantizeDivisionsPerBar) {
                                                   return;
                                                 }
                                                 setState(() {
                                                   _timelineMagnetEnabled =
                                                       magnetEnabled;
-                                                  _timelineQuantizeDivisionsPerBar =
-                                                      quantizeDivisionsPerBar;
+                                                  _timelineGridMode = gridMode;
+                                                  _timelineFixedQuantizeDivisionsPerBar =
+                                                      fixedQuantizeDivisionsPerBar;
                                                 });
                                               },
                                           onLoopToggle: (enabled) {
@@ -85097,8 +85106,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           beatsPerBar: _timeSignatureNumerator,
                                           beatUnit: _timeSignatureDenominator,
                                           magnetEnabled: _timelineMagnetEnabled,
-                                          quantizeDivisionsPerBar:
-                                              _timelineQuantizeDivisionsPerBar,
+                                          gridMode: _timelineGridMode,
+                                          fixedQuantizeDivisionsPerBar:
+                                              _timelineFixedQuantizeDivisionsPerBar,
                                           fullscreen: _pianoRollFullscreen,
                                           isRecording:
                                               _isMidiClipRecordingForEditor(

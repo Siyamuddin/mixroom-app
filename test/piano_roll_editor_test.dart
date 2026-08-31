@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
 
@@ -40,6 +41,8 @@ Widget _buildEditor({
   PianoKeyDownCallback? onKeyboardNoteDown,
   PianoKeyUpCallback? onKeyboardNoteUp,
   PlayableMidiPitchesResolver? resolvePlayablePitches,
+  TimelineGridMode gridMode = TimelineGridMode.adaptive,
+  int fixedQuantizeDivisionsPerBar = 4,
   List<Map<String, dynamic>> availableInstruments =
       const <Map<String, dynamic>>[],
 }) {
@@ -58,7 +61,8 @@ Widget _buildEditor({
             isPlaying: isPlaying,
             isRecording: isRecording,
             magnetEnabled: true,
-            quantizeDivisionsPerBar: 4,
+            gridMode: gridMode,
+            fixedQuantizeDivisionsPerBar: fixedQuantizeDivisionsPerBar,
             fullscreen: false,
             onFullscreenChanged: (_) {},
             onClose: () {},
@@ -226,6 +230,133 @@ void main() {
     expect(committedNotes, isNotNull);
     expect(_noteById(committedNotes!, 'a').startBeat, 3);
     expect(_noteById(committedNotes!, 'b').startBeat, 5);
+  });
+
+  testWidgets('adaptive note snapping follows piano-roll zoom',
+      (tester) async {
+    List<MidiNote>? committedNotes;
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          committedNotes = notes.map((note) => note.copy()).toList();
+        },
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    await tester.tap(find.byTooltip('Zoom in').first);
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final moveGesture = await tester.startGesture(tester.getCenter(noteFinder));
+    await tester.pump(const Duration(milliseconds: 50));
+    await moveGesture.moveBy(const Offset(37, 0));
+    await tester.pump();
+    await moveGesture.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(committedNotes, isNotNull);
+    expect(_noteById(committedNotes!, 'a').startBeat, 2.5);
+  });
+
+  testWidgets('adaptive piano-roll grid reaches 1/32 at maximum zoom',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final zoomIn = find.byTooltip('Zoom in').first;
+    for (var i = 0; i < 6; i++) {
+      await tester.tap(zoomIn);
+      await tester.pump();
+    }
+
+    expect(
+      find.byKey(
+        const ValueKey<String>('piano_roll_grid_divisions_32'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('fixed piano-roll grid remains fixed while zooming',
+      (tester) async {
+    List<MidiNote>? committedNotes;
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        gridMode: TimelineGridMode.fixed,
+        fixedQuantizeDivisionsPerBar: 4,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          committedNotes = notes.map((note) => note.copy()).toList();
+        },
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    await tester.tap(find.byTooltip('Zoom in').first);
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final moveGesture = await tester.startGesture(tester.getCenter(noteFinder));
+    await tester.pump(const Duration(milliseconds: 50));
+    await moveGesture.moveBy(const Offset(37, 0));
+    await tester.pump();
+    await moveGesture.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(committedNotes, isNotNull);
+    expect(_noteById(committedNotes!, 'a').startBeat, 3);
   });
 
   testWidgets('dragging a selected resize handle resizes the full selection',

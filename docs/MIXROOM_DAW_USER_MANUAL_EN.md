@@ -222,14 +222,18 @@ The magnet button controls timeline snapping.
 | Action | Result |
 | --- | --- |
 | Tap magnet | Turns snapping on or off. |
-| Hold magnet | Opens the quantize menu. |
-| Choose a quantize value | Sets the grid used by snapping, such as 1/4, 1/8, or 1/16. |
+| Desktop/tablet: open the quantize dropdown | Opens the grid menu. |
+| Phone: hold magnet | Opens the grid menu. |
+| Choose Auto | Adapts the visible grid and snap interval from 1/4 up to 1/32 when the current zoom provides enough spacing. |
+| Choose a fixed value | Keeps the selected grid, such as 1/4, 1/8, or 1/16, at every zoom level. |
 
 When magnet is on, timeline edits snap to the selected musical grid. This helps clips, cuts, pasted clips, painted clips, loop regions, and automation regions land exactly on beats or subdivisions.
 
 When magnet is off, users can place and edit items freely without grid snapping. This is better for dialogue, sound design, loose performances, or detailed cleanup.
 
-Quantize values are divisions of one bar:
+Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting.
+
+Fixed quantize values are divisions of one bar:
 
 | Value | Meaning |
 | --- | --- |
@@ -239,7 +243,7 @@ Quantize values are divisions of one bar:
 | 1/8 | Eighth-note grid. |
 | 1/16 | Sixteenth-note grid for tighter edits. |
 
-Practical rule: turn the magnet on for musical arrangement work, and hold the magnet button when the edit grid feels too coarse or too fine.
+Practical rule: leave Auto selected for normal zoom-aware editing. Choose a fixed value when an edit must stay on one exact subdivision regardless of zoom.
 
 The timeline also supports:
 

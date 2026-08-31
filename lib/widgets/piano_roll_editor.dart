@@ -13,6 +13,7 @@ import 'package:mixroom/ai/assistant_action_utils.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/instrument_picker_categories.dart';
 import 'package:mixroom/helpers/piano_roll_playhead.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
@@ -116,7 +117,8 @@ class PianoRollEditor extends StatefulWidget {
     required this.projectPlayheadMs,
     required this.isPlaying,
     required this.magnetEnabled,
-    required this.quantizeDivisionsPerBar,
+    required this.gridMode,
+    required this.fixedQuantizeDivisionsPerBar,
     required this.fullscreen,
     required this.isRecording,
     required this.onFullscreenChanged,
@@ -141,7 +143,8 @@ class PianoRollEditor extends StatefulWidget {
   final double projectPlayheadMs;
   final bool isPlaying;
   final bool magnetEnabled;
-  final int quantizeDivisionsPerBar;
+  final TimelineGridMode gridMode;
+  final int fixedQuantizeDivisionsPerBar;
   final bool fullscreen;
   final bool isRecording;
   final ValueChanged<bool> onFullscreenChanged;
@@ -173,7 +176,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const double _minRowHeight = 14.0;
   static const double _maxRowHeight = 40.0;
   static const double _minPxPerBeat = 24.0;
-  static const double _maxPxPerBeat = 220.0;
+  static const double _maxPxPerBeat = 240.0;
   static const double _followPlayheadViewportAnchor = 0.42;
   static const double _rollExtensionChunkBeats = 16.0;
   static const double _rulerHeight = 28.0;
@@ -1042,8 +1045,21 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   double get _quantizeBeat {
-    final safeDivisions = math.max(1, widget.quantizeDivisionsPerBar);
+    final safeDivisions = math.max(1, _effectiveQuantizeDivisionsPerBar);
     return _barLengthBeats / safeDivisions;
+  }
+
+  int get _effectiveQuantizeDivisionsPerBar {
+    final pixelsPerBar = TimelineGridPolicy.pianoRollPixelsPerBar(
+      beatsPerBar: widget.beatsPerBar,
+      beatUnit: widget.beatUnit,
+      pixelsPerBeat: _pxPerBeat,
+    );
+    return TimelineGridPolicy.resolveDivisionsPerBar(
+      mode: widget.gridMode,
+      fixedDivisionsPerBar: widget.fixedQuantizeDivisionsPerBar,
+      pixelsPerBar: pixelsPerBar,
+    );
   }
 
   double get _minimumLengthBeat =>
@@ -1710,7 +1726,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (remembered != null) {
       return remembered.clamp(_minimumLengthBeat, 64.0).toDouble();
     }
-    return widget.magnetEnabled ? math.max(_quantizeBeat, 0.25) : 1.0;
+    return widget.magnetEnabled ? _quantizeBeat : 1.0;
   }
 
   void _selectSingle(String id) {
@@ -2970,7 +2986,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 icon: Icons.grid_view_rounded,
                 title: _gridOptions[i].label,
                 subtitle: _gridOptions[i].divisionsPerBar ==
-                        widget.quantizeDivisionsPerBar
+                        _effectiveQuantizeDivisionsPerBar
                     ? L10n.translate(
                         context,
                         'Matches the current piano roll grid.',
@@ -6627,6 +6643,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                             children: [
                                               Positioned.fill(
                                                 child: CustomPaint(
+                                                  key: ValueKey<String>(
+                                                    'piano_roll_grid_divisions_$_effectiveQuantizeDivisionsPerBar',
+                                                  ),
                                                   painter: _PianoGridPainter(
                                                     rowHeight: _rowHeight,
                                                     pxPerBeat: _pxPerBeat,
@@ -6638,8 +6657,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                                     beatsPerBar:
                                                         widget.beatsPerBar,
                                                     beatUnit: widget.beatUnit,
-                                                    quantizeDivisionsPerBar: widget
-                                                        .quantizeDivisionsPerBar,
+                                                    quantizeDivisionsPerBar:
+                                                        _effectiveQuantizeDivisionsPerBar,
                                                     magnetEnabled:
                                                         widget.magnetEnabled,
                                                     playablePitches:

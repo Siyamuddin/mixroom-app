@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/helpers/trackpad_touch_count.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
@@ -405,8 +406,11 @@ Widget _buildHarness({
   bool hasCopiedClip = false,
   bool Function(int row)? canPasteClipAtRow,
   bool hasCopiedRowEffects = false,
-  void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
-      onSnapSettingsChanged,
+  void Function(
+    bool magnetEnabled,
+    TimelineGridMode gridMode,
+    int fixedQuantizeDivisionsPerBar,
+  )? onSnapSettingsChanged,
   ValueNotifier<Duration>? transportClockListenable,
   void Function(double ms)? onScrubRequested,
   bool isPlaying = false,
@@ -1074,7 +1078,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSnapSettingsChanged: (enabled, _) {
+        onSnapSettingsChanged: (enabled, _, __) {
           snapStates.add(enabled);
         },
       ),
@@ -1102,6 +1106,120 @@ void main() {
     expect(moveCommits.single, closeTo(1500.0, 0.01));
   });
 
+  testWidgets('adaptive grid follows timeline zoom without parent churn',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+      final snapSettings = <(bool, TimelineGridMode, int)>[];
+      final moveCommits = <double>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, newStartMs, __) async {
+            moveCommits.add(newStartMs);
+          },
+          onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
+            snapSettings.add((enabled, mode, fixedDivisions));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+      expect(snapSettings, <(bool, TimelineGridMode, int)>[
+        (true, TimelineGridMode.adaptive, 4),
+      ]);
+
+      final center = _desktopClipCenter(tester);
+      await tester.tapAt(center);
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -1000),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
+      expect(snapSettings, hasLength(1));
+
+      final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await gesture.down(center);
+      await tester.pump();
+      await gesture.moveBy(const Offset(70, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(moveCommits, hasLength(1));
+      expect(moveCommits.single, closeTo(62.5, 0.01));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('fixed grid override stays fixed while timeline zooms',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+      final snapSettings = <(bool, TimelineGridMode, int)>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
+            snapSettings.add((enabled, mode, fixedDivisions));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPressAt(_magnetButtonCenter(tester));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(
+        const ValueKey('timeline_quantize_menu_4'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+      expect(snapSettings.last, (true, TimelineGridMode.fixed, 4));
+
+      final center = _desktopClipCenter(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -1000),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('desktop alt clip drag overrides enabled snap grid',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -1114,7 +1232,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSnapSettingsChanged: (enabled, _) {
+        onSnapSettingsChanged: (enabled, _, __) {
           snapStates.add(enabled);
         },
       ),
@@ -1626,6 +1744,7 @@ void main() {
       var state = controller.horizontalScrollbarState;
       expect(state.visible, isTrue);
       expect(state.thumbWidth, greaterThanOrEqualTo(72.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
 
       controller.beginHorizontalScrollbarDrag(
         state.thumbLeft + state.thumbWidth - 2.0,
@@ -1637,6 +1756,7 @@ void main() {
       state = controller.horizontalScrollbarState;
       expect(state.thumbWidth, lessThan(72.0));
       expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -4562,10 +4682,13 @@ void main() {
         findsOneWidget);
   });
 
-  testWidgets('quantize menu is constrained to trigger width', (tester) async {
+  testWidgets('quantize menu exposes fixed 1/32 within trigger width',
+      (tester) async {
+    final controller = AudioCanvasTimelineController();
     await tester.pumpWidget(
       _buildHarness(
         clips: const <AudioTrack>[],
+        controller: controller,
         onMoveClipCommit: (_, __, ___) async {},
       ),
     );
@@ -4575,9 +4698,16 @@ void main() {
     await tester.longPressAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
-    final itemRect =
-        tester.getRect(find.byKey(const ValueKey('timeline_quantize_menu_4')));
+    final fixedThirtySecond =
+        find.byKey(const ValueKey('timeline_quantize_menu_32'));
+    final itemRect = tester.getRect(fixedThirtySecond);
     expect(itemRect.width, closeTo(triggerWidth, 0.5));
+
+    await tester.tap(fixedThirtySecond);
+    await tester.pumpAndSettle();
+
+    expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+    expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
   });
 
   testWidgets('automation tab opens point-lane editor for selected target',
