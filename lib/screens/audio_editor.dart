@@ -5891,6 +5891,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   // Piano roll / instrument editor
   bool _showPianoRoll = false;
+  int _pianoRollRequestedTab = 0;
+  int _pianoRollTabRequestRevision = 0;
   bool _pianoRollFullscreen = false;
   bool _showPitchLab = false;
   bool _pitchLabFullscreen = false;
@@ -33902,7 +33904,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _createMidiClipInInstrumentLane(int row, double timeMs) async {
+  Future<void> _createMidiClipInInstrumentLane(
+    int row,
+    double timeMs, {
+    bool openEditor = true,
+    int editorTab = 0,
+  }) async {
     if (row < 0 || row >= _rows.length) return;
     final lane = _rows[row];
     if (!lane.isInstrumentLane) return;
@@ -33944,9 +33951,65 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         onRemove: _syncRemovedClipFadesAfterUndo,
       ),
     );
-    if (_audioTracks.length > beforeCount) {
-      _openMidiClipEditor(_audioTracks.length - 1);
+    if (openEditor && _audioTracks.length > beforeCount) {
+      _openMidiClipEditor(_audioTracks.length - 1, initialTab: editorTab);
     }
+  }
+
+  int _midiClipIndexForInstrumentRow(int row) {
+    if (row < 0 || row >= _rows.length) return -1;
+    final rowId = _rows[row].rowId;
+    bool belongsToRow(AudioTrack clip) {
+      return clip.isMidi &&
+          (clip.rowIndex == row || (rowId >= 0 && clip.rowId == rowId));
+    }
+
+    final activeIndex = _activeMidiClipEditorIndex();
+    if (activeIndex >= 0 &&
+        activeIndex < _audioTracks.length &&
+        belongsToRow(_audioTracks[activeIndex])) {
+      return activeIndex;
+    }
+    return _audioTracks.indexWhere(belongsToRow);
+  }
+
+  Future<void> _openInstrumentUiForRow(int row) async {
+    if (row < 0 || row >= _rows.length || !_rows[row].isInstrumentLane) {
+      return;
+    }
+    if (_rows[row].instrumentId.trim().isEmpty) {
+      _showSmallNotice('This instrument lane is missing its instrument.');
+      return;
+    }
+
+    var clipIndex = _midiClipIndexForInstrumentRow(row);
+    if (clipIndex < 0) {
+      final beforeCount = _audioTracks.length;
+      await _createMidiClipInInstrumentLane(
+        row,
+        _transportClock.value.inMilliseconds.toDouble(),
+        openEditor: false,
+      );
+      if (_audioTracks.length <= beforeCount) return;
+      clipIndex = _audioTracks.length - 1;
+    }
+
+    final clip = _audioTracks[clipIndex];
+    if (_clipUsesExternalPluginInstrument(clip)) {
+      final opened = await _openMidiClipPluginEditor(clip);
+      if (!opened && mounted) {
+        _showSmallNotice('The instrument window could not be opened.');
+      }
+      return;
+    }
+    _openMidiClipEditor(clipIndex, initialTab: 2);
+  }
+
+  bool _canOpenInstrumentUiForRow(int row) {
+    return row >= 0 &&
+        row < _rows.length &&
+        _rows[row].isInstrumentLane &&
+        _instrumentIdUsesExternalPlugin(_rows[row].instrumentId);
   }
 
   Future<void> _handleAddActionSelection(String action) async {
@@ -41457,6 +41520,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       clip.engineClipId >= 0 ? clip.engineClipId : idx,
                     ),
                     clip: clip,
+                    initialTab: _pianoRollRequestedTab,
+                    tabRequestRevision: _pianoRollTabRequestRevision,
                     availableInstruments: _instrumentCatalogForCurrentPlan(
                       _uiInstrumentCatalog(),
                     ),
@@ -81322,7 +81387,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
-  void _openMidiClipEditor(int clipIndex) {
+  void _openMidiClipEditor(int clipIndex, {int initialTab = 0}) {
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi) return;
@@ -81333,6 +81398,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       _activeMidiClipEngineId = clip.engineClipId;
       _activeMidiClipIndex = clipIndex;
+      _pianoRollRequestedTab = initialTab.clamp(0, 2).toInt();
+      _pianoRollTabRequestRevision += 1;
       _showPianoRoll = true;
     });
     _setDawPanelVisible('piano_roll', true);
@@ -84586,6 +84653,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _canOpenMidiInstrumentUiForClipIndex,
                                           onOpenMidiInstrumentUi:
                                               _openMidiInstrumentUiForClipIndex,
+                                          canOpenInstrumentUi:
+                                              _canOpenInstrumentUiForRow,
+                                          onOpenInstrumentUi:
+                                              _openInstrumentUiForRow,
                                           onCreateMidiClipInInstrumentLane:
                                               _createMidiClipInInstrumentLane,
                                           onStemSeparation:
@@ -85550,6 +85621,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 : idx,
                                           ),
                                           clip: clip,
+                                          initialTab: _pianoRollRequestedTab,
+                                          tabRequestRevision:
+                                              _pianoRollTabRequestRevision,
                                           availableInstruments:
                                               _instrumentCatalogForCurrentPlan(
                                                 _uiInstrumentCatalog(),
