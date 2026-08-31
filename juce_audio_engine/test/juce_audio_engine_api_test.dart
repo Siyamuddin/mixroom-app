@@ -1132,6 +1132,21 @@ void main() {
     expect(calls[2].arguments, <String, dynamic>{'timeSeconds': 11.0});
   });
 
+  test('setLoopRegion forwards enabled bounds', () async {
+    await JuceAudioEngine.setLoopRegion(
+      enabled: true,
+      startSeconds: 1.25,
+      endSeconds: 1.45,
+    );
+
+    expect(calls.single.method, 'setLoopRegion');
+    expect(calls.single.arguments, <String, dynamic>{
+      'enabled': true,
+      'startSeconds': 1.25,
+      'endSeconds': 1.45,
+    });
+  });
+
   test('preparePlaybackRoute routes reason payload', () async {
     await JuceAudioEngine.preparePlaybackRoute(reason: 'projectLoad');
 

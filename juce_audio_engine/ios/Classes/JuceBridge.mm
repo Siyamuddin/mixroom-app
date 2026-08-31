@@ -4218,6 +4218,12 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return result.load();
 }
 
++ (void)setLoopRegionObjC:(BOOL)enabled startSeconds:(double)startSeconds endSeconds:(double)endSeconds
+{
+    JuceEngine::get().setLoopRegion(
+        enabled != NO, startSeconds, endSeconds);
+}
+
 + (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath forceIndividualRow:(BOOL)forceIndividualRow
 {
     if (pluginPath == nil || pluginPath.length == 0)

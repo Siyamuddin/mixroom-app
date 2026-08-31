@@ -2719,6 +2719,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTransportSecondsJNI(JNIEnv *,
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLoopRegionJNI(
+    JNIEnv *, jclass, jboolean enabled, jdouble startSeconds, jdouble endSeconds)
+{
+    const bool loopEnabled = enabled != JNI_FALSE;
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([loopEnabled, startSeconds, endSeconds]
+                     { JuceEngine::get().setLoopRegion(
+                           loopEnabled, (double)startSeconds, (double)endSeconds); });
+        return;
+    }
+    JuceEngine::get().setLoopRegion(
+        loopEnabled, (double)startSeconds, (double)endSeconds);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAutomationTransportJNI(JNIEnv *, jclass, jdouble timeSeconds)
 {
     juce::MessageManager::callAsync([timeSeconds]

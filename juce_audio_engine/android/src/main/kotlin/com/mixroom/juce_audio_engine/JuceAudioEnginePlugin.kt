@@ -4410,6 +4410,14 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.setTransportSecondsJNI(args.doubleValue("timeSeconds"))
           result.success(null)
         }
+        "setLoopRegion" -> {
+          JuceBridge.setLoopRegionJNI(
+            args.boolValue("enabled"),
+            args.doubleValue("startSeconds"),
+            args.doubleValue("endSeconds"),
+          )
+          result.success(null)
+        }
         "insertTrackEffect" -> {
           val ok = JuceBridge.insertTrackEffectJNI(
             args.intValue("row"),
