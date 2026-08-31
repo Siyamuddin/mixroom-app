@@ -45,11 +45,55 @@ private final class FinderDropSurfaceView: NSView {
   }
 }
 
+/// Receives indirect trackpad touches without participating in mouse hit-testing.
+private final class TrackpadTouchProbeView: NSView {
+  var onTouchCountChanged: ((Int) -> Void)?
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    allowedTouchTypes = [.indirect]
+    wantsRestingTouches = true
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) {
+    fatalError("init(coder:) has not been implemented")
+  }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    nil
+  }
+
+  override func touchesBegan(with event: NSEvent) {
+    publishTouchCount(from: event)
+  }
+
+  override func touchesMoved(with event: NSEvent) {
+    publishTouchCount(from: event)
+  }
+
+  override func touchesEnded(with event: NSEvent) {
+    publishTouchCount(from: event)
+  }
+
+  override func touchesCancelled(with event: NSEvent) {
+    onTouchCountChanged?(0)
+  }
+
+  private func publishTouchCount(from event: NSEvent) {
+    onTouchCountChanged?(event.touches(matching: .touching, in: self).count)
+  }
+}
+
 class MainFlutterWindow: NSWindow {
   private let finderDropChannelName = "mixroom/finder_drop"
+  private let trackpadTouchesChannelName = "mixroom/trackpad_touches"
   private let titleBarDragRegionHeight: CGFloat = 34
   private weak var flutterViewController: FlutterViewController?
   private var finderDropChannel: FlutterMethodChannel?
+  private var trackpadTouchesChannel: FlutterMethodChannel?
+  private var trackpadTouchProbeView: TrackpadTouchProbeView?
+  private var lastTrackpadTouchCount = 0
   private var pendingFinderDropPayloads: [[String: Any]] = []
   private var dropSurfaceView: FinderDropSurfaceView?
   private var cachedDragItems: [[String: Any]] = []
@@ -89,7 +133,9 @@ class MainFlutterWindow: NSWindow {
 
     super.awakeFromNib()
     bindFinderDropChannelIfNeeded(flutterViewController: flutterViewController)
+    bindTrackpadTouchesChannelIfNeeded(flutterViewController: flutterViewController)
     installFinderDropSurface(on: flutterViewController.view)
+    installTrackpadTouchProbe(on: flutterViewController.view)
   }
 
   override func sendEvent(_ event: NSEvent) {
@@ -196,6 +242,44 @@ class MainFlutterWindow: NSWindow {
     lastDragUpdateUptime = 0
     deliverFinderDropPayload(payload)
     return true
+  }
+
+  private func bindTrackpadTouchesChannelIfNeeded(
+    flutterViewController: FlutterViewController
+  ) {
+    if trackpadTouchesChannel != nil {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: trackpadTouchesChannelName,
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self = self else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      if call.method == "getTouchCount" {
+        result(self.lastTrackpadTouchCount)
+        return
+      }
+      result(FlutterMethodNotImplemented)
+    }
+    trackpadTouchesChannel = channel
+  }
+
+  /// Trackpad finger count for 3-finger marquee, without intercepting mouse events.
+  private func installTrackpadTouchProbe(on flutterView: NSView) {
+    trackpadTouchProbeView?.removeFromSuperview()
+    let probe = TrackpadTouchProbeView(frame: flutterView.bounds)
+    probe.autoresizingMask = [.width, .height]
+    probe.onTouchCountChanged = { [weak self] count in
+      guard let self = self, count != self.lastTrackpadTouchCount else { return }
+      self.lastTrackpadTouchCount = count
+      self.trackpadTouchesChannel?.invokeMethod("touchCountChanged", arguments: count)
+    }
+    flutterView.addSubview(probe, positioned: .below, relativeTo: dropSurfaceView)
+    trackpadTouchProbeView = probe
   }
 
   private func bindFinderDropChannelIfNeeded(flutterViewController: FlutterViewController) {

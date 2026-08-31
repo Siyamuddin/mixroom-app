@@ -19,6 +19,7 @@ import 'package:mixroom/helpers/desktop_slider_wheel_sensitivity.dart';
 import 'package:mixroom/helpers/glass_ui_tokens.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/trackpad_touch_count.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/track_group_reconciler.dart';
 import 'package:mixroom/helpers/track_row_icons.dart';
@@ -1554,6 +1555,12 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double?
   _activeTrimHandleX; // === FIX ===: The X anchor for the visual cue/tap
   double? newTrimStartUpdate, newTrimEndUpdate, newStartMsUpdate;
+  final Map<int, double> _trimGroupTrimStart = <int, double>{};
+  final Map<int, double> _trimGroupTrimEnd = <int, double>{};
+  final Map<int, double> _trimGroupStartMs = <int, double>{};
+  final Map<int, double> _trimGroupTimelineScale = <int, double>{};
+  final Map<int, ({double trimStart, double trimEnd, double? startMs})>
+  _trimGroupLive = <int, ({double trimStart, double trimEnd, double? startMs})>{};
   int? _stretchClipIndex;
   double? _stretchStartTimelineDurationMs;
   double? _stretchOriginalStartMs;
@@ -1614,7 +1621,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _tentativeClipSelectionActive = false;
   bool _suppressNextTimelineTapAfterTentativeSelectionCommit = false;
   bool _desktopAdditiveSelectionGestureActive = false;
-  bool _suppressNextTimelineTapAfterAdditiveSelection = false;
+  int _suppressedTimelineTapCount = 0;
   bool _touchMultiSelectMode = false;
   bool _suppressNextTimelineTapAfterInstrumentLaneCreate = false;
   int? _pendingTapSelectionClipIndex;
@@ -1656,7 +1663,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   final Set<int> _selectionBoxBaseClipIndices = <int>{};
   int? _pendingSelectionBoxPointer;
   Offset? _pendingSelectionBoxStart;
-  bool _suppressNextTimelineTapAfterSelectionBox = false;
+  bool _pendingModifierSelectionBox = false;
+  bool _modifierClipClickHandled = false;
+  Offset? _desktopPointerDownLocal;
+  int? _desktopPointerDownId;
+  static const double _kDesktopModifierClipMarqueeSlopPx = 8.0;
 
   /// BandLab-style "selection armed" cue at the long-press point.
   Offset? _selectionArmIndicatorAt;
@@ -2133,6 +2144,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     newTrimStartUpdate = null;
     newTrimEndUpdate = null;
     newStartMsUpdate = null;
+    _trimGroupTrimStart.clear();
+    _trimGroupTrimEnd.clear();
+    _trimGroupStartMs.clear();
+    _trimGroupTimelineScale.clear();
+    _trimGroupLive.clear();
     _stretchClipIndex = null;
     _stretchStartTimelineDurationMs = null;
     _stretchOriginalStartMs = null;
@@ -2328,6 +2344,62 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return true;
   }
 
+  bool _desktopSelectionModifierPressed() {
+    final keyboard = HardwareKeyboard.instance;
+    return Platform.isMacOS
+        ? keyboard.isMetaPressed
+        : keyboard.isControlPressed;
+  }
+
+  bool _isDesktopThreeFingerMarquee() {
+    if (TrackpadTouchCount.debugTouchCount != null) {
+      return TrackpadTouchCount.debugTouchCount! >= 3;
+    }
+    if (!PlatformCapabilities.current.isDesktop) return false;
+    return TrackpadTouchCount.current >= 3;
+  }
+
+  /// Starts a desktop marquee when the trackpad reports three or more fingers.
+  bool _tryBeginDesktopThreeFingerSelectionBox({
+    required Offset localPosition,
+    Offset? startLocal,
+  }) {
+    if (!_isDesktopThreeFingerMarquee()) return false;
+    if (_selectionBoxActive) return false;
+    if (_trimClipIndex != null && _activeTrimHandleX != null) return false;
+    if (_activeTool == _TimelineTool.cut ||
+        _activeTool == _TimelineTool.delete ||
+        _activeTool == _TimelineTool.paint) {
+      return false;
+    }
+    final Offset origin = startLocal ?? localPosition;
+    if (!_canStartSelectionBoxAt(origin, allowStartingOverClip: true) &&
+        !_canStartSelectionBoxAt(
+          localPosition,
+          allowStartingOverClip: true,
+        )) {
+      return false;
+    }
+    _clearPendingSelectionBox();
+    _clearPendingClipTapState();
+    _clearPendingClipDrag();
+    _interactionMode = '';
+    _isUserInteracting = false;
+    _beginSelectionBoxAt(
+      origin,
+      preserveExistingSelection: _desktopSelectionModifierPressed(),
+    );
+    if (localPosition != origin) {
+      _selectionBoxCurrent = localPosition;
+      final rect = _currentSelectionRect();
+      if (rect != null) {
+        _updateSelectionFromRect(rect);
+        _maybeHideSelectionArmIndicatorForRect(rect);
+      }
+    }
+    return true;
+  }
+
   bool _hasTimelineSelectionFeedback() {
     return _selectedClipIndex >= 0 ||
         _selectedClipIndices.isNotEmpty ||
@@ -2375,7 +2447,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             ? _activeSelectedClipIndices()
             : const <int>[],
       );
-    final clipUnderStart = _getGestureClipIndexAt(localPosition);
+    final clipUnderStart = _getClipIndexAt(localPosition);
     if (clipUnderStart != null) {
       _selectionBoxBaseClipIndices.add(clipUnderStart);
     }
@@ -2419,13 +2491,65 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _clearPendingSelectionBox() {
     _pendingSelectionBoxPointer = null;
     _pendingSelectionBoxStart = null;
+    _pendingModifierSelectionBox = false;
+  }
+
+  void _armPendingSelectionBox({
+    required int pointer,
+    required Offset start,
+    required bool preserveExistingSelection,
+  }) {
+    _pendingSelectionBoxPointer = pointer;
+    _pendingSelectionBoxStart = start;
+    _pendingModifierSelectionBox = preserveExistingSelection;
+    _modifierClipClickHandled = false;
+  }
+
+  /// Promotes a pending marquee once the pointer has moved past slop.
+  bool _promotePendingSelectionBox(Offset current) {
+    final Offset? start = _pendingSelectionBoxStart;
+    if (_pendingSelectionBoxPointer == null || start == null) return false;
+    final double slop = _pendingModifierSelectionBox
+        ? _kDesktopModifierClipMarqueeSlopPx
+        : 1.0;
+    if ((current - start).distance < slop) return false;
+    final bool preserve =
+        _pendingModifierSelectionBox || _desktopSelectionModifierPressed();
+    _clearPendingSelectionBox();
+    _beginSelectionBoxAt(start, preserveExistingSelection: preserve);
+    if (current != start) {
+      _selectionBoxCurrent = current;
+      final rect = _currentSelectionRect();
+      if (rect != null) {
+        _updateSelectionFromRect(rect);
+        _maybeHideSelectionArmIndicatorForRect(rect);
+      }
+    }
+    return true;
+  }
+
+  /// Cmd/Ctrl-click on a clip toggles it if tap-down did not already do so.
+  void _commitPendingModifierClipClick() {
+    final Offset? start = _pendingSelectionBoxStart;
+    final bool wasModifierPending = _pendingModifierSelectionBox;
+    final bool alreadyHandled = _modifierClipClickHandled;
+    _clearPendingSelectionBox();
+    _suppressNextTimelineTap();
+    if (!wasModifierPending || start == null || alreadyHandled) return;
+    final int? clipIndex = _getClipIndexAt(start);
+    if (clipIndex == null) return;
+    _resetTrimInteractionState();
+    _clearPastePopup();
+    _toggleClipInSelection(clipIndex);
+    _modifierClipClickHandled = true;
+  }
+
+  void _suppressNextTimelineTap() {
+    _suppressedTimelineTapCount++;
   }
 
   void _suppressImmediateTapAfterSelectionBox() {
-    _suppressNextTimelineTapAfterSelectionBox = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _suppressNextTimelineTapAfterSelectionBox = false;
-    });
+    _suppressNextTimelineTap();
   }
 
   void _requestTimelineFocus() {
@@ -2478,10 +2602,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _requestTimelineFocus();
     _suppressNextTimelineTapAfterDeadZoneHold = false;
     _activeTimelinePointers.add(event.pointer);
+    _desktopPointerDownLocal = event.localPosition;
+    _desktopPointerDownId = event.pointer;
     final keyboard = HardwareKeyboard.instance;
-    final desktopSelectionModifierPressed = Platform.isMacOS
-        ? keyboard.isMetaPressed
-        : keyboard.isControlPressed;
+    final desktopSelectionModifierPressed = _desktopSelectionModifierPressed();
     final desktopPrimaryPointer = _isDesktopPrimaryTimelinePointer(event);
     final primaryMouseOrTrackpadPointer =
         (event.kind == PointerDeviceKind.mouse ||
@@ -2517,6 +2641,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           allowStartingOverClip: true,
         );
     if (desktopBoxSelectionShortcut) {
+      final bool overClipBody = _getClipIndexAt(event.localPosition) != null;
+      if (overClipBody) {
+        // Wait for drag slop so a Cmd/Ctrl-click can still toggle the clip.
+        _armPendingSelectionBox(
+          pointer: event.pointer,
+          start: event.localPosition,
+          preserveExistingSelection: true,
+        );
+        return;
+      }
       setState(() {
         _clearPendingSelectionBox();
         _beginSelectionBoxAt(
@@ -2525,6 +2659,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         );
       });
       return;
+    }
+    if (desktopPrimaryPointer) {
+      var startedThreeFingerBox = false;
+      setState(() {
+        startedThreeFingerBox = _tryBeginDesktopThreeFingerSelectionBox(
+          localPosition: event.localPosition,
+          startLocal: event.localPosition,
+        );
+      });
+      if (startedThreeFingerBox) return;
     }
     if (primaryMouseOrTrackpadPointer &&
         !desktopSelectionModifierPressed &&
@@ -2541,12 +2685,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       if (_hasTimelineSelectionFeedback()) {
         setState(() {
           _clearTimelineSelectionFeedback();
-          _pendingSelectionBoxPointer = event.pointer;
-          _pendingSelectionBoxStart = event.localPosition;
+          _armPendingSelectionBox(
+            pointer: event.pointer,
+            start: event.localPosition,
+            preserveExistingSelection: false,
+          );
         });
       } else {
-        _pendingSelectionBoxPointer = event.pointer;
-        _pendingSelectionBoxStart = event.localPosition;
+        _armPendingSelectionBox(
+          pointer: event.pointer,
+          start: event.localPosition,
+          preserveExistingSelection: false,
+        );
       }
       return;
     }
@@ -2652,20 +2802,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     if (_pendingSelectionBoxPointer == event.pointer &&
         _pendingSelectionBoxStart != null) {
-      final start = _pendingSelectionBoxStart!;
-      if ((event.localPosition - start).distance >= 1.0) {
-        setState(() {
-          _clearPendingSelectionBox();
-          _beginSelectionBoxAt(start);
-          _selectionBoxCurrent = event.localPosition;
-          final rect = _currentSelectionRect();
-          if (rect != null) {
-            _updateSelectionFromRect(rect);
-            _maybeHideSelectionArmIndicatorForRect(rect);
-          }
-        });
+      if (_promotePendingSelectionBox(event.localPosition)) {
+        setState(() {});
       }
       return;
+    }
+    if (!_selectionBoxActive &&
+        _desktopPointerDownId == event.pointer &&
+        _isDesktopThreeFingerMarquee()) {
+      var startedThreeFingerBox = false;
+      setState(() {
+        startedThreeFingerBox = _tryBeginDesktopThreeFingerSelectionBox(
+          localPosition: event.localPosition,
+          startLocal: _desktopPointerDownLocal,
+        );
+      });
+      if (startedThreeFingerBox) return;
     }
     if (_selectionBoxActive && _selectionBoxStart != null) {
       setState(() {
@@ -3061,8 +3213,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _onDeadZonePointerUp(event);
     _activeTimelinePointers.remove(event.pointer);
     _desktopPrimaryPointerDownActive = false;
+    if (_desktopPointerDownId == event.pointer) {
+      _desktopPointerDownId = null;
+      _desktopPointerDownLocal = null;
+    }
     if (_desktopAdditiveSelectionGestureActive) {
       _desktopAdditiveSelectionGestureActive = false;
+      if (_pendingSelectionBoxPointer == event.pointer) {
+        _clearPendingSelectionBox();
+        _suppressNextTimelineTap();
+      }
       _timelineKeyboardModifierPointer = null;
       return;
     }
@@ -3075,6 +3235,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
     if (_pendingSelectionBoxPointer == event.pointer) {
+      if (_pendingModifierSelectionBox && !_selectionBoxActive) {
+        setState(_commitPendingModifierClipClick);
+        _timelineKeyboardModifierPointer = null;
+        return;
+      }
       _clearPendingSelectionBox();
     }
     if (_selectionBoxActive) {
@@ -3149,6 +3314,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _onDeadZonePointerCancel(event);
     _activeTimelinePointers.remove(event.pointer);
     _desktopPrimaryPointerDownActive = false;
+    if (_desktopPointerDownId == event.pointer) {
+      _desktopPointerDownId = null;
+      _desktopPointerDownLocal = null;
+    }
     _desktopAdditiveSelectionGestureActive = false;
     if (_timelineKeyboardModifierPointer == event.pointer) {
       _timelineKeyboardModifierPointer = null;
@@ -5633,6 +5802,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void initState() {
     super.initState();
     _timelineFocusNode = FocusNode(debugLabel: 'Audio timeline');
+    TrackpadTouchCount.ensureListening();
     _syncLoopStateFromWidget();
     widget.controller?._bind(
       ensureRowExpanded: ensureRowExpanded,
@@ -16269,6 +16439,48 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   // === FIX ===: New unified gesture handlers
+  /// Starts trim or stretch from a handle already armed in [_handleTapDown].
+  void _beginTrimFromArmedHandle(ScaleStartDetails details) {
+    final trimClipIndex = _trimClipIndex;
+    final handleX = _activeTrimHandleX;
+    if (trimClipIndex == null || handleX == null) return;
+    if (trimClipIndex < 0 || trimClipIndex >= widget.clips.length) return;
+    final clip = widget.clips[trimClipIndex];
+    final clipRect = _getClipRect(trimClipIndex);
+    if (clipRect == null) return;
+    final isTrimStart =
+        (handleX - clipRect.left).abs() <= (handleX - clipRect.right).abs();
+    _clearPendingSelectionBox();
+    _clearSelectionBoxGestureState();
+    _isUserInteracting = true;
+    if (_isStretchToolForClip(clip)) {
+      _interactionMode = isTrimStart ? 'stretch-start' : 'stretch-end';
+      _stretchClipIndex = trimClipIndex;
+      _stretchStartTimelineDurationMs = widget.getTimelineDurationMs(clip);
+      _stretchOriginalStartMs = widget.getStartMs(clip);
+      _stretchStartAnchorX = details.localFocalPoint.dx;
+      _stretchDurationUpdateMs = _stretchStartTimelineDurationMs;
+    } else {
+      _interactionMode = isTrimStart ? 'trim-start' : 'trim-end';
+      _trimStartValue = widget.getTrimStartMs(clip);
+      _trimEndValue = widget.getTrimEndMs(clip);
+      _trimOriginalStartMs = widget.getStartMs(clip);
+      _trimStartAnchorX = details.localFocalPoint.dx;
+      _trimTimelineScaleValue = _trimTimelineScaleForClip(
+        clip,
+        trimStartMs: _trimStartValue!,
+        trimEndMs: _trimEndValue!,
+      );
+      newTrimStartUpdate = _trimStartValue;
+      newTrimEndUpdate = _trimEndValue;
+      newStartMsUpdate = null;
+      if (_trimGroupTrimStart.isEmpty) {
+        _snapshotTrimGroup();
+      }
+    }
+    setState(() {});
+  }
+
   void _onScaleStart(ScaleStartDetails details) {
     _tutorialPanStartScrollMs = _scrollOffsetMs;
     _tutorialPanStartPixelsPerMs = _pixelsPerMs;
@@ -16287,6 +16499,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _initialPixelsPerMs = _pixelsPerMs;
         _initialScrollMs = _scrollOffsetMs;
       });
+      return;
+    }
+    if (_trimClipIndex != null && _activeTrimHandleX != null) {
+      _beginTrimFromArmedHandle(details);
+      return;
+    }
+    if (!_selectionBoxActive &&
+        _tryBeginDesktopThreeFingerSelectionBox(
+          localPosition: details.localFocalPoint,
+          startLocal: _desktopPointerDownLocal ?? details.localFocalPoint,
+        )) {
+      setState(() {});
+      _isUserInteracting = false;
+      _interactionMode = '';
+      _clearPendingClipDrag();
       return;
     }
     if (_pendingSelectionBoxPointer != null || _selectionBoxActive) {
@@ -16352,42 +16579,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
 
-    // === 1. TRIM HANDLE WAS TAPPED? → Start trim mode immediately ===
-    if (_trimClipIndex != null && _activeTrimHandleX != null) {
-      final clip = widget.clips[_trimClipIndex!];
-      final clipRect = _getClipRect(_trimClipIndex!);
-      if (clipRect == null) return;
-      final isTrimStart =
-          (_activeTrimHandleX! - clipRect.left).abs() <=
-          (_activeTrimHandleX! - clipRect.right).abs();
-
-      if (_isStretchToolForClip(clip)) {
-        _interactionMode = isTrimStart ? 'stretch-start' : 'stretch-end';
-        _stretchClipIndex = _trimClipIndex;
-        _stretchStartTimelineDurationMs = widget.getTimelineDurationMs(clip);
-        _stretchOriginalStartMs = widget.getStartMs(clip);
-        _stretchStartAnchorX = details.localFocalPoint.dx;
-        _stretchDurationUpdateMs = _stretchStartTimelineDurationMs;
-      } else {
-        _interactionMode = isTrimStart ? 'trim-start' : 'trim-end';
-        _trimStartValue = widget.getTrimStartMs(clip);
-        _trimEndValue = widget.getTrimEndMs(clip);
-        _trimOriginalStartMs = widget.getStartMs(clip);
-        _trimStartAnchorX = details.localFocalPoint.dx;
-        _trimTimelineScaleValue = _trimTimelineScaleForClip(
-          clip,
-          trimStartMs: _trimStartValue!,
-          trimEndMs: _trimEndValue!,
-        );
-        newTrimStartUpdate = _trimStartValue;
-        newTrimEndUpdate = _trimEndValue;
-        newStartMsUpdate = null;
-      }
-
-      setState(() {});
-      return; // EXIT EARLY — trim takes full control
-    }
-
     // === 2. DRAG WAS INITIATED IN tapDown? → Continue drag ===
     if (_pendingDrag && _draggedClipIndex != null) {
       return;
@@ -16411,6 +16602,23 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
     if (_pendingSelectionBoxPointer != null || _selectionBoxActive) {
+      if (!_selectionBoxActive &&
+          _promotePendingSelectionBox(details.localFocalPoint)) {
+        setState(() {});
+      }
+      if (_selectionBoxActive && _selectionBoxStart != null) {
+        setState(() {
+          _selectionBoxCurrent = details.localFocalPoint;
+          final rect = _currentSelectionRect();
+          if (rect != null) {
+            _updateSelectionFromRect(rect);
+            _maybeHideSelectionArmIndicatorForRect(rect);
+          }
+        });
+      }
+      _isUserInteracting = false;
+      _interactionMode = '';
+      _clearPendingClipDrag();
       return;
     }
     if (_activeTool == _TimelineTool.cut && _cutPreviewClipIndex != null) {
@@ -16656,24 +16864,40 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _endAutomationClipDrag(row, targetId);
         }
       } else {
-        if (newStartMsUpdate != null) {
+        final commitIndices = _trimGroupTrimStart.keys.isEmpty
+            ? <int>[_trimClipIndex!]
+            : _trimGroupTrimStart.keys.toList(growable: false);
+        for (final index in commitIndices) {
+          if (index < 0 || index >= widget.clips.length) continue;
+          final live = _trimGroupLive[index];
+          if (live == null) {
+            if (index != _trimClipIndex ||
+                newTrimStartUpdate == null ||
+                newTrimEndUpdate == null ||
+                _trimStartValue == null ||
+                _trimEndValue == null ||
+                _trimOriginalStartMs == null) {
+              continue;
+            }
+            widget.onTrimClipCommit(
+              index,
+              newTrimStartUpdate!,
+              newTrimEndUpdate!,
+              _trimStartValue!,
+              _trimEndValue!,
+              _trimOriginalStartMs!,
+              newStartMs: newStartMsUpdate,
+            );
+            continue;
+          }
           widget.onTrimClipCommit(
-            _trimClipIndex!,
-            newTrimStartUpdate!,
-            newTrimEndUpdate!,
-            _trimStartValue!,
-            _trimEndValue!,
-            _trimOriginalStartMs!,
-            newStartMs: newStartMsUpdate,
-          );
-        } else {
-          widget.onTrimClipCommit(
-            _trimClipIndex!,
-            newTrimStartUpdate!,
-            newTrimEndUpdate!,
-            _trimStartValue!,
-            _trimEndValue!,
-            _trimOriginalStartMs!,
+            index,
+            live.trimStart,
+            live.trimEnd,
+            _trimGroupTrimStart[index] ?? _trimStartValue!,
+            _trimGroupTrimEnd[index] ?? _trimEndValue!,
+            _trimGroupStartMs[index] ?? _trimOriginalStartMs!,
+            newStartMs: live.startMs,
           );
         }
       }
@@ -16717,6 +16941,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       newTrimStartUpdate = null;
       newTrimEndUpdate = null;
       newStartMsUpdate = null;
+      _trimGroupTrimStart.clear();
+      _trimGroupTrimEnd.clear();
+      _trimGroupStartMs.clear();
+      _trimGroupTimelineScale.clear();
+      _trimGroupLive.clear();
       _stretchClipIndex = null;
       _stretchStartTimelineDurationMs = null;
       _stretchOriginalStartMs = null;
@@ -16899,101 +17128,101 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return value.clamp(min, max).toDouble().roundToDouble();
   }
 
-  void _handleTrimUpdate(ScaleUpdateDetails details) {
-    if (_hasActiveAutomationClipDrag) {
-      final row = _automationClipDragRow;
-      final targetId = _automationClipDragTargetId;
-      final draggedClip = _activeDraggedAutomationClip();
-      if (row != null && targetId != null && draggedClip != null) {
-        _updateAutomationClipDrag(
-          row,
-          targetId,
-          draggedClip,
-          details.focalPointDelta.dx,
-          details.localFocalPoint,
-        );
-      }
+  void _snapshotTrimGroup() {
+    _trimGroupTrimStart.clear();
+    _trimGroupTrimEnd.clear();
+    _trimGroupStartMs.clear();
+    _trimGroupTimelineScale.clear();
+    _trimGroupLive.clear();
+    final int? leader = _trimClipIndex;
+    if (leader == null || leader < 0 || leader >= widget.clips.length) {
       return;
     }
-    final trimClipIndex = _trimClipIndex;
-    if (trimClipIndex == null || _trimStartAnchorX == null) return;
-    if (trimClipIndex < 0 || trimClipIndex >= widget.clips.length) {
-      setState(_cancelClipGestureAfterTopologyChange);
-      return;
+    final selected = _activeSelectedClipIndices();
+    final targets = selected.length > 1 && selected.contains(leader)
+        ? selected
+        : <int>{leader};
+    for (final index in targets) {
+      if (index < 0 || index >= widget.clips.length) continue;
+      final clip = widget.clips[index];
+      final trimStart = widget.getTrimStartMs(clip);
+      final trimEnd = widget.getTrimEndMs(clip);
+      _trimGroupTrimStart[index] = trimStart;
+      _trimGroupTrimEnd[index] = trimEnd;
+      _trimGroupStartMs[index] = widget.getStartMs(clip);
+      _trimGroupTimelineScale[index] = _trimTimelineScaleForClip(
+        clip,
+        trimStartMs: trimStart,
+        trimEndMs: trimEnd,
+      );
     }
+  }
 
-    final clip = widget.clips[trimClipIndex];
+  ({double trimStart, double trimEnd, double? startMs}) _trimClipByVisibleDelta({
+    required AudioTrack clip,
+    required double originalTrimStart,
+    required double originalTrimEnd,
+    required double originalStartMs,
+    required double timelineScale,
+    required double deltaVisibleMs,
+    required bool isTrimStart,
+  }) {
     final fullDuration = widget.getFullDurationMs(clip);
     final isReversed = clip.isReversed;
-    final timelineScale = (_trimTimelineScaleValue ?? 1.0).clamp(
-      0.0001,
-      double.infinity,
-    );
     const minRawTrimMs = 50.0;
     final minTimelineTrimMs = minRawTrimMs * timelineScale;
-    final originalStartMs = _trimOriginalStartMs!;
     final originalVisibleDurationMs =
-        (_trimEndValue! - _trimStartValue!) * timelineScale;
+        (originalTrimEnd - originalTrimStart) * timelineScale;
     final originalVisibleEndMs = originalStartMs + originalVisibleDurationMs;
     final minVisibleStartMs = math.max(
       0.0,
       originalStartMs -
-          ((isReversed ? (fullDuration - _trimEndValue!) : _trimStartValue!) *
+          ((isReversed
+                  ? (fullDuration - originalTrimEnd)
+                  : originalTrimStart) *
               timelineScale),
     );
     final maxVisibleEndMs =
         originalStartMs +
-        ((isReversed ? _trimEndValue! : (fullDuration - _trimStartValue!)) *
+        ((isReversed
+                ? originalTrimEnd
+                : (fullDuration - originalTrimStart)) *
             timelineScale);
-
-    // Amount user moved horizontally in pixels (local to timeline)
-    final deltaPx = details.localFocalPoint.dx - _trimStartAnchorX!;
-    // Convert movement delta to visible timeline ms.
-    final deltaTimelineMs = deltaPx / _pixelsPerMs;
-
-    double newTrimStart = _trimStartValue!;
-    double newTrimEnd = _trimEndValue!;
-
+    double newTrimStart = originalTrimStart;
+    double newTrimEnd = originalTrimEnd;
     double? newStartMs;
-
-    if (_interactionMode == 'trim-start') {
-      double targetVisibleStartMs = originalStartMs + deltaTimelineMs;
-      targetVisibleStartMs = _quantizeMsForTimelineClipDrag(
-        targetVisibleStartMs,
-      );
+    if (isTrimStart) {
+      double targetVisibleStartMs = originalStartMs + deltaVisibleMs;
       targetVisibleStartMs = targetVisibleStartMs
           .clamp(minVisibleStartMs, originalVisibleEndMs - minTimelineTrimMs)
           .toDouble();
-      final deltaVisibleMs = targetVisibleStartMs - originalStartMs;
+      final appliedDelta = targetVisibleStartMs - originalStartMs;
       if (isReversed) {
-        newTrimEnd = (_trimEndValue! - (deltaVisibleMs / timelineScale)).clamp(
+        newTrimEnd = (originalTrimEnd - (appliedDelta / timelineScale)).clamp(
           newTrimStart + minRawTrimMs,
           fullDuration,
         );
       } else {
-        newTrimStart = (_trimStartValue! + (deltaVisibleMs / timelineScale))
+        newTrimStart = (originalTrimStart + (appliedDelta / timelineScale))
             .clamp(0.0, newTrimEnd - minRawTrimMs);
       }
       newStartMs = targetVisibleStartMs;
-    } else if (_interactionMode == 'trim-end') {
-      double targetVisibleEndMs = originalVisibleEndMs + deltaTimelineMs;
-      targetVisibleEndMs = _quantizeMsForTimelineClipDrag(targetVisibleEndMs);
+    } else {
+      double targetVisibleEndMs = originalVisibleEndMs + deltaVisibleMs;
       targetVisibleEndMs = targetVisibleEndMs
           .clamp(originalStartMs + minTimelineTrimMs, maxVisibleEndMs)
           .toDouble();
-      final deltaVisibleMs = targetVisibleEndMs - originalVisibleEndMs;
+      final appliedDelta = targetVisibleEndMs - originalVisibleEndMs;
       if (isReversed) {
-        newTrimStart = (_trimStartValue! - (deltaVisibleMs / timelineScale))
+        newTrimStart = (originalTrimStart - (appliedDelta / timelineScale))
             .clamp(0.0, newTrimEnd - minRawTrimMs);
       } else {
-        newTrimEnd = (_trimEndValue! + (deltaVisibleMs / timelineScale)).clamp(
+        newTrimEnd = (originalTrimEnd + (appliedDelta / timelineScale)).clamp(
           newTrimStart + minRawTrimMs,
           fullDuration,
         );
       }
-      // newStartMs remains null, correctly signaling no position change
     }
-
     final minTrimWindowMs = minRawTrimMs.roundToDouble();
     final maxTrimStart = math.max(0.0, fullDuration - minTrimWindowMs);
     var sanitizedTrimStart = _sanitizeTrimMs(
@@ -17027,32 +17256,146 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
             min: minVisibleStartMs,
             max: originalVisibleEndMs - minTimelineTrimMs,
           );
+    return (
+      trimStart: sanitizedTrimStart,
+      trimEnd: sanitizedTrimEnd,
+      startMs: sanitizedNewStartMs,
+    );
+  }
 
-    if (newTrimStartUpdate == sanitizedTrimStart &&
-        newTrimEndUpdate == sanitizedTrimEnd &&
-        newStartMsUpdate == sanitizedNewStartMs) {
+  void _handleTrimUpdate(ScaleUpdateDetails details) {
+    if (_hasActiveAutomationClipDrag) {
+      final row = _automationClipDragRow;
+      final targetId = _automationClipDragTargetId;
+      final draggedClip = _activeDraggedAutomationClip();
+      if (row != null && targetId != null && draggedClip != null) {
+        _updateAutomationClipDrag(
+          row,
+          targetId,
+          draggedClip,
+          details.focalPointDelta.dx,
+          details.localFocalPoint,
+        );
+      }
+      return;
+    }
+    final trimClipIndex = _trimClipIndex;
+    if (trimClipIndex == null || _trimStartAnchorX == null) return;
+    if (trimClipIndex < 0 || trimClipIndex >= widget.clips.length) {
+      setState(_cancelClipGestureAfterTopologyChange);
       return;
     }
 
-    if (sanitizedNewStartMs != null) {
-      widget.onTrimClip(
-        _trimClipIndex!,
-        sanitizedTrimStart,
-        sanitizedTrimEnd,
-        newStartMs: sanitizedNewStartMs,
-      );
-    } else {
-      widget.onTrimClip(
-        _trimClipIndex!,
-        sanitizedTrimStart,
-        sanitizedTrimEnd,
-        // newStartMs is omitted for trim-end
-      );
+    if (_trimGroupTrimStart.isEmpty) {
+      _snapshotTrimGroup();
     }
-    newTrimStartUpdate = sanitizedTrimStart;
-    newTrimEndUpdate = sanitizedTrimEnd;
-    newStartMsUpdate = sanitizedNewStartMs;
+    final clip = widget.clips[trimClipIndex];
+    final timelineScale = (_trimGroupTimelineScale[trimClipIndex] ??
+            _trimTimelineScaleValue ??
+            1.0)
+        .clamp(0.0001, double.infinity);
+    const minRawTrimMs = 50.0;
+    final minTimelineTrimMs = minRawTrimMs * timelineScale;
+    final originalStartMs =
+        _trimGroupStartMs[trimClipIndex] ?? _trimOriginalStartMs!;
+    final originalTrimStart =
+        _trimGroupTrimStart[trimClipIndex] ?? _trimStartValue!;
+    final originalTrimEnd = _trimGroupTrimEnd[trimClipIndex] ?? _trimEndValue!;
+    final originalVisibleDurationMs =
+        (originalTrimEnd - originalTrimStart) * timelineScale;
+    final originalVisibleEndMs = originalStartMs + originalVisibleDurationMs;
+    final fullDuration = widget.getFullDurationMs(clip);
+    final isReversed = clip.isReversed;
+    final minVisibleStartMs = math.max(
+      0.0,
+      originalStartMs -
+          ((isReversed ? (fullDuration - originalTrimEnd) : originalTrimStart) *
+              timelineScale),
+    );
+    final maxVisibleEndMs =
+        originalStartMs +
+        ((isReversed ? originalTrimEnd : (fullDuration - originalTrimStart)) *
+            timelineScale);
+    final deltaPx = details.localFocalPoint.dx - _trimStartAnchorX!;
+    final deltaTimelineMs = deltaPx / _pixelsPerMs;
+    final isTrimStart = _interactionMode == 'trim-start';
+    double deltaVisibleMs = 0.0;
+    if (isTrimStart) {
+      double targetVisibleStartMs = originalStartMs + deltaTimelineMs;
+      targetVisibleStartMs = _quantizeMsForTimelineClipDrag(
+        targetVisibleStartMs,
+      );
+      targetVisibleStartMs = targetVisibleStartMs
+          .clamp(minVisibleStartMs, originalVisibleEndMs - minTimelineTrimMs)
+          .toDouble();
+      deltaVisibleMs = targetVisibleStartMs - originalStartMs;
+    } else if (_interactionMode == 'trim-end') {
+      double targetVisibleEndMs = originalVisibleEndMs + deltaTimelineMs;
+      targetVisibleEndMs = _quantizeMsForTimelineClipDrag(targetVisibleEndMs);
+      targetVisibleEndMs = targetVisibleEndMs
+          .clamp(originalStartMs + minTimelineTrimMs, maxVisibleEndMs)
+          .toDouble();
+      deltaVisibleMs = targetVisibleEndMs - originalVisibleEndMs;
+    } else {
+      return;
+    }
 
+    var leaderTrimStart = originalTrimStart;
+    var leaderTrimEnd = originalTrimEnd;
+    double? leaderStartMs;
+    var anyChanged = false;
+    final indices = _trimGroupTrimStart.keys.isEmpty
+        ? <int>[trimClipIndex]
+        : _trimGroupTrimStart.keys.toList(growable: false);
+    for (final index in indices) {
+      if (index < 0 || index >= widget.clips.length) continue;
+      final groupClip = widget.clips[index];
+      final result = _trimClipByVisibleDelta(
+        clip: groupClip,
+        originalTrimStart: _trimGroupTrimStart[index] ?? originalTrimStart,
+        originalTrimEnd: _trimGroupTrimEnd[index] ?? originalTrimEnd,
+        originalStartMs: _trimGroupStartMs[index] ?? originalStartMs,
+        timelineScale: (_trimGroupTimelineScale[index] ?? timelineScale).clamp(
+          0.0001,
+          double.infinity,
+        ),
+        deltaVisibleMs: deltaVisibleMs,
+        isTrimStart: isTrimStart,
+      );
+      final previous = _trimGroupLive[index];
+      if (previous != null &&
+          previous.trimStart == result.trimStart &&
+          previous.trimEnd == result.trimEnd &&
+          previous.startMs == result.startMs) {
+        continue;
+      }
+      anyChanged = true;
+      _trimGroupLive[index] = result;
+      if (result.startMs != null) {
+        widget.onTrimClip(
+          index,
+          result.trimStart,
+          result.trimEnd,
+          newStartMs: result.startMs,
+        );
+      } else {
+        widget.onTrimClip(index, result.trimStart, result.trimEnd);
+      }
+      if (index == trimClipIndex) {
+        leaderTrimStart = result.trimStart;
+        leaderTrimEnd = result.trimEnd;
+        leaderStartMs = result.startMs;
+      }
+    }
+    if (!anyChanged &&
+        newTrimStartUpdate == leaderTrimStart &&
+        newTrimEndUpdate == leaderTrimEnd &&
+        newStartMsUpdate == leaderStartMs) {
+      return;
+    }
+    newTrimStartUpdate = leaderTrimStart;
+    newTrimEndUpdate = leaderTrimEnd;
+    newStartMsUpdate = leaderStartMs;
     setState(() {});
   }
 
@@ -17337,13 +17680,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (tapRow == null || !_isLocalYInMainTrackLane(tapRow, localY)) {
       return null;
     }
-    if (includeTrimHandleHitbox &&
-        _selectedClipIndices.length == 1 &&
-        _selectedClipIndex >= 0 &&
-        _selectedClipIndex < widget.clips.length) {
-      final selectedClip = widget.clips[_selectedClipIndex];
-      if (selectedClip.rowIndex == tapRow) {
-        final selectedClipRect = _getClipRect(_selectedClipIndex);
+    if (includeTrimHandleHitbox && _selectedClipIndices.isNotEmpty) {
+      for (final selectedIndex in _selectedClipIndices) {
+        if (selectedIndex < 0 || selectedIndex >= widget.clips.length) {
+          continue;
+        }
+        final selectedClip = widget.clips[selectedIndex];
+        if (selectedClip.rowIndex != tapRow) continue;
+        final selectedClipRect = _getClipRect(selectedIndex);
         if (selectedClipRect != null &&
             (_isLocalPositionInLeftTrimHandleHitbox(
                   selectedClipRect,
@@ -17353,7 +17697,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   selectedClipRect,
                   localPosition,
                 ))) {
-          return _selectedClipIndex;
+          return selectedIndex;
         }
       }
     }
@@ -17391,9 +17735,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return;
     }
     if (_selectionBoxActive) return;
+    if (_desktopAdditiveSelectionModifierPressed &&
+        _modifierClipClickHandled) {
+      return;
+    }
+    if (_trimClipIndex != null && _activeTrimHandleX != null) {
+      return;
+    }
     if (_desktopAdditiveSelectionGestureActive) return;
 
-    final touchedClipIndex = _getGestureClipIndexAt(details.localPosition);
+    final touchedClipIndex = _desktopAdditiveSelectionModifierPressed
+        ? _getClipIndexAt(details.localPosition)
+        : _getGestureClipIndexAt(details.localPosition);
     final touchShouldAddClip =
         !PlatformCapabilities.current.isDesktop &&
         _touchMultiSelectMode &&
@@ -17409,7 +17762,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _clearPendingClipTapState();
         _clearPastePopup();
         _desktopAdditiveSelectionGestureActive = true;
-        _suppressNextTimelineTapAfterAdditiveSelection = true;
+        _modifierClipClickHandled = _desktopAdditiveSelectionModifierPressed;
+        _suppressNextTimelineTap();
         _toggleClipInSelection(additiveClipIndex);
       });
       return;
@@ -17532,23 +17886,34 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       localPos,
     );
 
-    if (!draggingGroup && (leftHandleHit || rightHandleHit)) {
+    if ((leftHandleHit || rightHandleHit) &&
+        (wasAlreadySelected || !draggingGroup)) {
       setState(() {
         _resetTrimInteractionState();
         _tentativeClipSelectionActive = !wasAlreadySelected;
         if (wasAlreadySelected) {
-          _setSingleClipSelection(tappedClipIndex, popupMs: tapPopupMs);
+          if (_selectedClipIndices.length <= 1) {
+            _setSingleClipSelection(tappedClipIndex, popupMs: tapPopupMs);
+          } else {
+            _setPrimaryClipSelection(
+              tappedClipIndex,
+              preserveExistingSelection: true,
+              popupMs: tapPopupMs,
+            );
+          }
           _trimClipIndex = tappedClipIndex;
           _activeTrimHandleX = leftHandleHit ? clipRect.left : clipRect.right;
+          _trimStartAnchorX = localPos.dx;
+          _clearPendingSelectionBox();
+          _clearSelectionBoxGestureState();
+          _snapshotTrimGroup();
         } else {
           _pendingTapSelectionClipIndex = tappedClipIndex;
           _pendingTapSelectionPopupMs = tapPopupMs;
           _dragStartGlobalOffset = details.globalPosition;
         }
-        // Only clips that were already selected can arm trim/stretch in the
-        // same gesture. First touch selects; a follow-up gesture can edit.
       });
-      return; // STOP — do NOT allow drag
+      return;
     }
 
     // === 4. PRIORITY 2: TAP ON CLIP BODY → SELECT FIRST, DRAG ON FOLLOW-UP ===
@@ -17682,12 +18047,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _onTimelineTap(TapUpDetails details) {
     _timelineKeyboardModifierPointer = null;
-    if (_suppressNextTimelineTapAfterAdditiveSelection) {
-      _suppressNextTimelineTapAfterAdditiveSelection = false;
+    if (_suppressedTimelineTapCount > 0) {
+      _suppressedTimelineTapCount--;
+      _modifierClipClickHandled = false;
       return;
     }
-    if (_suppressNextTimelineTapAfterSelectionBox) {
-      _suppressNextTimelineTapAfterSelectionBox = false;
+    if (_desktopAdditiveSelectionModifierPressed) {
+      _modifierClipClickHandled = false;
       return;
     }
     if (_suppressNextTimelineTapAfterDeadZoneHold) {
@@ -19663,37 +20029,43 @@ class _TimelinePainter extends CustomPainter {
   }
 
   void _drawSelectedClipHandlesOverlay(Canvas canvas) {
-    if (selectedClipIndices.length != 1) return;
-    if (selectedClipIndex < 0 || selectedClipIndex >= clips.length) return;
-    if (draggedClipIndex == selectedClipIndex) return;
+    if (selectedClipIndices.isEmpty) return;
+    final draggingGroup =
+        draggedClipIndex != null &&
+        selectedClipIndices.length > 1 &&
+        selectedClipIndices.contains(draggedClipIndex);
+    if (draggingGroup) return;
 
-    final clip = clips[selectedClipIndex];
-    if (_isRowHiddenByCollapsedGroup(clip.rowIndex)) return;
-    final startMs = getStartMs(clip);
-    final trimStartMs = getTrimStartMs(clip);
-    final trimEndMs = getTrimEndMs(clip);
-    final visualDuration = getTimelineDurationMs(clip);
-    final x = (startMs - scrollOffsetMs) * pixelsPerMs;
-    final y = _rowTopForIndex(clip.rowIndex) + 2;
-    final width = visualDuration * pixelsPerMs;
-    final double height = rowHeight - 4;
-    final leftExtension = leftVisibleExtensionPx ?? 0.0;
-    if (x + width < -leftExtension || x > viewportWidth) return;
+    for (final index in selectedClipIndices) {
+      if (index < 0 || index >= clips.length) continue;
+      if (draggedClipIndex == index) continue;
+      final clip = clips[index];
+      if (_isRowHiddenByCollapsedGroup(clip.rowIndex)) continue;
+      final startMs = getStartMs(clip);
+      final trimStartMs = getTrimStartMs(clip);
+      final trimEndMs = getTrimEndMs(clip);
+      final visualDuration = getTimelineDurationMs(clip);
+      if (visualDuration <= 0 || (trimEndMs - trimStartMs) <= 0) continue;
+      final x = (startMs - scrollOffsetMs) * pixelsPerMs;
+      final y = _rowTopForIndex(clip.rowIndex) + 2;
+      final width = visualDuration * pixelsPerMs;
+      final double height = rowHeight - 4;
+      final leftExtension = leftVisibleExtensionPx ?? 0.0;
+      if (x + width < -leftExtension || x > viewportWidth) continue;
 
-    final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(x, y, width, height),
-      const Radius.circular(6),
-    );
-    final isMidi = clip.clipKind == ClipKind.midi;
-    if (visualDuration <= 0 || (trimEndMs - trimStartMs) <= 0) return;
-
-    _drawTrimHandles(
-      canvas,
-      rect,
-      asStretchHandles: stretchToolActive && !isMidi,
-      stretchEnabled: clip.stretchToProjectTempo,
-      preservePitch: clip.tempoStretchPreservePitch,
-    );
+      final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(x, y, width, height),
+        const Radius.circular(6),
+      );
+      final isMidi = clip.clipKind == ClipKind.midi;
+      _drawTrimHandles(
+        canvas,
+        rect,
+        asStretchHandles: stretchToolActive && !isMidi,
+        stretchEnabled: clip.stretchToProjectTempo,
+        preservePitch: clip.tempoStretchPreservePitch,
+      );
+    }
   }
 
   Color _automationColorForTarget(String targetId, {bool isOrphan = false}) {
