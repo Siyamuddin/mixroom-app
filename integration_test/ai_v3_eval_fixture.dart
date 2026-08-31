@@ -78,6 +78,8 @@ Future<DevelopmentEvalFixture> createDevelopmentEvalFixture(
     bool rhythmic = false,
     bool withBoundarySilence = false,
     int durationMs = 1200,
+    double gain = 2.0,
+    double pitchSemitones = 0.0,
   }) async {
     final fileName = '$id.wav';
     await audio(
@@ -98,6 +100,8 @@ Future<DevelopmentEvalFixture> createDevelopmentEvalFixture(
       preservePitch: preservePitch,
       warpMode: warpMode,
       durationMs: durationMs,
+      gain: gain,
+      pitchSemitones: pitchSemitones,
     ));
   }
 
@@ -163,6 +167,38 @@ Future<DevelopmentEvalFixture> createDevelopmentEvalFixture(
         id: 'lead_piano',
         label: 'Upright Piano',
         row: 1,
+        instrumentId: 'sfz.vsco.upright_piano',
+        instrumentName: 'Upright Piano',
+        notes: _minorHarmonyNotes(),
+      );
+      break;
+    case 'clip_inspector_mixed':
+      addRow('Audio A');
+      addRow('Audio B');
+      addRow(
+        'Keys',
+        kind: 'instrument',
+        instrumentId: 'sfz.vsco.upright_piano',
+        instrumentName: 'Upright Piano',
+      );
+      await addAudioClip(
+        id: 'inspector_audio_a',
+        label: 'Audio A',
+        row: 0,
+        gain: 1.25,
+        pitchSemitones: -2.5,
+      );
+      await addAudioClip(
+        id: 'inspector_audio_b',
+        label: 'Audio B',
+        row: 1,
+        gain: 2.6,
+        pitchSemitones: 4.0,
+      );
+      addMidiClip(
+        id: 'inspector_midi',
+        label: 'Keys',
+        row: 2,
         instrumentId: 'sfz.vsco.upright_piano',
         instrumentName: 'Upright Piano',
         notes: _minorHarmonyNotes(),
@@ -1027,6 +1063,8 @@ Map<String, dynamic> _track({
   bool preservePitch = false,
   String warpMode = 'complex',
   int durationMs = 1200,
+  double gain = 2.0,
+  double pitchSemitones = 0.0,
 }) {
   return <String, dynamic>{
     'fileName': fileName,
@@ -1036,11 +1074,11 @@ Map<String, dynamic> _track({
     'trimEndMs': durationMs,
     'offset': offset,
     'crossfade': 0.0,
-    'gain': 2.0,
+    'gain': gain,
     'normalizeVolume': false,
     'normalizeGain': 1.0,
     'preNormalizeGain': 2.0,
-    'pitchSemitones': 0.0,
+    'pitchSemitones': pitchSemitones,
     'isReversed': false,
     'sourceTempoBpm': sourceTempoBpm,
     'stretchToProjectTempo': clipType == 'midi' || stretchToProjectTempo,

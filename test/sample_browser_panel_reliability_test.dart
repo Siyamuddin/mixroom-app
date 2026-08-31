@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 
 void main() {
@@ -20,11 +22,12 @@ void main() {
 
   Widget buildPanel({
     required SampleBrowserDirectoryReader directoryReader,
+    double width = 420,
   }) {
     return MaterialApp(
       home: Scaffold(
         body: SizedBox(
-          width: 420,
+          width: width,
           height: 680,
           child: SampleBrowserPanel(
             rootFolders: <String>[root.path],
@@ -55,6 +58,72 @@ void main() {
     await tester.pump(const Duration(milliseconds: 420));
     await tester.pump();
   }
+
+  testWidgets('reserves balanced desktop gutters around tree controls',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    PlatformCapabilities.debugResetForCurrentPlatform();
+    try {
+      final sample = File('${root.path}/kick.wav');
+      await tester.pumpWidget(
+        buildPanel(
+          directoryReader: (_) async => <FileSystemEntity>[sample],
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      final treeListFinder = find.byWidgetPredicate(
+        (widget) =>
+            widget is ListView && widget.scrollDirection == Axis.vertical,
+      );
+      final treeList = tester.widget<ListView>(treeListFinder);
+      final padding = treeList.padding! as EdgeInsets;
+      expect(padding.left, 12);
+      expect(padding.right, 12);
+
+      final listBounds = tester.getRect(treeListFinder);
+      final insertButtonBounds = tester.getRect(
+        find.byIcon(Icons.add_circle_outline),
+      );
+      final durationBounds = tester.getRect(find.text('--:--'));
+      expect(
+        insertButtonBounds.left - durationBounds.right,
+        greaterThanOrEqualTo(6),
+      );
+      expect(
+        listBounds.right - insertButtonBounds.right,
+        greaterThanOrEqualTo(16),
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      PlatformCapabilities.debugResetForCurrentPlatform();
+    }
+  });
+
+  testWidgets('keeps file duration visible at minimum desktop panel width',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    PlatformCapabilities.debugResetForCurrentPlatform();
+    try {
+      final sample = File('${root.path}/kick.wav');
+      await tester.pumpWidget(
+        buildPanel(
+          width: 344,
+          directoryReader: (_) async => <FileSystemEntity>[sample],
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('--:--'), findsOneWidget);
+      expect(find.byIcon(Icons.add_circle_outline), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+      PlatformCapabilities.debugResetForCurrentPlatform();
+    }
+  });
 
   testWidgets('retries a transient empty Android-style directory result',
       (tester) async {

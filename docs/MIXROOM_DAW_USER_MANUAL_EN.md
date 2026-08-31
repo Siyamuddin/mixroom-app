@@ -233,14 +233,18 @@ The magnet button controls timeline snapping.
 | Action | Result |
 | --- | --- |
 | Tap magnet | Turns snapping on or off. |
-| Hold magnet | Opens the quantize menu. |
-| Choose a quantize value | Sets the grid used by snapping, such as 1/4, 1/8, or 1/16. |
+| Desktop/tablet: open the quantize dropdown | Opens the grid menu. |
+| Phone: hold magnet | Opens the grid menu. |
+| Choose Auto | Adapts the visible grid and snap interval from 1/4 through fine tick-level subdivisions up to 1/512 when the arrangement zoom provides enough spacing. |
+| Choose a fixed value | Keeps the selected grid, such as 1/4, 1/8, or 1/16, at every zoom level. |
 
 When magnet is on, timeline edits snap to the selected musical grid. This helps clips, cuts, pasted clips, painted clips, loop regions, and automation regions land exactly on beats or subdivisions.
 
 When magnet is off, users can place and edit items freely without grid snapping. This is better for dialogue, sound design, loose performances, or detailed cleanup.
 
-Quantize values are divisions of one bar:
+Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. Both editors can continue through 1/64, 1/128, 1/256, and 1/512 when their zoom provides enough space. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting. Fixed choices remain available through 1/32 and do not change with zoom.
+
+Fixed quantize values are divisions of one bar:
 
 | Value | Meaning |
 | --- | --- |
@@ -250,7 +254,7 @@ Quantize values are divisions of one bar:
 | 1/8 | Eighth-note grid. |
 | 1/16 | Sixteenth-note grid for tighter edits. |
 
-Practical rule: turn the magnet on for musical arrangement work, and hold the magnet button when the edit grid feels too coarse or too fine.
+Practical rule: leave Auto selected for normal zoom-aware editing. Choose a fixed value when an edit must stay on one exact subdivision regardless of zoom.
 
 The timeline also supports:
 
@@ -328,7 +332,7 @@ Selecting a clip opens a compact action popover.
 
 ### Clip Settings
 
-On desktop and tablet, Clip settings opens the right inspector. On phones it opens a compact overlay on the timeline.
+On desktop and tablet, Clip settings opens the right inspector. While it remains open, selecting another clip updates the inspector to that clip's properties. On phones, Clip settings opens a compact overlay on the timeline.
 
 Audio clip settings include:
 
@@ -718,6 +722,8 @@ Users can:
 - scale note lengths
 
 Tap-to-add is the fastest mobile workflow: open a MIDI clip, choose the note row and beat position, then tap the grid. Drag horizontally to move timing, drag vertically to change pitch, and resize note edges to change duration.
+
+Horizontal Piano Roll zoom supports fine Auto grid and snapping values through 1/512 in meters and zoom levels that preserve readable spacing. Zoom buttons, desktop modifier-wheel zoom, macOS trackpad pinch, and touch pinch zoom keep the musical position beneath the zoom focus stable. The active desktop/tablet quantize readout follows the Piano Roll while it is open. Explicit fixed grid choices remain available through 1/32.
 
 ### Piano Roll Tools
 

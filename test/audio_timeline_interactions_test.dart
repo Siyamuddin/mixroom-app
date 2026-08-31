@@ -7,7 +7,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/helpers/trackpad_touch_count.dart';
+import 'package:mixroom/helpers/waveform_detail.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -320,8 +322,12 @@ Widget _buildHarness({
     double? newStartMs,
   })? onTrimClipCommit,
   void Function(int row)? onSelectRow,
-  void Function(List<int> selectedClipIndices, int primaryClipIndex)?
-      onSelectionChanged,
+  void Function(
+    List<int> selectedClipIndices,
+    int primaryClipIndex,
+    TimelineSelectionChangeOrigin origin,
+  )?
+  onSelectionChanged,
   List<String> rowEffects = const <String>[],
   List<Map<String, dynamic>> automationTargets = const <Map<String, dynamic>>[],
   Map<String, List<AutomationClipSnapshot>> initialAutomationClipsByTarget =
@@ -395,6 +401,7 @@ Widget _buildHarness({
   bool useTabletDawLayout = false,
   bool allowMultipleExpandedRows = true,
   bool expandRowsOnTrackSelect = true,
+  int clipTopologyRevision = -1,
   int selectedClipIndex = -1,
   List<int> selectedClipIndices = const <int>[],
   bool Function(int clipIndex)? canReplaceSamplerSource,
@@ -402,8 +409,11 @@ Widget _buildHarness({
   bool hasCopiedClip = false,
   bool Function(int row)? canPasteClipAtRow,
   bool hasCopiedRowEffects = false,
-  void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
-      onSnapSettingsChanged,
+  void Function(
+    bool magnetEnabled,
+    TimelineGridMode gridMode,
+    int fixedQuantizeDivisionsPerBar,
+  )? onSnapSettingsChanged,
   ValueNotifier<Duration>? transportClockListenable,
   void Function(double ms)? onScrubRequested,
   bool isPlaying = false,
@@ -412,6 +422,7 @@ Widget _buildHarness({
   int loopEndMs = 0,
   VoidCallback? onTutorialTimelineScrolled,
   VoidCallback? onTutorialTimelineZoomed,
+  ValueChanged<WaveformDetailViewport>? onWaveformDetailViewportSettled,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
@@ -448,6 +459,7 @@ Widget _buildHarness({
           rows: rows,
           trackGroups: trackGroupsOverride ?? const <TrackGroup>[],
           clips: clips,
+          clipTopologyRevision: clipTopologyRevision,
           clipOverlapMode: 'off',
           rowGain: rowGain,
           rowPan: rowPan,
@@ -487,6 +499,7 @@ Widget _buildHarness({
           getFullDurationMs: (clip) =>
               clip.audioDuration.inMilliseconds.toDouble(),
           getPeaks: (_) => List<double>.filled(32, 0.35, growable: false),
+          onWaveformDetailViewportSettled: onWaveformDetailViewportSettled,
           getY: (clip) => clip.y,
           onSelectRow: onSelectRow ?? (_) {},
           recordingInProgress: false,
@@ -671,7 +684,7 @@ void main() {
           onMoveClipCommit: (clipIndex, _, __) async {
             moveCommits.add(clipIndex);
           },
-          onSelectionChanged: (selectedClipIndices, _) {
+          onSelectionChanged: (selectedClipIndices, _, __) {
             selectionSnapshots.add(
               selectedClipIndices.toList(growable: false),
             );
@@ -718,7 +731,7 @@ void main() {
           ],
           useTabletDawLayout: true,
           onMoveClipCommit: (_, __, ___) async {},
-          onSelectionChanged: (selectedClipIndices, _) {
+          onSelectionChanged: (selectedClipIndices, _, __) {
             selectionSnapshots.add(
               selectedClipIndices.toList(growable: false),
             );
@@ -769,6 +782,42 @@ void main() {
     }
   });
 
+  testWidgets('desktop and tablet row scaling keeps its default and reaches 150%',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    final semantics = tester.ensureSemantics();
+    try {
+      final clip = await _buildClip();
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[clip],
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rowHeader =
+          find.byKey(const ValueKey('timeline_tablet_row_header_0'));
+      final heightControl = find.bySemanticsLabel('Rows scrollbar and height');
+      final semanticsHeightControl =
+          find.semantics.byLabel('Rows scrollbar and height');
+      expect(tester.getSize(rowHeader).height, 84.0);
+      expect(tester.getSemantics(heightControl).value, '100%');
+
+      for (var i = 0; i < 8; i++) {
+        tester.semantics.increase(semanticsHeightControl);
+        await tester.pumpAndSettle();
+      }
+
+      expect(tester.getSize(rowHeader).height, 126.0);
+      expect(tester.getSemantics(heightControl).value, '150%');
+    } finally {
+      semantics.dispose();
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('swiping an unselected clip does not select or move it',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -781,7 +830,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -813,7 +862,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -848,7 +897,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -899,7 +948,7 @@ void main() {
             onMoveClipCommit: (clipIndex, _, __) async {
               moveCommits.add(clipIndex);
             },
-            onSelectionChanged: (selectedClipIndices, _) {
+            onSelectionChanged: (selectedClipIndices, _, __) {
               selectionSnapshots.add(
                 selectedClipIndices.toList(growable: false),
               );
@@ -956,7 +1005,7 @@ void main() {
             onMoveClipCommit: (clipIndex, _, __) async {
               moveCommits.add(clipIndex);
             },
-            onSelectionChanged: (selectedClipIndices, _) {
+            onSelectionChanged: (selectedClipIndices, _, __) {
               selectionSnapshots.add(
                 selectedClipIndices.toList(growable: false),
               );
@@ -1023,7 +1072,7 @@ void main() {
             onMoveClipCommit: (clipIndex, _, __) async {
               moveCommits.add(clipIndex);
             },
-            onSelectionChanged: (selectedClipIndices, _) {
+            onSelectionChanged: (selectedClipIndices, _, __) {
               selectionSnapshots.add(
                 selectedClipIndices.toList(growable: false),
               );
@@ -1072,7 +1121,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSnapSettingsChanged: (enabled, _) {
+        onSnapSettingsChanged: (enabled, _, __) {
           snapStates.add(enabled);
         },
       ),
@@ -1100,6 +1149,176 @@ void main() {
     expect(moveCommits.single, closeTo(1500.0, 0.01));
   });
 
+  testWidgets('adaptive grid follows timeline zoom without parent churn',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+      final snapSettings = <(bool, TimelineGridMode, int)>[];
+      final moveCommits = <double>[];
+      final detailViewports = <WaveformDetailViewport>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, newStartMs, __) async {
+            moveCommits.add(newStartMs);
+          },
+          onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
+            snapSettings.add((enabled, mode, fixedDivisions));
+          },
+          onWaveformDetailViewportSettled: detailViewports.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+      expect(snapSettings, <(bool, TimelineGridMode, int)>[
+        (true, TimelineGridMode.adaptive, 4),
+      ]);
+
+      final center = _desktopClipCenter(tester);
+      await tester.tapAt(center);
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -2000),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 181));
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+      expect(snapSettings, hasLength(1));
+      expect(detailViewports.last.pixelsPerMs, 8.0);
+
+      final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await gesture.down(center);
+      await tester.pump();
+      await gesture.moveBy(const Offset(70, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(moveCommits, hasLength(1));
+      expect(moveCommits.single, closeTo(7.8125, 0.01));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('waveform detail viewport waits for settled final zoom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clip = await _buildClip();
+      final viewports = <WaveformDetailViewport>[];
+      Widget buildTimeline() => _buildHarness(
+        clips: <AudioTrack>[clip],
+        onMoveClipCommit: (_, __, ___) async {},
+        onWaveformDetailViewportSettled: viewports.add,
+      );
+      await tester.pumpWidget(buildTimeline());
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pumpWidget(buildTimeline());
+      await tester.pump(const Duration(milliseconds: 121));
+      expect(viewports, hasLength(1));
+      expect(viewports.single.pixelsPerMs, _kInitialPixelsPerMs);
+      expect(viewports.single.visibleClipIds, <String>[clip.clipId]);
+      viewports.clear();
+
+      final center = _desktopClipCenter(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -600),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -600),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+
+      await tester.pump(const Duration(milliseconds: 179));
+      expect(viewports, isEmpty);
+      await tester.pump(const Duration(milliseconds: 2));
+      expect(viewports, hasLength(1));
+      expect(
+        viewports.single.pixelsPerMs,
+        greaterThanOrEqualTo(kWaveformDetailMinimumPixelsPerMs),
+      );
+      expect(viewports.single.visibleClipIds, <String>[clip.clipId]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('fixed grid override stays fixed while timeline zooms',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+      final snapSettings = <(bool, TimelineGridMode, int)>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
+            snapSettings.add((enabled, mode, fixedDivisions));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPressAt(_magnetButtonCenter(tester));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(
+        const ValueKey('timeline_quantize_menu_4'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+      expect(snapSettings.last, (true, TimelineGridMode.fixed, 4));
+
+      final center = _desktopClipCenter(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -1000),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('desktop alt clip drag overrides enabled snap grid',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -1112,7 +1331,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSnapSettingsChanged: (enabled, _) {
+        onSnapSettingsChanged: (enabled, _, __) {
           snapStates.add(enabled);
         },
       ),
@@ -1610,12 +1829,14 @@ void main() {
     try {
       final controller = AudioCanvasTimelineController();
       final clips = <AudioTrack>[await _buildClip()];
+      final detailViewports = <WaveformDetailViewport>[];
 
       await tester.pumpWidget(
         _buildHarness(
           clips: clips,
           controller: controller,
           onMoveClipCommit: (_, __, ___) async {},
+          onWaveformDetailViewportSettled: detailViewports.add,
         ),
       );
       await tester.pumpAndSettle();
@@ -1624,6 +1845,7 @@ void main() {
       var state = controller.horizontalScrollbarState;
       expect(state.visible, isTrue);
       expect(state.thumbWidth, greaterThanOrEqualTo(72.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
 
       controller.beginHorizontalScrollbarDrag(
         state.thumbLeft + state.thumbWidth - 2.0,
@@ -1635,6 +1857,22 @@ void main() {
       state = controller.horizontalScrollbarState;
       expect(state.thumbWidth, lessThan(72.0));
       expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
+
+      controller.beginHorizontalScrollbarDrag(
+        state.thumbLeft + state.thumbWidth - 2.0,
+      );
+      controller.dragHorizontalScrollbarBy(-2000.0);
+      controller.endHorizontalScrollbarDrag();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 181));
+
+      state = controller.horizontalScrollbarState;
+      expect(state.thumbLeft.isFinite, isTrue);
+      expect(state.thumbWidth.isFinite, isTrue);
+      expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+      expect(detailViewports.last.pixelsPerMs, 8.0);
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -3303,6 +3541,104 @@ void main() {
   );
 
   testWidgets(
+    'tablet selection reports a new primary after clip settings opens',
+    (tester) async {
+      final first = await _buildClip(engineClipId: 1);
+      final second = await _buildClip(engineClipId: 2);
+      second.offset = 2200.0;
+      final panelRequests = <int>[];
+      final selectionSnapshots = <
+        ({
+          List<int> selected,
+          int primary,
+          TimelineSelectionChangeOrigin origin,
+        })
+      >[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[first, second],
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+          onSelectionChanged: (selected, primary, origin) {
+            selectionSnapshots.add((
+              selected: List<int>.from(selected),
+              primary: primary,
+              origin: origin,
+            ));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+      expect(panelRequests, <int>[0]);
+      expect(selectionSnapshots.last.selected, isEmpty);
+      expect(selectionSnapshots.last.primary, -1);
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+
+      expect(selectionSnapshots.last.selected, <int>[1]);
+      expect(selectionSnapshots.last.primary, 1);
+      expect(
+        selectionSnapshots.last.origin,
+        TimelineSelectionChangeOrigin.interaction,
+      );
+    },
+  );
+
+  testWidgets(
+    'topology reconciliation is distinct from the next user selection',
+    (tester) async {
+      final first = await _buildClip(engineClipId: 1);
+      final second = await _buildClip(engineClipId: 2);
+      second.offset = 2200.0;
+      final origins = <TimelineSelectionChangeOrigin>[];
+
+      Widget harness(List<AudioTrack> clips, int topologyRevision) {
+        return _buildHarness(
+          clips: clips,
+          clipTopologyRevision: topologyRevision,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (_, __, origin) => origins.add(origin),
+        );
+      }
+
+      await tester.pumpWidget(harness(<AudioTrack>[first], 0));
+      await tester.pumpAndSettle();
+      origins.clear();
+
+      await tester.pumpWidget(harness(<AudioTrack>[first, second], 1));
+      await tester.pumpAndSettle();
+      expect(origins, contains(TimelineSelectionChangeOrigin.reconciliation));
+      origins.clear();
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+      expect(origins.last, TimelineSelectionChangeOrigin.interaction);
+
+      origins.clear();
+      await tester.pumpWidget(harness(<AudioTrack>[first, second], 2));
+      await tester.pumpAndSettle();
+      expect(
+        origins,
+        contains(TimelineSelectionChangeOrigin.reconciliation),
+      );
+
+      origins.clear();
+      await tester.tapAt(_clipCenter(tester));
+      await tester.pumpAndSettle();
+      expect(origins.last, TimelineSelectionChangeOrigin.interaction);
+    },
+  );
+
+  testWidgets(
     'phone MIDI clip settings keeps the timeline overlay',
     (tester) async {
       final clips = <AudioTrack>[await _buildMidiClip()];
@@ -3825,7 +4161,7 @@ void main() {
             'newStartMs': newStartMs,
           });
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -3999,6 +4335,39 @@ void main() {
     expect(moveCommits, isEmpty);
   });
 
+  testWidgets('scale gesture reaches the shared deep zoom ceiling',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+    final controller = AudioCanvasTimelineController();
+    final detailViewports = <WaveformDetailViewport>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        controller: controller,
+        onMoveClipCommit: (_, __, ___) async {},
+        onWaveformDetailViewportSettled: detailViewports.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final center = _clipCenter(tester);
+    final gesture = await tester.createGesture(
+      pointer: 103,
+      kind: PointerDeviceKind.trackpad,
+    );
+    await gesture.panZoomStart(center);
+    await tester.pump();
+    await gesture.panZoomUpdate(center, scale: 100.0);
+    await tester.pump();
+    await gesture.panZoomEnd();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 181));
+
+    expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+    expect(detailViewports.last.pixelsPerMs, 8.0);
+  });
+
   testWidgets('pinch zoom does not leave an unselected clip selected',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -4008,7 +4377,7 @@ void main() {
       _buildHarness(
         clips: clips,
         onMoveClipCommit: (_, __, ___) async {},
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -4515,10 +4884,13 @@ void main() {
         findsOneWidget);
   });
 
-  testWidgets('quantize menu is constrained to trigger width', (tester) async {
+  testWidgets('quantize menu exposes fixed 1/32 within trigger width',
+      (tester) async {
+    final controller = AudioCanvasTimelineController();
     await tester.pumpWidget(
       _buildHarness(
         clips: const <AudioTrack>[],
+        controller: controller,
         onMoveClipCommit: (_, __, ___) async {},
       ),
     );
@@ -4528,9 +4900,16 @@ void main() {
     await tester.longPressAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
-    final itemRect =
-        tester.getRect(find.byKey(const ValueKey('timeline_quantize_menu_4')));
+    final fixedThirtySecond =
+        find.byKey(const ValueKey('timeline_quantize_menu_32'));
+    final itemRect = tester.getRect(fixedThirtySecond);
     expect(itemRect.width, closeTo(triggerWidth, 0.5));
+
+    await tester.tap(fixedThirtySecond);
+    await tester.pumpAndSettle();
+
+    expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+    expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
   });
 
   testWidgets('automation tab opens point-lane editor for selected target',

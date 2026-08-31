@@ -6,6 +6,7 @@
 #include "JuceLogBridge.h"
 #include "../../native/RealtimeWavCapture.h"
 #include "../../native/SampledPitchSemantics.h"
+#include "../../native/TimelineMidiBoundary.h"
 
 #include <array>
 #include <atomic>
@@ -3425,8 +3426,15 @@ public:
                     const double startTimelineSec = blockStart + ((double)writeStart / sr);
                     const double endTimelineSec =
                         startTimelineSec + ((double)framesToRender / sr);
-                    const double blockSourceStartSec =
+                    const double roundedBlockSourceStartSec =
                         ((startTimelineSec - cs) * safeRatio) + inFile;
+                    const double blockSourceStartSec =
+                        mixroom::timelineMidiAdmissionSourceStartSec(
+                            blockStart,
+                            blockEnd,
+                            cs,
+                            roundedBlockSourceStartSec,
+                            inFile);
                     const double blockSourceEndSec =
                         ((endTimelineSec - cs) * safeRatio) + inFile;
                     const double pitchOffsetSemitones =

@@ -93,11 +93,12 @@ void main() {
       );
     });
 
-    test('label rename action survives undo and redo', () async {
+    test('label rename action survives topology changes', () async {
       final clip = await _midiClip()
         ..label = 'Upright Piano';
+      final tracks = <AudioTrack>[clip];
       final action = SetClipLabelAction(
-        tracks: <AudioTrack>[clip],
+        tracks: tracks,
         originalIndex: 0,
         oldLabel: 'Upright Piano',
         newLabel: 'Dream Pad',
@@ -106,10 +107,17 @@ void main() {
 
       await action.redo();
       expect(clip.label, 'Dream Pad');
+
+      final precedingClip = await _midiClip()
+        ..label = 'Intro';
+      tracks.insert(0, precedingClip);
+
       await action.undo();
       expect(clip.label, 'Upright Piano');
+      expect(precedingClip.label, 'Intro');
       await action.redo();
       expect(clip.label, 'Dream Pad');
+      expect(precedingClip.label, 'Intro');
     });
   });
 

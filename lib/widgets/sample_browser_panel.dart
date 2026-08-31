@@ -175,6 +175,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
   static const Color _kPanelFillStrong = Color.fromRGBO(244, 244, 244, 0.14);
   static const Color _kPanelAccent = Color(0xFF78D9FF);
   static const Color _kHelpWarmBorder = Color(0xFFE0B27F);
+  static const double _kDesktopTreeHorizontalInset = 12.0;
   static const Duration _kFolderHoldDelay = Duration(milliseconds: 180);
   static const List<Duration> _kEmptyDirectoryRetryDelays = <Duration>[
     Duration(milliseconds: 140),
@@ -1418,7 +1419,7 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
 
     final tile = LayoutBuilder(
       builder: (context, constraints) {
-        final showDuration = constraints.maxWidth > 340;
+        final showDuration = constraints.maxWidth >= 300;
         final showInsertButton = constraints.maxWidth > 280;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -1483,6 +1484,8 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
                         ),
                       ),
                     ),
+                  if (showDuration && showInsertButton)
+                    const SizedBox(width: 6),
                   if (showInsertButton)
                     IconButton(
                       tooltip: L10n.translate(context, 'Insert at playhead'),
@@ -1766,9 +1769,17 @@ class _SampleBrowserPanelState extends State<SampleBrowserPanel>
 
     _pruneTreeRowKeys(lines);
     _restorePendingTreeScrollOffset();
+    final horizontalInset = PlatformCapabilities.current.isDesktop
+        ? _kDesktopTreeHorizontalInset
+        : 0.0;
     return ListView.builder(
       controller: _treeScrollController,
-      padding: const EdgeInsets.fromLTRB(0, 2, 0, 4),
+      padding: EdgeInsets.fromLTRB(
+        horizontalInset,
+        2,
+        horizontalInset,
+        4,
+      ),
       itemCount: lines.length,
       itemBuilder: (context, index) {
         final line = lines[index];

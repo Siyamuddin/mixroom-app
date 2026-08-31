@@ -1381,8 +1381,15 @@ private:
         const double blockTimelineStartSec = blockStart + ((double)writeStart / sr);
         const double blockTimelineEndSec =
             blockTimelineStartSec + ((double)framesToRender / sr);
-        const double blockSourceStartSec =
+        const double roundedBlockSourceStartSec =
             ((blockTimelineStartSec - clipStart) * safeRatio) + inFile;
+        const double blockSourceStartSec =
+            mixroom::timelineMidiAdmissionSourceStartSec(
+                blockStart,
+                blockEnd,
+                clipStart,
+                roundedBlockSourceStartSec,
+                inFile);
         const double blockSourceEndSec =
             ((blockTimelineEndSec - clipStart) * safeRatio) + inFile;
         const int transposeSemitones =

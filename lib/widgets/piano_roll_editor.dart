@@ -13,6 +13,7 @@ import 'package:mixroom/ai/assistant_action_utils.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/instrument_picker_categories.dart';
 import 'package:mixroom/helpers/piano_roll_playhead.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/desktop_scrollable_slider.dart';
@@ -37,6 +38,10 @@ typedef PianoKeyUpCallback = Future<void> Function(
 typedef PlayableMidiPitchesResolver = Future<Set<int>> Function(
   String instrumentId,
   Map<String, double> instrumentParams,
+);
+typedef PianoRollGridResolutionChanged = void Function(
+  String clipId,
+  int divisionsPerBar,
 );
 
 const Color _kPianoShellText = Color(0xFFF4F4F4);
@@ -116,7 +121,8 @@ class PianoRollEditor extends StatefulWidget {
     required this.projectPlayheadMs,
     required this.isPlaying,
     required this.magnetEnabled,
-    required this.quantizeDivisionsPerBar,
+    required this.gridMode,
+    required this.fixedQuantizeDivisionsPerBar,
     required this.fullscreen,
     required this.isRecording,
     required this.onFullscreenChanged,
@@ -131,6 +137,7 @@ class PianoRollEditor extends StatefulWidget {
     this.onOpenCurrentInstrumentUi,
     this.canReplaceSamplerSource = false,
     this.onReplaceSamplerSource,
+    this.onEffectiveGridResolutionChanged,
     this.initialTab = 0,
     this.tabRequestRevision = 0,
   });
@@ -143,7 +150,8 @@ class PianoRollEditor extends StatefulWidget {
   final double projectPlayheadMs;
   final bool isPlaying;
   final bool magnetEnabled;
-  final int quantizeDivisionsPerBar;
+  final TimelineGridMode gridMode;
+  final int fixedQuantizeDivisionsPerBar;
   final bool fullscreen;
   final bool isRecording;
   final ValueChanged<bool> onFullscreenChanged;
@@ -158,6 +166,7 @@ class PianoRollEditor extends StatefulWidget {
   final Future<bool> Function()? onOpenCurrentInstrumentUi;
   final bool canReplaceSamplerSource;
   final Future<void> Function()? onReplaceSamplerSource;
+  final PianoRollGridResolutionChanged? onEffectiveGridResolutionChanged;
   final int initialTab;
   final int tabRequestRevision;
 
@@ -177,7 +186,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const double _minRowHeight = 14.0;
   static const double _maxRowHeight = 40.0;
   static const double _minPxPerBeat = 24.0;
-  static const double _maxPxPerBeat = 220.0;
+  static const double _maxPxPerBeat = 3840.0;
+  static const double _touchPinchScaleExponent = 0.65;
+  static const double _minTouchPinchStartDistance = 12.0;
   static const double _followPlayheadViewportAnchor = 0.42;
   static const double _rollExtensionChunkBeats = 16.0;
   static const double _rulerHeight = 28.0;
@@ -285,6 +296,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   bool _manualPinchActive = false;
   bool _manualPinchUpdateScheduled = false;
   int _manualPinchUpdateToken = 0;
+  bool _nativeTrackpadPinchActive = false;
   bool _desktopWheelZoomModifierPressed = false;
   Offset _pinchStartPointA = Offset.zero;
   Offset _pinchStartPointB = Offset.zero;
@@ -294,7 +306,16 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   double _pinchStartVerticalOffset = 0.0;
   double _pinchStartFocalBeat = 0.0;
   double _pinchStartFocalRow = 0.0;
-  Offset _pinchStartFocalLocal = Offset.zero;
+  Offset _pinchStartFocalViewport = Offset.zero;
+  double _nativeTrackpadStartPxPerBeat = 56.0;
+  double _nativeTrackpadStartRowHeight = 22.0;
+  double _nativeTrackpadStartHorizontalOffset = 0.0;
+  double _nativeTrackpadStartVerticalOffset = 0.0;
+  double _nativeTrackpadFocalDx = 0.0;
+  double _nativeTrackpadFocalDy = 0.0;
+  double _nativeTrackpadFocalBeat = 0.0;
+  double _nativeTrackpadFocalRow = 0.0;
+  int? _lastPublishedEffectiveGridDivisions;
 
   @override
   void initState() {
@@ -324,6 +345,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _sequencerHorizontalController.addListener(_extendSequencerWhenNeeded);
     HardwareKeyboard.instance.addHandler(_handleGlobalKeyEvent);
     _scheduleInitialNoteViewportSync();
+    _publishEffectiveGridResolutionIfChanged();
   }
 
   @override
@@ -393,6 +415,21 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         !clipContentChanged) {
       _refreshPlayablePitches();
     }
+    if (clipIdentityChanged ||
+        oldWidget.beatsPerBar != widget.beatsPerBar ||
+        oldWidget.beatUnit != widget.beatUnit ||
+        oldWidget.gridMode != widget.gridMode ||
+        oldWidget.fixedQuantizeDivisionsPerBar !=
+            widget.fixedQuantizeDivisionsPerBar ||
+        oldWidget.onEffectiveGridResolutionChanged !=
+            widget.onEffectiveGridResolutionChanged) {
+      if (clipIdentityChanged ||
+          oldWidget.onEffectiveGridResolutionChanged !=
+              widget.onEffectiveGridResolutionChanged) {
+        _lastPublishedEffectiveGridDivisions = null;
+      }
+      _publishEffectiveGridResolutionIfChanged();
+    }
     final playheadDeltaMs =
         (oldWidget.projectPlayheadMs - widget.projectPlayheadMs).abs();
     final visualMsDelta = (_projectMsForBeat(_visualPlayheadBeat.value) -
@@ -425,6 +462,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _activeGridPointers.clear();
     _activeGridGlobalPointers.clear();
     _manualPinchActive = false;
+    _nativeTrackpadPinchActive = false;
     _manualPinchUpdateToken++;
     _playheadVisualTicker.dispose();
     _visualPlayheadBeat.dispose();
@@ -1061,8 +1099,34 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   double get _quantizeBeat {
-    final safeDivisions = math.max(1, widget.quantizeDivisionsPerBar);
+    final safeDivisions = math.max(1, _effectiveQuantizeDivisionsPerBar);
     return _barLengthBeats / safeDivisions;
+  }
+
+  int get _effectiveQuantizeDivisionsPerBar {
+    final pixelsPerBar = TimelineGridPolicy.pianoRollPixelsPerBar(
+      beatsPerBar: widget.beatsPerBar,
+      beatUnit: widget.beatUnit,
+      pixelsPerBeat: _pxPerBeat,
+    );
+    return TimelineGridPolicy.resolveDivisionsPerBar(
+      mode: widget.gridMode,
+      fixedDivisionsPerBar: widget.fixedQuantizeDivisionsPerBar,
+      pixelsPerBar: pixelsPerBar,
+    );
+  }
+
+  void _publishEffectiveGridResolutionIfChanged() {
+    if (widget.onEffectiveGridResolutionChanged == null) return;
+    final divisions = _effectiveQuantizeDivisionsPerBar;
+    if (_lastPublishedEffectiveGridDivisions == divisions) return;
+    _lastPublishedEffectiveGridDivisions = divisions;
+    final clipId = widget.clip.clipId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.clip.clipId != clipId) return;
+      if (_effectiveQuantizeDivisionsPerBar != divisions) return;
+      widget.onEffectiveGridResolutionChanged?.call(clipId, divisions);
+    });
   }
 
   double get _minimumLengthBeat =>
@@ -1567,6 +1631,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         _rowHeight = nextRowHeight;
         _pxPerBeat = nextPxPerBeat;
       });
+      _publishEffectiveGridResolutionIfChanged();
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1729,7 +1794,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (remembered != null) {
       return remembered.clamp(_minimumLengthBeat, 64.0).toDouble();
     }
-    return widget.magnetEnabled ? math.max(_quantizeBeat, 0.25) : 1.0;
+    return widget.magnetEnabled ? _quantizeBeat : 1.0;
   }
 
   void _selectSingle(String id) {
@@ -2055,6 +2120,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _pxPerBeat = nextX;
       _rowHeight = nextY;
     });
+    _publishEffectiveGridResolutionIfChanged();
 
     final nextContentWidth = _contentWidth;
     final nextContentHeight = _contentHeight;
@@ -2076,6 +2142,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (_manualPinchActive || _activeGridGlobalPointers.length < 2) return;
     final globalPts = _activeGridGlobalPointers.values.toList(growable: false);
     final localPts = _activeGridPointers.values.toList(growable: false);
+    if (_distance(globalPts[0], globalPts[1]) <
+        _minTouchPinchStartDistance) {
+      return;
+    }
     _pinchStartPointA = globalPts[0];
     _pinchStartPointB = globalPts[1];
     _pinchStartPxPerBeat = _pxPerBeat;
@@ -2085,12 +2155,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _pinchStartVerticalOffset = _gridVerticalController.hasClients
         ? _gridVerticalController.offset
         : 0.0;
-    final focal = (localPts[0] + localPts[1]) / 2.0;
-    _pinchStartFocalLocal = focal;
+    final focalContent = (localPts[0] + localPts[1]) / 2.0;
+    _pinchStartFocalViewport = Offset(
+      focalContent.dx - _pinchStartHorizontalOffset,
+      focalContent.dy - _pinchStartVerticalOffset,
+    );
     _pinchStartFocalBeat =
-        _unsnappedBeatForContentX(focal.dx, _pinchStartPxPerBeat);
-    _pinchStartFocalRow =
-        (_pinchStartVerticalOffset + focal.dy) / _pinchStartRowHeight;
+        _unsnappedBeatForContentX(focalContent.dx, _pinchStartPxPerBeat);
+    _pinchStartFocalRow = focalContent.dy / _pinchStartRowHeight;
     setState(() {
       _manualPinchActive = true;
       _pinchZoomActive = true;
@@ -2120,7 +2192,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final currentDistance = _distance(p1, p2);
     if (startDistance <= 0.5 || currentDistance <= 0.5) return;
 
-    final scale = (currentDistance / startDistance).clamp(0.25, 4.0);
+    final rawScale = (currentDistance / startDistance).clamp(0.25, 4.0);
+    final scale = math.pow(rawScale, _touchPinchScaleExponent).toDouble();
     final nextPxPerBeat =
         (_pinchStartPxPerBeat * scale).clamp(_minPxPerBeat, _maxPxPerBeat);
     final nextRowHeight =
@@ -2135,13 +2208,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _pxPerBeat = nextPxPerBeat;
       _rowHeight = nextRowHeight;
     });
+    _publishEffectiveGridResolutionIfChanged();
 
     final nextContentWidth = _contentWidth;
     final nextContentHeight = _contentHeight;
     if (_horizontalController.hasClients) {
       final targetH = _scrollOffsetForBeatAtViewportX(
         _pinchStartFocalBeat,
-        _pinchStartFocalLocal.dx - _pinchStartHorizontalOffset,
+        _pinchStartFocalViewport.dx,
       );
       _jumpHorizontalTo(
         targetH,
@@ -2150,7 +2224,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       );
     }
     final targetV =
-        (_pinchStartFocalRow * _rowHeight) - _pinchStartFocalLocal.dy;
+        (_pinchStartFocalRow * _rowHeight) - _pinchStartFocalViewport.dy;
     _jumpBothVerticalControllers(targetV, contentHeight: nextContentHeight);
   }
 
@@ -2164,7 +2238,16 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 
   void _handleDesktopWheelZoom(PointerScrollEvent event) {
-    final rawDelta = event.scrollDelta.dy;
+    _handleDesktopZoomDelta(
+      event.scrollDelta.dy,
+      focalDx: _desktopZoomFocalDx(event.position),
+    );
+  }
+
+  void _handleDesktopZoomDelta(
+    double rawDelta, {
+    required double focalDx,
+  }) {
     if (rawDelta == 0) return;
 
     final startX = _pxPerBeat;
@@ -2176,7 +2259,6 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
     final currentHorizontalOffset =
         _horizontalController.hasClients ? _horizontalController.offset : 0.0;
-    final focalDx = _desktopWheelZoomFocalDx(event);
     final focalBeat = _unsnappedBeatForViewportX(
       currentHorizontalOffset,
       focalDx,
@@ -2187,6 +2269,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _followPlayhead = false;
       _pxPerBeat = nextX;
     });
+    _publishEffectiveGridResolutionIfChanged();
 
     if (_horizontalController.hasClients) {
       final targetHorizontalOffset = _scrollOffsetForBeatAtViewportX(
@@ -2201,13 +2284,103 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     }
   }
 
-  double _desktopWheelZoomFocalDx(PointerScrollEvent event) {
+  double _desktopZoomFocalDx(Offset globalPosition) {
     final renderObject = _rollViewportKey.currentContext?.findRenderObject();
     if (renderObject is RenderBox) {
-      final local = renderObject.globalToLocal(event.position);
+      final local = renderObject.globalToLocal(globalPosition);
       return local.dx.clamp(0.0, renderObject.size.width).toDouble();
     }
-    return event.localPosition.dx.clamp(0.0, double.infinity).toDouble();
+    return 0.0;
+  }
+
+  double _desktopZoomFocalDy(Offset globalPosition) {
+    final renderObject = _gridViewportKey.currentContext?.findRenderObject();
+    if (renderObject is RenderBox) {
+      final local = renderObject.globalToLocal(globalPosition);
+      return local.dy.clamp(0.0, renderObject.size.height).toDouble();
+    }
+    return 0.0;
+  }
+
+  void _onGridPointerPanZoomStart(PointerPanZoomStartEvent event) {
+    if (!_desktopWheelZoomAvailable) return;
+    _nativeTrackpadPinchActive = false;
+    _nativeTrackpadStartPxPerBeat = _pxPerBeat;
+    _nativeTrackpadStartRowHeight = _rowHeight;
+    _nativeTrackpadStartHorizontalOffset =
+        _horizontalController.hasClients ? _horizontalController.offset : 0.0;
+    _nativeTrackpadStartVerticalOffset = _gridVerticalController.hasClients
+        ? _gridVerticalController.offset
+        : 0.0;
+    _nativeTrackpadFocalDx = _desktopZoomFocalDx(event.position);
+    _nativeTrackpadFocalDy = _desktopZoomFocalDy(event.position);
+    _nativeTrackpadFocalBeat = _unsnappedBeatForViewportX(
+      _nativeTrackpadStartHorizontalOffset,
+      _nativeTrackpadFocalDx,
+      _nativeTrackpadStartPxPerBeat,
+    );
+    _nativeTrackpadFocalRow =
+        (_nativeTrackpadStartVerticalOffset + _nativeTrackpadFocalDy) /
+            _nativeTrackpadStartRowHeight;
+  }
+
+  void _onGridPointerPanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    if (!_desktopWheelZoomAvailable) return;
+
+    if (_desktopWheelZoomModifierActive) {
+      _syncDesktopWheelZoomModifierState();
+      _handleDesktopZoomDelta(
+        event.localPanDelta.dy,
+        focalDx: _desktopZoomFocalDx(event.position),
+      );
+      return;
+    }
+
+    final scale = event.scale;
+    if (!scale.isFinite || (scale - 1.0).abs() < 0.001) return;
+    final nextX = (_nativeTrackpadStartPxPerBeat * scale)
+        .clamp(_minPxPerBeat, _maxPxPerBeat);
+    final nextY = (_nativeTrackpadStartRowHeight * scale)
+        .clamp(_minRowHeight, _maxRowHeight);
+    if ((nextX - _pxPerBeat).abs() < 0.001 &&
+        (nextY - _rowHeight).abs() < 0.001) {
+      return;
+    }
+
+    if (!_nativeTrackpadPinchActive) {
+      _nativeTrackpadPinchActive = true;
+      _pinchZoomActive = true;
+      _lockGridScroll = true;
+    }
+    setState(() {
+      _followPlayhead = false;
+      _pxPerBeat = nextX;
+      _rowHeight = nextY;
+    });
+    _publishEffectiveGridResolutionIfChanged();
+
+    if (_horizontalController.hasClients) {
+      _jumpHorizontalTo(
+        _scrollOffsetForBeatAtViewportX(
+          _nativeTrackpadFocalBeat,
+          _nativeTrackpadFocalDx,
+        ),
+        suppressFollowScrub: true,
+        contentWidth: _contentWidth,
+      );
+    }
+    _jumpBothVerticalControllers(
+      (_nativeTrackpadFocalRow * _rowHeight) - _nativeTrackpadFocalDy,
+      contentHeight: _contentHeight,
+    );
+  }
+
+  void _onGridPointerPanZoomEnd(PointerPanZoomEndEvent event) {
+    if (!_nativeTrackpadPinchActive) return;
+    _nativeTrackpadPinchActive = false;
+    _pinchZoomActive = false;
+    _setGridScrollLocked(false);
+    _suppressGridTapFor();
   }
 
   void _onGridPointerSignal(PointerSignalEvent event) {
@@ -2274,7 +2447,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _updateBoxSelectionAt(event.localPosition);
       return;
     }
-    _scheduleManualPinchUpdate();
+    _maybeStartManualPinch();
+    if (_manualPinchActive) {
+      _scheduleManualPinchUpdate();
+    }
   }
 
   void _onGridPointerUp(PointerEvent event) {
@@ -2989,7 +3165,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                 icon: Icons.grid_view_rounded,
                 title: _gridOptions[i].label,
                 subtitle: _gridOptions[i].divisionsPerBar ==
-                        widget.quantizeDivisionsPerBar
+                        _effectiveQuantizeDivisionsPerBar
                     ? L10n.translate(
                         context,
                         'Matches the current piano roll grid.',
@@ -3684,6 +3860,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
               Listener(
                 behavior: HitTestBehavior.translucent,
                 onPointerSignal: _onGridPointerSignal,
+                onPointerPanZoomStart: _onGridPointerPanZoomStart,
+                onPointerPanZoomUpdate: _onGridPointerPanZoomUpdate,
+                onPointerPanZoomEnd: _onGridPointerPanZoomEnd,
                 child: SizedBox(
                   width: 74,
                   child: Column(
@@ -6592,6 +6771,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     child: Listener(
                       behavior: HitTestBehavior.translucent,
                       onPointerSignal: _onGridPointerSignal,
+                      onPointerPanZoomStart: _onGridPointerPanZoomStart,
+                      onPointerPanZoomUpdate: _onGridPointerPanZoomUpdate,
+                      onPointerPanZoomEnd: _onGridPointerPanZoomEnd,
                       child: SizedBox(
                         height: _contentHeight +
                             (showDesktopRuler ? _rulerHeight : 0.0),
@@ -6613,6 +6795,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                       onPointerMove: _onGridPointerMove,
                                       onPointerUp: _onGridPointerUp,
                                       onPointerCancel: _onGridPointerUp,
+                                      onPointerSignal: _onGridPointerSignal,
                                       child: _buildFollowTranslatedContent(
                                         GestureDetector(
                                           key: const ValueKey<String>(
@@ -6646,6 +6829,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                             children: [
                                               Positioned.fill(
                                                 child: CustomPaint(
+                                                  key: ValueKey<String>(
+                                                    'piano_roll_grid_divisions_$_effectiveQuantizeDivisionsPerBar',
+                                                  ),
                                                   painter: _PianoGridPainter(
                                                     rowHeight: _rowHeight,
                                                     pxPerBeat: _pxPerBeat,
@@ -6657,8 +6843,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                                                     beatsPerBar:
                                                         widget.beatsPerBar,
                                                     beatUnit: widget.beatUnit,
-                                                    quantizeDivisionsPerBar: widget
-                                                        .quantizeDivisionsPerBar,
+                                                    quantizeDivisionsPerBar:
+                                                        _effectiveQuantizeDivisionsPerBar,
                                                     magnetEnabled:
                                                         widget.magnetEnabled,
                                                     playablePitches:
@@ -7527,6 +7713,49 @@ class _SamplerWaveformPainter extends CustomPainter {
   }
 }
 
+Rect _visiblePianoRollPaintBounds(Canvas canvas, Size size) {
+  final fullBounds = Offset.zero & size;
+  final localClip = canvas.getLocalClipBounds();
+  if (!localClip.left.isFinite ||
+      !localClip.top.isFinite ||
+      !localClip.right.isFinite ||
+      !localClip.bottom.isFinite) {
+    return fullBounds;
+  }
+  final visible = localClip.intersect(fullBounds);
+  return visible.isEmpty ? fullBounds : visible;
+}
+
+({int start, int end}) _visiblePianoRollBarRange({
+  required Rect paintBounds,
+  required double leadingBeatPadPx,
+  required double pxPerBeat,
+  required double barLengthBeats,
+  required int maxBars,
+}) {
+  if (!pxPerBeat.isFinite ||
+      pxPerBeat <= 0.0 ||
+      !barLengthBeats.isFinite ||
+      barLengthBeats <= 0.0 ||
+      maxBars <= 0) {
+    return (start: 0, end: math.max(0, maxBars));
+  }
+  final startBeat = math.max(
+    0.0,
+    (paintBounds.left - leadingBeatPadPx) / pxPerBeat,
+  );
+  final endBeat = math.max(
+    startBeat,
+    (paintBounds.right - leadingBeatPadPx) / pxPerBeat,
+  );
+  final firstVisibleBar = (startBeat / barLengthBeats).floor();
+  final lastVisibleBar = (endBeat / barLengthBeats).ceil();
+  return (
+    start: math.max(0, firstVisibleBar - 1),
+    end: math.min(maxBars, lastVisibleBar + 1),
+  );
+}
+
 class _PianoGridPainter extends CustomPainter {
   _PianoGridPainter({
     required this.rowHeight,
@@ -7561,6 +7790,7 @@ class _PianoGridPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final paintBounds = _visiblePianoRollPaintBounds(canvas, size);
     final rowPaint = Paint()
       ..color = Colors.white.withValues(alpha: 0.06)
       ..strokeWidth = 0.7;
@@ -7586,22 +7816,30 @@ class _PianoGridPainter extends CustomPainter {
       final y = r * rowHeight;
       if (_isBlackPitch(pitch)) {
         canvas.drawRect(
-            Rect.fromLTWH(0, y, size.width, rowHeight), blackRowFill);
+          Rect.fromLTWH(paintBounds.left, y, paintBounds.width, rowHeight),
+          blackRowFill,
+        );
       } else {
         canvas.drawRect(
-            Rect.fromLTWH(0, y, size.width, rowHeight), whiteRowFill);
+          Rect.fromLTWH(paintBounds.left, y, paintBounds.width, rowHeight),
+          whiteRowFill,
+        );
       }
       if (!playablePitches.contains(pitch)) {
         canvas.drawRect(
-          Rect.fromLTWH(0, y, size.width, rowHeight),
+          Rect.fromLTWH(paintBounds.left, y, paintBounds.width, rowHeight),
           unavailableRowFill,
         );
       }
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), rowPaint);
+      canvas.drawLine(
+        Offset(paintBounds.left, y),
+        Offset(paintBounds.right, y),
+        rowPaint,
+      );
     }
     canvas.drawLine(
-      Offset(0, pitchCount * rowHeight),
-      Offset(size.width, pitchCount * rowHeight),
+      Offset(paintBounds.left, pitchCount * rowHeight),
+      Offset(paintBounds.right, pitchCount * rowHeight),
       rowPaint,
     );
 
@@ -7612,8 +7850,15 @@ class _PianoGridPainter extends CustomPainter {
     final safeDivisions = math.max(1, quantizeDivisionsPerBar);
     final divisionBeat = barLengthBeats / safeDivisions;
     final maxBars = (maxBeat / barLengthBeats).ceil() + 1;
+    final visibleBars = _visiblePianoRollBarRange(
+      paintBounds: paintBounds,
+      leadingBeatPadPx: leadingBeatPadPx,
+      pxPerBeat: pxPerBeat,
+      barLengthBeats: barLengthBeats,
+      maxBars: maxBars,
+    );
 
-    for (int bar = 0; bar <= maxBars; bar++) {
+    for (int bar = visibleBars.start; bar <= visibleBars.end; bar++) {
       final barBeat = bar * barLengthBeats;
       final barX = leadingBeatPadPx + (barBeat * pxPerBeat);
       canvas.drawLine(
@@ -7749,6 +7994,7 @@ class _PianoRollRulerPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final paintBounds = _visiblePianoRollPaintBounds(canvas, size);
     final backgroundPaint = Paint()
       ..color = const Color(0xFF3A4047).withValues(alpha: 0.92);
     final dividerPaint = Paint()
@@ -7767,10 +8013,10 @@ class _PianoRollRulerPainter extends CustomPainter {
       fontFamily: 'Pretendard',
     );
 
-    canvas.drawRect(Offset.zero & size, backgroundPaint);
+    canvas.drawRect(paintBounds, backgroundPaint);
     canvas.drawLine(
-      Offset(0, size.height - 0.5),
-      Offset(size.width, size.height - 0.5),
+      Offset(paintBounds.left, size.height - 0.5),
+      Offset(paintBounds.right, size.height - 0.5),
       dividerPaint,
     );
 
@@ -7779,7 +8025,14 @@ class _PianoRollRulerPainter extends CustomPainter {
     final barLengthBeats = safeBeatsPerBar * 4.0 / safeBeatUnit;
     final beatStep = barLengthBeats / safeBeatsPerBar;
     final maxBars = (maxBeat / barLengthBeats).ceil() + 1;
-    for (int bar = 0; bar <= maxBars; bar++) {
+    final visibleBars = _visiblePianoRollBarRange(
+      paintBounds: paintBounds,
+      leadingBeatPadPx: leadingBeatPadPx,
+      pxPerBeat: pxPerBeat,
+      barLengthBeats: barLengthBeats,
+      maxBars: maxBars,
+    );
+    for (int bar = visibleBars.start; bar <= visibleBars.end; bar++) {
       final barBeat = bar * barLengthBeats;
       final barX = leadingBeatPadPx + (barBeat * pxPerBeat);
       canvas.drawLine(

@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
 
@@ -14,13 +15,14 @@ Future<AudioTrack> _buildMidiTrack(
   List<MidiNote> notes, {
   String instrumentId = 'synth.test',
   String instrumentName = 'Test Synth',
+  Duration duration = const Duration(seconds: 8),
 }) {
   final file = File('/tmp/piano_roll_editor_test.mid');
   return AudioTrack.create(
     file: file,
     originalFile: file,
-    audioDuration: const Duration(seconds: 8),
-    trimEnd: const Duration(seconds: 8),
+    audioDuration: duration,
+    trimEnd: duration,
     engineClipId: 101,
     label: 'Test MIDI',
     clipKind: ClipKind.midi,
@@ -40,6 +42,9 @@ Widget _buildEditor({
   PianoKeyDownCallback? onKeyboardNoteDown,
   PianoKeyUpCallback? onKeyboardNoteUp,
   PlayableMidiPitchesResolver? resolvePlayablePitches,
+  TimelineGridMode gridMode = TimelineGridMode.adaptive,
+  int fixedQuantizeDivisionsPerBar = 4,
+  PianoRollGridResolutionChanged? onEffectiveGridResolutionChanged,
   int initialTab = 0,
   int tabRequestRevision = 0,
   List<Map<String, dynamic>> availableInstruments =
@@ -60,7 +65,10 @@ Widget _buildEditor({
             isPlaying: isPlaying,
             isRecording: isRecording,
             magnetEnabled: true,
-            quantizeDivisionsPerBar: 4,
+            gridMode: gridMode,
+            fixedQuantizeDivisionsPerBar: fixedQuantizeDivisionsPerBar,
+            onEffectiveGridResolutionChanged:
+                onEffectiveGridResolutionChanged,
             fullscreen: false,
             onFullscreenChanged: (_) {},
             onClose: () {},
@@ -267,6 +275,197 @@ void main() {
     expect(committedNotes, isNotNull);
     expect(_noteById(committedNotes!, 'a').startBeat, 3);
     expect(_noteById(committedNotes!, 'b').startBeat, 5);
+  });
+
+  testWidgets('adaptive note snapping follows piano-roll zoom',
+      (tester) async {
+    List<MidiNote>? committedNotes;
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          committedNotes = notes.map((note) => note.copy()).toList();
+        },
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    await tester.tap(find.byTooltip('Zoom in').first);
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final moveGesture = await tester.startGesture(tester.getCenter(noteFinder));
+    await tester.pump(const Duration(milliseconds: 50));
+    await moveGesture.moveBy(const Offset(37, 0));
+    await tester.pump();
+    await moveGesture.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(committedNotes, isNotNull);
+    expect(_noteById(committedNotes!, 'a').startBeat, 2.5);
+  });
+
+  testWidgets('adaptive piano-roll grid reaches every bucket through 1/512',
+      (tester) async {
+    final reportedDivisions = <int>[];
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onEffectiveGridResolutionChanged: (clipId, divisionsPerBar) {
+          expect(clipId, clip.clipId);
+          reportedDivisions.add(divisionsPerBar);
+        },
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final zoomIn = find.byTooltip('Zoom in').first;
+    for (var i = 0; i < 18; i++) {
+      await tester.tap(zoomIn);
+      await tester.pump();
+    }
+
+    expect(
+      find.byKey(
+        const ValueKey<String>('piano_roll_grid_divisions_512'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      reportedDivisions,
+      <int>[4, 8, 16, 32, 64, 128, 256, 512],
+    );
+    final maxZoomNoteWidth = tester.getSize(
+      find.byKey(const ValueKey<String>('piano_note_a')),
+    ).width;
+    await tester.tap(zoomIn);
+    await tester.pump();
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey<String>('piano_note_a')))
+          .width,
+      maxZoomNoteWidth,
+    );
+    expect(reportedDivisions.last, 512);
+  });
+
+  testWidgets('fixed piano-roll grid remains fixed while zooming',
+      (tester) async {
+    List<MidiNote>? committedNotes;
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        gridMode: TimelineGridMode.fixed,
+        fixedQuantizeDivisionsPerBar: 4,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          committedNotes = notes.map((note) => note.copy()).toList();
+        },
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    await tester.tap(find.byTooltip('Zoom in').first);
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final moveGesture = await tester.startGesture(tester.getCenter(noteFinder));
+    await tester.pump(const Duration(milliseconds: 50));
+    await moveGesture.moveBy(const Offset(37, 0));
+    await tester.pump();
+    await moveGesture.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(committedNotes, isNotNull);
+    expect(_noteById(committedNotes!, 'a').startBeat, 3);
+  });
+
+  testWidgets('deep zoom keeps a long MIDI clip finite and paintable',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      <MidiNote>[
+        MidiNote(
+          id: 'a',
+          pitch: 84,
+          startBeat: 2,
+          lengthBeats: 1,
+          velocity: 0.7,
+        ),
+      ],
+      duration: const Duration(minutes: 10),
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final zoomIn = find.byTooltip('Zoom in').first;
+    for (var i = 0; i < 18; i++) {
+      await tester.tap(zoomIn);
+      await tester.pump();
+    }
+
+    expect(
+      find.byKey(
+        const ValueKey<String>('piano_roll_grid_divisions_512'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('dragging a selected resize handle resizes the full selection',
@@ -501,6 +700,65 @@ void main() {
 
     expect(firstZoomWidth, greaterThan(initialWidth));
     expect(secondZoomWidth, greaterThanOrEqualTo(firstZoomWidth));
+  });
+
+  testWidgets('touch pinch is damped and keeps its focal note stable',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final focalPosition = tester.getCenter(noteFinder);
+    final initialSize = tester.getSize(noteFinder);
+
+    final first = await tester.startGesture(
+      focalPosition - const Offset(40, 0),
+      pointer: 13,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    final second = await tester.startGesture(
+      focalPosition + const Offset(40, 0),
+      pointer: 14,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+
+    await first.moveBy(const Offset(-40, 0));
+    await second.moveBy(const Offset(40, 0));
+    await tester.pump();
+
+    final zoomedSize = tester.getSize(noteFinder);
+    final zoomedCenter = tester.getCenter(noteFinder);
+    final horizontalScale = zoomedSize.width / initialSize.width;
+
+    await first.up();
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(horizontalScale, closeTo(1.57, 0.04));
+    expect((zoomedCenter.dx - focalPosition.dx).abs(), lessThan(1.0));
+    expect((zoomedCenter.dy - focalPosition.dy).abs(), lessThan(1.0));
   });
 
   testWidgets('two-finger pinch zoom out shrinks the grid monotonically',
@@ -766,6 +1024,123 @@ void main() {
       expect((afterCenter.dx - beforeCenter.dx).abs(), lessThan(1.0));
     } finally {
       await tester.binding.setSurfaceSize(null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('macOS trackpad pinch zooms around its focal position',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    try {
+      final clip = await _buildMidiTrack(<MidiNote>[
+        MidiNote(
+          id: 'a',
+          pitch: 72,
+          startBeat: 2,
+          lengthBeats: 1,
+          velocity: 0.7,
+        ),
+      ]);
+
+      await tester.pumpWidget(
+        _buildEditor(
+          clip: clip,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+      final focalPosition = tester.getCenter(noteFinder);
+      final initialSize = tester.getSize(noteFinder);
+
+      await tester.sendEventToBinding(
+        PointerPanZoomStartEvent(pointer: 61, position: focalPosition),
+      );
+      await tester.sendEventToBinding(
+        PointerPanZoomUpdateEvent(
+          pointer: 61,
+          position: focalPosition,
+          scale: 2.0,
+        ),
+      );
+      await tester.pump();
+      await tester.sendEventToBinding(
+        PointerPanZoomEndEvent(pointer: 61, position: focalPosition),
+      );
+      await tester.pump();
+
+      final zoomedSize = tester.getSize(noteFinder);
+      final zoomedCenter = tester.getCenter(noteFinder);
+      expect(zoomedSize.width, greaterThan(initialSize.width));
+      expect(zoomedSize.height, greaterThan(initialSize.height));
+      expect((zoomedCenter.dx - focalPosition.dx).abs(), lessThan(1.0));
+    } finally {
+      await tester.binding.setSurfaceSize(null);
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  testWidgets('macOS command trackpad scroll zooms only in time',
+      (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final clip = await _buildMidiTrack(<MidiNote>[
+        MidiNote(
+          id: 'a',
+          pitch: 72,
+          startBeat: 2,
+          lengthBeats: 1,
+          velocity: 0.7,
+        ),
+      ]);
+
+      await tester.pumpWidget(
+        _buildEditor(
+          clip: clip,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {},
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 120));
+
+      final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+      final focalPosition = tester.getCenter(noteFinder);
+      final initialSize = tester.getSize(noteFinder);
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+      await tester.sendEventToBinding(
+        PointerPanZoomStartEvent(pointer: 62, position: focalPosition),
+      );
+      await tester.sendEventToBinding(
+        PointerPanZoomUpdateEvent(
+          pointer: 62,
+          position: focalPosition,
+          panDelta: const Offset(0, -120),
+        ),
+      );
+      await tester.pump();
+      await tester.sendEventToBinding(
+        PointerPanZoomEndEvent(pointer: 62, position: focalPosition),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+
+      final zoomedSize = tester.getSize(noteFinder);
+      expect(zoomedSize.width, greaterThan(initialSize.width));
+      expect(zoomedSize.height, initialSize.height);
+    } finally {
       debugDefaultTargetPlatformOverride = null;
     }
   });
