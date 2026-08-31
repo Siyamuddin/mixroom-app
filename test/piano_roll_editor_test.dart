@@ -661,6 +661,65 @@ void main() {
     expect(secondZoomWidth, greaterThanOrEqualTo(firstZoomWidth));
   });
 
+  testWidgets('touch pinch is damped and keeps its focal note stable',
+      (tester) async {
+    final clip = await _buildMidiTrack(<MidiNote>[
+      MidiNote(
+        id: 'a',
+        pitch: 84,
+        startBeat: 2,
+        lengthBeats: 1,
+        velocity: 0.7,
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 120));
+
+    final noteFinder = find.byKey(const ValueKey<String>('piano_note_a'));
+    final focalPosition = tester.getCenter(noteFinder);
+    final initialSize = tester.getSize(noteFinder);
+
+    final first = await tester.startGesture(
+      focalPosition - const Offset(40, 0),
+      pointer: 13,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+    final second = await tester.startGesture(
+      focalPosition + const Offset(40, 0),
+      pointer: 14,
+      kind: PointerDeviceKind.touch,
+    );
+    await tester.pump();
+
+    await first.moveBy(const Offset(-40, 0));
+    await second.moveBy(const Offset(40, 0));
+    await tester.pump();
+
+    final zoomedSize = tester.getSize(noteFinder);
+    final zoomedCenter = tester.getCenter(noteFinder);
+    final horizontalScale = zoomedSize.width / initialSize.width;
+
+    await first.up();
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(horizontalScale, closeTo(1.57, 0.04));
+    expect((zoomedCenter.dx - focalPosition.dx).abs(), lessThan(1.0));
+    expect((zoomedCenter.dy - focalPosition.dy).abs(), lessThan(1.0));
+  });
+
   testWidgets('two-finger pinch zoom out shrinks the grid monotonically',
       (tester) async {
     final clip = await _buildMidiTrack(<MidiNote>[

@@ -327,10 +327,11 @@ class WaveformDetailProvider extends ChangeNotifier
         .catchError((Object _) => null)
         .whenComplete(() {
           _detailJobActive = false;
-          if (!_disposed && generation == _generation) {
+          if (_disposed) return;
+          if (generation == _generation) {
             _desired.remove(request.key);
-            _pump();
           }
+          _pump();
         });
   }
 

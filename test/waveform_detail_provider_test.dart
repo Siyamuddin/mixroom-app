@@ -288,6 +288,59 @@ void main() {
     expect(provider.peakForSourceRange(source.path, 0.0, 100.0), isNull);
   });
 
+  test(
+    'stale completion starts a pending request from the new generation',
+    () async {
+      final oldSource = _source(path: '/audio/old.wav', cacheKey: 'old|100|1');
+      final newSource = _source(path: '/audio/new.wav', cacheKey: 'new|100|1');
+      final started = <String>[];
+      final completers = <String, Completer<WaveformDetailTile?>>{};
+      final provider = WaveformDetailProvider(
+        loadTile: (request) {
+          started.add(request.source.cacheKey);
+          return (completers[request.source.cacheKey] =
+                  Completer<WaveformDetailTile?>())
+              .future;
+        },
+        overviewWorkPending: () => false,
+      );
+      addTearDown(provider.dispose);
+
+      final oldRequest = WaveformDetailTileRequest(
+        source: oldSource,
+        tileIndex: 0,
+      );
+      final newRequest = WaveformDetailTileRequest(
+        source: newSource,
+        tileIndex: 0,
+      );
+      provider.requestTiles(<WaveformDetailTileRequest>[oldRequest]);
+      provider.clear();
+      provider.requestTiles(<WaveformDetailTileRequest>[newRequest]);
+
+      expect(started, <String>[oldSource.cacheKey]);
+      completers[oldSource.cacheKey]!.complete(
+        _tile(oldRequest, const <double>[0.8, 0.2]),
+      );
+      await _flushAsync();
+
+      expect(started, <String>[oldSource.cacheKey, newSource.cacheKey]);
+      expect(provider.cachedTileCount, 0);
+
+      completers[newSource.cacheKey]!.complete(
+        _tile(newRequest, const <double>[0.4, 0.1]),
+      );
+      await _flushAsync();
+
+      expect(provider.cachedTileCount, 1);
+      expect(provider.peakForSourceRange(oldSource.path, 0.0, 100.0), isNull);
+      expect(
+        provider.peakForSourceRange(newSource.path, 0.0, 100.0),
+        closeTo(0.4, 0.0001),
+      );
+    },
+  );
+
   test('a completed stale viewport tile does not request a repaint', () async {
     final source = _source();
     final completers = <int, Completer<WaveformDetailTile?>>{};

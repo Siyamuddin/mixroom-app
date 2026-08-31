@@ -183,6 +183,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   static const double _maxRowHeight = 40.0;
   static const double _minPxPerBeat = 24.0;
   static const double _maxPxPerBeat = 3840.0;
+  static const double _touchPinchScaleExponent = 0.65;
+  static const double _minTouchPinchStartDistance = 12.0;
   static const double _followPlayheadViewportAnchor = 0.42;
   static const double _rollExtensionChunkBeats = 16.0;
   static const double _rulerHeight = 28.0;
@@ -300,7 +302,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   double _pinchStartVerticalOffset = 0.0;
   double _pinchStartFocalBeat = 0.0;
   double _pinchStartFocalRow = 0.0;
-  Offset _pinchStartFocalLocal = Offset.zero;
+  Offset _pinchStartFocalViewport = Offset.zero;
   double _nativeTrackpadStartPxPerBeat = 56.0;
   double _nativeTrackpadStartRowHeight = 22.0;
   double _nativeTrackpadStartHorizontalOffset = 0.0;
@@ -2121,6 +2123,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (_manualPinchActive || _activeGridGlobalPointers.length < 2) return;
     final globalPts = _activeGridGlobalPointers.values.toList(growable: false);
     final localPts = _activeGridPointers.values.toList(growable: false);
+    if (_distance(globalPts[0], globalPts[1]) <
+        _minTouchPinchStartDistance) {
+      return;
+    }
     _pinchStartPointA = globalPts[0];
     _pinchStartPointB = globalPts[1];
     _pinchStartPxPerBeat = _pxPerBeat;
@@ -2130,12 +2136,14 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _pinchStartVerticalOffset = _gridVerticalController.hasClients
         ? _gridVerticalController.offset
         : 0.0;
-    final focal = (localPts[0] + localPts[1]) / 2.0;
-    _pinchStartFocalLocal = focal;
+    final focalContent = (localPts[0] + localPts[1]) / 2.0;
+    _pinchStartFocalViewport = Offset(
+      focalContent.dx - _pinchStartHorizontalOffset,
+      focalContent.dy - _pinchStartVerticalOffset,
+    );
     _pinchStartFocalBeat =
-        _unsnappedBeatForContentX(focal.dx, _pinchStartPxPerBeat);
-    _pinchStartFocalRow =
-        (_pinchStartVerticalOffset + focal.dy) / _pinchStartRowHeight;
+        _unsnappedBeatForContentX(focalContent.dx, _pinchStartPxPerBeat);
+    _pinchStartFocalRow = focalContent.dy / _pinchStartRowHeight;
     setState(() {
       _manualPinchActive = true;
       _pinchZoomActive = true;
@@ -2165,7 +2173,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final currentDistance = _distance(p1, p2);
     if (startDistance <= 0.5 || currentDistance <= 0.5) return;
 
-    final scale = (currentDistance / startDistance).clamp(0.25, 4.0);
+    final rawScale = (currentDistance / startDistance).clamp(0.25, 4.0);
+    final scale = math.pow(rawScale, _touchPinchScaleExponent).toDouble();
     final nextPxPerBeat =
         (_pinchStartPxPerBeat * scale).clamp(_minPxPerBeat, _maxPxPerBeat);
     final nextRowHeight =
@@ -2187,7 +2196,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     if (_horizontalController.hasClients) {
       final targetH = _scrollOffsetForBeatAtViewportX(
         _pinchStartFocalBeat,
-        _pinchStartFocalLocal.dx - _pinchStartHorizontalOffset,
+        _pinchStartFocalViewport.dx,
       );
       _jumpHorizontalTo(
         targetH,
@@ -2196,7 +2205,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       );
     }
     final targetV =
-        (_pinchStartFocalRow * _rowHeight) - _pinchStartFocalLocal.dy;
+        (_pinchStartFocalRow * _rowHeight) - _pinchStartFocalViewport.dy;
     _jumpBothVerticalControllers(targetV, contentHeight: nextContentHeight);
   }
 
@@ -2419,7 +2428,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _updateBoxSelectionAt(event.localPosition);
       return;
     }
-    _scheduleManualPinchUpdate();
+    _maybeStartManualPinch();
+    if (_manualPinchActive) {
+      _scheduleManualPinchUpdate();
+    }
   }
 
   void _onGridPointerUp(PointerEvent event) {
