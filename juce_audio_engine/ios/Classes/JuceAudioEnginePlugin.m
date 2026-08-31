@@ -7652,6 +7652,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         double t = [args[@"timeSeconds"] doubleValue];
         [JuceBridge setTransportSecondsObjC:t];
         result(nil);
+    } else if ([call.method isEqualToString:@"setLoopRegion"]) {
+        BOOL enabled = [args[@"enabled"] boolValue];
+        double startSeconds = [args[@"startSeconds"] doubleValue];
+        double endSeconds = [args[@"endSeconds"] doubleValue];
+        [JuceBridge setLoopRegionObjC:enabled
+                         startSeconds:startSeconds
+                           endSeconds:endSeconds];
+        result(nil);
 
     // ----------------------------------------
     // NEW ROW (TRACK BUS) API

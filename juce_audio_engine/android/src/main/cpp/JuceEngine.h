@@ -4814,6 +4814,68 @@ public:
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
+    void setLoopRegion(bool enabled, double startSec, double endSec)
+    {
+        const double safeStart = juce::jmax(0.0, startSec);
+        const double safeEnd = juce::jmax(safeStart, endSec);
+        const bool active = enabled && safeEnd > safeStart + 1.0e-6;
+        if (!active)
+        {
+            loopEnabledAtomic.store(false, std::memory_order_release);
+            return;
+        }
+        loopStartSecAtomic.store(safeStart, std::memory_order_relaxed);
+        loopEndSecAtomic.store(safeEnd, std::memory_order_relaxed);
+        loopEnabledAtomic.store(true, std::memory_order_release);
+    }
+    bool isLoopRegionActive() const
+    {
+        return loopEnabledAtomic.load(std::memory_order_relaxed) &&
+               loopEndSecAtomic.load(std::memory_order_relaxed) >
+                   loopStartSecAtomic.load(std::memory_order_relaxed) + 1.0e-6;
+    }
+    double wrapTransportSecondsToLoop(double t) const
+    {
+        if (!isLoopRegionActive())
+            return t;
+        const double start = loopStartSecAtomic.load(std::memory_order_relaxed);
+        const double end = loopEndSecAtomic.load(std::memory_order_relaxed);
+        if (t < end)
+            return t;
+        const double length = end - start;
+        if (length <= 1.0e-9)
+            return start;
+        double pos = std::fmod(t - start, length);
+        if (pos < 0.0)
+            pos += length;
+        return start + pos;
+    }
+    void wrapPlayingTransportToLoopIfNeeded()
+    {
+        if (!blockIsPlayingAtomic.load(std::memory_order_relaxed) &&
+            !isPlayingAtomic.load(std::memory_order_relaxed))
+            return;
+        const double current = transportSec.load(std::memory_order_relaxed);
+        const double wrapped = wrapTransportSecondsToLoop(current);
+        if (wrapped == current)
+            return;
+        transportSec.store(wrapped, std::memory_order_relaxed);
+        mixroom::fx::setGlobalTransportSeconds(wrapped);
+    }
+    int samplesUntilLoopWrap(double sampleRate) const
+    {
+        if (sampleRate <= 0.0 || !isLoopRegionActive())
+            return std::numeric_limits<int>::max();
+        const double current = transportSec.load(std::memory_order_relaxed);
+        const double end = loopEndSecAtomic.load(std::memory_order_relaxed);
+        const double remainingSec = end - current;
+        if (remainingSec <= 0.0)
+            return 0;
+        const double samples = remainingSec * sampleRate;
+        if (samples >= (double)std::numeric_limits<int>::max())
+            return std::numeric_limits<int>::max();
+        return juce::jmax(1, (int)std::ceil(samples));
+    }
     bool isTransportPlaying() const
     {
         return isPlayingAtomic.load(std::memory_order_relaxed);
@@ -4840,8 +4902,8 @@ public:
             return;
 
         const double delta = (double)numSamples / sr;
-        const double next =
-            transportSec.load(std::memory_order_relaxed) + delta;
+        const double next = wrapTransportSecondsToLoop(
+            transportSec.load(std::memory_order_relaxed) + delta);
         transportSec.store(next, std::memory_order_relaxed);
         mixroom::fx::setGlobalTransportSeconds(next);
     }
@@ -5139,6 +5201,9 @@ private:
     bool hasVideoAudio{false};
 
     std::atomic<double> transportSec{0.0};           // source of truth
+    std::atomic<bool> loopEnabledAtomic{false};
+    std::atomic<double> loopStartSecAtomic{0.0};
+    std::atomic<double> loopEndSecAtomic{0.0};
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
     std::atomic<bool> isPlayingAtomic{false};
@@ -5876,6 +5941,9 @@ public:
 
         const bool blockWasPlaying = engine.isTransportPlaying();
         engine.setBlockPlayingState(blockWasPlaying);
+        engine.wrapPlayingTransportToLoopIfNeeded();
+        transportMs = engine.getTransportSeconds() * 1000.0;
+        alignToTransport();
 
         engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
@@ -5893,7 +5961,11 @@ public:
 
         for (int offset = 0; offset < numSamples;)
         {
-            const int chunkSamples = juce::jmin(renderBlockSize, numSamples - offset);
+            engine.wrapPlayingTransportToLoopIfNeeded();
+            int chunkSamples = juce::jmin(renderBlockSize, numSamples - offset);
+            const int untilWrap = engine.samplesUntilLoopWrap(sampleRate);
+            if (untilWrap > 0)
+                chunkSamples = juce::jmin(chunkSamples, untilWrap);
 
             for (int ch = 0; ch < playerInputChannels; ++ch)
                 chunkInputPointers[(size_t)ch] = inputChannelData[ch] + offset;
@@ -5934,6 +6006,17 @@ public:
         for (int i = 0; i < numSamples; ++i)
         {
             transportMs += msPerSample;
+            if (engine.isLoopRegionActive())
+            {
+                const double wrappedMs =
+                    engine.wrapTransportSecondsToLoop(transportMs * 0.001) *
+                    1000.0;
+                if (wrappedMs + 1.0e-6 < transportMs)
+                {
+                    transportMs = wrappedMs;
+                    alignToTransport();
+                }
+            }
 
             if (transportMs >= nextBeatMs)
             {

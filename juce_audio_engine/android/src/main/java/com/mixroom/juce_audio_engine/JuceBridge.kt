@@ -144,6 +144,11 @@ object JuceBridge {
     // Transport
     @JvmStatic external fun setTransportSecondsJNI(timeSeconds: Double)
     @JvmStatic external fun getTransportSecondsJNI(): Double
+    @JvmStatic external fun setLoopRegionJNI(
+        enabled: Boolean,
+        startSeconds: Double,
+        endSeconds: Double,
+    )
     @JvmStatic external fun setAutomationTransportJNI(timeSeconds: Double)
 
     // Volume & bypass (legacy)

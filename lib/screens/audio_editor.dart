@@ -30,6 +30,7 @@ import 'package:mixroom/helpers/automation_target_labels.dart';
 import 'package:mixroom/helpers/mix_change_highlighter.dart';
 import 'package:mixroom/helpers/halo.dart';
 import 'package:mixroom/helpers/timeline_tempo_mapping.dart';
+import 'package:mixroom/helpers/transport_loop.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -4796,6 +4797,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   int _timelinePrimarySelectedClipIndex = -1;
 
   void _setGlobalAudioClock(Duration value, {bool forceNotify = false}) {
+    if (_isPlaying && !_isRecording) {
+      value = wrapTransportClockToLoop(
+        clock: value,
+        loopEnabled: _loopEnabled,
+        loopStartMs: _loopStartMs,
+        loopEndMs: _loopEndMs,
+      );
+    }
     if (_globalAudioClock == value && _transportClock.value == value) {
       return;
     }
@@ -5283,7 +5292,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final estimatedSeconds =
         _lastTransportSampleSeconds +
         (boundedElapsed.inMicroseconds / 1e6) * _transportRateSecPerSec;
-    return Duration(milliseconds: (estimatedSeconds * 1000).round());
+    final estimated = Duration(milliseconds: (estimatedSeconds * 1000).round());
+    if (_isRecording) return estimated;
+    return wrapTransportClockToLoop(
+      clock: estimated,
+      loopEnabled: _loopEnabled,
+      loopStartMs: _loopStartMs,
+      loopEndMs: _loopEndMs,
+    );
   }
 
   Future<void> _pollTransportFromJuceIfNeeded({
@@ -5312,11 +5328,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final sampleElapsed = _transportUiStopwatch.elapsed;
       final wallDeltaUs = (sampleElapsed - prevSampleElapsed).inMicroseconds;
       if (wallDeltaUs > 0) {
-        final measuredRate = ((t - prevSampleSeconds) / (wallDeltaUs / 1e6))
-            .clamp(0.0, 2.0);
+        var deltaSec = t - prevSampleSeconds;
+        if (isTransportLoopRegionValid(
+              loopEnabled: _loopEnabled,
+              loopStartMs: _loopStartMs,
+              loopEndMs: _loopEndMs,
+            ) &&
+            deltaSec < 0) {
+          deltaSec += (_loopEndMs - _loopStartMs) / 1000.0;
+        }
+        final measuredRate = (deltaSec / (wallDeltaUs / 1e6)).clamp(0.0, 2.0);
         if (_isPlaying) {
           if (measuredRate < 0.05) {
-            _transportRateSecPerSec = 0.0;
+            _transportRateSecPerSec =
+                isTransportLoopRegionValid(
+                  loopEnabled: _loopEnabled,
+                  loopStartMs: _loopStartMs,
+                  loopEndMs: _loopEndMs,
+                )
+                ? 1.0
+                : 0.0;
           } else if (_transportRateSecPerSec <= 0.0) {
             _transportRateSecPerSec = measuredRate;
           } else {
@@ -5698,7 +5729,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _loopEnabled = false;
   int _loopStartMs = 0;
   int _loopEndMs = 0;
-  bool _loopWrapInFlight = false;
 
   // top attached popups
   _TopPopupType _activeTopPopup = _TopPopupType.none;
@@ -9043,15 +9073,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _loopEnabled &&
           _globalAudioClock >= Duration(milliseconds: _loopEndMs);
 
-      if (reachedLoopEnd && !withinEndGuard) {
-        if (_isRecording) {
-          _transportTicker?.stop();
-          _stopRecordingJuce(keepPlaying: false);
-          return;
-        }
-        if (!_loopWrapInFlight) {
-          unawaited(_wrapPlaybackToLoopStart());
-        }
+      if (reachedLoopEnd && _isRecording && !withinEndGuard) {
+        _transportTicker?.stop();
+        _stopRecordingJuce(keepPlaying: false);
+        return;
+      }
+
+      if (reachedLoopEnd && !_isRecording) {
         return;
       }
 
@@ -13644,6 +13672,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _loopEnabled = (uiSettings?["loopEnabled"] as bool?) ?? false;
       _loopStartMs = (uiSettings?["loopStartMs"] as num?)?.toInt() ?? 0;
       _loopEndMs = (uiSettings?["loopEndMs"] as num?)?.toInt() ?? 0;
+      await _syncNativeLoopRegion();
       await _syncMetronomeTimingToEngine();
       await JuceAudioEngine.setMetronomeEnabled(_metronomeEnabled);
       await JuceAudioEngine.setMetronomeVolume(_metronomeVolume);
@@ -18778,6 +18807,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool commandIsCurrent() =>
         commandSerial == null || commandSerial == _transportCommandSerial;
     if (!commandIsCurrent()) return;
+    await _syncNativeLoopRegion();
+    if (!commandIsCurrent()) return;
     if (_loopEnabled &&
         _loopEndMs > _loopStartMs &&
         _globalAudioClock >= Duration(milliseconds: _loopEndMs)) {
@@ -18930,16 +18961,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _stopMeterPolling();
   }
 
-  Future<void> _wrapPlaybackToLoopStart() async {
-    if (_loopWrapInFlight) return;
-    _loopWrapInFlight = true;
-    try {
-      await _restartAudio(_safeAudioEditorStateSetter);
-      if (!mounted) return;
-      await _togglePlayPauseAudio(_safeAudioEditorStateSetter);
-    } finally {
-      _loopWrapInFlight = false;
-    }
+  /// Pushes the editor loop region into the native engine.
+  ///
+  /// Recording still stops at the loop end in Dart, so wrap is suppressed
+  /// while a take is armed or in progress.
+  Future<void> _syncNativeLoopRegion() {
+    final bool shouldWrap =
+        !_isRecording &&
+        !_recordStartVisualPending &&
+        isTransportLoopRegionValid(
+          loopEnabled: _loopEnabled,
+          loopStartMs: _loopStartMs,
+          loopEndMs: _loopEndMs,
+        );
+    return JuceAudioEngine.setLoopRegion(
+      enabled: shouldWrap,
+      startSeconds: _loopStartMs / 1000.0,
+      endSeconds: _loopEndMs / 1000.0,
+    );
   }
 
   // Pause helper
@@ -21988,6 +22027,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _isRecording = false;
         _recordStartVisualPending = true;
       });
+      await _syncNativeLoopRegion();
       await _letRecordingVisualStatePaint();
       if (!mounted || _recordStartCancelRequested) return;
 
@@ -22148,6 +22188,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           }
         });
       }
+      unawaited(_syncNativeLoopRegion());
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
     }
@@ -22207,6 +22248,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _isRecording = false;
       _recordingFilePath = null;
     }
+    unawaited(_syncNativeLoopRegion());
 
     if (clip != null && clip.isMidi && hadMidiChanges) {
       try {
@@ -22638,6 +22680,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _recordStartVisualPending = true;
         });
       }
+      await _syncNativeLoopRegion();
       await _letRecordingVisualStatePaint();
       if (!mounted || _recordStartCancelRequested) return;
 
@@ -22834,6 +22877,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _clearV2LiveMonitoringState();
         }
       }
+      unawaited(_syncNativeLoopRegion());
       _recordStartCancelRequested = false;
       _recordTransitionInFlight = false;
     }
@@ -23029,6 +23073,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _midiRecordingLiveInputArmed = false;
         });
       }
+      unawaited(_syncNativeLoopRegion());
       await _letRecordingVisualStatePaint();
 
       // Stop transport before native record-stop and clip insertion. This keeps
@@ -28355,6 +28400,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _loopStartMs = snapshot.loopStartMs;
       _loopEndMs = snapshot.loopEndMs;
     });
+    unawaited(_syncNativeLoopRegion());
     _syncTempoPickerSelection();
     await _queueTempoEngineSync();
     _updateOverallDurationIfNeeded();
@@ -29026,6 +29072,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       }
     });
+    unawaited(_syncNativeLoopRegion());
     _syncTempoPickerSelection();
     await _queueTempoEngineSync();
     _scheduleProjectAutosave();
@@ -34541,9 +34588,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       child: Text(
                         L10n.translate(
                           context,
-                          isMidi
-                              ? 'MIDI Clip Options'
-                              : 'Audio Clip Options',
+                          isMidi ? 'MIDI Clip Options' : 'Audio Clip Options',
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -34671,63 +34716,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             trailing: isMidi
                 ? null
                 : Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(999),
-                onTap: () => unawaited(
-                  _handleToggleClipNormalize(index, !clip.normalizeVolume),
-                ),
-                child: Ink(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color:
-                        (clip.normalizeVolume
-                                ? const Color(0xFFD7DBE2)
-                                : Colors.white)
-                            .withValues(
-                              alpha: clip.normalizeVolume ? 0.34 : 0.08,
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => unawaited(
+                        _handleToggleClipNormalize(
+                          index,
+                          !clip.normalizeVolume,
+                        ),
+                      ),
+                      child: Ink(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              (clip.normalizeVolume
+                                      ? const Color(0xFFD7DBE2)
+                                      : Colors.white)
+                                  .withValues(
+                                    alpha: clip.normalizeVolume ? 0.34 : 0.08,
+                                  ),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: Colors.white.withValues(
+                              alpha: clip.normalizeVolume ? 0.42 : 0.13,
                             ),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.white.withValues(
-                        alpha: clip.normalizeVolume ? 0.42 : 0.13,
+                          ),
+                        ),
+                        child: Semantics(
+                          button: true,
+                          toggled: clip.normalizeVolume,
+                          label: L10n.translate(context, 'Normalize'),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                clip.normalizeVolume
+                                    ? Icons.toggle_on_rounded
+                                    : Icons.toggle_off_rounded,
+                                size: 19,
+                                color: const Color(0xFFF4F4F4),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                L10n.translate(context, 'Normalize'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.0,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  child: Semantics(
-                    button: true,
-                    toggled: clip.normalizeVolume,
-                    label: L10n.translate(context, 'Normalize'),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          clip.normalizeVolume
-                              ? Icons.toggle_on_rounded
-                              : Icons.toggle_off_rounded,
-                          size: 19,
-                          color: const Color(0xFFF4F4F4),
-                        ),
-                        const SizedBox(width: 5),
-                        Text(
-                          L10n.translate(context, 'Normalize'),
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            color: Color(0xFFF4F4F4),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            height: 1.0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -34936,24 +34984,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             icon: Icons.graphic_eq_rounded,
                             label: 'Pitch Lab',
                             color: const Color(0xFF8BE7C8),
-                            onTap: () => unawaited(
-                              _openAudioPitchLabForClip(index),
-                            ),
+                            onTap: () =>
+                                unawaited(_openAudioPitchLabForClip(index)),
                           ),
                           clipPanelActionPill(
                             icon: Icons.library_music_outlined,
                             label: 'Split vocals',
-                            onTap: () => unawaited(
-                              _handleStemSeparationForClip(index),
-                            ),
+                            onTap: () =>
+                                unawaited(_handleStemSeparationForClip(index)),
                           ),
                           clipPanelActionPill(
                             icon: Icons.keyboard_alt_outlined,
                             label: 'Sampler',
                             color: const Color(0xFFD7DBE2),
-                            onTap: () => unawaited(
-                              _createSamplerFromAudioClip(index),
-                            ),
+                            onTap: () =>
+                                unawaited(_createSamplerFromAudioClip(index)),
                           ),
                         ],
                       ),
@@ -51843,6 +51888,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _loopStartMs = startMs;
           _loopEndMs = endMs;
         });
+        unawaited(_syncNativeLoopRegion());
         _scheduleProjectAutosave();
         return;
       default:
@@ -51895,6 +51941,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _loopEndMs = snapshot.loopEndMs;
       });
     }
+    if (loopChanged) unawaited(_syncNativeLoopRegion());
     if (metronomeChanged) {
       await JuceAudioEngine.setMetronomeEnabled(snapshot.metronomeEnabled);
     }
@@ -77506,6 +77553,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _loopEndMs = end;
       }
     });
+    unawaited(_syncNativeLoopRegion());
     _scheduleProjectAutosave();
   }
 
@@ -83910,6 +83958,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             setState(
                                               () => _loopEnabled = enabled,
                                             );
+                                            unawaited(_syncNativeLoopRegion());
                                             _scheduleProjectAutosave();
                                           },
                                           loopEnabled: _loopEnabled,
@@ -83921,6 +83970,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _loopStartMs = start;
                                               _loopEndMs = end;
                                             });
+                                            unawaited(_syncNativeLoopRegion());
                                             _scheduleProjectAutosave();
                                           },
                                           isRecording: _isRecording,

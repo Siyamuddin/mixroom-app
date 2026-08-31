@@ -250,6 +250,7 @@
 // Transport source of truth
 + (void)setTransportSecondsObjC:(double)seconds;
 + (double)getTransportSecondsObjC;
++ (void)setLoopRegionObjC:(BOOL)enabled startSeconds:(double)startSeconds endSeconds:(double)endSeconds;
 
 // Row (track bus) FX and controls
 + (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath forceIndividualRow:(BOOL)forceIndividualRow;

@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-09-01  
 Update trigger: Update this when method-channel names, payloads, event payloads,
 platform implementations, or native social/auth bridge behavior changes.
 
@@ -29,6 +29,21 @@ Platform-level wrapper:
 
 The iOS plugin podspec preserves the prebuilt JUCE archives and links the
 correct archive through sdk/config-specific `OTHER_LDFLAGS`.
+
+## Transport Loop Region
+
+Method: `setLoopRegion`
+
+Payload:
+
+- `enabled` (`bool`)
+- `startSeconds` (`double`)
+- `endSeconds` (`double`)
+
+The native engine wraps playing transport inside that region on the audio
+thread. Flutter must not pause, seek, and restart to wrap. A disabled or
+empty region turns wrap off. While recording, Flutter sends `enabled: false`
+so a take can still stop at the loop end.
 
 ## Native App Channels
 

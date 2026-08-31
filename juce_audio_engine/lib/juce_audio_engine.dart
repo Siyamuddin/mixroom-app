@@ -943,6 +943,22 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<void> setLoopRegion({
+    required bool enabled,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    try {
+      await _ch.invokeMethod('setLoopRegion', {
+        'enabled': enabled,
+        'startSeconds': startSeconds,
+        'endSeconds': endSeconds,
+      });
+    } on PlatformException catch (e) {
+      _logError('setLoopRegion', e);
+    }
+  }
+
   static Future<double> getCurrentPosition(int track) async {
     try {
       final pos = await _ch.invokeMethod<double>(
