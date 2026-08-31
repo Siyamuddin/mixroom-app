@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -271,6 +272,29 @@ Future<void> _openInstrumentLaneMenu(
   await tester.pumpAndSettle();
 }
 
+Future<void> _desktopDoubleTapAt(WidgetTester tester, Offset position) async {
+  await tester.tapAt(position);
+  await tester.pump(kDoubleTapMinTime);
+  await tester.tapAt(position);
+  await tester.pumpAndSettle();
+}
+
+Offset _desktopClipCenter(WidgetTester tester) {
+  final timelineFinder = find.byType(AudioCanvasTimeline);
+  final topLeft = tester.getTopLeft(timelineFinder);
+  final timeline = tester.widget<AudioCanvasTimeline>(timelineFinder);
+  final headerWidth = timeline.useTabletDawLayout
+      ? (timeline.tabletSidePanelWidth ??
+          TabletDawPanelLayout.leftExpandedWidth)
+      : _kHeaderWidth;
+  final clipWidthPx = _kClipDurationMs * _kInitialPixelsPerMs;
+  return topLeft +
+      Offset(
+        headerWidth + (clipWidthPx / 2.0),
+        _kRulerHeight + 40.0,
+      );
+}
+
 Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
   final rect = tester.getRect(
     find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
@@ -318,6 +342,7 @@ Widget _buildHarness({
   Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane,
   void Function(int clipIndex)? onOpenMidiClip,
+  void Function(int clipIndex)? onOpenAudioClipOptionsPanel,
   void Function(int clipIndex)? onCopyClip,
   void Function(List<int> clipIndices)? onCopyClips,
   Future<bool> Function(int row, double timeMs)? onPasteClipAt,
@@ -549,6 +574,7 @@ Widget _buildHarness({
           onDeleteClips: null,
           onCutClipAt: null,
           onOpenMidiClip: onOpenMidiClip,
+          onOpenAudioClipOptionsPanel: onOpenAudioClipOptionsPanel,
           onCreateMidiClipInInstrumentLane: onCreateMidiClipInInstrumentLane,
           onStemSeparation: null,
           onSelectionChanged: onSelectionChanged,
@@ -2821,6 +2847,157 @@ void main() {
 
     expect(openRequests, <int>[0]);
   });
+
+  testWidgets('desktop double-click MIDI clip opens piano roll', (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildMidiClip()];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 1,
+          name: 'Keys',
+          iconId: 1,
+          kind: TimelineRowKind.instrument,
+          instrumentId: 'sfz.vsco.upright_piano',
+          instrumentName: 'Upright Piano',
+        ),
+      ];
+      final openRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenMidiClip: openRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _desktopDoubleTapAt(tester, _desktopClipCenter(tester));
+
+      expect(openRequests, <int>[0]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+    'desktop double-click audio clip opens clip options panel',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[await _buildClip()];
+        final panelRequests = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            useTabletDawLayout: true,
+            onMoveClipCommit: (_, __, ___) async {},
+            onOpenAudioClipOptionsPanel: panelRequests.add,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await _desktopDoubleTapAt(tester, _desktopClipCenter(tester));
+
+        expect(panelRequests, <int>[0]);
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop single click MIDI clip does not open piano roll',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[await _buildMidiClip()];
+        final rows = <TimelineRow>[
+          TimelineRow(
+            rowId: 1,
+            name: 'Keys',
+            iconId: 1,
+            kind: TimelineRowKind.instrument,
+            instrumentId: 'sfz.vsco.upright_piano',
+            instrumentName: 'Upright Piano',
+          ),
+        ];
+        final openRequests = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            rowsOverride: rows,
+            onMoveClipCommit: (_, __, ___) async {},
+            onOpenMidiClip: openRequests.add,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tapAt(_desktopClipCenter(tester));
+        await tester.pumpAndSettle();
+
+        expect(openRequests, isEmpty);
+        expect(
+          find.byKey(const ValueKey('selected_clip_popup_open_piano_roll')),
+          findsOneWidget,
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'phone second tap on selected MIDI clip still opens piano roll',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.android);
+      try {
+        final clips = <AudioTrack>[await _buildMidiClip()];
+        final rows = <TimelineRow>[
+          TimelineRow(
+            rowId: 1,
+            name: 'Keys',
+            iconId: 1,
+            kind: TimelineRowKind.instrument,
+            instrumentId: 'sfz.vsco.upright_piano',
+            instrumentName: 'Upright Piano',
+          ),
+        ];
+        final openRequests = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            rowsOverride: rows,
+            onMoveClipCommit: (_, __, ___) async {},
+            onOpenMidiClip: openRequests.add,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tapAt(_clipCenter(tester));
+        await tester.pump(kDoubleTapTimeout);
+        await tester.pumpAndSettle();
+        expect(openRequests, isEmpty);
+        expect(
+          find.byKey(const ValueKey('selected_clip_popup_open_piano_roll')),
+          findsOneWidget,
+        );
+
+        await tester.tapAt(_clipCenter(tester));
+        await tester.pump(kDoubleTapTimeout);
+        await tester.pumpAndSettle();
+
+        expect(openRequests, <int>[0]);
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
 
   testWidgets('selected sampler clip popup exposes replace source action',
       (tester) async {
