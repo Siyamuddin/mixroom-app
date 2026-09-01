@@ -38,7 +38,7 @@ Map<String, dynamic> _serverResponse(
   'schema_version': aiV3ServerResponseVersion,
   'plan': plan,
   'trace': <String, dynamic>{
-    'contract_version': 'mixroom_v3_server_contract_2',
+    'contract_version': 'mixroom_v3_server_contract_6',
     'contract_fingerprint': 'abcdef0123456789',
     'request_id': 'request-1',
     ...traceExtra,
@@ -166,6 +166,11 @@ void main() {
       expect(result.meta.containsKey('model'), isFalse);
       expect(result.meta.containsKey('reasoning_effort'), isFalse);
       expect(result.meta.containsKey('provider_response_id'), isFalse);
+      expect(result.meta['v3_planner_request_ms'], isA<int>());
+      expect(
+        result.meta['v3_request_body_bytes'],
+        sentRequest.bodyBytes.length,
+      );
       expect(result.meta['prompt_rate_limit'], <String, dynamic>{
         'can_submit': true,
       });
@@ -368,39 +373,96 @@ void main() {
       expect(error.code, 'v3_planner_http_error');
       expect(error.detail, 'http_503:v3_server_contract_disabled');
       expect(error.toString(), isNot(contains('secret prompt')));
-      expect(error.diagnostic, isEmpty);
+      expect(error.diagnostic['stage'], 'proxy_response');
+      expect(error.diagnostic['http_status'], 503);
+      expect(
+        error.diagnostic['server_error_code'],
+        'v3_server_contract_disabled',
+      );
+      expect(error.diagnostic['request_body_bytes'], greaterThan(0));
+      expect(error.diagnostic.toString(), isNot(contains('secret prompt')));
+    }
+  });
+
+  test('maps gateway and V3 upstream deadline responses to timeout', () async {
+    for (final response in <http.Response>[
+      http.Response('{"message":"Internal Server Error"}', 504),
+      http.Response(
+        jsonEncode(<String, dynamic>{
+          'error': <String, dynamic>{'code': 'v3_upstream_timeout'},
+        }),
+        502,
+      ),
+    ]) {
+      try {
+        await _service(MockClient((_) async => response)).plan(
+          context: _context(),
+          originalRequest: 'Question.',
+          promptTraceId: 'gateway-timeout-trace',
+        );
+        fail('Expected a planner timeout.');
+      } on AiV3PlannerException catch (error) {
+        expect(error.code, 'v3_planner_timeout');
+        expect(error.diagnostic['stage'], 'proxy_response');
+        expect(error.diagnostic['prompt_trace_id'], 'gateway-timeout-trace');
+        expect(error.diagnostic['http_status'], response.statusCode);
+        expect(error.diagnostic['request_body_bytes'], greaterThan(0));
+      }
     }
   });
 
   test('maps invalid JSON and timeout to safe failures', () async {
-    await expectLater(
-      _service(
+    try {
+      await _service(
         MockClient((_) async => http.Response('not-json', 200)),
-      ).plan(context: _context(), originalRequest: 'Question.'),
-      throwsA(
-        isA<AiV3PlannerException>().having(
-          (error) => error.code,
-          'code',
-          'v3_planner_response_invalid_json',
-        ),
-      ),
-    );
+      ).plan(context: _context(), originalRequest: 'Question.');
+      fail('Expected invalid JSON to fail.');
+    } on AiV3PlannerException catch (error) {
+      expect(error.code, 'v3_planner_response_invalid_json');
+      expect(error.diagnostic['stage'], 'proxy_response');
+      expect(error.diagnostic['http_status'], 200);
+      expect(error.diagnostic['request_body_bytes'], greaterThan(0));
+      expect(error.diagnostic.toString(), isNot(contains('not-json')));
+    }
 
     final timeoutClient = MockClient((_) async {
       await Completer<void>().future;
       return http.Response('{}', 200);
     });
-    await expectLater(
-      _service(
+    try {
+      await _service(
         timeoutClient,
         timeout: const Duration(milliseconds: 1),
+      ).plan(
+        context: _context(),
+        originalRequest: 'Question.',
+        promptTraceId: 'timeout-trace',
+      );
+      fail('Expected a planner timeout.');
+    } on AiV3PlannerException catch (error) {
+      expect(error.code, 'v3_planner_timeout');
+      expect(error.detail, isEmpty);
+      expect(error.diagnostic['stage'], 'proxy_roundtrip');
+      expect(error.diagnostic['prompt_trace_id'], 'timeout-trace');
+      expect(error.diagnostic['elapsed_ms'], isA<int>());
+      expect(error.diagnostic['request_timeout_ms'], 1);
+      expect(error.diagnostic['request_body_bytes'], greaterThan(0));
+      expect(error.diagnostic, isNot(contains('request_body')));
+    }
+
+    await expectLater(
+      _service(
+        MockClient((_) async => http.Response('{}', 200)),
+        authTokenProvider: () => throw TimeoutException('auth timeout'),
       ).plan(context: _context(), originalRequest: 'Question.'),
       throwsA(
-        isA<AiV3PlannerException>().having(
-          (error) => error.code,
-          'code',
-          'v3_planner_timeout',
-        ),
+        isA<AiV3PlannerException>()
+            .having((error) => error.code, 'code', 'v3_planner_timeout')
+            .having(
+              (error) => error.diagnostic['stage'],
+              'diagnostic stage',
+              'auth',
+            ),
       ),
     );
   });

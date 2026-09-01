@@ -5,9 +5,11 @@ import 'package:mixroom/ai/chat_pipeline.dart';
 import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
+import 'package:mixroom/ai/magnitude_predictor.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/models/mixing_result.dart';
@@ -168,9 +170,21 @@ class _ConfirmingAiV3Preparer extends AiV3CommandPreparer {
 }
 
 class _FailingAiV3Preparer extends AiV3CommandPreparer {
-  const _FailingAiV3Preparer(this.code);
+  const _FailingAiV3Preparer(
+    this.code, {
+    this.commandType,
+    this.commandIndex,
+    this.effectId,
+    this.parameterId,
+    this.reason,
+  });
 
   final String code;
+  final String? commandType;
+  final int? commandIndex;
+  final String? effectId;
+  final String? parameterId;
+  final String? reason;
 
   @override
   AiV3PreparedBundle prepare({
@@ -180,7 +194,43 @@ class _FailingAiV3Preparer extends AiV3CommandPreparer {
     Map<String, AiV3ClipBoundaryAnalysis> boundaryAnalysisByClipId =
         const <String, AiV3ClipBoundaryAnalysis>{},
   }) {
-    throw AiV3PreparationException(code);
+    throw AiV3PreparationException(
+      code,
+      commandType: commandType,
+      commandIndex: commandIndex,
+      effectId: effectId,
+      parameterId: parameterId,
+      reason: reason,
+    );
+  }
+}
+
+class _FailingAiV3MixGoalMaterializer extends AiV3MixGoalMaterializer {
+  _FailingAiV3MixGoalMaterializer(this.code, {this.effectId, this.reason})
+    : super(
+        mixModel: LocalMixingModel(),
+        magnitudePredictor: const NoopMixingMagnitudePredictor(),
+      );
+
+  final String code;
+  final String? effectId;
+  final String? reason;
+
+  @override
+  Future<AiV3MixMaterializationResult> materialize({
+    required AiV3PreparedBundle bundle,
+    required ProjectState project,
+    required Map<int, String> roleOverrides,
+    required bool bypassLearnedMagnitudes,
+    required Set<String> allowedEffectIds,
+    String? projectId,
+  }) async {
+    throw AiV3PreparationException(
+      code,
+      commandType: 'mix.apply_goal',
+      effectId: effectId,
+      reason: reason,
+    );
   }
 }
 
@@ -426,6 +476,75 @@ void main() {
       expect(result.message, 'V3 handled the request.');
     });
 
+    test('V3 plan diagnostics expose structure without command payloads', () {
+      const privateClipId = 'private-clip-id-that-must-not-be-logged';
+      const privateEffectValue = 'private-effect-value';
+      const privateStyle = 'private-style-description';
+      final summary = aiV3PlanDiagnosticSummary(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'private planner message',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'midi',
+              type: 'midi.replace_notes',
+              arguments: <String, dynamic>{
+                'clip_id': privateClipId,
+                'notes': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'pitch': 64,
+                    'start_beat': 0,
+                    'length_beats': 1,
+                    'velocity': 100,
+                  },
+                ],
+              },
+            ),
+            AiV3Command(
+              commandId: 'effect',
+              type: 'effect.ensure_configured',
+              arguments: <String, dynamic>{
+                'row_id': 101,
+                'parameters': <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'parameter_id': 'drive',
+                    'value': privateEffectValue,
+                  },
+                ],
+              },
+            ),
+            AiV3Command(
+              commandId: 'mix',
+              type: 'mix.apply_goal',
+              arguments: <String, dynamic>{
+                'target': <String, dynamic>{'scope': 'row', 'row_id': 101},
+                'style_tags': <String>[privateStyle],
+              },
+            ),
+          ],
+        ),
+      );
+
+      expect(summary['command_count'], 3);
+      expect(summary['command_type_counts'], <String, int>{
+        'effect.ensure_configured': 1,
+        'midi.replace_notes': 1,
+        'mix.apply_goal': 1,
+      });
+      expect(summary, isNot(contains('row_ids')));
+      expect(summary['target_scopes'], <String>['row']);
+      expect(summary['has_midi_commands'], isTrue);
+      expect(summary['has_direct_effect_commands'], isTrue);
+      expect(summary['has_mix_goal'], isTrue);
+      final encoded = summary.toString();
+      expect(encoded, isNot(contains(privateClipId)));
+      expect(encoded, isNot(contains(privateEffectValue)));
+      expect(encoded, isNot(contains(privateStyle)));
+      expect(encoded, isNot(contains('private planner message')));
+      expect(encoded, isNot(contains('pitch')));
+      expect(encoded, isNot(contains('velocity')));
+    });
+
     test(
       'invalid V3 planner output returns an actionable safe result',
       () async {
@@ -459,14 +578,48 @@ void main() {
         );
         expect(
           result.message,
-          'I could not turn the AI response into safe DAW changes. '
-          'Nothing was changed. Rephrase the request or split it into '
-          'smaller steps.',
+          'That request did not finish correctly. Nothing was changed. '
+          'Please try again.',
         );
         expect(result.message, isNot(contains('AI request failed')));
         expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
       },
     );
+
+    test('V3 timeout response is accurate for short requests', () async {
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: const _FailingAiV3Planner('v3_planner_timeout'),
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Make the guitar richer.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Guitar', iconId: 1),
+        ],
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(result.hasAiV3Handoff, isTrue);
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(result.aiV3Handoff?['error_code'], 'v3_planner_timeout');
+      expect(
+        result.message,
+        'The AI service did not finish this request in time. '
+        'Nothing was changed. Try again.',
+      );
+      expect(result.message, isNot(contains('large request')));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
 
     test(
       'clear mutating V3 request executes immediately without a pending plan',
@@ -736,7 +889,233 @@ void main() {
           'Delete an existing row before creating another one.',
         );
         expect(result.message, result.aiV3Handoff?['message']);
+        final meta = result.meta!;
+        expect(meta['preparation_failure_stage'], 'command_preparation');
+        expect(meta['preparation_error_code'], 'v3_row_capacity_exceeded');
+        expect(
+          (meta['plan_diagnostic'] as Map)['command_type_counts'],
+          <String, int>{'row.create': 1},
+        );
         expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+      },
+    );
+
+    test(
+      'V3 reports mix materialization failures as a distinct stage',
+      () async {
+        final planner = _StaticAiV3Planner(
+          const AiV3Plan(
+            outcome: 'plan',
+            userMessage: 'Adjusting Audio 1.',
+            commands: <AiV3Command>[
+              AiV3Command(
+                commandId: 'gain',
+                type: 'row.adjust_gain_db',
+                arguments: <String, dynamic>{'row_id': 101, 'delta_db': -2},
+              ),
+            ],
+          ),
+        );
+        final pipeline = ChatPipeline(
+          llm: _FakeCloudLlmService(
+            LlmResult.text('Unexpected V1 result.', null),
+          ),
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+          aiV3Planner: planner,
+          aiV3MixMaterializer: _FailingAiV3MixGoalMaterializer(
+            'v3_mix_action_target_invalid',
+          ),
+        );
+
+        final result = await pipeline.handleUserText(
+          text: 'Adjust Audio 1.',
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+          timelineRows: <TimelineRow>[
+            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+          ],
+          clientContext: _v3ClientContext(),
+        );
+
+        expect(result.aiV3Handoff?['decision'], 'blocked');
+        final meta = result.meta!;
+        expect(meta['preparation_failure_stage'], 'mix_materialization');
+        expect(meta['preparation_error_code'], 'v3_mix_action_target_invalid');
+        expect(
+          (meta['plan_diagnostic'] as Map)['command_type_counts'],
+          <String, int>{'row.adjust_gain_db': 1},
+        );
+        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+      },
+    );
+
+    test(
+      'unavailable mix effects use the actionable effect response',
+      () async {
+        final planner = _StaticAiV3Planner(
+          const AiV3Plan(
+            outcome: 'plan',
+            userMessage: 'Making Audio 1 more intense.',
+            commands: <AiV3Command>[
+              AiV3Command(
+                commandId: 'gain',
+                type: 'row.adjust_gain_db',
+                arguments: <String, dynamic>{'row_id': 101, 'delta_db': -2},
+              ),
+            ],
+          ),
+        );
+        final pipeline = ChatPipeline(
+          llm: _FakeCloudLlmService(
+            LlmResult.text('Unexpected V1 result.', null),
+          ),
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+          aiV3Planner: planner,
+          aiV3MixMaterializer: _FailingAiV3MixGoalMaterializer(
+            'v3_effect_id_unknown',
+            effectId: 'Distortion',
+            reason: 'effect_unavailable',
+          ),
+        );
+
+        final result = await pipeline.handleUserText(
+          text: 'Make Audio 1 more intense.',
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+          timelineRows: <TimelineRow>[
+            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+          ],
+          clientContext: _v3ClientContext(),
+        );
+
+        expect(result.aiV3Handoff?['decision'], 'clarify');
+        expect(result.message, contains('Distortion'));
+        expect(
+          result.message,
+          isNot(contains('I could not safely prepare every requested change')),
+        );
+        expect(
+          result.meta?['preparation_failure_stage'],
+          'mix_materialization',
+        );
+        expect(result.meta?['preparation_error_code'], 'v3_effect_id_unknown');
+        expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+      },
+    );
+
+    test(
+      'effect contract failures are actionable and expose only safe diagnostics',
+      () async {
+        final planner = _StaticAiV3Planner(
+          const AiV3Plan(
+            outcome: 'plan',
+            userMessage: 'Making the guitar richer.',
+            commands: <AiV3Command>[
+              AiV3Command(
+                commandId: 'distortion',
+                type: 'effect.ensure_configured',
+                arguments: <String, dynamic>{
+                  'row_id': 101,
+                  'effect_id': 'Distortion',
+                  'parameters': <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'parameter_id': 'Unsupported Amount',
+                      'value': 0.73,
+                    },
+                  ],
+                },
+              ),
+            ],
+          ),
+        );
+        final pipeline = ChatPipeline(
+          llm: _FakeCloudLlmService(
+            LlmResult.text('Unexpected V1 result.', null),
+          ),
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+          aiV3Planner: planner,
+          aiV3Preparer: const _FailingAiV3Preparer(
+            'v3_effect_parameter_unknown',
+            commandType: 'effect.ensure_configured',
+            commandIndex: 0,
+            effectId: 'Distortion',
+            parameterId: 'Unsupported Amount',
+            reason: 'unknown_parameter',
+          ),
+        );
+
+        final result = await pipeline.handleUserText(
+          text: 'Secret prompt text that must not enter diagnostics.',
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+          timelineRows: <TimelineRow>[
+            TimelineRow(rowId: 101, name: 'Guitar', iconId: 0),
+          ],
+          clientContext: _v3ClientContext(),
+        );
+
+        expect(result.aiV3Handoff?['decision'], 'clarify');
+        expect(result.message, contains('Distortion'));
+        expect(result.message, contains('Unsupported Amount'));
+        expect(
+          result.message,
+          isNot(contains('I could not safely prepare every requested change')),
+        );
+        final diagnostic = result.meta!['preparation_diagnostic'] as Map;
+        expect(diagnostic, <String, dynamic>{
+          'command_type': 'effect.ensure_configured',
+          'command_index': 0,
+          'effect_id': 'Distortion',
+          'parameter_id': 'Unsupported Amount',
+          'reason': 'unknown_parameter',
+        });
+        expect(diagnostic.toString(), isNot(contains('0.73')));
+        expect(diagnostic.toString(), isNot(contains('Secret prompt')));
+
+        final releasePipeline = ChatPipeline(
+          llm: _FakeCloudLlmService(
+            LlmResult.text('Unexpected V1 result.', null),
+          ),
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+          aiV3Planner: planner,
+          aiV3Preparer: const _FailingAiV3Preparer(
+            'v3_effect_parameter_unknown',
+            commandType: 'effect.ensure_configured',
+            commandIndex: 0,
+            effectId: 'Distortion',
+            parameterId: 'Unsupported Amount',
+            reason: 'unknown_parameter',
+          ),
+          exposeAiV3TechnicalDetails: false,
+        );
+        final releaseResult = await releasePipeline.handleUserText(
+          text: 'Make the guitar richer.',
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+          timelineRows: <TimelineRow>[
+            TimelineRow(rowId: 101, name: 'Guitar', iconId: 0),
+          ],
+          clientContext: _v3ClientContext(),
+        );
+        expect(releaseResult.message, isNot(contains('Distortion')));
+        expect(releaseResult.message, isNot(contains('Unsupported Amount')));
+        expect(releaseResult.message, isNot(contains('parameter')));
       },
     );
 
@@ -940,8 +1319,8 @@ void main() {
             'receipts': <Map<String, dynamic>>[
               <String, dynamic>{
                 'status': 'prepared',
-                'verified_label': 'Added/configured Chorus on Chords',
-                'verified_l10n_key': 'Added/configured {effect} on {target}.',
+                'verified_label': 'Set up Chorus on Chords',
+                'verified_l10n_key': 'Set up {effect} on {target}.',
                 'verified_l10n_args': <String, String>{
                   'effect': 'Chorus',
                   'target': 'Chords',

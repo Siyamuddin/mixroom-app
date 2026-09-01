@@ -36,6 +36,69 @@ class _AiV3PreparationFailureResponse {
   final String message;
 }
 
+Set<String> _aiV3AllowedEffectIds(AiV3CoreContext context) =>
+    (context.data['effects'] as List? ?? const <Object>[])
+        .whereType<Map>()
+        .map((effect) => effect['effect_id']?.toString().trim() ?? '')
+        .where((effectId) => effectId.isNotEmpty)
+        .toSet();
+
+Map<String, dynamic> aiV3PlanDiagnosticSummary(AiV3Plan plan) {
+  final commandTypeCounts = <String, int>{};
+  final targetScopes = <String>{};
+  const safeTargetScopes = <String>{
+    'row',
+    'group',
+    'all_rows',
+    'master',
+    'clip',
+  };
+
+  String safeCommandType(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty ||
+        normalized.length > 64 ||
+        !RegExp(r'^[a-z0-9_.]+$').hasMatch(normalized)) {
+      return 'invalid';
+    }
+    return normalized;
+  }
+
+  void collectTarget(Object? rawTarget) {
+    if (rawTarget is! Map) return;
+    final scope = rawTarget['scope']?.toString().trim() ?? '';
+    if (safeTargetScopes.contains(scope)) targetScopes.add(scope);
+  }
+
+  for (final command in plan.commands) {
+    final type = safeCommandType(command.type);
+    commandTypeCounts[type] = (commandTypeCounts[type] ?? 0) + 1;
+    final arguments = command.arguments;
+    collectTarget(arguments);
+    collectTarget(arguments['target']);
+    collectTarget(arguments['destination']);
+  }
+
+  final sortedTypes = commandTypeCounts.keys.toList()..sort();
+  final sortedScopes = targetScopes.toList()..sort();
+  return <String, dynamic>{
+    'command_count': plan.commands.length,
+    'command_type_counts': <String, int>{
+      for (final type in sortedTypes) type: commandTypeCounts[type]!,
+    },
+    'target_scopes': sortedScopes,
+    'has_midi_commands': plan.commands.any(
+      (command) => command.type.startsWith('midi.'),
+    ),
+    'has_direct_effect_commands': plan.commands.any(
+      (command) => command.type.startsWith('effect.'),
+    ),
+    'has_mix_goal': plan.commands.any(
+      (command) => command.type == 'mix.apply_goal',
+    ),
+  };
+}
+
 Map<String, dynamic> aiV3BundleWithRuntimeAlreadySatisfiedReceipts(
   Map<String, dynamic> bundle,
   Set<String> commandIds,
@@ -190,102 +253,158 @@ String _normalizeAiV3ExecutionSummary(String summary) {
   return normalized;
 }
 
-_AiV3PreparationFailureResponse? _aiV3PreparationFailureResponse(
-  String code,
-) => switch (code) {
-  'v3_mix_reference_audio_missing' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'That row cannot be used as a reference because it has no usable analyzed audio. Choose a different audio reference.',
-  ),
-  'v3_mix_reference_equals_target' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'The processing target and reference must be different rows. Choose a separate reference row.',
-  ),
-  'v3_mix_master_reference_unsupported' => const _AiV3PreparationFailureResponse(
-    decision: 'unsupported',
-    message:
-        'Reference matching is not available for the master target yet. Choose a row or group target instead.',
-  ),
-  'v3_mix_audio_missing' => const _AiV3PreparationFailureResponse(
-    decision: 'blocked',
-    message:
-        'There is no playable audio or MIDI material to mix. Add material to the project, then try again.',
-  ),
-  'v3_clip_stretch_global_conflict' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'Other clips are configured to follow project tempo. Choose whether those clips should remain unchanged before stretching this clip.',
-  ),
-  'v3_clip_tempo_detection_unavailable' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'I could not detect a reliable tempo from that clip. Choose a clearer rhythmic audio clip or provide its source BPM manually.',
-  ),
-  'v3_clip_boundary_analysis_unavailable' =>
-    const _AiV3PreparationFailureResponse(
+_AiV3PreparationFailureResponse _aiV3PreparationFailureResponse(
+  AiV3PreparationException error, {
+  required bool exposeTechnicalDetails,
+}) {
+  final diagnostic = error.diagnostic;
+  final effectId = diagnostic['effect_id']?.toString() ?? 'that effect';
+  final parameterId =
+      diagnostic['parameter_id']?.toString() ?? 'that parameter';
+  if (error.code == 'v3_effect_parameter_unknown') {
+    if (exposeTechnicalDetails) {
+      return _AiV3PreparationFailureResponse(
+        decision: 'clarify',
+        message:
+            'I could not configure $effectId because "$parameterId" is not an available control. Nothing was changed. Ask me to add $effectId without that setting, or choose one of its available controls.',
+      );
+    }
+    return const _AiV3PreparationFailureResponse(
       decision: 'clarify',
       message:
-          'I could not detect a clear audible boundary in that clip. Choose a clearer audio clip or make the trim or alignment manually.',
+          'I couldn’t apply every requested setting, so nothing was changed. Describe the sound you want instead, or ask me to add the effect with its default settings.',
+    );
+  }
+  if (error.code == 'v3_effect_parameter_duplicate') {
+    if (exposeTechnicalDetails) {
+      return _AiV3PreparationFailureResponse(
+        decision: 'clarify',
+        message:
+            'The plan assigned two different settings to $parameterId on $effectId. Nothing was changed. Try the request again with one setting for that control.',
+      );
+    }
+    return const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'Two requested settings conflict, so nothing was changed. Describe the result you want and I’ll choose one consistent setting.',
+    );
+  }
+  if (error.code == 'v3_effect_id_unknown') {
+    if (exposeTechnicalDetails) {
+      return _AiV3PreparationFailureResponse(
+        decision: 'clarify',
+        message:
+            '$effectId is not available for this project or plan. Nothing was changed. Choose an available built-in effect.',
+      );
+    }
+    return const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'That effect isn’t available in this project, so nothing was changed. Ask for a similar sound and I’ll use an available effect.',
+    );
+  }
+  return switch (error.code) {
+    'v3_mix_reference_audio_missing' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'That row cannot be used as a reference because it has no usable analyzed audio. Choose a different audio reference.',
     ),
-  'v3_clip_first_sound_negative_start' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'That first sound cannot reach the requested position without moving the clip before the project start. Choose a later position or trim the leading silence first.',
-  ),
-  'v3_row_capacity_exceeded' => const _AiV3PreparationFailureResponse(
-    decision: 'blocked',
-    message:
-        'This project has reached its row limit. Delete an existing row before creating another one.',
-  ),
-  'v3_instrument_id_unknown' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'That instrument is not available in the current project. Choose one of the available instruments.',
-  ),
-  'v3_embedded_destination_row_conflict' => const _AiV3PreparationFailureResponse(
-    decision: 'blocked',
-    message:
-        'The plan tries to create the same destination row more than once. Use one MIDI or sample command to create that destination row.',
-  ),
-  'v3_row_delete_last_remaining' => const _AiV3PreparationFailureResponse(
-    decision: 'unsupported',
-    message:
-        'The project must keep at least one row, so the final remaining row cannot be deleted.',
-  ),
-  'v3_group_members_already_grouped' => const _AiV3PreparationFailureResponse(
-    decision: 'blocked',
-    message:
-        'Those rows already form a group. Ask to change that existing group instead of creating another group from the same rows.',
-  ),
-  'v3_group_membership_mismatch' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'That row is not currently a member of the specified group. Choose a current group member.',
-  ),
-  'v3_transport_recording_active' => const _AiV3PreparationFailureResponse(
-    decision: 'blocked',
-    message:
-        'Playback controls cannot be changed while recording. Stop recording first, then try again.',
-  ),
-  'v3_phone_cleanup_unavailable' => const _AiV3PreparationFailureResponse(
-    decision: 'unsupported',
-    message:
-        'Phone-recording cleanup is not available with the current effects and service access.',
-  ),
-  'v3_phone_cleanup_audio_missing' => const _AiV3PreparationFailureResponse(
-    decision: 'clarify',
-    message:
-        'That row has no audio clips to clean. Choose a row containing an audio recording.',
-  ),
-  'v3_phone_cleanup_effect_conflict' => const _AiV3PreparationFailureResponse(
-    decision: 'blocked',
-    message:
-        'Phone-recording cleanup and another effect or mix change target the same row. Apply the cleanup first, then make the other sound change.',
-  ),
-  _ => null,
-};
+    'v3_mix_reference_equals_target' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'The processing target and reference must be different rows. Choose a separate reference row.',
+    ),
+    'v3_mix_master_reference_unsupported' =>
+      const _AiV3PreparationFailureResponse(
+        decision: 'unsupported',
+        message:
+            'Reference matching is not available for the master target yet. Choose a row or group target instead.',
+      ),
+    'v3_mix_audio_missing' => const _AiV3PreparationFailureResponse(
+      decision: 'blocked',
+      message:
+          'There is no playable audio or MIDI material to mix. Add material to the project, then try again.',
+    ),
+    'v3_clip_stretch_global_conflict' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'Other clips are configured to follow project tempo. Choose whether those clips should remain unchanged before stretching this clip.',
+    ),
+    'v3_clip_tempo_detection_unavailable' =>
+      const _AiV3PreparationFailureResponse(
+        decision: 'clarify',
+        message:
+            'I could not detect a reliable tempo from that clip. Choose a clearer rhythmic audio clip or provide its source BPM manually.',
+      ),
+    'v3_clip_boundary_analysis_unavailable' =>
+      const _AiV3PreparationFailureResponse(
+        decision: 'clarify',
+        message:
+            'I could not detect a clear audible boundary in that clip. Choose a clearer audio clip or make the trim or alignment manually.',
+      ),
+    'v3_clip_first_sound_negative_start' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'That first sound cannot reach the requested position without moving the clip before the project start. Choose a later position or trim the leading silence first.',
+    ),
+    'v3_row_capacity_exceeded' => const _AiV3PreparationFailureResponse(
+      decision: 'blocked',
+      message:
+          'This project has reached its row limit. Delete an existing row before creating another one.',
+    ),
+    'v3_instrument_id_unknown' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'That instrument is not available in the current project. Choose one of the available instruments.',
+    ),
+    'v3_embedded_destination_row_conflict' =>
+      const _AiV3PreparationFailureResponse(
+        decision: 'blocked',
+        message:
+            'The plan tries to create the same destination row more than once. Use one MIDI or sample command to create that destination row.',
+      ),
+    'v3_row_delete_last_remaining' => const _AiV3PreparationFailureResponse(
+      decision: 'unsupported',
+      message:
+          'The project must keep at least one row, so the final remaining row cannot be deleted.',
+    ),
+    'v3_group_members_already_grouped' => const _AiV3PreparationFailureResponse(
+      decision: 'blocked',
+      message:
+          'Those rows already form a group. Ask to change that existing group instead of creating another group from the same rows.',
+    ),
+    'v3_group_membership_mismatch' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'That row is not currently a member of the specified group. Choose a current group member.',
+    ),
+    'v3_transport_recording_active' => const _AiV3PreparationFailureResponse(
+      decision: 'blocked',
+      message:
+          'Playback controls cannot be changed while recording. Stop recording first, then try again.',
+    ),
+    'v3_phone_cleanup_unavailable' => const _AiV3PreparationFailureResponse(
+      decision: 'unsupported',
+      message:
+          'Phone-recording cleanup is not available with the current effects and service access.',
+    ),
+    'v3_phone_cleanup_audio_missing' => const _AiV3PreparationFailureResponse(
+      decision: 'clarify',
+      message:
+          'That row has no audio clips to clean. Choose a row containing an audio recording.',
+    ),
+    'v3_phone_cleanup_effect_conflict' => const _AiV3PreparationFailureResponse(
+      decision: 'blocked',
+      message:
+          'Phone-recording cleanup and another effect or mix change target the same row. Apply the cleanup first, then make the other sound change.',
+    ),
+    _ => const _AiV3PreparationFailureResponse(
+      decision: 'blocked',
+      message:
+          'One planned change is not supported in the current project. Nothing was changed. Try a more specific request or make that change separately.',
+    ),
+  };
+}
 
 _AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(
   String code,
@@ -293,7 +412,7 @@ _AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(
   'v3_planner_timeout' => const _AiV3PreparationFailureResponse(
     decision: 'blocked',
     message:
-        'The AI took too long to finish this request. Nothing was changed. Try again, or split a very large request into smaller parts.',
+        'The AI service did not finish this request in time. Nothing was changed. Try again.',
   ),
   'v3_proxy_auth_token_missing' => const _AiV3PreparationFailureResponse(
     decision: 'blocked',
@@ -307,18 +426,17 @@ _AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(
   'v3_planner_arguments_invalid_json' => const _AiV3PreparationFailureResponse(
     decision: 'blocked',
     message:
-        'I could not turn the AI response into safe DAW changes. Nothing was changed. Rephrase the request or split it into smaller steps.',
+        'That request did not finish correctly. Nothing was changed. Please try again.',
   ),
   'v3_planner_http_error' ||
   'v3_planner_response_invalid_json' => const _AiV3PreparationFailureResponse(
     decision: 'blocked',
     message:
-        'The AI service returned an unusable response. Nothing was changed. Try again in a moment.',
+        'That request did not finish correctly. Nothing was changed. Please try again.',
   ),
   _ => const _AiV3PreparationFailureResponse(
     decision: 'blocked',
-    message:
-        'I could not safely complete this AI request. Nothing was changed.',
+    message: 'That request did not finish correctly. Nothing was changed.',
   ),
 };
 
@@ -334,8 +452,10 @@ class ChatPipeline {
   final AiV3Planner? aiV3Planner;
   final AiV3ContextProfile aiV3ContextProfile;
   final AiV3CommandPreparer _aiV3Preparer;
+  final AiV3MixGoalMaterializer _aiV3MixMaterializer;
   final AiV3ClipTempoDetector? _aiV3ClipTempoDetector;
   final AiV3ClipBoundaryAnalyzer? _aiV3ClipBoundaryAnalyzer;
+  final bool _exposeAiV3TechnicalDetails;
 
   /// Optional: UI can hook into this to show a global "thinking..." indicator.
   final void Function(bool isThinking)? onThinkingChanged;
@@ -355,13 +475,25 @@ class ChatPipeline {
     this.aiV3Planner,
     this.aiV3ContextProfile = AiV3ContextProfile.essential,
     AiV3CommandPreparer aiV3Preparer = const AiV3CommandPreparer(),
+    AiV3MixGoalMaterializer? aiV3MixMaterializer,
     AiV3ClipTempoDetector? aiV3ClipTempoDetector,
     AiV3ClipBoundaryAnalyzer? aiV3ClipBoundaryAnalyzer,
+    bool exposeAiV3TechnicalDetails = !const bool.fromEnvironment(
+      'dart.vm.product',
+    ),
   }) : magnitudePredictor =
            magnitudePredictor ?? const NoopMixingMagnitudePredictor(),
        _aiV3Preparer = aiV3Preparer,
+       _aiV3MixMaterializer =
+           aiV3MixMaterializer ??
+           AiV3MixGoalMaterializer(
+             mixModel: mixModel,
+             magnitudePredictor:
+                 magnitudePredictor ?? const NoopMixingMagnitudePredictor(),
+           ),
        _aiV3ClipTempoDetector = aiV3ClipTempoDetector,
-       _aiV3ClipBoundaryAnalyzer = aiV3ClipBoundaryAnalyzer;
+       _aiV3ClipBoundaryAnalyzer = aiV3ClipBoundaryAnalyzer,
+       _exposeAiV3TechnicalDetails = exposeAiV3TechnicalDetails;
 
   Future<Map<String, double>> _detectTemposForPlan(
     AiV3Plan plan,
@@ -1270,6 +1402,20 @@ class ChatPipeline {
       final code = error is AiV3PlannerException
           ? error.code
           : 'v3_planner_unexpected';
+      if (error is AiV3PlannerException) {
+        final diagnostic = error.diagnostic;
+        aiDebugLog(
+          'v3-planner',
+          'failed code=${error.code} '
+              'trace=${diagnostic['prompt_trace_id'] ?? promptTraceId ?? '-'} '
+              'stage=${diagnostic['stage'] ?? '-'} '
+              'elapsed_ms=${diagnostic['elapsed_ms'] ?? '-'} '
+              'timeout_ms=${diagnostic['request_timeout_ms'] ?? '-'} '
+              'request_body_bytes=${diagnostic['request_body_bytes'] ?? '-'} '
+              'http_status=${diagnostic['http_status'] ?? '-'} '
+              'server_error_code=${diagnostic['server_error_code'] ?? '-'}',
+        );
+      }
       final response = _aiV3PlannerFailureResponse(code);
       _pendingAiV3Bundle = null;
       _pendingAiV3PlanId = null;
@@ -1288,7 +1434,14 @@ class ChatPipeline {
       );
     }
     final plan = result.plan;
+    final planDiagnostic = aiV3PlanDiagnosticSummary(plan);
+    aiDebugLog(
+      'v3-prepare',
+      'plan trace=${promptTraceId ?? '-'} summary=${jsonEncode(planDiagnostic)}',
+    );
     var preparationElapsedMs = 0;
+    var commandPreparationElapsedMs = 0;
+    var mixMaterializationElapsedMs = 0;
     var mixMaterializationMeta = const <String, dynamic>{};
     _push('user', userText);
     if (!plan.isMutating) {
@@ -1311,8 +1464,57 @@ class ChatPipeline {
       );
     }
     late AiV3PreparedBundle prepared;
-    AiV3MixMaterializationResult? mixMaterialization;
-    final preparationStopwatch = Stopwatch()..start();
+    final totalPreparationStopwatch = Stopwatch()..start();
+
+    ChatPipelineResult preparationFailure(
+      AiV3PreparationException error, {
+      required String stage,
+      required int stageElapsedMs,
+    }) {
+      if (totalPreparationStopwatch.isRunning) {
+        totalPreparationStopwatch.stop();
+      }
+      preparationElapsedMs = totalPreparationStopwatch.elapsedMilliseconds;
+      _pendingAiV3Bundle = null;
+      _pendingAiV3PlanId = null;
+      aiDebugLog(
+        'v3-prepare',
+        'failed trace=${promptTraceId ?? '-'} stage=$stage '
+            'code=${error.code} stage_elapsed_ms=$stageElapsedMs '
+            'total_elapsed_ms=$preparationElapsedMs '
+            'diagnostic=${jsonEncode(error.diagnostic)} '
+            'summary=${jsonEncode(planDiagnostic)}',
+      );
+      final actionable = _aiV3PreparationFailureResponse(
+        error,
+        exposeTechnicalDetails: _exposeAiV3TechnicalDetails,
+      );
+      final message = actionable.message;
+      _push('assistant', message);
+      final handoff = <String, dynamic>{
+        'schema_version': 'ai_v3_handoff_prototype_1',
+        'decision': actionable.decision,
+        'plan': plan.toJson(),
+        'error_code': error.code,
+        'message': message,
+      };
+      return ChatPipelineResult.v3(
+        message,
+        handoff,
+        meta: <String, dynamic>{
+          'tool': 'ai_v3_planner',
+          ...result.meta,
+          'preparation_error_code': error.code,
+          'preparation_failure_stage': stage,
+          'preparation_stage_elapsed_ms': stageElapsedMs,
+          'preparation_elapsed_ms': preparationElapsedMs,
+          'preparation_diagnostic': error.diagnostic,
+          'plan_diagnostic': planDiagnostic,
+        },
+      );
+    }
+
+    final commandPreparationStopwatch = Stopwatch()..start();
     try {
       final detectedTempos = await _detectTemposForPlan(
         plan,
@@ -1330,48 +1532,55 @@ class ChatPipeline {
         detectedTempoByClipId: detectedTempos,
         boundaryAnalysisByClipId: boundaryAnalyses,
       );
-      mixMaterialization =
-          await AiV3MixGoalMaterializer(
-            mixModel: mixModel,
-            magnitudePredictor: magnitudePredictor,
-          ).materialize(
-            bundle: prepared,
-            project: project,
-            roleOverrides: _roleOverrides,
-            bypassLearnedMagnitudes: bypassLearnedMagnitudes,
-            projectId: projectId,
-          );
+    } on AiV3PreparationException catch (error) {
+      commandPreparationStopwatch.stop();
+      commandPreparationElapsedMs =
+          commandPreparationStopwatch.elapsedMilliseconds;
+      return preparationFailure(
+        error,
+        stage: 'command_preparation',
+        stageElapsedMs: commandPreparationElapsedMs,
+      );
+    }
+    commandPreparationStopwatch.stop();
+    commandPreparationElapsedMs =
+        commandPreparationStopwatch.elapsedMilliseconds;
+
+    final mixMaterializationStopwatch = Stopwatch()..start();
+    try {
+      final mixMaterialization = await _aiV3MixMaterializer.materialize(
+        bundle: prepared,
+        project: project,
+        roleOverrides: _roleOverrides,
+        bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+        allowedEffectIds: _aiV3AllowedEffectIds(context),
+        projectId: projectId,
+      );
       prepared = mixMaterialization.bundle;
       mixMaterializationMeta = mixMaterialization.metadata;
     } on AiV3PreparationException catch (error) {
-      preparationStopwatch.stop();
-      preparationElapsedMs = preparationStopwatch.elapsedMilliseconds;
-      _pendingAiV3Bundle = null;
-      _pendingAiV3PlanId = null;
-      final actionable = _aiV3PreparationFailureResponse(error.code);
-      final message =
-          actionable?.message ??
-          'I could not safely prepare every requested change. Nothing was changed.';
-      _push('assistant', message);
-      final handoff = <String, dynamic>{
-        'schema_version': 'ai_v3_handoff_prototype_1',
-        'decision': actionable?.decision ?? 'blocked',
-        'plan': plan.toJson(),
-        'error_code': error.code,
-        'message': message,
-      };
-      return ChatPipelineResult.v3(
-        message,
-        handoff,
-        meta: <String, dynamic>{
-          'tool': 'ai_v3_planner',
-          ...result.meta,
-          'preparation_error_code': error.code,
-        },
+      mixMaterializationStopwatch.stop();
+      mixMaterializationElapsedMs =
+          mixMaterializationStopwatch.elapsedMilliseconds;
+      return preparationFailure(
+        error,
+        stage: 'mix_materialization',
+        stageElapsedMs: mixMaterializationElapsedMs,
       );
     }
-    preparationStopwatch.stop();
-    preparationElapsedMs = preparationStopwatch.elapsedMilliseconds;
+    mixMaterializationStopwatch.stop();
+    mixMaterializationElapsedMs =
+        mixMaterializationStopwatch.elapsedMilliseconds;
+    totalPreparationStopwatch.stop();
+    preparationElapsedMs = totalPreparationStopwatch.elapsedMilliseconds;
+    aiDebugLog(
+      'v3-prepare',
+      'completed trace=${promptTraceId ?? '-'} '
+          'command_preparation_ms=$commandPreparationElapsedMs '
+          'mix_materialization_ms=$mixMaterializationElapsedMs '
+          'total_elapsed_ms=$preparationElapsedMs '
+          'prepared_action_count=${prepared.actions.length}',
+    );
     if (prepared.actions.isEmpty) {
       _pendingAiV3Bundle = null;
       _pendingAiV3PlanId = null;
@@ -1428,6 +1637,8 @@ class ChatPipeline {
         'tool': 'ai_v3_planner',
         ...result.meta,
         'preparation_elapsed_ms': preparationElapsedMs,
+        'command_preparation_elapsed_ms': commandPreparationElapsedMs,
+        'mix_materialization_elapsed_ms': mixMaterializationElapsedMs,
         'prepared_action_count': prepared.actions.length,
       },
     );

@@ -66,6 +66,13 @@ class LlmConfig {
     defaultValue: 25,
   );
 
+  // Outlast the 30-second HTTP API window so V3 can receive the backend's
+  // controlled timeout response instead of abandoning the request first.
+  static const int aiV3RequestTimeoutSeconds = int.fromEnvironment(
+    'AI_V3_REQUEST_TIMEOUT_SECONDS',
+    defaultValue: 35,
+  );
+
   static const bool allowDirectOpenAiInRelease = bool.fromEnvironment(
     'LLM_ALLOW_DIRECT_OPENAI_IN_RELEASE',
     defaultValue: false,

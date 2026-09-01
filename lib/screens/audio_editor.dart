@@ -204,26 +204,6 @@ bool audioEditorShouldApplyScheduledMissingClipResolution({
 
 Completer<void> _cancelSignal = Completer();
 
-const List<String> kMixroomBuiltInEffects = [
-  "Gain",
-  "EQ 3-Band",
-  "Compressor",
-  "Dynamic Softener",
-  "Transient Shaper",
-  "Limiter",
-  "Clipper",
-  "De-Esser",
-  "Distortion",
-  "Degrade",
-  "Delay",
-  "Reverb",
-  "EQ Parametric",
-  "Pitch Shift",
-  "Pitch Corrector",
-  "Chorus",
-  "Vibrato",
-];
-
 const String kMixroomDawBackgroundAsset = 'assets/daw/editor_background.webp';
 const String kMixroomDawTopSettingsIconAsset =
     'assets/daw/top_settings_icon.png';
@@ -4504,6 +4484,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       effectName,
     );
   }
+
+  Set<String> _allowedBuiltInEffectIdsForCurrentPlan() => <String>{
+    for (final effectName in kMixroomBuiltInEffects)
+      if (_canUseEffectForCurrentPlan(effectName)) effectName,
+  };
 
   bool _canUseInstrumentForCurrentPlan(String instrumentId) {
     if (!_isSubscriptionEnforcementEnabled) return true;
@@ -9431,7 +9416,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
               requestTimeout: Duration(
-                seconds: LlmConfig.requestTimeoutSeconds,
+                seconds: LlmConfig.aiV3RequestTimeoutSeconds,
               ),
               proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
               proxyPath: LlmConfig.aiV3ProxyPath,
@@ -32183,9 +32168,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Map<String, dynamic> _buildAiClientContext() {
     final entitlement = _currentEntitlementSnapshot;
-    final allowedEffects = _isFreePlan
-        ? SubscriptionLimits.freeBuiltInEffects.toList(growable: false)
-        : kMixroomBuiltInEffects;
+    final allowedEffects = _allowedBuiltInEffectIdsForCurrentPlan().toList(
+      growable: false,
+    );
     final allowedInstrumentCatalog = _instrumentCatalogForCurrentPlan(
       _uiInstrumentCatalog(),
     );
@@ -49290,6 +49275,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _assistantActionExecutionBatchDepth += 1;
     }
     final executionMessagesBefore = _assistantActionExecutionMessageCount;
+    final orderedEffectConstraints = AiV3OrderedEffectConstraints();
     Future<void> applyV3MixActions(Map<String, dynamic> data) async {
       final rawMixActions = data['actions'];
       if (rawMixActions is! List || rawMixActions.isEmpty) {
@@ -49306,6 +49292,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
           })
           .toList(growable: false);
+      validateAiV3MixEffectCapabilities(
+        mixActions,
+        allowedEffectIds: _allowedBuiltInEffectIdsForCurrentPlan(),
+      );
       final report = await applyMixingResult(
         MixingResult(actions: mixActions, summary: '', isNoOp: false),
         emitActionSummaries: false,
@@ -50694,12 +50684,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   configuredExpectations,
                 );
               }
+              orderedEffectConstraints.observeAppliedAction(type, data);
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'v3_effect_instance_edit':
               await _applyAiV3EffectInstanceEditAction(data);
+              orderedEffectConstraints.observeAppliedAction(type, data);
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -50776,8 +50768,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 };
               }
               final project = await _buildCurrentAiProjectState();
-              final allowedTargetRowIds = <int>{};
-              int? requiredTargetRow;
               switch (scope) {
                 case 'row':
                   final rowId = _toActionInt(target['row_id']);
@@ -50795,55 +50785,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     'row_index': rowIndex,
                   };
                   data = <String, dynamic>{...data, 'target': target};
-                  final projectRow = project.rows
-                      .where(
-                        (row) => row.rowIndex == rowIndex && row.rowId == rowId,
-                      )
-                      .firstOrNull;
-                  if (projectRow == null || projectRow.clips.isEmpty) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
-                  requiredTargetRow = rowIndex;
-                  allowedTargetRowIds.add(rowId);
                   break;
                 case 'group':
-                  final groupId = target['group_id']?.toString().trim() ?? '';
-                  final group = _trackGroups
-                      .where((candidate) => candidate.id == groupId)
-                      .firstOrNull;
-                  if (group == null || group.rowIds.length < 2) {
-                    throw StateError('v3_group_id_unknown');
-                  }
-                  allowedTargetRowIds.addAll(group.rowIds);
-                  if (!project.rows.any(
-                    (row) =>
-                        allowedTargetRowIds.contains(row.rowId) &&
-                        row.clips.isNotEmpty,
-                  )) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
-                  break;
                 case 'all_rows':
-                  allowedTargetRowIds.addAll(
-                    project.rows
-                        .where((row) => row.clips.isNotEmpty)
-                        .map((row) => row.rowId),
-                  );
-                  if (allowedTargetRowIds.isEmpty) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
-                  break;
                 case 'master':
-                  if (!project.rows.any((row) => row.clips.isNotEmpty)) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
                   break;
                 default:
                   throw StateError('v3_mix_action_target_invalid');
               }
-              if (allowedTargetRowIds.any((rowId) => rowId < 0)) {
-                throw StateError('v3_mix_audio_missing');
-              }
+              final mixContainment = resolveAiV3MixContainment(data, project);
+              final containedTargetRowIds =
+                  mixContainment.allowedTargetRowIds ?? const <int>{};
               final materialized =
                   await AiV3MixGoalMaterializer(
                     mixModel: _mixModel,
@@ -50853,28 +50805,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     project: project,
                     roleOverrides: aiV3CurrentRoleOverrides(project),
                     bypassLearnedMagnitudes: _producerDataMode,
-                    requiredTargetRow: requiredTargetRow,
-                    allowedTargetRowIds: scope == 'master'
-                        ? null
-                        : allowedTargetRowIds,
+                    allowedEffectIds: _allowedBuiltInEffectIdsForCurrentPlan(),
+                    effectConstraints: orderedEffectConstraints,
                     projectId: _projectId,
                   );
               if (materialized.isNoChange) {
                 v3RuntimeAlreadySatisfiedCommandIds?.add(commandId);
               } else {
+                final executionActions = normalizeAiV3MixActionsForExecution(
+                  materialized.actions,
+                );
                 final materializedData = <String, dynamic>{
                   'command_id': commandId,
-                  'actions': materialized.actions
-                      .map((action) {
-                        final json = action.toJson();
-                        return <String, dynamic>{
-                          ...json,
-                          'data': <String, dynamic>{
-                            ...Map<String, dynamic>.from(json['data'] as Map),
-                            'force_individual_row': true,
-                          },
-                        };
-                      })
+                  'actions': executionActions
+                      .map((action) => action.toJson())
                       .toList(growable: false),
                   if (materialized.protectedReferenceRow != null)
                     'protected_reference_row_index':
@@ -50896,7 +50840,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   for (final generatedRow in v3RuntimeExpectations.where(
                     (expectation) =>
                         expectation['kind'] == 'generated_row_state' &&
-                        allowedTargetRowIds.contains(expectation['row_id']),
+                        containedTargetRowIds.contains(expectation['row_id']),
                   )) {
                     final generatedRowIndex = _rowIndexForId(
                       generatedRow['row_id'] as int,
