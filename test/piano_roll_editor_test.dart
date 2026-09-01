@@ -238,6 +238,121 @@ void main() {
     expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 0);
   });
 
+  testWidgets('built-in synth exposes and commits decay and sustain',
+      (tester) async {
+    Map<String, double>? committedParams;
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.basic_synth',
+      instrumentName: 'Basic Synth',
+    );
+    clip.instrumentParams = <String, double>{
+      'attackMs': 42.0,
+      'releaseMs': 777.0,
+      'drive': 0.24,
+    };
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'mixroom.basic_synth',
+            'name': 'Basic Synth',
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          committedParams = Map<String, double>.from(instrumentParams);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final decayRow = find.byKey(
+      const ValueKey<String>('basic_synth_decay_slider'),
+    );
+    final sustainRow = find.byKey(
+      const ValueKey<String>('basic_synth_sustain_slider'),
+    );
+    expect(decayRow, findsOneWidget);
+    expect(sustainRow, findsOneWidget);
+    expect(
+      find.descendant(of: decayRow, matching: find.text('120')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: sustainRow, matching: find.text('86')),
+      findsOneWidget,
+    );
+
+    tester
+        .widget<Slider>(
+          find.descendant(of: decayRow, matching: find.byType(Slider)),
+        )
+        .onChanged!(640.0);
+    await tester.pump(const Duration(milliseconds: 40));
+    tester
+        .widget<Slider>(
+          find.descendant(of: sustainRow, matching: find.byType(Slider)),
+        )
+        .onChanged!(55.0);
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(committedParams, isNotNull);
+    expect(committedParams!['attackMs'], 42.0);
+    expect(committedParams!['decayMs'], 640.0);
+    expect(committedParams!['sustainLevel'], 0.55);
+    expect(committedParams!['releaseMs'], 777.0);
+    expect(committedParams!['drive'], 0.24);
+  });
+
+  testWidgets('external plugins keep the existing attack release envelope',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'plugin.test',
+      instrumentName: 'External Test',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'plugin.test',
+            'name': 'External Test',
+            'isExternalPlugin': true,
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Attack'), findsOneWidget);
+    expect(find.text('Release'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('basic_synth_decay_slider')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('basic_synth_sustain_slider')),
+      findsNothing,
+    );
+  });
+
   testWidgets(
     'guitar instrument panel uses the shared guitar visual treatment',
     (tester) async {

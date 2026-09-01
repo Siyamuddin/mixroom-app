@@ -617,6 +617,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _params.putIfAbsent('oscillator', () => 1.0);
     _params.putIfAbsent('cutoffHz', () => 3200.0);
     _params.putIfAbsent('attackMs', () => 18.0);
+    _params.putIfAbsent('decayMs', () => 120.0);
+    _params.putIfAbsent('sustainLevel', () => 0.86);
     _params.putIfAbsent('releaseMs', () => 180.0);
     _params.putIfAbsent('drive', () => 0.08);
   }
@@ -861,6 +863,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     params.putIfAbsent('oscillator', () => 1.0);
     params.putIfAbsent('cutoffHz', () => 3200.0);
     params.putIfAbsent('attackMs', () => 18.0);
+    params.putIfAbsent('decayMs', () => 120.0);
+    params.putIfAbsent('sustainLevel', () => 0.86);
     params.putIfAbsent('releaseMs', () => 180.0);
     params.putIfAbsent('drive', () => 0.08);
     return params;
@@ -5556,6 +5560,37 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                       _queueCommit();
                     },
                   ),
+                  if (!externalPlugin)
+                    KeyedSubtree(
+                      key: const ValueKey<String>('basic_synth_decay_slider'),
+                      child: _labeledSlider(
+                        label: 'Decay',
+                        value:
+                            (_params['decayMs'] ?? 120.0).clamp(0.0, 2000.0),
+                        min: 0.0,
+                        max: 2000.0,
+                        onChanged: (v) {
+                          setState(() => _params['decayMs'] = v);
+                          _queueCommit();
+                        },
+                      ),
+                    ),
+                  if (!externalPlugin)
+                    KeyedSubtree(
+                      key:
+                          const ValueKey<String>('basic_synth_sustain_slider'),
+                      child: _labeledSlider(
+                        label: 'Sustain',
+                        value: ((_params['sustainLevel'] ?? 0.86) * 100.0)
+                            .clamp(5.0, 100.0),
+                        min: 5.0,
+                        max: 100.0,
+                        onChanged: (v) {
+                          setState(() => _params['sustainLevel'] = v / 100.0);
+                          _queueCommit();
+                        },
+                      ),
+                    ),
                   _labeledSlider(
                     label: 'Release',
                     value: (_params['releaseMs'] ?? 180.0).clamp(20.0, 1200.0),

@@ -595,6 +595,8 @@ const List<Map<String, dynamic>> kInstrumentCatalog = [
     "oscillator": 1.0,
     "cutoffHz": 3200.0,
     "attackMs": 18.0,
+    "decayMs": 120.0,
+    "sustainLevel": 0.86,
     "releaseMs": 180.0,
     "drive": 0.08,
   },
@@ -24483,6 +24485,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     params.putIfAbsent('oscillator', () => 1.0);
     params.putIfAbsent('cutoffHz', () => 3200.0);
     params.putIfAbsent('attackMs', () => 18.0);
+    params.putIfAbsent('decayMs', () => 120.0);
+    params.putIfAbsent('sustainLevel', () => 0.86);
     params.putIfAbsent('releaseMs', () => 180.0);
     params.putIfAbsent('drive', () => 0.08);
     return params;
