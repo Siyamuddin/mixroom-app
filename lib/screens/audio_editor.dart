@@ -1157,6 +1157,26 @@ class _ResolvedMixEffectParameter {
   final Map<String, dynamic> parameter;
 }
 
+class _EffectParameterAdjustment {
+  const _EffectParameterAdjustment({
+    required this.oldValue,
+    required this.newValue,
+    required this.oldDisplayValue,
+    required this.newDisplayValue,
+    required this.rawInterval,
+    this.expectedNormalizedValue,
+  });
+
+  final dynamic oldValue;
+  final dynamic newValue;
+  final String oldDisplayValue;
+  final String newDisplayValue;
+  final double rawInterval;
+  final double? expectedNormalizedValue;
+
+  bool get usesNormalizedVerification => expectedNormalizedValue != null;
+}
+
 class _AssistantActionApplyException implements Exception {
   const _AssistantActionApplyException({
     required this.actionType,
@@ -48357,6 +48377,139 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return (minimum + steps * interval).clamp(minimum, maximum).toDouble();
   }
 
+  _EffectParameterAdjustment _effectParameterAdjustment(
+    Map<String, dynamic> parameter,
+    Map<String, dynamic> action,
+  ) {
+    final type = (parameter['type'] ?? '').toString().trim().toLowerCase();
+    final isBoolean = type == 'bool';
+    final isChoice = type == 'choice';
+    final mode = (action['mode'] as String?) ?? 'delta';
+    final rawInterval = (_toActionDouble(parameter['interval']) ?? 0.0).abs();
+
+    if (isBoolean || isChoice) {
+      final rawCurrent = parameter['value'];
+      final currentNormalized = switch (rawCurrent) {
+        bool value => value ? 1.0 : 0.0,
+        _ => (_toActionDouble(parameter['valueNormalized']) ??
+                _toActionDouble(rawCurrent) ??
+                0.0)
+            .clamp(0.0, 1.0)
+            .toDouble(),
+      };
+      double nextNormalized;
+      if (mode == 'set') {
+        final requested =
+            _toActionDouble(action['value_norm']) ??
+            _toActionDouble(action['value']);
+        if (requested == null) {
+          throw StateError('mix_effect_parameter_value_invalid');
+        }
+        nextNormalized = requested;
+      } else {
+        final delta =
+            _toActionDouble(action['delta_norm']) ??
+            _toActionDouble(action['delta']);
+        if (delta == null) {
+          throw StateError('mix_effect_parameter_value_invalid');
+        }
+        nextNormalized = currentNormalized + delta;
+      }
+      nextNormalized = nextNormalized.clamp(0.0, 1.0).toDouble();
+
+      if (isBoolean) {
+        nextNormalized = nextNormalized >= 0.5 ? 1.0 : 0.0;
+      } else {
+        final choiceCount = parameter.keys
+            .where((key) => key.startsWith('choice_'))
+            .length;
+        final reportedInterval =
+            (_toActionDouble(parameter['intervalNormalized']) ?? 0.0).abs();
+        final normalizedInterval = reportedInterval > 0.0
+            ? reportedInterval
+            : choiceCount > 1
+            ? 1.0 / (choiceCount - 1)
+            : 0.0;
+        if (normalizedInterval > 0.0 && normalizedInterval.isFinite) {
+          nextNormalized =
+              (nextNormalized / normalizedInterval).round() *
+              normalizedInterval;
+          nextNormalized = nextNormalized.clamp(0.0, 1.0).toDouble();
+        }
+      }
+
+      final newValue = isBoolean ? nextNormalized == 1.0 : nextNormalized;
+      return _EffectParameterAdjustment(
+        oldValue: rawCurrent ?? currentNormalized,
+        newValue: newValue,
+        oldDisplayValue:
+            rawCurrent?.toString() ?? currentNormalized.toStringAsFixed(2),
+        newDisplayValue: newValue.toString(),
+        rawInterval: rawInterval,
+        expectedNormalizedValue: nextNormalized,
+      );
+    }
+
+    final current = _toActionDouble(parameter['value']);
+    if (current == null) {
+      throw StateError('mix_effect_parameter_value_invalid');
+    }
+    final minimum = _toActionDouble(parameter['min']);
+    final maximum = _toActionDouble(parameter['max']);
+    final clamp01 = (action['clamp_0_1'] as bool?) ?? false;
+    double next = current;
+    if (mode == 'set') {
+      final normalized = _toActionDouble(action['value_norm']);
+      if (normalized != null && minimum != null && maximum != null) {
+        next = minimum +
+            (maximum - minimum) * normalized.clamp(0.0, 1.0);
+      } else {
+        final value = _toActionDouble(action['value']);
+        if (value == null) {
+          throw StateError('mix_effect_parameter_value_invalid');
+        }
+        next = value;
+      }
+    } else {
+      final normalizedDelta = _toActionDouble(action['delta_norm']);
+      final delta =
+          normalizedDelta != null && minimum != null && maximum != null
+          ? normalizedDelta * (maximum - minimum)
+          : normalizedDelta ?? _toActionDouble(action['delta']);
+      if (delta == null) {
+        throw StateError('mix_effect_parameter_value_invalid');
+      }
+      next = current + delta;
+    }
+
+    final hardMinimum = _toActionDouble(action['clamp_min']);
+    final hardMaximum = _toActionDouble(action['clamp_max']);
+    if (hardMinimum != null || hardMaximum != null) {
+      next = next.clamp(
+        hardMinimum ?? double.negativeInfinity,
+        hardMaximum ?? double.infinity,
+      );
+    }
+    if (minimum != null && maximum != null) {
+      next = next.clamp(minimum, maximum);
+    } else if (clamp01) {
+      next = next.clamp(0.0, 1.0);
+    }
+    next = _canonicalEffectParameterValue(
+      value: next,
+      minimum: minimum,
+      maximum: maximum,
+      interval: rawInterval,
+    );
+    return _EffectParameterAdjustment(
+      oldValue: current,
+      newValue: next,
+      oldDisplayValue: current.toStringAsFixed(2),
+      newDisplayValue: next.toStringAsFixed(2),
+      rawInterval: rawInterval,
+    );
+  }
+
   int? _toActionInt(dynamic raw) {
     return AssistantActionUtils.toActionInt(raw);
   }
@@ -66927,82 +67080,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   (picked['id'] as String?) ??
                   (picked['name'] as String); // robust
               final paramName = (picked['name'] as String?) ?? paramId;
-              final current = (picked['value'] as num).toDouble();
-
-              final double? pMin = picked['min'] is num
-                  ? (picked['min'] as num).toDouble()
-                  : null;
-              final double? pMax = picked['max'] is num
-                  ? (picked['max'] as num).toDouble()
-                  : null;
-
-              final clamp01 = (a.data['clamp_0_1'] as bool?) ?? false;
-
-              final mode = (a.data['mode'] as String?) ?? 'delta';
-
-              double next = current;
-
-              if (mode == 'set') {
-                if (a.data.containsKey('value_norm') &&
-                    pMin != null &&
-                    pMax != null) {
-                  final vn = (a.data['value_norm'] as num).toDouble().clamp(
-                    0.0,
-                    1.0,
-                  );
-                  next = pMin + (pMax - pMin) * vn;
-                } else {
-                  next = (a.data['value'] as num).toDouble();
-                }
-              } else {
-                // delta mode
-                double delta;
-                if (a.data.containsKey('delta_norm')) {
-                  final dn = (a.data['delta_norm'] as num).toDouble();
-                  if (pMin != null && pMax != null) {
-                    delta = dn * (pMax - pMin);
-                  } else {
-                    delta = dn;
-                  }
-                } else {
-                  delta = (a.data['delta'] as num).toDouble();
-                }
-                next = current + delta;
-              }
-
-              // -----------------------------
-              // HARD SAFETY CLAMPS (action-level)
-              // -----------------------------
-              final double? hardMin = a.data['clamp_min'] is num
-                  ? (a.data['clamp_min'] as num).toDouble()
-                  : null;
-              final double? hardMax = a.data['clamp_max'] is num
-                  ? (a.data['clamp_max'] as num).toDouble()
-                  : null;
-
-              // Apply hard clamps FIRST (authoritative)
-              if (hardMin != null || hardMax != null) {
-                final lo = hardMin ?? double.negativeInfinity;
-                final hi = hardMax ?? double.infinity;
-                next = next.clamp(lo, hi);
-              }
-
-              // -----------------------------
-              // Plugin range clamp
-              // -----------------------------
-              if (pMin != null && pMax != null) {
-                next = next.clamp(pMin, pMax);
-              } else if (clamp01) {
-                next = next.clamp(0.0, 1.0);
-              }
-              final interval = (_toActionDouble(picked['interval']) ?? 0.0)
-                  .abs();
-              next = _canonicalEffectParameterValue(
-                value: next,
-                minimum: pMin,
-                maximum: pMax,
-                interval: interval,
-              );
+              final adjustment = _effectParameterAdjustment(picked, a.data);
 
               // await _undoManager.execute(
               //   SetEffectParamAction(
@@ -67025,8 +67103,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 effectInstanceId: resolved.effectInstanceId,
                 effectOccurrence: resolved.effectOccurrence,
                 paramId: paramId,
-                oldValue: current,
-                newValue: next,
+                oldValue: adjustment.oldValue,
+                newValue: adjustment.newValue,
                 forceIndividualRow: forceIndividualRow,
                 onChange: () {
                   setState(() {});
@@ -67064,16 +67142,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final normalizedValue = _toActionDouble(
                 appliedParameter?['valueNormalized'],
               );
-              if (appliedValue == null ||
-                  normalizedValue == null ||
-                  (appliedValue - next).abs() >
-                      math.max(0.0001, interval / 2.0 + 0.000001)) {
-                throw StateError('mix_effect_parameter_apply_failed');
-              }
               final normalizedInterval =
                   (_toActionDouble(appliedParameter?['intervalNormalized']) ??
                           0.0)
                       .abs();
+              final normalizedTolerance = math.max(
+                0.001,
+                normalizedInterval > 0.0
+                    ? normalizedInterval / 2.0 + 0.000001
+                    : 0.001,
+              );
+              final parameterApplied = adjustment.usesNormalizedVerification
+                  ? normalizedValue != null &&
+                        (normalizedValue -
+                                    adjustment.expectedNormalizedValue!)
+                                .abs() <=
+                            normalizedTolerance
+                  : appliedValue != null &&
+                        (appliedValue - (adjustment.newValue as double)).abs() <=
+                            math.max(
+                              0.0001,
+                              adjustment.rawInterval / 2.0 + 0.000001,
+                            );
+              if (!parameterApplied || normalizedValue == null) {
+                throw StateError('mix_effect_parameter_apply_failed');
+              }
               appliedMutations.add(<String, dynamic>{
                 'kind': 'effect_parameter_value',
                 'row': row,
@@ -67084,14 +67177,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'effect_name': resolved.effectName,
                 'parameter_id': paramId,
                 'param_name': paramName,
-                'value': next,
+                'value': adjustment.newValue,
                 'value_normalized': normalizedValue,
-                'tolerance_normalized': math.max(
-                  0.001,
-                  normalizedInterval > 0.0
-                      ? normalizedInterval / 2.0 + 0.000001
-                      : 0.001,
-                ),
+                'tolerance_normalized': normalizedTolerance,
               });
               adjustedCount += 1;
 
@@ -67106,7 +67194,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ]);
 
               emitActionSummary(
-                '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${resolved.effectName} (${targetDisplayNameForRow(row)}) •',
+                '• Adjusted $paramName from ${adjustment.oldDisplayValue} to ${adjustment.newDisplayValue} on ${resolved.effectName} (${targetDisplayNameForRow(row)}) •',
               );
             }
             if (adjustedCount == 0 && !skipIfMissing) {
@@ -67146,78 +67234,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final paramId =
                 (picked['id'] as String?) ?? (picked['name'] as String);
             final paramName = (picked['name'] as String?) ?? paramId;
-            final current = (picked['value'] as num).toDouble();
-
-            final double? pMin = picked['min'] is num
-                ? (picked['min'] as num).toDouble()
-                : null;
-            final double? pMax = picked['max'] is num
-                ? (picked['max'] as num).toDouble()
-                : null;
-
-            final clamp01 = (a.data['clamp_0_1'] as bool?) ?? false;
-            final mode = (a.data['mode'] as String?) ?? 'delta';
-
-            double next = current;
-            if (mode == 'set') {
-              if (a.data.containsKey('value_norm') &&
-                  pMin != null &&
-                  pMax != null) {
-                final vn = (a.data['value_norm'] as num).toDouble().clamp(
-                  0.0,
-                  1.0,
-                );
-                next = pMin + (pMax - pMin) * vn;
-              } else {
-                next = (a.data['value'] as num).toDouble();
-              }
-            } else {
-              double delta;
-              if (a.data.containsKey('delta_norm')) {
-                final dn = (a.data['delta_norm'] as num).toDouble();
-                if (pMin != null && pMax != null) {
-                  delta = dn * (pMax - pMin);
-                } else {
-                  delta = dn;
-                }
-              } else {
-                delta = (a.data['delta'] as num).toDouble();
-              }
-              next = current + delta;
-            }
-
-            final double? hardMin = a.data['clamp_min'] is num
-                ? (a.data['clamp_min'] as num).toDouble()
-                : null;
-            final double? hardMax = a.data['clamp_max'] is num
-                ? (a.data['clamp_max'] as num).toDouble()
-                : null;
-
-            if (hardMin != null || hardMax != null) {
-              final lo = hardMin ?? double.negativeInfinity;
-              final hi = hardMax ?? double.infinity;
-              next = next.clamp(lo, hi);
-            }
-
-            if (pMin != null && pMax != null) {
-              next = next.clamp(pMin, pMax);
-            } else if (clamp01) {
-              next = next.clamp(0.0, 1.0);
-            }
-            final interval = (_toActionDouble(picked['interval']) ?? 0.0).abs();
-            next = _canonicalEffectParameterValue(
-              value: next,
-              minimum: pMin,
-              maximum: pMax,
-              interval: interval,
-            );
+            final adjustment = _effectParameterAdjustment(picked, a.data);
 
             final finalAct = SetMasterEffectParamAction(
               effectIndex: fxIndex,
               effectId: resolved.effectId,
               paramId: paramId,
-              oldValue: current,
-              newValue: next,
+              oldValue: adjustment.oldValue,
+              newValue: adjustment.newValue,
               onChange: () {
                 setState(() {});
                 unawaited(_refreshAutomationTargetsForAllRows());
@@ -67246,16 +67270,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final normalizedValue = _toActionDouble(
               appliedParameter?['valueNormalized'],
             );
-            if (appliedValue == null ||
-                normalizedValue == null ||
-                (appliedValue - next).abs() >
-                    math.max(0.0001, interval / 2.0 + 0.000001)) {
-              throw StateError('mix_master_parameter_apply_failed');
-            }
             final normalizedInterval =
                 (_toActionDouble(appliedParameter?['intervalNormalized']) ??
                         0.0)
                     .abs();
+            final normalizedTolerance = math.max(
+              0.001,
+              normalizedInterval > 0.0
+                  ? normalizedInterval / 2.0 + 0.000001
+                  : 0.001,
+            );
+            final parameterApplied = adjustment.usesNormalizedVerification
+                ? normalizedValue != null &&
+                      (normalizedValue - adjustment.expectedNormalizedValue!)
+                              .abs() <=
+                          normalizedTolerance
+                : appliedValue != null &&
+                      (appliedValue - (adjustment.newValue as double)).abs() <=
+                          math.max(
+                            0.0001,
+                            adjustment.rawInterval / 2.0 + 0.000001,
+                          );
+            if (!parameterApplied || normalizedValue == null) {
+              throw StateError('mix_master_parameter_apply_failed');
+            }
             appliedMutations.add(<String, dynamic>{
               'kind': 'effect_parameter_value',
               'master': true,
@@ -67264,18 +67302,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'effect_name': resolved.effectName,
               'parameter_id': paramId,
               'param_name': paramName,
-              'value': next,
+              'value': adjustment.newValue,
               'value_normalized': normalizedValue,
-              'tolerance_normalized': math.max(
-                0.001,
-                normalizedInterval > 0.0
-                    ? normalizedInterval / 2.0 + 0.000001
-                    : 0.001,
-              ),
+              'tolerance_normalized': normalizedTolerance,
             });
 
             emitActionSummary(
-              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${resolved.effectName} (Master Bus) •',
+              '• Adjusted $paramName from ${adjustment.oldDisplayValue} to ${adjustment.newDisplayValue} on ${resolved.effectName} (Master Bus) •',
             );
             continue;
           }
