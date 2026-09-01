@@ -242,7 +242,11 @@ class LlmProviderTests(unittest.TestCase):
                     response,
                 ],
             ) as urlopen_mock:
-                with mock.patch.object(llm_provider.time, "sleep") as sleep_mock:
+                with mock.patch.object(
+                    llm_provider.time,
+                    "monotonic",
+                    side_effect=[100.0, 100.0, 100.5, 102.0],
+                ), mock.patch.object(llm_provider.time, "sleep") as sleep_mock:
                     status_code, body = llm_provider._post_json_request(
                         url="https://api.example.test/v1/responses",
                         headers={"Authorization": "Bearer sk-test"},
@@ -254,7 +258,56 @@ class LlmProviderTests(unittest.TestCase):
         self.assertEqual(status_code, 200)
         self.assertEqual(json.loads(body), {"ok": True})
         self.assertEqual(urlopen_mock.call_count, 2)
+        self.assertEqual(
+            [call.kwargs["timeout"] for call in urlopen_mock.call_args_list],
+            [5.0, 3.0],
+        )
         sleep_mock.assert_called_once()
+
+    def test_post_json_request_does_not_retry_after_deadline_exhausted(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        response.__enter__.return_value.read.return_value = b'{"ok":true}'
+
+        with mock.patch.dict(
+            llm_provider.os.environ,
+            {"LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS": "2"},
+            clear=False,
+        ), mock.patch.object(
+            llm_provider.urllib.request,
+            "urlopen",
+            side_effect=[
+                urllib.error.URLError(TimeoutError("timed out")),
+                response,
+            ],
+        ) as urlopen_mock, mock.patch.object(
+            llm_provider.time,
+            "monotonic",
+            side_effect=[100.0, 100.0, 104.9],
+        ), mock.patch.object(llm_provider.time, "sleep") as sleep_mock:
+            with self.assertRaises(TimeoutError):
+                llm_provider._post_json_request(
+                    url="https://api.example.test/v1/responses",
+                    headers={"Authorization": "Bearer sk-test"},
+                    body={"input": "hello"},
+                    timeout_seconds=5,
+                    fallback_error_message="Upstream error",
+                )
+
+        self.assertEqual(urlopen_mock.call_count, 1)
+        sleep_mock.assert_not_called()
+
+    def test_upstream_timeout_detection_handles_wrapped_socket_timeout(self) -> None:
+        self.assertTrue(
+            llm_provider.is_upstream_timeout_error(
+                urllib.error.URLError(TimeoutError("timed out"))
+            )
+        )
+        self.assertFalse(
+            llm_provider.is_upstream_timeout_error(
+                urllib.error.URLError(ConnectionResetError("reset"))
+            )
+        )
 
     def test_post_json_request_does_not_retry_http_errors(self) -> None:
         http_error = urllib.error.HTTPError(

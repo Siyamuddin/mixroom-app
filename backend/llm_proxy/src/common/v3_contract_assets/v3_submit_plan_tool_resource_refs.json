@@ -4299,7 +4299,7 @@
                 "arguments"
               ],
               "additionalProperties": false,
-              "description": "Use when the user explicitly names an effect to add or configure. Do not route an explicitly named effect through mix.apply_goal."
+              "description": "Use when the user explicitly names an effect to add or configure. Copy exact effect_id and parameter_id values from core_context.effects. Use an empty parameters list when no representable setting was requested. This command may coexist with mix.apply_goal for a separate subjective goal."
             },
             {
               "type": "object",
@@ -5318,7 +5318,7 @@
                 "arguments"
               ],
               "additionalProperties": false,
-              "description": "Use for subjective sonic or reference-mixing goals such as warmer, wider, punchier, or polished. Use deterministic V3 commands for explicitly named effects and numeric settings."
+              "description": "Use for subjective sonic or reference-mixing goals such as warmer, wider, punchier, polished, or balanced. It may coexist with deterministic V3 commands for explicitly named effects and numeric settings, but must not replace them."
             }
           ]
         }

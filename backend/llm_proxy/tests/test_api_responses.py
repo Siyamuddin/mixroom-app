@@ -109,6 +109,14 @@ class _ReservationResult:
         self.reserved_grant_prompts = reserved_grant_prompts
 
 
+class _LambdaContext:
+    def __init__(self, remaining_ms: int) -> None:
+        self.remaining_ms = remaining_ms
+
+    def get_remaining_time_in_millis(self) -> int:
+        return self.remaining_ms
+
+
 class _FakeUsageRepo:
     def __init__(self) -> None:
         self.user_context = {
@@ -553,6 +561,8 @@ class ApiResponsesTests(unittest.TestCase):
                 "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
                 "AI_V3_MODEL": "gpt-5.6-luna",
                 "AI_V3_REASONING_EFFORT": "low",
+                "AI_V3_TIMEOUT_SECONDS": "60",
+                "LLM_TIMEOUT_SECONDS": "60",
             },
             clear=False,
         ), mock.patch.object(
@@ -560,13 +570,14 @@ class ApiResponsesTests(unittest.TestCase):
         ), mock.patch.object(
             api_responses, "get_provider", return_value=provider
         ), redirect_stdout(output):
-            result = api_responses.handler(event, None)
+            result = api_responses.handler(event, _LambdaContext(30_000))
 
         self.assertEqual(result["statusCode"], 200)
         assert provider.request_body is not None
         self.assertEqual(set(result), {"statusCode", "headers", "body"})
         self.assertEqual(provider.request_body["model"], "gpt-5.6-luna")
         self.assertEqual(provider.request_body["reasoning"], {"effort": "low"})
+        self.assertEqual(provider.timeout_seconds, 27)
         self.assertEqual(provider.request_body["max_output_tokens"], 8192)
         self.assertFalse(provider.request_body["parallel_tool_calls"])
         self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
@@ -593,9 +604,81 @@ class ApiResponsesTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, rendered)
         logged = output.getvalue()
+        self.assertIn('"provider_timeout_seconds": 27', logged)
+        self.assertIn('"provider_body_bytes":', logged)
         self.assertNotIn("Restart playback.", logged)
         self.assertNotIn("secret-project", logged)
         self.assertNotIn("No project changes were needed.", logged)
+
+    def test_v3_provider_timeout_preserves_lambda_response_margin(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(self._v3_respond_plan()),
+                    }
+                ]
+            }
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+                "AI_V3_TIMEOUT_SECONDS": "20",
+                "LLM_TIMEOUT_SECONDS": "60",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(event, _LambdaContext(6_500))
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(provider.timeout_seconds, 4)
+
+    def test_v3_upstream_timeout_returns_controlled_gateway_timeout(self) -> None:
+        provider = _FakeProvider(forward_error=TimeoutError("timed out"))
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 504)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_upstream_timeout",
+        )
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(
+            self.fake_usage_repo.log_calls[-1]["error_code"],
+            "upstream_timeout",
+        )
 
     def test_v3_server_contract_rejects_client_ai_fields_before_quota_or_provider(
         self,
@@ -709,6 +792,107 @@ class ApiResponsesTests(unittest.TestCase):
                 response = json.loads(result["body"])
                 self.assertEqual(response["error"]["code"], "v3_invalid_provider_output")
                 self.assertEqual(set(response), {"error"})
+
+    def test_v3_server_contract_rejects_unadvertised_effect_parameter_privately(self) -> None:
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Updated the guitar.",
+            "commands": [
+                {
+                    "command_id": "effect-1",
+                    "type": "effect.ensure_configured",
+                    "arguments": {
+                        "row_id": 101,
+                        "effect_id": "Distortion",
+                        "parameters": [{"parameter_id": "hpf", "value": 0.5}],
+                    },
+                }
+            ],
+            "question_options": [],
+        }
+        provider = _FakeProvider(
+            response_body={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(plan),
+                    }
+                ]
+            }
+        )
+        body = self._v3_context_body(
+            original_request="Make the guitar richer.",
+            supported_command_types=["effect.ensure_configured", "mix.apply_goal"],
+            resource_refs_enabled=False,
+            core_context={
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "row_capacity": {
+                        "current_rows": 1,
+                        "max_rows": 5,
+                        "can_create": True,
+                    }
+                },
+                "rows": [
+                    {
+                        "row_id": 101,
+                        "lane_kind": "instrument",
+                        "instrument_id": "free-piano",
+                        "mix_processing_supported": True,
+                        "has_usable_signal": False,
+                        "effects": [],
+                    }
+                ],
+                "clips": [],
+                "groups": [],
+                "library_assets": [],
+                "instruments": ["free-piano"],
+                "instrument_catalog": [
+                    {
+                        "instrument_id": "free-piano",
+                        "name": "Free Piano",
+                        "playable_pitch_ranges": [{"low": 40, "high": 84}],
+                    }
+                ],
+                "effects": [
+                    {
+                        "effect_id": "Distortion",
+                        "parameters": [
+                            {"parameter_id": "HPF Frequency", "range": [0, 1]}
+                        ],
+                    }
+                ],
+            },
+        )
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+        output = StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), redirect_stdout(output):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 502)
+        response = json.loads(result["body"])
+        self.assertEqual(response["error"]["code"], "v3_invalid_provider_output")
+        self.assertEqual(set(response), {"error"})
+        self.assertNotIn("hpf", result["body"].lower())
+        self.assertNotIn("distortion", result["body"].lower())
+        self.assertNotIn("hpf", output.getvalue().lower())
+        self.assertNotIn("distortion", output.getvalue().lower())
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
+        assert provider.request_body is not None
+        runtime_tool = json.dumps(provider.request_body["tools"][0])
+        self.assertIn("HPF Frequency", runtime_tool)
+        self.assertNotIn('"hpf"', runtime_tool)
 
     def test_v3_endpoint_kill_switch_blocks_before_provider_usage(self) -> None:
         event = _authed_event(

@@ -3250,7 +3250,7 @@
                 "arguments"
               ],
               "additionalProperties": false,
-              "description": "Use for subjective sonic or reference-mixing goals. Use exact row commands for explicit numeric gain or pan edits."
+              "description": "Use for subjective sonic or reference-mixing goals. It may coexist with named effect commands, but must not replace an explicitly named effect. Use exact row commands for explicit numeric gain or pan edits."
             }
           ]
         }

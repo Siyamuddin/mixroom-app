@@ -43,6 +43,7 @@ from common.llm_provider import (
     append_openai_conversation_items,
     create_openai_conversation,
     get_provider,
+    is_upstream_timeout_error,
 )
 from common.logging_utils import build_request_log_context, log_request_complete
 from common.monitoring import capture_exception, init_sentry
@@ -61,6 +62,8 @@ _secret_cache: Any | None = None
 _secret_cache_loaded_at: float | None = None
 _usage_repo = AiUsageRepository()
 _conversation_state_table: Any | None = None
+_V3_MAX_PROVIDER_TIMEOUT_SECONDS = 27
+_V3_LAMBDA_RESPONSE_MARGIN_MS = 2_000
 _STRUCTURED_MIXROOM_FIELDS = frozenset(
     {
         "conversation",
@@ -492,6 +495,32 @@ def _request_timeout_seconds() -> int:
     except ValueError:
         return 30
     return max(1, value)
+
+
+def _v3_request_timeout_seconds(context: Any) -> int:
+    """Return a V3 provider deadline that preserves Lambda response time."""
+
+    raw = _env_value(
+        "AI_V3_TIMEOUT_SECONDS",
+        default=str(_V3_MAX_PROVIDER_TIMEOUT_SECONDS),
+    )
+    try:
+        configured = int(raw)
+    except ValueError:
+        configured = _V3_MAX_PROVIDER_TIMEOUT_SECONDS
+    configured = max(1, min(configured, _V3_MAX_PROVIDER_TIMEOUT_SECONDS))
+
+    remaining_time = getattr(context, "get_remaining_time_in_millis", None)
+    if not callable(remaining_time):
+        return configured
+    try:
+        remaining_ms = int(remaining_time())
+    except (TypeError, ValueError):
+        return configured
+    available_seconds = (
+        remaining_ms - _V3_LAMBDA_RESPONSE_MARGIN_MS
+    ) // 1_000
+    return max(1, min(configured, available_seconds))
 
 
 def _conversation_state_table_name() -> str:
@@ -3194,6 +3223,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         runtime_config_fingerprint = v3_server_contract_fingerprint(
             command_types=v3_server_request["supported_command_types"],
             resource_refs_enabled=v3_server_request["resource_refs_enabled"],
+            capability_surface=v3_server_request["capability_surface"],
+            max_output_tokens=int(request_body.get("max_output_tokens") or 8192),
         )
         request_log_context["v3_contract_version"] = V3_SERVER_CONTRACT_VERSION
     request_log_context["provider"] = provider.name
@@ -3450,12 +3481,30 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="ai_usage_limit_hit",
         )
 
+    provider_timeout_seconds = (
+        _v3_request_timeout_seconds(_context)
+        if is_v3_request
+        else _request_timeout_seconds()
+    )
+    provider_request_body_bytes = len(
+        json.dumps(request_body, separators=(",", ":")).encode("utf-8")
+    )
+    request_log_context["client_request_body_bytes"] = len(
+        raw_body.encode("utf-8")
+    )
+    request_log_context["provider_request_body_bytes"] = (
+        provider_request_body_bytes
+    )
+    request_log_context["provider_timeout_seconds"] = provider_timeout_seconds
+
     print(
         json.dumps(
             {
                 "message": "Forwarding LLM request",
                 "user_id": user_id,
                 "body_bytes": len(raw_body.encode("utf-8")),
+                "provider_body_bytes": provider_request_body_bytes,
+                "provider_timeout_seconds": provider_timeout_seconds,
                 "provider": provider.name,
                 "model": request_body.get("model"),
                 "tier": subscription_tier,
@@ -3496,11 +3545,15 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         enabled=analytics_enabled,
     )
 
+    provider_started_at = time.perf_counter()
     try:
         proxy_response = provider.forward_request(
             api_key=api_key,
             request_body=request_body,
-            timeout_seconds=_request_timeout_seconds(),
+            timeout_seconds=provider_timeout_seconds,
+        )
+        measured_provider_roundtrip_ms = int(
+            (time.perf_counter() - provider_started_at) * 1000
         )
         provider_observability = proxy_response.get("observability") or {}
         if isinstance(provider_observability, dict):
@@ -3520,7 +3573,23 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 request_log_context["openai_conversation_tool_outputs_appended"] = (
                     openai_conversation_tool_outputs_appended
                 )
+        if provider_roundtrip_ms <= 0:
+            provider_roundtrip_ms = measured_provider_roundtrip_ms
+            if provider_roundtrip_ms > 0:
+                request_log_context["provider_roundtrip_ms"] = (
+                    provider_roundtrip_ms
+                )
     except Exception as error:
+        provider_roundtrip_ms = int(
+            (time.perf_counter() - provider_started_at) * 1000
+        )
+        upstream_timed_out = is_upstream_timeout_error(error)
+        upstream_error_code = (
+            "upstream_timeout" if upstream_timed_out else "upstream_unavailable"
+        )
+        request_log_context["provider_roundtrip_ms"] = provider_roundtrip_ms
+        request_log_context["failure_stage"] = "provider_roundtrip"
+        request_log_context["provider_timed_out"] = upstream_timed_out
         capture_exception(
             error,
             context={
@@ -3559,7 +3628,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             total_tokens=0,
             credits_charged=0,
             status="failed",
-            error_code="upstream_unavailable",
+            error_code=upstream_error_code,
             runtime_config_fingerprint=runtime_config_fingerprint,
             app_version=str(client_context.get("app_version") or ""),
             platform=str(client_context.get("platform") or ""),
@@ -3584,7 +3653,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     "provider_roundtrip_ms": provider_roundtrip_ms or None,
                     "openai_api_ms": openai_api_ms or None,
                     "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
-                    "error_code": "upstream_unavailable",
+                    "error_code": upstream_error_code,
                     "success": False,
                 },
             ),
@@ -3592,12 +3661,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
         return _finalize(
             json_response(
-                502,
+                504 if is_v3_request and upstream_timed_out else 502,
                 (
                     {
                         "error": {
-                            "code": "v3_upstream_unavailable",
-                            "message": "AI V3 planning is temporarily unavailable.",
+                            "code": (
+                                "v3_upstream_timeout"
+                                if upstream_timed_out
+                                else "v3_upstream_unavailable"
+                            ),
+                            "message": (
+                                "AI V3 planning did not finish in time."
+                                if upstream_timed_out
+                                else "AI V3 planning is temporarily unavailable."
+                            ),
                         }
                     }
                     if v3_server_request is not None
@@ -3630,6 +3707,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     response_payload,
                     command_types=v3_server_request["supported_command_types"],
                     resource_refs_enabled=v3_server_request["resource_refs_enabled"],
+                    capability_surface=v3_server_request["capability_surface"],
                 )
             except V3ContractError as error:
                 try:
