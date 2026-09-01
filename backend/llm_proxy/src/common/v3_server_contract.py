@@ -513,6 +513,12 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
             raise _contract_error("v3_capability_context_duplicate", "'clips' contains duplicate IDs.")
         clip_ids.add(clip_id)
         clip_row_id = raw_clip.get("row_id")
+        if (
+            not isinstance(clip_row_id, int)
+            or isinstance(clip_row_id, bool)
+            or clip_row_id < 0
+        ):
+            raise _contract_error("v3_capability_context_invalid", "A clip row ID is invalid.")
         if clip_row_id not in row_ids:
             raise _contract_error("v3_capability_context_invalid", "A clip references an unknown row.")
         row = next(item for item in typed_rows if item.row_id == clip_row_id)

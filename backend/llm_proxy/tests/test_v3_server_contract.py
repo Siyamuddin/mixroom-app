@@ -546,6 +546,21 @@ class V3ServerContractTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, "v3_capability_context_invalid")
 
+    def test_capability_surface_rejects_invalid_clip_row_ids(self) -> None:
+        for invalid_row_id in (None, True, False, 101.0, "101", -1, [], {}, 999):
+            with self.subTest(row_id=invalid_row_id):
+                context = self._core_context()
+                if isinstance(invalid_row_id, bool):
+                    context["rows"][0]["row_id"] = int(invalid_row_id)
+                context["clips"][0]["row_id"] = invalid_row_id
+
+                with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+                    v3_server_contract.extract_capability_surface(context)
+
+                self.assertEqual(
+                    raised.exception.code, "v3_capability_context_invalid"
+                )
+
     def test_runtime_schema_prunes_empty_stable_identifier_alternatives(self) -> None:
         context = self._core_context()
         context["project"]["row_capacity"] = {

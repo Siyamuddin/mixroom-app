@@ -696,6 +696,48 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(self.fake_usage_repo.reserve_calls, [])
         get_provider.assert_not_called()
 
+    def test_v3_server_contract_rejects_malformed_clip_row_before_quota_or_provider(
+        self,
+    ) -> None:
+        body = self._v3_context_body()
+        body["core_context"].update(
+            {
+                "rows": [
+                    {
+                        "row_id": 101,
+                        "lane_kind": "audio",
+                        "instrument_id": "",
+                        "mix_processing_supported": True,
+                        "has_usable_signal": True,
+                        "effects": [],
+                    }
+                ],
+                "clips": [
+                    {
+                        "clip_id": "clip-1",
+                        "row_id": [],
+                        "kind": "audio",
+                    }
+                ],
+            }
+        )
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(api_responses, "get_provider") as get_provider:
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_capability_context_invalid",
+        )
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+        get_provider.assert_not_called()
+
     def test_v3_server_contract_rejects_unknown_fields_and_versions_before_quota(
         self,
     ) -> None:
