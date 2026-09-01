@@ -647,6 +647,67 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(result["statusCode"], 200)
         self.assertEqual(provider.timeout_seconds, 4)
 
+    def test_v3_exhausted_response_margin_skips_provider_and_releases_usage(
+        self,
+    ) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(self._v3_respond_plan()),
+                    }
+                ]
+            }
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+        output = StringIO()
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+                "AI_V3_TIMEOUT_SECONDS": "20",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), redirect_stdout(output):
+            self.assertEqual(
+                api_responses._v3_request_timeout_seconds(_LambdaContext(2_999)),
+                0,
+            )
+            self.assertEqual(
+                api_responses._v3_request_timeout_seconds(_LambdaContext(3_000)),
+                1,
+            )
+            result = api_responses.handler(event, _LambdaContext(2_999))
+
+        self.assertEqual(result["statusCode"], 504)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_upstream_timeout",
+        )
+        self.assertIsNone(provider.request_body)
+        self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(
+            self.fake_usage_repo.log_calls[-1]["error_code"],
+            "upstream_timeout",
+        )
+        logged = output.getvalue()
+        self.assertIn('"message": "V3 provider deadline exhausted"', logged)
+        self.assertIn('"failure_stage": "provider_deadline"', logged)
+        self.assertNotIn('"message": "Forwarding LLM request"', logged)
+
     def test_v3_upstream_timeout_returns_controlled_gateway_timeout(self) -> None:
         provider = _FakeProvider(forward_error=TimeoutError("timed out"))
         event = _authed_event(

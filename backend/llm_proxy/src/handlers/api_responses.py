@@ -520,7 +520,7 @@ def _v3_request_timeout_seconds(context: Any) -> int:
     available_seconds = (
         remaining_ms - _V3_LAMBDA_RESPONSE_MARGIN_MS
     ) // 1_000
-    return max(1, min(configured, available_seconds))
+    return max(0, min(configured, available_seconds))
 
 
 def _conversation_state_table_name() -> str:
@@ -3496,11 +3496,16 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         provider_request_body_bytes
     )
     request_log_context["provider_timeout_seconds"] = provider_timeout_seconds
+    provider_deadline_exhausted = is_v3_request and provider_timeout_seconds <= 0
 
     print(
         json.dumps(
             {
-                "message": "Forwarding LLM request",
+                "message": (
+                    "V3 provider deadline exhausted"
+                    if provider_deadline_exhausted
+                    else "Forwarding LLM request"
+                ),
                 "user_id": user_id,
                 "body_bytes": len(raw_body.encode("utf-8")),
                 "provider_body_bytes": provider_request_body_bytes,
@@ -3547,6 +3552,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     provider_started_at = time.perf_counter()
     try:
+        if provider_deadline_exhausted:
+            raise TimeoutError("V3 provider deadline exhausted before request.")
         proxy_response = provider.forward_request(
             api_key=api_key,
             request_body=request_body,
@@ -3588,17 +3595,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             "upstream_timeout" if upstream_timed_out else "upstream_unavailable"
         )
         request_log_context["provider_roundtrip_ms"] = provider_roundtrip_ms
-        request_log_context["failure_stage"] = "provider_roundtrip"
-        request_log_context["provider_timed_out"] = upstream_timed_out
-        capture_exception(
-            error,
-            context={
-                **request_log_context,
-                "provider": provider.name,
-                "model": str(request_body.get("model") or ""),
-            },
-            tags={"service": "llm_proxy"},
+        request_log_context["failure_stage"] = (
+            "provider_deadline" if provider_deadline_exhausted else "provider_roundtrip"
         )
+        request_log_context["provider_timed_out"] = upstream_timed_out
+        if not provider_deadline_exhausted:
+            capture_exception(
+                error,
+                context={
+                    **request_log_context,
+                    "provider": provider.name,
+                    "model": str(request_body.get("model") or ""),
+                },
+                tags={"service": "llm_proxy"},
+            )
         try:
             _usage_repo.release_usage(
                 user_id,
