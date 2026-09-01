@@ -81,6 +81,10 @@ flutter build macos
 flutter build windows
 ```
 
+For the signed website DMG and Sparkle update archive, follow
+`docs/MACOS_AUTO_UPDATE.md` and use `script/package_macos_release.sh`. Do not
+publish a raw `flutter build macos` output.
+
 Scan each release-equivalent output before signing or distribution. Pass the
 APK/AAB archive itself and the unpacked iOS, macOS, and Windows application
 directories so assets, native/AOT binaries, frameworks, and symbol bundles are

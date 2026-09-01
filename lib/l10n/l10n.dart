@@ -64,6 +64,8 @@ class L10n {
       'Version {version}': 'Version {version}',
       'Update Mixroom': 'Update Mixroom',
       'Check for updates': 'Check for updates',
+      'Unable to check for updates right now.':
+          'Unable to check for updates right now.',
       'Mixroom website': 'Mixroom website',
       'Update Required': 'Update Required',
       'Update Available': 'Update Available',

@@ -10,5 +10,10 @@
     "minSupportedVersion": "1.1.0",
     "storeUrl": "https://play.google.com/store/apps/details?id=com.mixroom.mixroomapp",
     "promptCadenceHours": 24
+  },
+  "macos": {
+    "latestVersion": "1.3.6",
+    "minSupportedVersion": "1.3.6",
+    "promptCadenceHours": 24
   }
 }

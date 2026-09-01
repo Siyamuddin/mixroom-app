@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/desktop_auto_update_service.dart';
 import 'package:mixroom/helpers/app_update_prompt_service.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -50,6 +51,7 @@ class _SignedInShellState extends State<SignedInShell> {
   bool _creatingProject = false;
   final AppUpdatePromptService _appUpdatePromptService =
       AppUpdatePromptService();
+  late Future<AppVersionStatus?> _desktopVersionStatusFuture;
   final RemoteAnnouncementManager _remoteAnnouncementManager =
       RemoteAnnouncementManager();
   bool _welcomeCheckStarted = false;
@@ -78,6 +80,7 @@ class _SignedInShellState extends State<SignedInShell> {
   @override
   void initState() {
     super.initState();
+    _desktopVersionStatusFuture = _appUpdatePromptService.getVersionStatus();
     _educationInviteLinkSub = OpenMixroomService.urlStream.listen(
       (url) => unawaited(_handleIncomingEducationInviteUrl(url)),
     );
@@ -293,6 +296,30 @@ class _SignedInShellState extends State<SignedInShell> {
     String action,
   ) async {
     if (action == 'update') {
+      if (DesktopAutoUpdateService.instance.isConfigured) {
+        final launched = await DesktopAutoUpdateService.instance
+            .checkForUpdates();
+        if (!mounted) return;
+        if (!launched) {
+          showAppSnackBar(
+            context,
+            L10n.translate(context, 'Unable to check for updates right now.'),
+          );
+        }
+        unawaited(
+          AnalyticsService.instance.track(
+            AnalyticsEvents.appUpdatePromptInteracted(
+              action: launched ? 'update_native' : 'update_native_failed',
+              promptType: decision.type.name,
+              currentVersion: decision.currentVersion,
+              latestVersion: decision.latestVersion,
+              errorCode: launched ? null : 'native_updater_failed',
+            ),
+          ),
+        );
+        return;
+      }
+
       final uri = Uri.tryParse(decision.storeUrl.trim());
       if (uri == null) {
         showAppSnackBar(
@@ -579,9 +606,23 @@ class _SignedInShellState extends State<SignedInShell> {
         _RailInfoPopupEntry(
           child: _MixroomRailInfoPopover(
             updateService: _appUpdatePromptService,
+            onCheckForUpdates: _checkForDesktopUpdates,
           ),
         ),
       ],
+    );
+    if (!mounted) return;
+    setState(() {
+      _desktopVersionStatusFuture = _appUpdatePromptService.getVersionStatus();
+    });
+  }
+
+  Future<void> _checkForDesktopUpdates() async {
+    final launched = await DesktopAutoUpdateService.instance.checkForUpdates();
+    if (!mounted || launched) return;
+    showAppSnackBar(
+      context,
+      L10n.translate(context, 'Unable to check for updates right now.'),
     );
   }
 
@@ -747,12 +788,30 @@ class _SignedInShellState extends State<SignedInShell> {
                   SafeArea(
                     top: false,
                     right: false,
-                    child: MixroomMainSideRail(
-                      selectedTab: _selectedTab,
-                      onTabSelected: _setTab,
-                      onAddTap: _createMusicProject,
-                      onBrandTap: () => _showRailInfo(desktopRailTopInset),
-                      topContentInset: desktopRailTopInset,
+                    child: FutureBuilder<AppVersionStatus?>(
+                      future: _desktopVersionStatusFuture,
+                      builder: (context, snapshot) {
+                        final desktopUpdater =
+                            DesktopAutoUpdateService.instance;
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: desktopUpdater.updateAvailable,
+                          builder: (context, nativeUpdateAvailable, _) {
+                            final showUpdateDot =
+                                desktopUpdater.isConfigured &&
+                                (nativeUpdateAvailable ||
+                                    snapshot.data?.isUpdateAvailable == true);
+                            return MixroomMainSideRail(
+                              selectedTab: _selectedTab,
+                              onTabSelected: _setTab,
+                              onAddTap: _createMusicProject,
+                              onBrandTap: () =>
+                                  _showRailInfo(desktopRailTopInset),
+                              showBrandNotificationDot: showUpdateDot,
+                              topContentInset: desktopRailTopInset,
+                            );
+                          },
+                        );
+                      },
                     ),
                   ),
                   Expanded(
@@ -871,9 +930,13 @@ class _RailInfoPopupEntryState extends State<_RailInfoPopupEntry> {
 }
 
 class _MixroomRailInfoPopover extends StatefulWidget {
-  const _MixroomRailInfoPopover({required this.updateService});
+  const _MixroomRailInfoPopover({
+    required this.updateService,
+    required this.onCheckForUpdates,
+  });
 
   final AppUpdatePromptService updateService;
+  final Future<void> Function() onCheckForUpdates;
 
   @override
   State<_MixroomRailInfoPopover> createState() =>
@@ -900,6 +963,11 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
     final uri = Uri.tryParse(rawUrl);
     if (uri == null) return;
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  void _checkForDesktopUpdates() {
+    Navigator.of(context).pop();
+    unawaited(widget.onCheckForUpdates());
   }
 
   @override
@@ -992,7 +1060,7 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
               final loading = snapshot.connectionState != ConnectionState.done;
               final version = status?.currentVersion.trim() ?? '';
               final canUpdate = status?.isUpdateAvailable == true;
-              final statusText = loading
+              final String? statusText = loading
                   ? L10n.translate(context, 'Checking for updates…')
                   : canUpdate
                   ? L10n.translateWithParams(
@@ -1000,8 +1068,8 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                       'Version {version} is available',
                       {'version': status!.latestVersion},
                     )
-                  : status == null
-                  ? L10n.translate(context, 'Version information unavailable')
+                  : status == null || !status.hasLatestVersion
+                  ? null
                   : L10n.translate(context, 'You’re up to date');
               return Container(
                 padding: const EdgeInsets.all(14),
@@ -1044,18 +1112,20 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                           ),
                       ],
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      statusText,
-                      style: TextStyle(
-                        fontFamily: 'Pretendard',
-                        color: canUpdate
-                            ? const Color(0xFFBBD5FF)
-                            : Colors.white.withValues(alpha: 0.56),
-                        fontSize: 11,
-                        height: 1.35,
+                    if (statusText != null) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        statusText,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: canUpdate
+                              ? const Color(0xFFBBD5FF)
+                              : Colors.white.withValues(alpha: 0.56),
+                          fontSize: 11,
+                          height: 1.35,
+                        ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 12),
                     _RailPopoverButton(
                       label: canUpdate
@@ -1068,6 +1138,8 @@ class _MixroomRailInfoPopoverState extends State<_MixroomRailInfoPopover> {
                       busy: loading,
                       onTap: loading
                           ? null
+                          : DesktopAutoUpdateService.instance.isConfigured
+                          ? _checkForDesktopUpdates
                           : canUpdate && status!.hasStoreUrl
                           ? () => _openExternal(status.storeUrl)
                           : _checkAgain,

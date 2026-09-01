@@ -22,6 +22,31 @@ class AppUpdateConfig {
     defaultValue: 24,
   );
 
+  /// Sparkle appcast used by the direct-download macOS build.
+  ///
+  /// The appcast and update archives are separate from the website DMG. The
+  /// DMG is only the installer for first-time downloads; Sparkle consumes the
+  /// signed archives referenced by this feed.
+  static const String macosAppcastUrl = String.fromEnvironment(
+    'MIXROOM_MACOS_APPCAST_URL',
+    defaultValue: 'https://www.mixroom.ai/downloads/appcast.xml',
+  );
+
+  static const int desktopUpdateCheckIntervalSeconds = int.fromEnvironment(
+    'MIXROOM_DESKTOP_UPDATE_CHECK_INTERVAL_SECONDS',
+    defaultValue: 21600,
+  );
+
+  static const String macosLatestVersion = String.fromEnvironment(
+    'MIXROOM_MACOS_LATEST_VERSION',
+    defaultValue: '',
+  );
+
+  static const String macosMinSupportedVersion = String.fromEnvironment(
+    'MIXROOM_MACOS_MIN_SUPPORTED_VERSION',
+    defaultValue: '',
+  );
+
   static const String iosLatestVersion = String.fromEnvironment(
     'MIXROOM_IOS_LATEST_VERSION',
     defaultValue: '',

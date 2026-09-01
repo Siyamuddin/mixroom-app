@@ -249,6 +249,7 @@ class AppUpdatePromptService {
     if (set == null) return null;
     if (Platform.isIOS) return set.ios;
     if (Platform.isAndroid) return set.android;
+    if (Platform.isMacOS) return set.macos;
     return null;
   }
 
@@ -271,6 +272,15 @@ class AppUpdatePromptService {
       );
       return policy.isConfigured ? policy : null;
     }
+    if (Platform.isMacOS) {
+      final policy = AppPlatformUpdatePolicy(
+        latestVersion: AppUpdateConfig.macosLatestVersion,
+        minSupportedVersion: AppUpdateConfig.macosMinSupportedVersion,
+        storeUrl: '',
+        promptCadenceHours: AppUpdateConfig.defaultPromptCadenceHours,
+      );
+      return policy.isConfigured ? policy : null;
+    }
     return null;
   }
 
@@ -283,7 +293,9 @@ class AppUpdatePromptService {
 
     final fallbackStoreUrl = Platform.isIOS
         ? AppUpdateConfig.iosStoreUrl.trim()
-        : AppUpdateConfig.androidStoreUrl.trim();
+        : Platform.isAndroid
+            ? AppUpdateConfig.androidStoreUrl.trim()
+            : '';
     if (fallbackStoreUrl.isEmpty) {
       return policy;
     }

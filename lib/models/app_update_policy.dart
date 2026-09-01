@@ -42,10 +42,12 @@ class AppUpdatePolicySet {
   const AppUpdatePolicySet({
     this.ios,
     this.android,
+    this.macos,
   });
 
   final AppPlatformUpdatePolicy? ios;
   final AppPlatformUpdatePolicy? android;
+  final AppPlatformUpdatePolicy? macos;
 
   factory AppUpdatePolicySet.fromJson(Map<String, dynamic> json) {
     AppPlatformUpdatePolicy? readPlatform(String key) {
@@ -60,6 +62,7 @@ class AppUpdatePolicySet {
     return AppUpdatePolicySet(
       ios: readPlatform('ios'),
       android: readPlatform('android'),
+      macos: readPlatform('macos'),
     );
   }
 }

@@ -1013,6 +1013,7 @@ class MixroomMainSideRail extends StatelessWidget {
     required this.onTabSelected,
     required this.onAddTap,
     this.onBrandTap,
+    this.showBrandNotificationDot = false,
     this.topContentInset = 22,
   });
 
@@ -1020,6 +1021,7 @@ class MixroomMainSideRail extends StatelessWidget {
   final ValueChanged<MixroomMainTab> onTabSelected;
   final VoidCallback onAddTap;
   final VoidCallback? onBrandTap;
+  final bool showBrandNotificationDot;
   final double topContentInset;
 
   String _iconForTab(MixroomMainTab tab, bool active) {
@@ -1071,28 +1073,64 @@ class MixroomMainSideRail extends StatelessWidget {
           child: Column(
             children: [
               Tooltip(
-                message: L10n.translate(context, 'About Mixroom'),
+                message: showBrandNotificationDot
+                    ? L10n.translate(context, 'Update Available')
+                    : L10n.translate(context, 'About Mixroom'),
                 child: Material(
                   color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onBrandTap,
-                    borderRadius: BorderRadius.circular(15),
-                    child: Ink(
-                      width: 43,
-                      height: 43,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF111A25),
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      InkWell(
+                        onTap: onBrandTap,
                         borderRadius: BorderRadius.circular(15),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.14),
+                        child: Ink(
+                          width: 43,
+                          height: 43,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF111A25),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          child: const MixroomShellShortLogo(),
                         ),
                       ),
-                      child: const MixroomShellShortLogo(),
-                    ),
+                      if (showBrandNotificationDot)
+                        Positioned(
+                          top: -2,
+                          right: -2,
+                          child: Semantics(
+                            label: L10n.translate(context, 'Update Available'),
+                            child: Container(
+                              key: const ValueKey(
+                                'mixroom-update-available-dot',
+                              ),
+                              width: 11,
+                              height: 11,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF8A34),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF080E15),
+                                  width: 2,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x66FF8A34),
+                                    blurRadius: 7,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ),
