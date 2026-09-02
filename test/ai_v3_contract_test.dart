@@ -45,6 +45,27 @@ AiV3Plan _allRowsMixPlan() => AiV3Plan.fromJson(
   ]),
 );
 
+AiV3Plan _mixPlanForTarget(Map<String, dynamic> target) => AiV3Plan.fromJson(
+  _plan(<Map<String, dynamic>>[
+    _command('mix-target', 'mix.apply_goal', <String, dynamic>{
+      'target': target,
+      'intents': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'kind': 'reverb',
+          'direction': 'up',
+          'descriptor': null,
+        },
+      ],
+      'intensity': 0.5,
+      'execution_profile': 'producer_safe',
+      'audibility': 'noticeable',
+      'style_tags': const <String>[],
+      'reset_fx': false,
+      'reference': null,
+    }),
+  ]),
+);
+
 AiV3CoreContext _context() => AiV3CoreContext(
   profile: AiV3ContextProfile.essential,
   stateDigest: 'state-1',
@@ -216,6 +237,29 @@ AiV3CoreContext _context() => AiV3CoreContext(
     ],
   },
 );
+
+AiV3CoreContext _contextWithEffects(
+  Map<String, List<String>> effectParameters,
+) {
+  final data = Map<String, dynamic>.from(
+    jsonDecode(jsonEncode(_context().data)) as Map,
+  );
+  data['effects'] = effectParameters.entries
+      .map(
+        (entry) => <String, dynamic>{
+          'effect_id': entry.key,
+          'parameters': entry.value
+              .map((parameter) => <String, dynamic>{'parameter_id': parameter})
+              .toList(growable: false),
+        },
+      )
+      .toList(growable: false);
+  return AiV3CoreContext(
+    profile: _context().profile,
+    stateDigest: _context().stateDigest,
+    data: data,
+  );
+}
 
 AiV3CoreContext _contextWithSecondAudioClip() {
   final data = Map<String, dynamic>.from(
@@ -627,6 +671,12 @@ void main() {
     test('generated rows support deferred mix goals and later row actions', () {
       final plan = parse(<Map<String, dynamic>>[
         row('created', 'audio'),
+        _command('place', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_ref': ref('created', 'row')},
+          'placements': <Map<String, dynamic>>[
+            <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+          ],
+        }),
         mixRow('mix', <String, dynamic>{
           'scope': 'row',
           'row_ref': ref('created', 'row'),
@@ -643,10 +693,11 @@ void main() {
       );
       expect(prepared.actions.map((action) => action.type), <String>[
         'row_create',
+        'sample_insert',
         'v3_deferred_mix_goal',
         'row_mix',
       ]);
-      final deferred = prepared.actions[1].data;
+      final deferred = prepared.actions[2].data;
       expect(deferred['resource_consumer_type'], 'mix.apply_goal');
       expect(deferred['operation'], 'apply_goal');
       expect(
@@ -661,6 +712,18 @@ void main() {
         final plan = parse(<Map<String, dynamic>>[
           row('drums', 'audio'),
           row('bass', 'audio'),
+          _command('place-drums', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_ref': ref('drums', 'row')},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
+          _command('place-bass', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_ref': ref('bass', 'row')},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
           _command('group', 'group.create', <String, dynamic>{
             'members': <Map<String, dynamic>>[
               <String, dynamic>{'row_ref': ref('drums', 'row')},
@@ -685,12 +748,14 @@ void main() {
         expect(prepared.actions.map((action) => action.type), <String>[
           'row_create',
           'row_create',
+          'sample_insert',
+          'sample_insert',
           'v3_group_edit',
           'v3_deferred_mix_goal',
           'v3_group_edit',
         ]);
         expect(
-          (prepared.actions[3].data['target'] as Map)['group_resource_ref'],
+          (prepared.actions[5].data['target'] as Map)['group_resource_ref'],
           ref('group', 'group'),
         );
       },
@@ -1624,7 +1689,7 @@ void main() {
         <String>[
           'Created audio row Audio',
           'Set project tempo to 60 BPM',
-          'Added/configured Reverb on Audio',
+          'Set up Reverb on Audio',
           'Added gain fade on Audio',
           'Set 2 automation points on Audio',
           'Cleared automation on Audio',
@@ -1635,7 +1700,7 @@ void main() {
         <String>[
           'Created audio row {name}.',
           'Set project tempo to {value} BPM.',
-          'Added/configured {effect} on {target}.',
+          'Set up {effect} on {target}.',
           'Added a gain fade on {target}.',
           'Set {count} automation points on {target}.',
           'Cleared automation on {target}.',
@@ -2986,6 +3051,25 @@ void main() {
           ref('create-midi', 'midi_clip'),
         );
       }
+      expect(
+        prepared.receipts.skip(1).map((receipt) => receipt['verified_label']),
+        <String>[
+          'Replaced notes in Keys',
+          'Appended notes to Keys',
+          'Chopped notes in Keys',
+        ],
+      );
+      final displayText = prepared.receipts
+          .skip(1)
+          .expand(
+            (receipt) => <Object?>[
+              receipt['preview_label'],
+              receipt['verified_label'],
+              receipt['verified_l10n_args'],
+            ],
+          )
+          .join(' ');
+      expect(displayText, isNot(contains('create-midi.midi_clip')));
     });
 
     test(
@@ -3241,6 +3325,80 @@ void main() {
       expect(prepared.actions, isEmpty);
       expect(prepared.receipts.single['status'], 'already_satisfied');
     });
+
+    test(
+      'prepares remove and recreate effect ordering as one ordered chain',
+      () {
+        final base = _contextWithEffects(<String, List<String>>{
+          'Compressor': <String>['Mix'],
+          'EQ 3-Band': <String>['Low Gain'],
+        });
+        final data = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(base.data)) as Map,
+        );
+        final rows = (data['rows'] as List)
+            .map((value) => Map<String, dynamic>.from(value as Map))
+            .toList(growable: false);
+        rows.first['effects'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'effect_instance_id': 'fx-comp-1',
+            'effect_id': 'Compressor',
+            'display_name': 'Compressor',
+            'bypassed': true,
+            'parameters': const <Object>[],
+          },
+          <String, dynamic>{
+            'effect_instance_id': 'fx-eq-1',
+            'effect_id': 'EQ 3-Band',
+            'display_name': 'EQ 3-Band',
+            'bypassed': false,
+            'parameters': const <Object>[],
+          },
+        ];
+        data['rows'] = rows;
+        final context = AiV3CoreContext(
+          profile: base.profile,
+          stateDigest: base.stateDigest,
+          data: data,
+        );
+        final plan = AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('remove-comp', 'effect.remove', <String, dynamic>{
+              'effect_instance_id': 'fx-comp-1',
+            }),
+            _command('remove-eq', 'effect.remove', <String, dynamic>{
+              'effect_instance_id': 'fx-eq-1',
+            }),
+            _command('add-eq', 'effect.ensure_configured', <String, dynamic>{
+              'row_id': 100,
+              'effect_id': 'EQ 3-Band',
+              'parameters': const <Map<String, dynamic>>[],
+            }),
+            _command('add-comp', 'effect.ensure_configured', <String, dynamic>{
+              'row_id': 100,
+              'effect_id': 'Compressor',
+              'parameters': const <Map<String, dynamic>>[],
+            }),
+          ]),
+        );
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: context,
+        );
+        expect(prepared.actions.map((action) => action.type), <String>[
+          'v3_effect_instance_edit',
+          'v3_effect_instance_edit',
+          'v3_effect_configure',
+          'v3_effect_configure',
+        ]);
+        expect(prepared.receipts, hasLength(4));
+        expect(prepared.actions[0].data['effect_index'], 0);
+        expect(prepared.actions[1].data['effect_index'], 0);
+        expect(prepared.actions[2].data['effect_id'], 'EQ 3-Band');
+        expect(prepared.actions[3].data['effect_id'], 'Compressor');
+      },
+    );
 
     test('rejects malformed mix enums and extra target fields', () {
       Map<String, dynamic> arguments() => <String, dynamic>{
@@ -4367,7 +4525,7 @@ void main() {
         expect(prepared.actions.last.data['instrument_id'], 'bass');
         expect(
           prepared.receipts.first['verified_label'],
-          'Changed Keys instrument to bass',
+          'Changed Keys instrument to another instrument',
         );
         expect(
           prepared.receipts.first['verified_l10n_key'],
@@ -4375,10 +4533,319 @@ void main() {
         );
         expect(prepared.receipts.first['verified_l10n_args'], <String, String>{
           'row': 'Keys',
-          'instrument': 'bass',
+          'instrument': 'another instrument',
         });
       },
     );
+
+    test(
+      'rewrites a preserved instrument without allowing it to be selected',
+      () {
+        final data = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(_context().data)) as Map,
+        );
+        final row = (data['rows'] as List).whereType<Map>().singleWhere(
+          (value) => value['row_id'] == 200,
+        );
+        row['instrument_id'] = 'paid-marimba';
+        final clip = (data['clips'] as List).whereType<Map>().singleWhere(
+          (value) => value['clip_id'] == 'midi-clip',
+        );
+        clip['instrument_id'] = 'paid-marimba';
+        data['instruments'] = <String>['piano', 'bass'];
+        data['instrument_catalog'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'instrument_id': 'piano',
+            'name': 'Piano',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 21, 'high': 108},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'bass',
+            'name': 'Bass',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 28, 'high': 72},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'paid-marimba',
+            'name': 'Marimba',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 45, 'high': 96},
+            ],
+          },
+        ];
+        final context = AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'preserved-marimba',
+          data: data,
+        );
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: AiV3Plan.fromJson(
+            _plan(<Map<String, dynamic>>[
+              _command('rewrite', 'midi.replace_notes', <String, dynamic>{
+                'clip_id': 'midi-clip',
+                'notes': <Map<String, dynamic>>[_note(60, 0.0, 1.0)],
+              }),
+            ]),
+          ),
+          context: context,
+        );
+
+        expect(prepared.actions, hasLength(1));
+        expect(prepared.actions.single.type, 'midi_compose');
+        expect(prepared.actions.single.data['operation'], 'replace_notes');
+        expect(
+          () => const AiV3CommandPreparer().prepare(
+            plan: AiV3Plan.fromJson(
+              _plan(<Map<String, dynamic>>[
+                _command('select', 'row.set_instrument', <String, dynamic>{
+                  'row_id': 200,
+                  'instrument_id': 'paid-marimba',
+                }),
+              ]),
+            ),
+            context: context,
+          ),
+          throwsA(
+            isA<AiV3PreparationException>().having(
+              (error) => error.code,
+              'code',
+              'v3_instrument_id_unknown',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'propagates an instrument swap to existing MIDI before rewrite and mix',
+      () {
+        final data = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(_context().data)) as Map,
+        );
+        final clips = (data['clips'] as List).whereType<Map>().toList();
+        clips.singleWhere(
+          (clip) => clip['clip_id'] == 'midi-clip',
+        )['instrument_id'] = 'piano';
+        data['instrument_catalog'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'instrument_id': 'piano',
+            'name': 'Piano',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 36, 'high': 36},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'bass',
+            'name': 'Replacement instrument',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 60, 'high': 72},
+            ],
+          },
+        ];
+        final context = AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'instrument-rewrite-state',
+          data: data,
+        );
+        final plan = AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('instrument', 'row.set_instrument', <String, dynamic>{
+              'row_id': 200,
+              'instrument_id': 'bass',
+            }),
+            _command('rewrite', 'midi.replace_notes', <String, dynamic>{
+              'clip_id': 'midi-clip',
+              'notes': <Map<String, dynamic>>[_note(60, 0.0, 1.0)],
+            }),
+            _command('balance', 'mix.apply_goal', <String, dynamic>{
+              'target': <String, dynamic>{'scope': 'all_rows'},
+              'intents': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'kind': 'balance',
+                  'direction': null,
+                  'descriptor': null,
+                },
+              ],
+              'intensity': 0.5,
+              'execution_profile': 'producer_safe',
+              'audibility': 'noticeable',
+              'style_tags': <String>['orchestral'],
+              'reset_fx': false,
+              'reference': null,
+            }),
+          ]),
+        );
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: context,
+        );
+
+        expect(
+          prepared.receipts.first['verified_label'],
+          'Changed Keys instrument to Replacement instrument',
+        );
+        expect(prepared.receipts.first['verified_l10n_args'], <String, String>{
+          'row': 'Keys',
+          'instrument': 'Replacement instrument',
+        });
+        expect(prepared.actions.map((action) => action.type), <String>[
+          'v3_row_set_instrument',
+          'midi_compose',
+          'v3_deferred_mix_goal',
+        ]);
+        expect(prepared.receipts, hasLength(3));
+        expect(
+          prepared.receipts[1]['verified_label'],
+          'Replaced notes in Keys',
+        );
+        expect(prepared.receipts[1]['verified_l10n_args'], <String, String>{
+          'target': 'Keys',
+        });
+      },
+    );
+
+    test('instrument receipts never expose internal catalog ids', () {
+      const internalId = 'sfz.vsco_2_ce_1_1_0_tubularbells';
+      final data = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_context().data)) as Map,
+      );
+      data['instruments'] = <String>['piano', internalId];
+      data['instrument_catalog'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'instrument_id': internalId,
+          'name': 'Tubular Bells',
+          'playable_pitch_ranges': <Map<String, int>>[
+            <String, int>{'low': 48, 'high': 84},
+          ],
+        },
+      ];
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('instrument', 'row.set_instrument', <String, dynamic>{
+              'row_id': 200,
+              'instrument_id': internalId,
+            }),
+          ]),
+        ),
+        context: AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'private-instrument-receipt',
+          data: data,
+        ),
+      );
+
+      expect(
+        prepared.receipts.single['verified_label'],
+        'Changed Keys instrument to Tubular Bells',
+      );
+      expect(prepared.receipts.single['verified_l10n_args'], <String, String>{
+        'row': 'Keys',
+        'instrument': 'Tubular Bells',
+      });
+      expect(jsonEncode(prepared.receipts), isNot(contains(internalId)));
+    });
+
+    test('receipt display fields never fall back to row or clip ids', () {
+      final data = Map<String, dynamic>.from(
+        jsonDecode(jsonEncode(_context().data)) as Map,
+      );
+      for (final row in (data['rows'] as List).whereType<Map>()) {
+        row['name'] = '';
+      }
+      for (final clip in (data['clips'] as List).whereType<Map>()) {
+        clip['name'] = '';
+      }
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('unmute', 'row.set_muted', <String, dynamic>{
+              'row_id': 200,
+              'muted': false,
+            }),
+            _command('move', 'clip.move_by_beats', <String, dynamic>{
+              'clip_id': 'audio-clip',
+              'delta_beats': 1.0,
+            }),
+          ]),
+        ),
+        context: AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'private-resource-receipts',
+          data: data,
+        ),
+      );
+
+      final displayText = prepared.receipts
+          .expand(
+            (receipt) => <Object?>[
+              receipt['preview_label'],
+              receipt['verified_label'],
+              receipt['verified_l10n_args'],
+            ],
+          )
+          .join(' ');
+      expect(displayText, contains('that row'));
+      expect(displayText, contains('that clip'));
+      expect(displayText, isNot(contains('200')));
+      expect(displayText, isNot(contains('audio-clip')));
+    });
+
+    test('matches shared state-contract fixtures', () {
+      final fixture =
+          jsonDecode(
+                File(
+                  'test/fixtures/ai_v3_state_contract_cases.json',
+                ).readAsStringSync(),
+              )
+              as Map<String, dynamic>;
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'shared-state-contract',
+        data: Map<String, dynamic>.from(fixture['context'] as Map),
+      );
+
+      for (final rawCase in (fixture['cases'] as List).whereType<Map>()) {
+        final fixtureCase = Map<String, dynamic>.from(rawCase);
+        final commands = (fixtureCase['commands'] as List)
+            .whereType<Map>()
+            .map((command) => Map<String, dynamic>.from(command))
+            .toList(growable: false);
+        final plan = AiV3Plan.fromJson(_plan(commands));
+        if (fixtureCase['accepted'] == true) {
+          final prepared = const AiV3CommandPreparer().prepare(
+            plan: plan,
+            context: context,
+          );
+          expect(prepared.receipts, hasLength(commands.length));
+          expect(
+            prepared.actions.first.data['instrument_id'],
+            fixtureCase['final_instrument_id'],
+            reason: fixtureCase['id'].toString(),
+          );
+        } else {
+          expect(
+            () => const AiV3CommandPreparer().prepare(
+              plan: plan,
+              context: context,
+            ),
+            throwsA(
+              isA<AiV3PreparationException>().having(
+                (error) => error.code,
+                'code',
+                fixtureCase['client_error'],
+              ),
+            ),
+            reason: fixtureCase['id'].toString(),
+          );
+        }
+      }
+    });
 
     test(
       'row instrument preparation is idempotent and rejects bad targets',
@@ -4476,6 +4943,303 @@ void main() {
         () => const AiV3CommandPreparer().prepare(
           plan: _allRowsMixPlan(),
           context: context,
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_mix_audio_missing',
+          ),
+        ),
+      );
+    });
+
+    test('rejects row, group, and master mixing without playable material', () {
+      final data =
+          jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
+      final rows = (data['rows'] as List).cast<Map>();
+      for (final row in rows) {
+        row['mix_processing_supported'] = false;
+      }
+      data['groups'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'group_id': 'empty-group',
+          'name': 'Empty group',
+          'member_row_ids': <int>[100, 200],
+        },
+      ];
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'unready-mix-targets',
+        data: data,
+      );
+
+      for (final target in <Map<String, dynamic>>[
+        <String, dynamic>{'scope': 'row', 'row_id': 100},
+        <String, dynamic>{'scope': 'group', 'group_id': 'empty-group'},
+        <String, dynamic>{'scope': 'master'},
+      ]) {
+        expect(
+          () => const AiV3CommandPreparer().prepare(
+            plan: _mixPlanForTarget(target),
+            context: context,
+          ),
+          throwsA(
+            isA<AiV3PreparationException>().having(
+              (error) => error.code,
+              'code',
+              'v3_mix_audio_missing',
+            ),
+          ),
+          reason: target.toString(),
+        );
+      }
+    });
+
+    test('deleting the last clip makes a later row mix unavailable', () {
+      final data =
+          jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
+      data['rows'] = <Map<String, dynamic>>[
+        Map<String, dynamic>.from((data['rows'] as List).first as Map),
+      ];
+      data['clips'] = <Map<String, dynamic>>[
+        Map<String, dynamic>.from((data['clips'] as List).first as Map),
+      ];
+      data['project'] = <String, dynamic>{
+        ...Map<String, dynamic>.from(data['project'] as Map),
+        'row_capacity': <String, dynamic>{
+          'current_rows': 1,
+          'max_rows': 32,
+          'can_create': true,
+        },
+      };
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'delete-last-clip-before-mix',
+        data: data,
+      );
+      final mix = _mixPlanForTarget(<String, dynamic>{
+        'scope': 'row',
+        'row_id': 100,
+      }).commands.single;
+      final plan = AiV3Plan(
+        outcome: 'plan',
+        userMessage: 'Delete and mix.',
+        commands: <AiV3Command>[
+          const AiV3Command(
+            commandId: 'delete',
+            type: 'clip.delete',
+            arguments: <String, dynamic>{'clip_id': 'audio-clip'},
+          ),
+          mix,
+        ],
+      );
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(plan: plan, context: context),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_mix_audio_missing',
+          ),
+        ),
+      );
+    });
+
+    test('generated row must be populated before a deferred row mix', () {
+      Map<String, dynamic> ref(String commandId, String output) =>
+          <String, dynamic>{'command_id': commandId, 'output': output};
+      Map<String, dynamic> create = _command(
+        'created',
+        'row.create',
+        <String, dynamic>{
+          'name': 'Generated drums',
+          'lane': <String, dynamic>{'kind': 'audio'},
+          'position': <String, dynamic>{'kind': 'end'},
+        },
+      );
+      final mix = _command('mix', 'mix.apply_goal', <String, dynamic>{
+        'target': <String, dynamic>{
+          'scope': 'row',
+          'row_ref': ref('created', 'row'),
+        },
+        'intents': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'kind': 'reverb',
+            'direction': 'up',
+            'descriptor': null,
+          },
+        ],
+        'intensity': 0.5,
+        'execution_profile': 'producer_safe',
+        'audibility': 'noticeable',
+        'style_tags': const <String>[],
+        'reset_fx': false,
+        'reference': null,
+      });
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: AiV3Plan.fromJson(
+            _plan(<Map<String, dynamic>>[create, mix]),
+            allowResourceRefs: true,
+          ),
+          context: _context(),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_mix_audio_missing',
+          ),
+        ),
+      );
+
+      final populated = const AiV3CommandPreparer().prepare(
+        plan: AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            create,
+            _command('place', 'sample.place', <String, dynamic>{
+              'destination': <String, dynamic>{
+                'row_ref': ref('created', 'row'),
+              },
+              'placements': <Map<String, dynamic>>[
+                <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+              ],
+            }),
+            mix,
+          ]),
+          allowResourceRefs: true,
+        ),
+        context: _context(),
+      );
+      expect(populated.actions.last.type, 'v3_deferred_mix_goal');
+    });
+
+    test('deleting a populated generated row removes later mix readiness', () {
+      Map<String, dynamic> ref(String commandId, String output) =>
+          <String, dynamic>{'command_id': commandId, 'output': output};
+      final data =
+          jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
+      for (final row in (data['rows'] as List).whereType<Map>()) {
+        row['mix_processing_supported'] = false;
+      }
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'delete-generated-row-before-mix',
+        data: data,
+      );
+      final plan = AiV3Plan.fromJson(
+        _plan(<Map<String, dynamic>>[
+          _command('created', 'row.create', <String, dynamic>{
+            'name': 'Temporary audio',
+            'lane': <String, dynamic>{'kind': 'audio'},
+            'position': <String, dynamic>{'kind': 'end'},
+          }),
+          _command('place', 'sample.place', <String, dynamic>{
+            'destination': <String, dynamic>{'row_ref': ref('created', 'row')},
+            'placements': <Map<String, dynamic>>[
+              <String, dynamic>{'asset_id': 'kick-1', 'start_beat': 0},
+            ],
+          }),
+          _command('delete-row', 'row.delete', <String, dynamic>{
+            'row_ref': ref('created', 'row'),
+          }),
+          _mixPlanForTarget(<String, dynamic>{
+            'scope': 'master',
+          }).commands.single.toJson(),
+        ]),
+        allowResourceRefs: true,
+      );
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(plan: plan, context: context),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_mix_audio_missing',
+          ),
+        ),
+      );
+    });
+
+    test('duplicating into an empty row makes that row mixable', () {
+      final data =
+          jsonDecode(jsonEncode(_context().data)) as Map<String, dynamic>;
+      final rows = (data['rows'] as List).whereType<Map>().toList();
+      rows[1]
+        ..['lane_kind'] = 'audio'
+        ..['instrument_id'] = null
+        ..['mix_processing_supported'] = false;
+      data['clips'] = (data['clips'] as List)
+          .whereType<Map>()
+          .where((clip) => clip['row_id'] != 200)
+          .toList(growable: false);
+      final context = AiV3CoreContext(
+        profile: AiV3ContextProfile.essential,
+        stateDigest: 'duplicate-then-mix-empty-row',
+        data: data,
+      );
+      final mix = _mixPlanForTarget(<String, dynamic>{
+        'scope': 'row',
+        'row_id': 200,
+      }).commands.single;
+      final plan = AiV3Plan(
+        outcome: 'plan',
+        userMessage: 'Duplicate and mix.',
+        commands: <AiV3Command>[
+          const AiV3Command(
+            commandId: 'duplicate',
+            type: 'clip.duplicate_to',
+            arguments: <String, dynamic>{
+              'clip_id': 'audio-clip',
+              'destination_row_id': 200,
+              'start_beat': 8,
+            },
+          ),
+          mix,
+        ],
+      );
+
+      final prepared = const AiV3CommandPreparer().prepare(
+        plan: plan,
+        context: context,
+      );
+      expect(prepared.actions.last.type, 'v3_deferred_mix_goal');
+    });
+
+    test('deleting both split outputs removes source-row mix readiness', () {
+      Map<String, dynamic> ref(String output) => <String, dynamic>{
+        'command_id': 'split',
+        'output': output,
+      };
+      final mix = _mixPlanForTarget(<String, dynamic>{
+        'scope': 'row',
+        'row_id': 100,
+      }).commands.single.toJson();
+      final plan = AiV3Plan.fromJson(
+        _plan(<Map<String, dynamic>>[
+          _command('split', 'clip.split_at', <String, dynamic>{
+            'clip_id': 'audio-clip',
+            'at_beat': 4,
+          }),
+          _command('delete-left', 'clip.delete', <String, dynamic>{
+            'clip_ref': ref('left_clip'),
+          }),
+          _command('delete-right', 'clip.delete', <String, dynamic>{
+            'clip_ref': ref('right_clip'),
+          }),
+          mix,
+        ]),
+        allowResourceRefs: true,
+      );
+
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: _context(),
         ),
         throwsA(
           isA<AiV3PreparationException>().having(
@@ -4691,6 +5455,162 @@ void main() {
         ),
       );
     });
+
+    test(
+      'repairs verified aliases and rejects conflicting duplicates safely',
+      () {
+        final context = _contextWithEffects(<String, List<String>>{
+          'Distortion': <String>['Drive', 'DC Offset', 'Pre Shape'],
+        });
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: AiV3Plan.fromJson(
+            _plan(<Map<String, dynamic>>[
+              _command('effect', 'effect.ensure_configured', <String, dynamic>{
+                'row_id': 100,
+                'effect_id': 'Distortion',
+                'parameters': <Map<String, dynamic>>[
+                  <String, dynamic>{'parameter_id': 'drive', 'value': 0.7},
+                  <String, dynamic>{'parameter_id': 'Offset', 'value': 0.2},
+                  <String, dynamic>{'parameter_id': 'drive', 'value': 0.7},
+                ],
+              }),
+            ]),
+          ),
+          context: context,
+        );
+        expect(prepared.actions.single.data['parameters'], <String, dynamic>{
+          'Drive': 0.7,
+          'DC Offset': 0.2,
+        });
+
+        expect(
+          () => const AiV3CommandPreparer().prepare(
+            plan: AiV3Plan.fromJson(
+              _plan(<Map<String, dynamic>>[
+                _command(
+                  'effect',
+                  'effect.ensure_configured',
+                  <String, dynamic>{
+                    'row_id': 100,
+                    'effect_id': 'Distortion',
+                    'parameters': <Map<String, dynamic>>[
+                      <String, dynamic>{'parameter_id': 'Drive', 'value': 0.4},
+                      <String, dynamic>{'parameter_id': 'drive', 'value': 0.8},
+                    ],
+                  },
+                ),
+              ]),
+            ),
+            context: context,
+          ),
+          throwsA(
+            isA<AiV3PreparationException>()
+                .having(
+                  (error) => error.code,
+                  'code',
+                  'v3_effect_parameter_duplicate',
+                )
+                .having(
+                  (error) => error.diagnostic,
+                  'diagnostic',
+                  containsPair('effect_id', 'Distortion'),
+                )
+                .having(
+                  (error) => error.diagnostic,
+                  'diagnostic',
+                  containsPair('command_index', 0),
+                ),
+          ),
+        );
+      },
+    );
+
+    test(
+      'prepares the reproduced MIDI, effects, and mix plan without drops',
+      () {
+        final context = _contextWithEffects(<String, List<String>>{
+          'Distortion': <String>['Drive', 'Mix'],
+          'EQ 3-Band': <String>['Low Gain', 'Mid Gain', 'High Gain'],
+          'Compressor': <String>['Threshold', 'Ratio', 'Mix'],
+        });
+        final plan = AiV3Plan.fromJson(
+          _plan(<Map<String, dynamic>>[
+            _command('rewrite', 'midi.replace_notes', <String, dynamic>{
+              'clip_id': 'midi-clip',
+              'notes': <Map<String, dynamic>>[
+                _note(52, 0, 1),
+                _note(55, 0, 1),
+                _note(59, 0, 1),
+              ],
+            }),
+            _command(
+              'distortion',
+              'effect.ensure_configured',
+              <String, dynamic>{
+                'row_id': 200,
+                'effect_id': 'Distortion',
+                'parameters': <Map<String, dynamic>>[
+                  <String, dynamic>{'parameter_id': 'Drive', 'value': 0.7},
+                  <String, dynamic>{'parameter_id': 'Mix', 'value': 0.8},
+                ],
+              },
+            ),
+            _command('eq', 'effect.ensure_configured', <String, dynamic>{
+              'row_id': 200,
+              'effect_id': 'EQ 3-Band',
+              'parameters': <Map<String, dynamic>>[
+                <String, dynamic>{'parameter_id': 'Mid Gain', 'value': 0.6},
+              ],
+            }),
+            _command(
+              'compressor',
+              'effect.ensure_configured',
+              <String, dynamic>{
+                'row_id': 200,
+                'effect_id': 'Compressor',
+                'parameters': <Map<String, dynamic>>[
+                  <String, dynamic>{'parameter_id': 'Mix', 'value': 0.65},
+                ],
+              },
+            ),
+            _command('balance', 'mix.apply_goal', <String, dynamic>{
+              'target': <String, dynamic>{'scope': 'all_rows'},
+              'intents': <Map<String, dynamic>>[
+                <String, dynamic>{
+                  'kind': 'balance',
+                  'direction': null,
+                  'descriptor': null,
+                },
+              ],
+              'intensity': 0.6,
+              'execution_profile': 'producer_safe',
+              'audibility': 'noticeable',
+              'style_tags': <String>['rock'],
+              'reset_fx': false,
+              'reference': null,
+            }),
+          ]),
+        );
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: plan,
+          context: context,
+        );
+        expect(prepared.receipts, hasLength(5));
+        expect(
+          prepared.receipts.map((receipt) => receipt['command_id']),
+          <String>['rewrite', 'distortion', 'eq', 'compressor', 'balance'],
+        );
+        expect(prepared.actions, hasLength(5));
+        expect(prepared.actions.map((action) => action.type), <String>[
+          'midi_compose',
+          'v3_effect_configure',
+          'v3_effect_configure',
+          'v3_effect_configure',
+          'v3_deferred_mix_goal',
+        ]);
+      },
+    );
 
     test(
       'prepares exact stable sample replacement and rejects dead targets',
@@ -5860,9 +6780,13 @@ void main() {
             'start_beat': 12,
           }),
           _command('delete', 'clip.delete', <String, dynamic>{
-            'clip_id': 'midi-clip',
+            'clip_ref': <String, dynamic>{
+              'command_id': 'split',
+              'output': 'right_clip',
+            },
           }),
         ]),
+        allowResourceRefs: true,
       );
 
       final prepared = const AiV3CommandPreparer().prepare(
@@ -5882,7 +6806,8 @@ void main() {
       expect(prepared.actions[2].data['paste_start_ms'], 6000.0);
       expect(prepared.actions[2].data['row_index'], 0);
       for (final action in prepared.actions) {
-        expect((action.data['target'] as Map)['clip_id'], isNotEmpty);
+        final target = action.data['target'] as Map;
+        expect(target['clip_id'] ?? target['resource_ref'], isNotEmpty);
       }
     });
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import json
 import os
@@ -43,24 +44,45 @@ from common.llm_provider import (
     append_openai_conversation_items,
     create_openai_conversation,
     get_provider,
+    is_upstream_timeout_error,
 )
 from common.logging_utils import build_request_log_context, log_request_complete
 from common.monitoring import capture_exception, init_sentry
 from common.usage_repository import AiUsageRepository
-from common.v3_server_contract import (
-    CONTRACT_VERSION as V3_SERVER_CONTRACT_VERSION,
-    V3ContractError,
-    build_provider_request as build_v3_server_provider_request,
-    contract_fingerprint as v3_server_contract_fingerprint,
-    parse_and_validate_provider_plan,
-    response_envelope as v3_server_response_envelope,
-    validate_context_request as validate_v3_context_request,
-)
+from common import v3_server_contract as v3_server_contract_v2
+from common import v3_server_contract_v1
 
 _secret_cache: Any | None = None
 _secret_cache_loaded_at: float | None = None
 _usage_repo = AiUsageRepository()
 _conversation_state_table: Any | None = None
+_V3_MAX_PROVIDER_TIMEOUT_SECONDS = 27
+_V3_LAMBDA_RESPONSE_MARGIN_MS = 2_000
+_V3_REPAIRABLE_SEMANTIC_CODES = frozenset(
+    {
+        "v3_plan_midi_note_out_of_bounds",
+        "v3_plan_phone_cleanup_effect_conflict",
+        "v3_plan_user_visible_text_unsafe",
+    }
+)
+_V3_SEMANTIC_REPAIR_GUIDANCE = {
+    "v3_plan_midi_note_out_of_bounds": (
+        "Every midi.replace_notes note must end within the target clip's existing "
+        "length_beats. Return a complete corrected plan, not a partial patch."
+    ),
+    "v3_plan_phone_cleanup_effect_conflict": (
+        "Do not combine row.apply_phone_mic_cleanup with effect mutations or row, "
+        "group, or all-row mixing that affects the same cleanup row. Return a "
+        "complete corrected plan, not a partial patch."
+    ),
+    "v3_plan_user_visible_text_unsafe": (
+        "Rewrite every user-visible message and clarification option as concise, "
+        "natural customer-facing text. Do not copy the original request or include "
+        "private input-section labels, raw context, JSON, command names, validation "
+        "codes, or implementation details. Return a complete corrected plan, not a "
+        "partial patch."
+    ),
+}
 _STRUCTURED_MIXROOM_FIELDS = frozenset(
     {
         "conversation",
@@ -427,11 +449,17 @@ def _v3_enabled() -> bool:
     return _env_value("AI_V3_ENABLED", default="true").lower() == "true"
 
 
-def _v3_server_contract_enabled() -> bool:
-    return (
-        _env_value("AI_V3_SERVER_CONTRACT_ENABLED", default="false").lower()
-        == "true"
-    )
+def _v3_server_contract_enabled(request_contract: str) -> bool:
+    umbrella = _env_value("AI_V3_SERVER_CONTRACT_ENABLED", default="false")
+    if umbrella.lower() != "true":
+        return False
+    version_flag = {
+        v3_server_contract_v1.REQUEST_CONTRACT: "AI_V3_SERVER_CONTRACT_V1_ENABLED",
+        v3_server_contract_v2.REQUEST_CONTRACT: "AI_V3_SERVER_CONTRACT_V2_ENABLED",
+    }.get(request_contract)
+    if version_flag is None:
+        return False
+    return _env_value(version_flag, default="true").lower() == "true"
 
 
 def _v3_legacy_client_contract_enabled() -> bool:
@@ -443,6 +471,45 @@ def _v3_legacy_client_contract_enabled() -> bool:
 
 def _is_v3_server_contract_request(body: Dict[str, Any]) -> bool:
     return "request_contract" in body
+
+
+def _v3_server_contract_for_request(body: Dict[str, Any]) -> Any | None:
+    request_contract = str(body.get("request_contract") or "").strip()
+    return {
+        v3_server_contract_v1.REQUEST_CONTRACT: v3_server_contract_v1,
+        v3_server_contract_v2.REQUEST_CONTRACT: v3_server_contract_v2,
+    }.get(request_contract)
+
+
+def _v3_contract_fingerprint(
+    contract: Any,
+    request: Dict[str, Any],
+    *,
+    max_output_tokens: int,
+) -> str:
+    kwargs: Dict[str, Any] = {
+        "command_types": request["supported_command_types"],
+        "resource_refs_enabled": request["resource_refs_enabled"],
+    }
+    if contract is v3_server_contract_v2:
+        kwargs["capability_surface"] = request["capability_surface"]
+        kwargs["max_output_tokens"] = max_output_tokens
+    return str(contract.contract_fingerprint(**kwargs))
+
+
+def _parse_v3_provider_plan(
+    contract: Any,
+    payload: Dict[str, Any],
+    request: Dict[str, Any],
+) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {
+        "command_types": request["supported_command_types"],
+        "resource_refs_enabled": request["resource_refs_enabled"],
+    }
+    if contract is v3_server_contract_v2:
+        kwargs["capability_surface"] = request["capability_surface"]
+        kwargs["original_request"] = request["original_request"]
+    return dict(contract.parse_and_validate_provider_plan(payload, **kwargs))
 
 
 def _configured_v3_model() -> str:
@@ -492,6 +559,61 @@ def _request_timeout_seconds() -> int:
     except ValueError:
         return 30
     return max(1, value)
+
+
+def _v3_request_timeout_seconds(context: Any) -> int:
+    """Return a V3 provider deadline that preserves Lambda response time."""
+
+    raw = _env_value(
+        "AI_V3_TIMEOUT_SECONDS",
+        default=str(_V3_MAX_PROVIDER_TIMEOUT_SECONDS),
+    )
+    try:
+        configured = int(raw)
+    except ValueError:
+        configured = _V3_MAX_PROVIDER_TIMEOUT_SECONDS
+    configured = max(1, min(configured, _V3_MAX_PROVIDER_TIMEOUT_SECONDS))
+
+    remaining_time = getattr(context, "get_remaining_time_in_millis", None)
+    if not callable(remaining_time):
+        return configured
+    try:
+        remaining_ms = int(remaining_time())
+    except (TypeError, ValueError):
+        return configured
+    available_seconds = (
+        remaining_ms - _V3_LAMBDA_RESPONSE_MARGIN_MS
+    ) // 1_000
+    return max(0, min(configured, available_seconds))
+
+
+def _v3_semantic_repair_request_body(
+    request_body: Dict[str, Any], error_code: str
+) -> Dict[str, Any]:
+    repair_body = copy.deepcopy(request_body)
+    messages = repair_body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return repair_body
+    first_message = messages[0]
+    if not isinstance(first_message, dict):
+        return repair_body
+    content = first_message.get("content")
+    if not isinstance(content, list):
+        return repair_body
+    guidance = _V3_SEMANTIC_REPAIR_GUIDANCE[error_code]
+    content.append(
+        {
+            "type": "input_text",
+            "text": (
+                "SEMANTIC_REPAIR_REQUIRED\n"
+                f"validation_code: {error_code}\n"
+                f"constraint: {guidance}\n"
+                "Preserve every independent operation from the original request. "
+                "Do not silently omit or filter requested operations."
+            ),
+        }
+    )
+    return repair_body
 
 
 def _conversation_state_table_name() -> str:
@@ -2978,6 +3100,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         is_v3_request and _is_v3_server_contract_request(body)
     )
     v3_server_request: Dict[str, Any] | None = None
+    v3_server_contract: Any | None = None
     if is_v3_request and not _v3_enabled():
         return _finalize(
             json_response(
@@ -2993,7 +3116,22 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
     if is_v3_request:
         if is_v3_server_contract_request:
-            if not _v3_server_contract_enabled():
+            v3_server_contract = _v3_server_contract_for_request(body)
+            if v3_server_contract is None:
+                return _finalize(
+                    json_response(
+                        400,
+                        {
+                            "error": {
+                                "code": "v3_request_contract_unsupported",
+                                "message": "Unsupported V3 request contract.",
+                            }
+                        },
+                    ),
+                    error="v3_request_contract_unsupported",
+                )
+            request_contract = str(body.get("request_contract") or "").strip()
+            if not _v3_server_contract_enabled(request_contract):
                 return _finalize(
                     json_response(
                         503,
@@ -3007,11 +3145,14 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     error="v3_server_contract_disabled",
                 )
             try:
-                v3_server_request = validate_v3_context_request(
+                v3_server_request = v3_server_contract.validate_context_request(
                     body,
                     raw_body_bytes=len(raw_body.encode("utf-8")),
                 )
-            except V3ContractError as error:
+            except (
+                v3_server_contract_v1.V3ContractError,
+                v3_server_contract_v2.V3ContractError,
+            ) as error:
                 return _finalize(
                     json_response(
                         400,
@@ -3130,7 +3271,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     normalized_body["conversation_state_mode"] = conversation_state_mode_effective
 
     if v3_server_request is not None:
-        request_body = build_v3_server_provider_request(
+        if v3_server_contract is None:
+            raise RuntimeError("V3 server contract implementation is missing.")
+        request_body = v3_server_contract.build_provider_request(
             v3_server_request,
             model=_configured_v3_model() or "gpt-5.6-luna",
             reasoning_effort=_configured_v3_reasoning_effort(),
@@ -3191,11 +3334,16 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         runtime_config=runtime_config,
     )
     if v3_server_request is not None:
-        runtime_config_fingerprint = v3_server_contract_fingerprint(
-            command_types=v3_server_request["supported_command_types"],
-            resource_refs_enabled=v3_server_request["resource_refs_enabled"],
+        if v3_server_contract is None:
+            raise RuntimeError("V3 server contract implementation is missing.")
+        runtime_config_fingerprint = _v3_contract_fingerprint(
+            v3_server_contract,
+            v3_server_request,
+            max_output_tokens=int(request_body.get("max_output_tokens") or 8192),
         )
-        request_log_context["v3_contract_version"] = V3_SERVER_CONTRACT_VERSION
+        request_log_context["v3_contract_version"] = (
+            v3_server_contract.CONTRACT_VERSION
+        )
     request_log_context["provider"] = provider.name
     request_log_context["effective_model"] = str(request_body.get("model") or "").strip()
     request_log_context["runtime_config_fingerprint"] = runtime_config_fingerprint
@@ -3450,12 +3598,35 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="ai_usage_limit_hit",
         )
 
+    provider_timeout_seconds = (
+        _v3_request_timeout_seconds(_context)
+        if is_v3_request
+        else _request_timeout_seconds()
+    )
+    provider_request_body_bytes = len(
+        json.dumps(request_body, separators=(",", ":")).encode("utf-8")
+    )
+    request_log_context["client_request_body_bytes"] = len(
+        raw_body.encode("utf-8")
+    )
+    request_log_context["provider_request_body_bytes"] = (
+        provider_request_body_bytes
+    )
+    request_log_context["provider_timeout_seconds"] = provider_timeout_seconds
+    provider_deadline_exhausted = is_v3_request and provider_timeout_seconds <= 0
+
     print(
         json.dumps(
             {
-                "message": "Forwarding LLM request",
+                "message": (
+                    "V3 provider deadline exhausted"
+                    if provider_deadline_exhausted
+                    else "Forwarding LLM request"
+                ),
                 "user_id": user_id,
                 "body_bytes": len(raw_body.encode("utf-8")),
+                "provider_body_bytes": provider_request_body_bytes,
+                "provider_timeout_seconds": provider_timeout_seconds,
                 "provider": provider.name,
                 "model": request_body.get("model"),
                 "tier": subscription_tier,
@@ -3496,21 +3667,59 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         enabled=analytics_enabled,
     )
 
+    shared_v3_deadline = (
+        time.monotonic() + provider_timeout_seconds
+        if is_v3_request and provider_timeout_seconds > 0
+        else None
+    )
+    provider_attempt_request_body = request_body
+    provider_attempt_timeout_seconds = provider_timeout_seconds
+    provider_attempt_stage = "provider_roundtrip"
+    provider_attempt_count = 0
+    semantic_repair_attempted = False
+    semantic_repair_succeeded = False
+    validated_v3_plan: dict[str, Any] | None = None
+    v3_validation_error: Any | None = None
+    status_code = 500
+    response_payload: Dict[str, Any] = {}
+    provider_attempt_started_at = time.perf_counter()
     try:
-        proxy_response = provider.forward_request(
-            api_key=api_key,
-            request_body=request_body,
-            timeout_seconds=_request_timeout_seconds(),
-        )
-        provider_observability = proxy_response.get("observability") or {}
-        if isinstance(provider_observability, dict):
-            provider_roundtrip_ms = int(provider_observability.get("provider_roundtrip_ms") or 0)
-            openai_api_ms = int(provider_observability.get("openai_api_ms") or 0)
-            openai_conversation_tool_outputs_appended = int(
-                provider_observability.get(
-                    "openai_conversation_tool_outputs_appended"
+        if provider_deadline_exhausted:
+            raise TimeoutError("V3 provider deadline exhausted before request.")
+        while True:
+            provider_attempt_count += 1
+            provider_attempt_started_at = time.perf_counter()
+            proxy_response = provider.forward_request(
+                api_key=api_key,
+                request_body=provider_attempt_request_body,
+                timeout_seconds=provider_attempt_timeout_seconds,
+            )
+            measured_provider_roundtrip_ms = int(
+                (time.perf_counter() - provider_attempt_started_at) * 1000
+            )
+            provider_observability = proxy_response.get("observability") or {}
+            attempt_provider_roundtrip_ms = 0
+            attempt_openai_api_ms = 0
+            attempt_tool_outputs_appended = 0
+            if isinstance(provider_observability, dict):
+                attempt_provider_roundtrip_ms = int(
+                    provider_observability.get("provider_roundtrip_ms") or 0
                 )
-                or 0
+                attempt_openai_api_ms = int(
+                    provider_observability.get("openai_api_ms") or 0
+                )
+                attempt_tool_outputs_appended = int(
+                    provider_observability.get(
+                        "openai_conversation_tool_outputs_appended"
+                    )
+                    or 0
+                )
+            provider_roundtrip_ms += (
+                attempt_provider_roundtrip_ms or measured_provider_roundtrip_ms
+            )
+            openai_api_ms += attempt_openai_api_ms
+            openai_conversation_tool_outputs_appended += (
+                attempt_tool_outputs_appended
             )
             if provider_roundtrip_ms > 0:
                 request_log_context["provider_roundtrip_ms"] = provider_roundtrip_ms
@@ -3520,16 +3729,94 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 request_log_context["openai_conversation_tool_outputs_appended"] = (
                     openai_conversation_tool_outputs_appended
                 )
+
+            status_code = int(proxy_response.get("statusCode") or 500)
+            response_body = proxy_response.get("body")
+            response_payload = {}
+            if isinstance(response_body, str):
+                try:
+                    decoded = json.loads(response_body)
+                    if isinstance(decoded, dict):
+                        response_payload = decoded
+                except json.JSONDecodeError:
+                    response_payload = {}
+
+            if v3_server_request is None or not 200 <= status_code < 300:
+                break
+            try:
+                if v3_server_contract is None:
+                    raise RuntimeError("V3 server contract implementation is missing.")
+                validated_v3_plan = _parse_v3_provider_plan(
+                    v3_server_contract,
+                    response_payload,
+                    v3_server_request,
+                )
+                if semantic_repair_attempted:
+                    semantic_repair_succeeded = True
+                break
+            except (
+                v3_server_contract_v1.V3ContractError,
+                v3_server_contract_v2.V3ContractError,
+            ) as error:
+                v3_validation_error = error
+                if (
+                    v3_server_contract is not v3_server_contract_v2
+                    or semantic_repair_attempted
+                    or error.code not in _V3_REPAIRABLE_SEMANTIC_CODES
+                    or shared_v3_deadline is None
+                ):
+                    break
+                remaining_deadline_seconds = max(
+                    0, int(shared_v3_deadline - time.monotonic())
+                )
+                remaining_lambda_seconds = _v3_request_timeout_seconds(_context)
+                repair_timeout_seconds = min(
+                    remaining_deadline_seconds, remaining_lambda_seconds
+                )
+                if repair_timeout_seconds <= 0:
+                    request_log_context["semantic_repair_skipped_deadline"] = True
+                    break
+                semantic_repair_attempted = True
+                request_log_context["semantic_repair_attempted"] = True
+                request_log_context["semantic_repair_error_code"] = error.code
+                request_log_context["provider_repair_timeout_seconds"] = (
+                    repair_timeout_seconds
+                )
+                provider_attempt_request_body = _v3_semantic_repair_request_body(
+                    request_body, error.code
+                )
+                provider_attempt_timeout_seconds = repair_timeout_seconds
+                provider_attempt_stage = "semantic_repair"
+                v3_validation_error = None
     except Exception as error:
-        capture_exception(
-            error,
-            context={
-                **request_log_context,
-                "provider": provider.name,
-                "model": str(request_body.get("model") or ""),
-            },
-            tags={"service": "llm_proxy"},
+        provider_roundtrip_ms += int(
+            (time.perf_counter() - provider_attempt_started_at) * 1000
         )
+        if is_v3_request:
+            request_log_context["provider_attempt_count"] = provider_attempt_count
+        if is_v3_request and semantic_repair_attempted:
+            request_log_context["semantic_repair_succeeded"] = False
+        upstream_timed_out = is_upstream_timeout_error(error)
+        upstream_error_code = (
+            "upstream_timeout" if upstream_timed_out else "upstream_unavailable"
+        )
+        request_log_context["provider_roundtrip_ms"] = provider_roundtrip_ms
+        request_log_context["failure_stage"] = (
+            "provider_deadline"
+            if provider_deadline_exhausted
+            else provider_attempt_stage
+        )
+        request_log_context["provider_timed_out"] = upstream_timed_out
+        if not provider_deadline_exhausted:
+            capture_exception(
+                error,
+                context={
+                    **request_log_context,
+                    "provider": provider.name,
+                    "model": str(request_body.get("model") or ""),
+                },
+                tags={"service": "llm_proxy"},
+            )
         try:
             _usage_repo.release_usage(
                 user_id,
@@ -3559,7 +3846,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             total_tokens=0,
             credits_charged=0,
             status="failed",
-            error_code="upstream_unavailable",
+            error_code=upstream_error_code,
             runtime_config_fingerprint=runtime_config_fingerprint,
             app_version=str(client_context.get("app_version") or ""),
             platform=str(client_context.get("platform") or ""),
@@ -3584,7 +3871,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     "provider_roundtrip_ms": provider_roundtrip_ms or None,
                     "openai_api_ms": openai_api_ms or None,
                     "proxy_handler_ms_total": int((time.perf_counter() - started_at) * 1000),
-                    "error_code": "upstream_unavailable",
+                    "error_code": upstream_error_code,
                     "success": False,
                 },
             ),
@@ -3592,12 +3879,20 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
         return _finalize(
             json_response(
-                502,
+                504 if is_v3_request and upstream_timed_out else 502,
                 (
                     {
                         "error": {
-                            "code": "v3_upstream_unavailable",
-                            "message": "AI V3 planning is temporarily unavailable.",
+                            "code": (
+                                "v3_upstream_timeout"
+                                if upstream_timed_out
+                                else "v3_upstream_unavailable"
+                            ),
+                            "message": (
+                                "AI V3 planning did not finish in time."
+                                if upstream_timed_out
+                                else "AI V3 planning is temporarily unavailable."
+                            ),
                         }
                     }
                     if v3_server_request is not None
@@ -3610,28 +3905,18 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="llm_upstream_unavailable",
         )
 
-    status_code = int(proxy_response.get("statusCode") or 500)
-    response_body = proxy_response.get("body")
-    response_payload: Dict[str, Any] = {}
-    if isinstance(response_body, str):
-        try:
-            decoded = json.loads(response_body)
-            if isinstance(decoded, dict):
-                response_payload = decoded
-        except json.JSONDecodeError:
-            response_payload = {}
+    if is_v3_request:
+        request_log_context["provider_attempt_count"] = provider_attempt_count
+    if is_v3_request and semantic_repair_attempted:
+        request_log_context["semantic_repair_succeeded"] = (
+            semantic_repair_succeeded
+        )
 
     if 200 <= status_code < 300:
         normalization_started_at = time.perf_counter()
         billing_payload = response_payload
         if v3_server_request is not None:
-            try:
-                validated_plan = parse_and_validate_provider_plan(
-                    response_payload,
-                    command_types=v3_server_request["supported_command_types"],
-                    resource_refs_enabled=v3_server_request["resource_refs_enabled"],
-                )
-            except V3ContractError as error:
+            if v3_validation_error is not None:
                 try:
                     _usage_repo.release_usage(
                         user_id,
@@ -3661,7 +3946,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     total_tokens=0,
                     credits_charged=0,
                     status="failed",
-                    error_code=error.code,
+                    error_code=v3_validation_error.code,
                     runtime_config_fingerprint=runtime_config_fingerprint,
                     app_version=str(client_context.get("app_version") or ""),
                     platform=str(client_context.get("platform") or ""),
@@ -3680,10 +3965,14 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                             }
                         },
                     ),
-                    error=error.code,
+                    error=v3_validation_error.code,
                 )
-            response_payload = v3_server_response_envelope(
-                plan=validated_plan,
+            if validated_v3_plan is None:
+                raise RuntimeError("Validated V3 plan is missing.")
+            if v3_server_contract is None:
+                raise RuntimeError("V3 server contract implementation is missing.")
+            response_payload = v3_server_contract.response_envelope(
+                plan=validated_v3_plan,
                 prompt_trace_id=prompt_trace_id,
                 request_id=str(request_log_context.get("request_id") or ""),
                 fingerprint=runtime_config_fingerprint,

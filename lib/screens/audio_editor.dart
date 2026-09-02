@@ -76,6 +76,7 @@ import 'package:mixroom/ai/producer_data_collector.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/remote_mixing_magnitude_predictor.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
+import 'package:mixroom/ai/v3/ai_v3_execution_failure_message.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
@@ -203,26 +204,6 @@ bool audioEditorShouldApplyScheduledMissingClipResolution({
 }
 
 Completer<void> _cancelSignal = Completer();
-
-const List<String> kMixroomBuiltInEffects = [
-  "Gain",
-  "EQ 3-Band",
-  "Compressor",
-  "Dynamic Softener",
-  "Transient Shaper",
-  "Limiter",
-  "Clipper",
-  "De-Esser",
-  "Distortion",
-  "Degrade",
-  "Delay",
-  "Reverb",
-  "EQ Parametric",
-  "Pitch Shift",
-  "Pitch Corrector",
-  "Chorus",
-  "Vibrato",
-];
 
 const String kMixroomDawBackgroundAsset = 'assets/daw/editor_background.webp';
 const String kMixroomDawTopSettingsIconAsset =
@@ -1175,6 +1156,26 @@ class _ResolvedMixEffectParameter {
   final String? effectInstanceId;
   final int effectOccurrence;
   final Map<String, dynamic> parameter;
+}
+
+class _EffectParameterAdjustment {
+  const _EffectParameterAdjustment({
+    required this.oldValue,
+    required this.newValue,
+    required this.oldDisplayValue,
+    required this.newDisplayValue,
+    required this.rawInterval,
+    this.expectedNormalizedValue,
+  });
+
+  final dynamic oldValue;
+  final dynamic newValue;
+  final String oldDisplayValue;
+  final String newDisplayValue;
+  final double rawInterval;
+  final double? expectedNormalizedValue;
+
+  bool get usesNormalizedVerification => expectedNormalizedValue != null;
 }
 
 class _AssistantActionApplyException implements Exception {
@@ -4504,6 +4505,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       effectName,
     );
   }
+
+  Set<String> _allowedBuiltInEffectIdsForCurrentPlan() => <String>{
+    for (final effectName in kMixroomBuiltInEffects)
+      if (_canUseEffectForCurrentPlan(effectName)) effectName,
+  };
 
   bool _canUseInstrumentForCurrentPlan(String instrumentId) {
     if (!_isSubscriptionEnforcementEnabled) return true;
@@ -8234,6 +8240,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false);
   }
 
+  List<Map<String, dynamic>> _aiInstrumentCapabilityCatalog(
+    List<Map<String, dynamic>> selectableCatalog,
+  ) {
+    final byId = <String, Map<String, dynamic>>{
+      for (final spec in selectableCatalog)
+        if ((spec['id'] as String? ?? '').trim().isNotEmpty)
+          (spec['id'] as String).trim(): Map<String, dynamic>.from(spec),
+    };
+    for (final row in _rows) {
+      if (row.kind != TimelineRowKind.instrument) continue;
+      final instrumentId = row.instrumentId.trim();
+      if (instrumentId.isEmpty || byId.containsKey(instrumentId)) continue;
+      final spec = _findInstrumentSpecById(instrumentId);
+      if (spec == null) continue;
+      byId[instrumentId] = <String, dynamic>{...spec, 'id': instrumentId};
+    }
+    return byId.values.toList(growable: false);
+  }
+
   List<Map<String, dynamic>> _instrumentCatalogForCurrentPlan(
     List<Map<String, dynamic>> catalog,
   ) {
@@ -9431,7 +9456,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
               requestTimeout: Duration(
-                seconds: LlmConfig.requestTimeoutSeconds,
+                seconds: LlmConfig.aiV3RequestTimeoutSeconds,
               ),
               proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
               proxyPath: LlmConfig.aiV3ProxyPath,
@@ -16986,6 +17011,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           fallbackIndex: _commandInt(command, 'fallbackIndex') ?? -1,
           addClip: _addClipFromUndoPayload,
           removeClip: _removeClipForUndo,
+          restoreClipIndex: _restoreClipOrderIndex,
         );
       case 'rowCreate':
         final createdRowId = _commandInt(command, 'createdRowId');
@@ -31966,6 +31992,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _ensureDefaultSampleBrowserRoots();
     final catalog = _uiInstrumentCatalog().toList(growable: false)
       ..sort(_compareInstrumentSpecsForPicker);
+    final capabilityCatalog = _aiInstrumentCapabilityCatalog(catalog);
     final roots = _sampleBrowserRoots.map(p.normalize).toList(growable: false)
       ..sort();
     final cacheKey = jsonEncode(<String, dynamic>{
@@ -31979,6 +32006,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           )
           .where((entry) => entry['id']!.isNotEmpty)
           .toList(growable: false),
+      'capability_instrument_ids': capabilityCatalog
+          .map((spec) => (spec['id'] as String? ?? '').trim())
+          .where((id) => id.isNotEmpty)
+          .toList(growable: false),
       'sample_roots': roots,
     });
     if (_aiLibrarySnapshotCacheKey == cacheKey &&
@@ -31987,7 +32018,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final pitchRangeEntries = await Future.wait(
-      catalog.map((spec) async {
+      capabilityCatalog.map((spec) async {
         final instrumentId = (spec['id'] as String? ?? '').trim();
         if (instrumentId.isEmpty) {
           return null;
@@ -32183,11 +32214,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Map<String, dynamic> _buildAiClientContext() {
     final entitlement = _currentEntitlementSnapshot;
-    final allowedEffects = _isFreePlan
-        ? SubscriptionLimits.freeBuiltInEffects.toList(growable: false)
-        : kMixroomBuiltInEffects;
+    final allowedEffects = _allowedBuiltInEffectIdsForCurrentPlan().toList(
+      growable: false,
+    );
     final allowedInstrumentCatalog = _instrumentCatalogForCurrentPlan(
       _uiInstrumentCatalog(),
+    );
+    final instrumentCapabilityCatalog = _aiInstrumentCapabilityCatalog(
+      allowedInstrumentCatalog,
     );
     final allowedInstruments = allowedInstrumentCatalog
         .map((spec) => (spec['id'] as String? ?? '').trim())
@@ -32245,7 +32279,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'allowed_builtin_effects': allowedEffects,
       'allowed_instrument_ids': allowedInstruments,
       if (LlmConfig.effectiveAiV3Enabled) ...<String, dynamic>{
-        'ai_v3_instrument_catalog': allowedInstrumentCatalog
+        'ai_v3_instrument_catalog': instrumentCapabilityCatalog
             .map(
               (spec) => <String, dynamic>{
                 'instrument_id': (spec['id'] as String? ?? '').trim(),
@@ -48476,6 +48510,139 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return (minimum + steps * interval).clamp(minimum, maximum).toDouble();
   }
 
+  _EffectParameterAdjustment _effectParameterAdjustment(
+    Map<String, dynamic> parameter,
+    Map<String, dynamic> action,
+  ) {
+    final type = (parameter['type'] ?? '').toString().trim().toLowerCase();
+    final isBoolean = type == 'bool';
+    final isChoice = type == 'choice';
+    final mode = (action['mode'] as String?) ?? 'delta';
+    final rawInterval = (_toActionDouble(parameter['interval']) ?? 0.0).abs();
+
+    if (isBoolean || isChoice) {
+      final rawCurrent = parameter['value'];
+      final currentNormalized = switch (rawCurrent) {
+        bool value => value ? 1.0 : 0.0,
+        _ => (_toActionDouble(parameter['valueNormalized']) ??
+                _toActionDouble(rawCurrent) ??
+                0.0)
+            .clamp(0.0, 1.0)
+            .toDouble(),
+      };
+      double nextNormalized;
+      if (mode == 'set') {
+        final requested =
+            _toActionDouble(action['value_norm']) ??
+            _toActionDouble(action['value']);
+        if (requested == null) {
+          throw StateError('mix_effect_parameter_value_invalid');
+        }
+        nextNormalized = requested;
+      } else {
+        final delta =
+            _toActionDouble(action['delta_norm']) ??
+            _toActionDouble(action['delta']);
+        if (delta == null) {
+          throw StateError('mix_effect_parameter_value_invalid');
+        }
+        nextNormalized = currentNormalized + delta;
+      }
+      nextNormalized = nextNormalized.clamp(0.0, 1.0).toDouble();
+
+      if (isBoolean) {
+        nextNormalized = nextNormalized >= 0.5 ? 1.0 : 0.0;
+      } else {
+        final choiceCount = parameter.keys
+            .where((key) => key.startsWith('choice_'))
+            .length;
+        final reportedInterval =
+            (_toActionDouble(parameter['intervalNormalized']) ?? 0.0).abs();
+        final normalizedInterval = reportedInterval > 0.0
+            ? reportedInterval
+            : choiceCount > 1
+            ? 1.0 / (choiceCount - 1)
+            : 0.0;
+        if (normalizedInterval > 0.0 && normalizedInterval.isFinite) {
+          nextNormalized =
+              (nextNormalized / normalizedInterval).round() *
+              normalizedInterval;
+          nextNormalized = nextNormalized.clamp(0.0, 1.0).toDouble();
+        }
+      }
+
+      final newValue = isBoolean ? nextNormalized == 1.0 : nextNormalized;
+      return _EffectParameterAdjustment(
+        oldValue: rawCurrent ?? currentNormalized,
+        newValue: newValue,
+        oldDisplayValue:
+            rawCurrent?.toString() ?? currentNormalized.toStringAsFixed(2),
+        newDisplayValue: newValue.toString(),
+        rawInterval: rawInterval,
+        expectedNormalizedValue: nextNormalized,
+      );
+    }
+
+    final current = _toActionDouble(parameter['value']);
+    if (current == null) {
+      throw StateError('mix_effect_parameter_value_invalid');
+    }
+    final minimum = _toActionDouble(parameter['min']);
+    final maximum = _toActionDouble(parameter['max']);
+    final clamp01 = (action['clamp_0_1'] as bool?) ?? false;
+    double next = current;
+    if (mode == 'set') {
+      final normalized = _toActionDouble(action['value_norm']);
+      if (normalized != null && minimum != null && maximum != null) {
+        next = minimum +
+            (maximum - minimum) * normalized.clamp(0.0, 1.0);
+      } else {
+        final value = _toActionDouble(action['value']);
+        if (value == null) {
+          throw StateError('mix_effect_parameter_value_invalid');
+        }
+        next = value;
+      }
+    } else {
+      final normalizedDelta = _toActionDouble(action['delta_norm']);
+      final delta =
+          normalizedDelta != null && minimum != null && maximum != null
+          ? normalizedDelta * (maximum - minimum)
+          : normalizedDelta ?? _toActionDouble(action['delta']);
+      if (delta == null) {
+        throw StateError('mix_effect_parameter_value_invalid');
+      }
+      next = current + delta;
+    }
+
+    final hardMinimum = _toActionDouble(action['clamp_min']);
+    final hardMaximum = _toActionDouble(action['clamp_max']);
+    if (hardMinimum != null || hardMaximum != null) {
+      next = next.clamp(
+        hardMinimum ?? double.negativeInfinity,
+        hardMaximum ?? double.infinity,
+      );
+    }
+    if (minimum != null && maximum != null) {
+      next = next.clamp(minimum, maximum);
+    } else if (clamp01) {
+      next = next.clamp(0.0, 1.0);
+    }
+    next = _canonicalEffectParameterValue(
+      value: next,
+      minimum: minimum,
+      maximum: maximum,
+      interval: rawInterval,
+    );
+    return _EffectParameterAdjustment(
+      oldValue: current,
+      newValue: next,
+      oldDisplayValue: current.toStringAsFixed(2),
+      newDisplayValue: next.toStringAsFixed(2),
+      rawInterval: rawInterval,
+    );
+  }
+
   int? _toActionInt(dynamic raw) {
     return AssistantActionUtils.toActionInt(raw);
   }
@@ -49394,6 +49561,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _assistantActionExecutionBatchDepth += 1;
     }
     final executionMessagesBefore = _assistantActionExecutionMessageCount;
+    final orderedEffectConstraints = AiV3OrderedEffectConstraints();
     Future<void> applyV3MixActions(Map<String, dynamic> data) async {
       final rawMixActions = data['actions'];
       if (rawMixActions is! List || rawMixActions.isEmpty) {
@@ -49410,6 +49578,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
           })
           .toList(growable: false);
+      validateAiV3MixEffectCapabilities(
+        mixActions,
+        allowedEffectIds: _allowedBuiltInEffectIdsForCurrentPlan(),
+      );
       final report = await applyMixingResult(
         MixingResult(actions: mixActions, summary: '', isNoOp: false),
         emitActionSummaries: false,
@@ -50798,12 +50970,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   configuredExpectations,
                 );
               }
+              orderedEffectConstraints.observeAppliedAction(type, data);
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
               break;
             case 'v3_effect_instance_edit':
               await _applyAiV3EffectInstanceEditAction(data);
+              orderedEffectConstraints.observeAppliedAction(type, data);
               if (chatFlowId != null) {
                 _throwIfChatFlowStopped(chatFlowId);
               }
@@ -50880,8 +51054,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 };
               }
               final project = await _buildCurrentAiProjectState();
-              final allowedTargetRowIds = <int>{};
-              int? requiredTargetRow;
               switch (scope) {
                 case 'row':
                   final rowId = _toActionInt(target['row_id']);
@@ -50899,55 +51071,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     'row_index': rowIndex,
                   };
                   data = <String, dynamic>{...data, 'target': target};
-                  final projectRow = project.rows
-                      .where(
-                        (row) => row.rowIndex == rowIndex && row.rowId == rowId,
-                      )
-                      .firstOrNull;
-                  if (projectRow == null || projectRow.clips.isEmpty) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
-                  requiredTargetRow = rowIndex;
-                  allowedTargetRowIds.add(rowId);
                   break;
                 case 'group':
-                  final groupId = target['group_id']?.toString().trim() ?? '';
-                  final group = _trackGroups
-                      .where((candidate) => candidate.id == groupId)
-                      .firstOrNull;
-                  if (group == null || group.rowIds.length < 2) {
-                    throw StateError('v3_group_id_unknown');
-                  }
-                  allowedTargetRowIds.addAll(group.rowIds);
-                  if (!project.rows.any(
-                    (row) =>
-                        allowedTargetRowIds.contains(row.rowId) &&
-                        row.clips.isNotEmpty,
-                  )) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
-                  break;
                 case 'all_rows':
-                  allowedTargetRowIds.addAll(
-                    project.rows
-                        .where((row) => row.clips.isNotEmpty)
-                        .map((row) => row.rowId),
-                  );
-                  if (allowedTargetRowIds.isEmpty) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
-                  break;
                 case 'master':
-                  if (!project.rows.any((row) => row.clips.isNotEmpty)) {
-                    throw StateError('v3_mix_audio_missing');
-                  }
                   break;
                 default:
                   throw StateError('v3_mix_action_target_invalid');
               }
-              if (allowedTargetRowIds.any((rowId) => rowId < 0)) {
-                throw StateError('v3_mix_audio_missing');
-              }
+              final mixContainment = resolveAiV3MixContainment(data, project);
+              final containedTargetRowIds =
+                  mixContainment.allowedTargetRowIds ?? const <int>{};
               final materialized =
                   await AiV3MixGoalMaterializer(
                     mixModel: _mixModel,
@@ -50957,28 +51091,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     project: project,
                     roleOverrides: aiV3CurrentRoleOverrides(project),
                     bypassLearnedMagnitudes: _producerDataMode,
-                    requiredTargetRow: requiredTargetRow,
-                    allowedTargetRowIds: scope == 'master'
-                        ? null
-                        : allowedTargetRowIds,
+                    allowedEffectIds: _allowedBuiltInEffectIdsForCurrentPlan(),
+                    effectConstraints: orderedEffectConstraints,
                     projectId: _projectId,
                   );
               if (materialized.isNoChange) {
                 v3RuntimeAlreadySatisfiedCommandIds?.add(commandId);
               } else {
+                final executionActions = normalizeAiV3MixActionsForExecution(
+                  materialized.actions,
+                );
                 final materializedData = <String, dynamic>{
                   'command_id': commandId,
-                  'actions': materialized.actions
-                      .map((action) {
-                        final json = action.toJson();
-                        return <String, dynamic>{
-                          ...json,
-                          'data': <String, dynamic>{
-                            ...Map<String, dynamic>.from(json['data'] as Map),
-                            'force_individual_row': true,
-                          },
-                        };
-                      })
+                  'actions': executionActions
+                      .map((action) => action.toJson())
                       .toList(growable: false),
                   if (materialized.protectedReferenceRow != null)
                     'protected_reference_row_index':
@@ -51000,7 +51126,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   for (final generatedRow in v3RuntimeExpectations.where(
                     (expectation) =>
                         expectation['kind'] == 'generated_row_state' &&
-                        allowedTargetRowIds.contains(expectation['row_id']),
+                        containedTargetRowIds.contains(expectation['row_id']),
                   )) {
                     final generatedRowIndex = _rowIndexForId(
                       generatedRow['row_id'] as int,
@@ -67087,82 +67213,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   (picked['id'] as String?) ??
                   (picked['name'] as String); // robust
               final paramName = (picked['name'] as String?) ?? paramId;
-              final current = (picked['value'] as num).toDouble();
-
-              final double? pMin = picked['min'] is num
-                  ? (picked['min'] as num).toDouble()
-                  : null;
-              final double? pMax = picked['max'] is num
-                  ? (picked['max'] as num).toDouble()
-                  : null;
-
-              final clamp01 = (a.data['clamp_0_1'] as bool?) ?? false;
-
-              final mode = (a.data['mode'] as String?) ?? 'delta';
-
-              double next = current;
-
-              if (mode == 'set') {
-                if (a.data.containsKey('value_norm') &&
-                    pMin != null &&
-                    pMax != null) {
-                  final vn = (a.data['value_norm'] as num).toDouble().clamp(
-                    0.0,
-                    1.0,
-                  );
-                  next = pMin + (pMax - pMin) * vn;
-                } else {
-                  next = (a.data['value'] as num).toDouble();
-                }
-              } else {
-                // delta mode
-                double delta;
-                if (a.data.containsKey('delta_norm')) {
-                  final dn = (a.data['delta_norm'] as num).toDouble();
-                  if (pMin != null && pMax != null) {
-                    delta = dn * (pMax - pMin);
-                  } else {
-                    delta = dn;
-                  }
-                } else {
-                  delta = (a.data['delta'] as num).toDouble();
-                }
-                next = current + delta;
-              }
-
-              // -----------------------------
-              // HARD SAFETY CLAMPS (action-level)
-              // -----------------------------
-              final double? hardMin = a.data['clamp_min'] is num
-                  ? (a.data['clamp_min'] as num).toDouble()
-                  : null;
-              final double? hardMax = a.data['clamp_max'] is num
-                  ? (a.data['clamp_max'] as num).toDouble()
-                  : null;
-
-              // Apply hard clamps FIRST (authoritative)
-              if (hardMin != null || hardMax != null) {
-                final lo = hardMin ?? double.negativeInfinity;
-                final hi = hardMax ?? double.infinity;
-                next = next.clamp(lo, hi);
-              }
-
-              // -----------------------------
-              // Plugin range clamp
-              // -----------------------------
-              if (pMin != null && pMax != null) {
-                next = next.clamp(pMin, pMax);
-              } else if (clamp01) {
-                next = next.clamp(0.0, 1.0);
-              }
-              final interval = (_toActionDouble(picked['interval']) ?? 0.0)
-                  .abs();
-              next = _canonicalEffectParameterValue(
-                value: next,
-                minimum: pMin,
-                maximum: pMax,
-                interval: interval,
-              );
+              final adjustment = _effectParameterAdjustment(picked, a.data);
 
               // await _undoManager.execute(
               //   SetEffectParamAction(
@@ -67185,8 +67236,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 effectInstanceId: resolved.effectInstanceId,
                 effectOccurrence: resolved.effectOccurrence,
                 paramId: paramId,
-                oldValue: current,
-                newValue: next,
+                oldValue: adjustment.oldValue,
+                newValue: adjustment.newValue,
                 forceIndividualRow: forceIndividualRow,
                 onChange: () {
                   setState(() {});
@@ -67224,16 +67275,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final normalizedValue = _toActionDouble(
                 appliedParameter?['valueNormalized'],
               );
-              if (appliedValue == null ||
-                  normalizedValue == null ||
-                  (appliedValue - next).abs() >
-                      math.max(0.0001, interval / 2.0 + 0.000001)) {
-                throw StateError('mix_effect_parameter_apply_failed');
-              }
               final normalizedInterval =
                   (_toActionDouble(appliedParameter?['intervalNormalized']) ??
                           0.0)
                       .abs();
+              final normalizedTolerance = math.max(
+                0.001,
+                normalizedInterval > 0.0
+                    ? normalizedInterval / 2.0 + 0.000001
+                    : 0.001,
+              );
+              final parameterApplied = adjustment.usesNormalizedVerification
+                  ? normalizedValue != null &&
+                        (normalizedValue -
+                                    adjustment.expectedNormalizedValue!)
+                                .abs() <=
+                            normalizedTolerance
+                  : appliedValue != null &&
+                        (appliedValue - (adjustment.newValue as double)).abs() <=
+                            math.max(
+                              0.0001,
+                              adjustment.rawInterval / 2.0 + 0.000001,
+                            );
+              if (!parameterApplied || normalizedValue == null) {
+                throw StateError('mix_effect_parameter_apply_failed');
+              }
               appliedMutations.add(<String, dynamic>{
                 'kind': 'effect_parameter_value',
                 'row': row,
@@ -67244,14 +67310,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 'effect_name': resolved.effectName,
                 'parameter_id': paramId,
                 'param_name': paramName,
-                'value': next,
+                'value': adjustment.newValue,
                 'value_normalized': normalizedValue,
-                'tolerance_normalized': math.max(
-                  0.001,
-                  normalizedInterval > 0.0
-                      ? normalizedInterval / 2.0 + 0.000001
-                      : 0.001,
-                ),
+                'tolerance_normalized': normalizedTolerance,
               });
               adjustedCount += 1;
 
@@ -67266,7 +67327,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               ]);
 
               emitActionSummary(
-                '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${resolved.effectName} (${targetDisplayNameForRow(row)}) •',
+                '• Adjusted $paramName from ${adjustment.oldDisplayValue} to ${adjustment.newDisplayValue} on ${resolved.effectName} (${targetDisplayNameForRow(row)}) •',
               );
             }
             if (adjustedCount == 0 && !skipIfMissing) {
@@ -67306,78 +67367,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final paramId =
                 (picked['id'] as String?) ?? (picked['name'] as String);
             final paramName = (picked['name'] as String?) ?? paramId;
-            final current = (picked['value'] as num).toDouble();
-
-            final double? pMin = picked['min'] is num
-                ? (picked['min'] as num).toDouble()
-                : null;
-            final double? pMax = picked['max'] is num
-                ? (picked['max'] as num).toDouble()
-                : null;
-
-            final clamp01 = (a.data['clamp_0_1'] as bool?) ?? false;
-            final mode = (a.data['mode'] as String?) ?? 'delta';
-
-            double next = current;
-            if (mode == 'set') {
-              if (a.data.containsKey('value_norm') &&
-                  pMin != null &&
-                  pMax != null) {
-                final vn = (a.data['value_norm'] as num).toDouble().clamp(
-                  0.0,
-                  1.0,
-                );
-                next = pMin + (pMax - pMin) * vn;
-              } else {
-                next = (a.data['value'] as num).toDouble();
-              }
-            } else {
-              double delta;
-              if (a.data.containsKey('delta_norm')) {
-                final dn = (a.data['delta_norm'] as num).toDouble();
-                if (pMin != null && pMax != null) {
-                  delta = dn * (pMax - pMin);
-                } else {
-                  delta = dn;
-                }
-              } else {
-                delta = (a.data['delta'] as num).toDouble();
-              }
-              next = current + delta;
-            }
-
-            final double? hardMin = a.data['clamp_min'] is num
-                ? (a.data['clamp_min'] as num).toDouble()
-                : null;
-            final double? hardMax = a.data['clamp_max'] is num
-                ? (a.data['clamp_max'] as num).toDouble()
-                : null;
-
-            if (hardMin != null || hardMax != null) {
-              final lo = hardMin ?? double.negativeInfinity;
-              final hi = hardMax ?? double.infinity;
-              next = next.clamp(lo, hi);
-            }
-
-            if (pMin != null && pMax != null) {
-              next = next.clamp(pMin, pMax);
-            } else if (clamp01) {
-              next = next.clamp(0.0, 1.0);
-            }
-            final interval = (_toActionDouble(picked['interval']) ?? 0.0).abs();
-            next = _canonicalEffectParameterValue(
-              value: next,
-              minimum: pMin,
-              maximum: pMax,
-              interval: interval,
-            );
+            final adjustment = _effectParameterAdjustment(picked, a.data);
 
             final finalAct = SetMasterEffectParamAction(
               effectIndex: fxIndex,
               effectId: resolved.effectId,
               paramId: paramId,
-              oldValue: current,
-              newValue: next,
+              oldValue: adjustment.oldValue,
+              newValue: adjustment.newValue,
               onChange: () {
                 setState(() {});
                 unawaited(_refreshAutomationTargetsForAllRows());
@@ -67406,16 +67403,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final normalizedValue = _toActionDouble(
               appliedParameter?['valueNormalized'],
             );
-            if (appliedValue == null ||
-                normalizedValue == null ||
-                (appliedValue - next).abs() >
-                    math.max(0.0001, interval / 2.0 + 0.000001)) {
-              throw StateError('mix_master_parameter_apply_failed');
-            }
             final normalizedInterval =
                 (_toActionDouble(appliedParameter?['intervalNormalized']) ??
                         0.0)
                     .abs();
+            final normalizedTolerance = math.max(
+              0.001,
+              normalizedInterval > 0.0
+                  ? normalizedInterval / 2.0 + 0.000001
+                  : 0.001,
+            );
+            final parameterApplied = adjustment.usesNormalizedVerification
+                ? normalizedValue != null &&
+                      (normalizedValue - adjustment.expectedNormalizedValue!)
+                              .abs() <=
+                          normalizedTolerance
+                : appliedValue != null &&
+                      (appliedValue - (adjustment.newValue as double)).abs() <=
+                          math.max(
+                            0.0001,
+                            adjustment.rawInterval / 2.0 + 0.000001,
+                          );
+            if (!parameterApplied || normalizedValue == null) {
+              throw StateError('mix_master_parameter_apply_failed');
+            }
             appliedMutations.add(<String, dynamic>{
               'kind': 'effect_parameter_value',
               'master': true,
@@ -67424,18 +67435,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               'effect_name': resolved.effectName,
               'parameter_id': paramId,
               'param_name': paramName,
-              'value': next,
+              'value': adjustment.newValue,
               'value_normalized': normalizedValue,
-              'tolerance_normalized': math.max(
-                0.001,
-                normalizedInterval > 0.0
-                    ? normalizedInterval / 2.0 + 0.000001
-                    : 0.001,
-              ),
+              'tolerance_normalized': normalizedTolerance,
             });
 
             emitActionSummary(
-              '• Adjusted $paramName from ${current.toStringAsFixed(2)} to ${next.toStringAsFixed(2)} on ${resolved.effectName} (Master Bus) •',
+              '• Adjusted $paramName from ${adjustment.oldDisplayValue} to ${adjustment.newDisplayValue} on ${resolved.effectName} (Master Bus) •',
             );
             continue;
           }
@@ -69483,28 +69489,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertAiFailureSystemText(
         error.rollbackIncomplete || !artifactCleanupComplete
             ? 'The changes failed and could not be fully rolled back. Review the project state.'
-            : _aiV3RolledBackFailureMessage(error.cause),
+            : aiV3RolledBackFailureMessage(error.cause),
       );
     } finally {
       releaseTransactionNoticeCapture();
     }
-  }
-
-  String _aiV3RolledBackFailureMessage(Object cause) {
-    final code = cause.toString();
-    if (code.contains('v3_transport_recording_active')) {
-      return 'Playback controls cannot be changed while recording. Stop recording first, then try again. Nothing was changed.';
-    }
-    if (code.contains('v3_audio_to_midi_source_silent') ||
-        code.contains('v3_audio_to_midi_no_stable_notes') ||
-        code.contains('v3_audio_to_midi_render_unreadable') ||
-        code.contains('v3_audio_to_midi_transcription_failed')) {
-      return 'I could not detect usable notes in that audio. The project was unchanged. Try a clearer pitched clip or convert a different clip.';
-    }
-    if (code.contains('v3_audio_to_midi_source_unreadable')) {
-      return 'I could not read that audio clip for transcription. The project was unchanged. Try another readable audio clip.';
-    }
-    return 'I could not verify the complete change. The transaction was rolled back.';
   }
 
   Future<List<Map<String, dynamic>>> _captureAiV3Expectations(
@@ -80425,6 +80414,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _clipFadeRowIdByEngineId.remove(changedClip.engineClipId);
         }
       },
+      restoreClipIndex: _restoreClipOrderIndex,
     );
   }
 
@@ -82344,6 +82334,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : _audioTracks
               .where((clip) => clip.rowIndex == row)
               .toList(growable: false);
+    final deletedClipIdentities = HashSet<AudioTrack>.identity()
+      ..addAll(deletedClips);
+    final originalClipIndexes = <String, int>{};
+    for (int index = 0; index < _audioTracks.length; index++) {
+      final clip = _audioTracks[index];
+      final clipId = clip.clipId.trim();
+      if (clipId.isNotEmpty && deletedClipIdentities.contains(clip)) {
+        originalClipIndexes.putIfAbsent(clipId, () => index);
+      }
+    }
 
     final containsActiveMidiClip =
         _activeMidiClipEngineId != null &&
@@ -82384,6 +82384,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       rowEffects: await captureRowSnapshot(row, rowId: rowId),
       clips: deletedClips,
+      originalClipIndexes: originalClipIndexes,
       closesMidiEditor: containsActiveMidiClip,
       previousSelectedRowId: previousSelectedRowId,
       nextSelectedRowId: nextSelectedRowId,
@@ -82449,6 +82450,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         assumeFreshEngineDefaults: true,
       );
     }
+  }
+
+  void _restoreClipOrderIndexes(Map<String, int> originalIndexes) {
+    if (originalIndexes.isEmpty || _audioTracks.length < 2) return;
+    final orderedEntries = originalIndexes.entries.toList(growable: false)
+      ..sort((a, b) => a.value.compareTo(b.value));
+    var changed = false;
+    for (final entry in orderedEntries) {
+      final currentIndex = _clipIndexForPersistentId(entry.key);
+      if (currentIndex < 0) continue;
+      final targetIndex = entry.value.clamp(0, _audioTracks.length - 1);
+      if (currentIndex == targetIndex) continue;
+      final clip = _audioTracks.removeAt(currentIndex);
+      _audioTracks.insert(targetIndex, clip);
+      changed = true;
+    }
+    if (changed) {
+      _rebuildClipOperationIndexes();
+    }
+  }
+
+  void _restoreClipOrderIndex(String clipId, int originalIndex) {
+    if (clipId.trim().isEmpty || originalIndex < 0) return;
+    _restoreClipOrderIndexes(<String, int>{clipId: originalIndex});
   }
 
   Future<void> _restoreDeletedRowState(
@@ -82588,6 +82613,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _restoreDeletedRowClips(restoredRowIndex, snapshot.clips);
+    _restoreClipOrderIndexes(snapshot.originalClipIndexes);
     await _restoreRowSnapshot(
       RowEffectsSnapshot(
         restoredRowIndex,
@@ -82654,6 +82680,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Map<String, int> _commandDeletedRowClipIndexes(Object? raw) {
+    if (raw is! Map) return const <String, int>{};
+    final indexes = <String, int>{};
+    for (final entry in raw.entries) {
+      final clipId = entry.key.toString().trim();
+      final index = _valueInt(entry.value);
+      if (clipId.isNotEmpty && index != null && index >= 0) {
+        indexes.putIfAbsent(clipId, () => index);
+      }
+    }
+    return indexes;
+  }
+
   Future<int> _restoreDeletedRowFromPersistedSnapshot(
     Map<String, dynamic> snapshot,
   ) async {
@@ -82691,6 +82730,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
     final rowEffects = _commandRowEffectsSnapshot(snapshot['rowEffects']);
     final clipPayloads = _commandClipPayloads(snapshot['clips']);
+    final originalClipIndexes = _commandDeletedRowClipIndexes(
+      snapshot['originalClipIndexes'],
+    );
 
     var restoredRowIndex = originalIndex;
     final originalRowId = _valueInt(rowMap['rowId']) ?? -1;
@@ -82759,6 +82801,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _restoreDeletedRowClipPayloads(restoredRowIndex, clipPayloads);
+    _restoreClipOrderIndexes(originalClipIndexes);
     await _restoreRowSnapshot(
       RowEffectsSnapshot(
         restoredRowIndex,
@@ -89317,6 +89360,7 @@ class _DeletedRowSnapshot {
   final RowStateSnapshot rowState;
   final RowEffectsSnapshot rowEffects;
   final List<AudioTrack> clips;
+  final Map<String, int> originalClipIndexes;
   final bool closesMidiEditor;
   final int? previousSelectedRowId;
   final int? nextSelectedRowId;
@@ -89330,6 +89374,7 @@ class _DeletedRowSnapshot {
     required this.rowState,
     required this.rowEffects,
     required this.clips,
+    required this.originalClipIndexes,
     required this.closesMidiEditor,
     required this.previousSelectedRowId,
     required this.nextSelectedRowId,
@@ -89348,6 +89393,8 @@ class _DeletedRowSnapshot {
     'rowState': rowState.toJson(),
     'rowEffects': rowEffects.toJson(),
     'clips': clips.map(_persistedClipPayload).toList(),
+    if (originalClipIndexes.isNotEmpty)
+      'originalClipIndexes': originalClipIndexes,
     'closesMidiEditor': closesMidiEditor,
     'previousSelectedRowId': previousSelectedRowId,
     'nextSelectedRowId': nextSelectedRowId,
@@ -91059,6 +91106,7 @@ class DeleteClipAction extends EditorUndoAction {
   addTrack;
 
   final void Function(AudioTrack clip, {required bool removed}) onChange;
+  final void Function(String clipId, int originalIndex) restoreClipIndex;
 
   // snapshot
   // can deprecate all fields except clip, since all of them derive from clip anyways
@@ -91073,6 +91121,7 @@ class DeleteClipAction extends EditorUndoAction {
     required this.clip,
     required this.addTrack,
     required this.onChange,
+    required this.restoreClipIndex,
   }) {
     originalIndex = tracks.indexOf(clip);
     file = clip.file;
@@ -91114,6 +91163,10 @@ class DeleteClipAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
+    await restore(notifyChange: true);
+  }
+
+  Future<void> restore({required bool notifyChange}) async {
     await addTrack(
       clip: clip,
       row: row,
@@ -91121,7 +91174,10 @@ class DeleteClipAction extends EditorUndoAction {
       trimStartRequested: trimStart,
       trimEndRequested: trimEnd,
     );
-    onChange(clip, removed: false);
+    restoreClipIndex(clip.clipId, originalIndex);
+    if (notifyChange) {
+      onChange(clip, removed: false);
+    }
   }
 }
 
@@ -91181,13 +91237,7 @@ class DeleteClipsAction extends EditorUndoAction {
     await beginRestoreBatch();
     try {
       for (final action in actions.reversed) {
-        await action.addTrack(
-          clip: action.clip,
-          row: action.row,
-          timeMs: action.timeMs,
-          trimStartRequested: action.trimStart,
-          trimEndRequested: action.trimEnd,
-        );
+        await action.restore(notifyChange: false);
       }
     } finally {
       await endRestoreBatch();
@@ -91206,6 +91256,7 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
   final int fallbackIndex;
   final Future<void> Function(Map<String, dynamic> payload) addClip;
   final Future<void> Function(String clipId, int fallbackIndex) removeClip;
+  final void Function(String clipId, int originalIndex) restoreClipIndex;
 
   _PersistedClipPresenceAction({
     required String descriptionText,
@@ -91214,6 +91265,7 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
     required this.fallbackIndex,
     required this.addClip,
     required this.removeClip,
+    required this.restoreClipIndex,
   }) : descriptionText = descriptionText.trim().isEmpty
            ? (addedByRedo ? 'Add audio clip' : 'Delete audio clip')
            : descriptionText.trim(),
@@ -91235,7 +91287,7 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
   @override
   Future<void> redo() {
     return addedByRedo
-        ? addClip(clipPayload)
+        ? _addClipAtSavedIndex()
         : removeClip(clipId, fallbackIndex);
   }
 
@@ -91243,7 +91295,12 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
   Future<void> undo() {
     return addedByRedo
         ? removeClip(clipId, fallbackIndex)
-        : addClip(clipPayload);
+        : _addClipAtSavedIndex();
+  }
+
+  Future<void> _addClipAtSavedIndex() async {
+    await addClip(clipPayload);
+    restoreClipIndex(clipId, fallbackIndex);
   }
 }
 

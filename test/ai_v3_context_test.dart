@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/models/models.dart';
 
 Future<AudioTrack> _midiClip() => AudioTrack.create(
@@ -266,6 +267,175 @@ void main() {
       <String>['Compressor', 'Reverb'],
     );
   });
+
+  test('preserves Free-tier effects and row capacity exactly', () async {
+    final client = _clientContext()
+      ..['allowed_builtin_effects'] = SubscriptionLimits.freeBuiltInEffects
+          .toList(growable: false)
+      ..['allowed_instrument_ids'] = <String>['sfz.vsco.upright_piano']
+      ..['ai_v3_instrument_catalog'] = <Map<String, dynamic>>[
+        <String, dynamic>{
+          'instrument_id': 'sfz.vsco.upright_piano',
+          'name': 'Upright Piano',
+          'playable_pitch_ranges': <Map<String, int>>[
+            <String, int>{'low': 21, 'high': 108},
+          ],
+        },
+      ]
+      ..['max_rows'] = SubscriptionLimits.freeRowsPerProject;
+    final context = const AiV3CoreContextBuilder().build(
+      profile: AiV3ContextProfile.essential,
+      userRequest: 'Add a Free-tier effect.',
+      conversation: const <Map<String, String>>[],
+      validationState: _validation(),
+      audioTracks: <AudioTrack>[await _midiClip()],
+      clientContext: client,
+      bpm: 120,
+      beatsPerBar: 4,
+      beatUnit: 4,
+    );
+
+    final advertisedEffects = (context.data['effects'] as List)
+        .map((effect) => (effect as Map)['effect_id'].toString())
+        .toSet();
+    expect(advertisedEffects, SubscriptionLimits.freeBuiltInEffects);
+    expect(advertisedEffects, isNot(contains('Distortion')));
+    expect(
+      (context.data['project'] as Map)['row_capacity'],
+      containsPair('max_rows', SubscriptionLimits.freeRowsPerProject),
+    );
+    final advertisedInstruments = (context.data['instruments'] as List)
+        .map((id) => id.toString())
+        .toSet();
+    expect(advertisedInstruments, isNotEmpty);
+    expect(
+      advertisedInstruments.difference(
+        SubscriptionLimits.freeBuiltInInstrumentIds,
+      ),
+      isEmpty,
+    );
+  });
+
+  test(
+    'preserves existing Free-project state outside current creation entitlements',
+    () {
+      final validation = _validation();
+      final baseRow = Map<String, dynamic>.from(
+        (validation['rows'] as List).single as Map,
+      );
+      validation['rows'] = List<Map<String, dynamic>>.generate(6, (index) {
+        final rowId = 100 + index;
+        return <String, dynamic>{
+          ...baseRow,
+          'row_index': index,
+          'row_id': rowId,
+          'name': index == 0 ? 'Preserved Strings' : 'Audio ${index + 1}',
+          'lane_kind': index == 0 ? 'instrument' : 'audio',
+          'instrument_id': index == 0 ? 'paid-orchestral-strings' : null,
+          'source_type': index == 0 ? 'midi' : 'audio',
+          'has_audio': false,
+          'group_id': null,
+        };
+      });
+      validation['clips'] = <Map<String, dynamic>>[];
+      validation['groups'] = <Map<String, dynamic>>[];
+      validation['selection'] = <String, dynamic>{};
+
+      final client = _clientContext();
+      client
+        ..['ai_v3_clip_timeline_lengths_ms'] = <String, double>{}
+        ..['allowed_instrument_ids'] = <String>['sfz.vsco.upright_piano']
+        ..['ai_v3_instrument_catalog'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'instrument_id': 'sfz.vsco.upright_piano',
+            'name': 'Upright Piano',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 21, 'high': 108},
+            ],
+          },
+        ]
+        ..['max_rows'] = SubscriptionLimits.freeRowsPerProject
+        ..['current_rows'] = 6
+        ..['ai_v3_row_state'] = <Map<String, dynamic>>[
+          for (var index = 0; index < 6; index++)
+            <String, dynamic>{
+              'row_id': 100 + index,
+              'muted': false,
+              'soloed': false,
+            },
+        ];
+
+      final context = const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: 'Restart playback.',
+        conversation: const <Map<String, String>>[],
+        validationState: validation,
+        audioTracks: const <AudioTrack>[],
+        clientContext: client,
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      );
+
+      final rows = (context.data['rows'] as List).whereType<Map>().toList();
+      final capacity = (context.data['project'] as Map)['row_capacity'] as Map;
+      expect(rows, hasLength(6));
+      expect(rows.first['instrument_id'], 'paid-orchestral-strings');
+      expect(context.data['instruments'], <String>['sfz.vsco.upright_piano']);
+      expect(capacity['current_rows'], 6);
+      expect(capacity['max_rows'], SubscriptionLimits.freeRowsPerProject);
+      expect(capacity['can_create'], isFalse);
+    },
+  );
+
+  test(
+    'describes preserved instruments without making them selectable',
+    () async {
+      final validation = _validation();
+      final row = (validation['rows'] as List).single as Map<String, dynamic>;
+      row['instrument_id'] = 'paid-marimba';
+      final client = _clientContext()
+        ..['allowed_instrument_ids'] = <String>['piano']
+        ..['ai_v3_instrument_catalog'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'instrument_id': 'piano',
+            'name': 'Piano',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 21, 'high': 108},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'paid-marimba',
+            'name': 'Marimba',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 45, 'high': 96},
+            ],
+          },
+        ];
+      final clip = await _midiClip();
+      clip.instrumentId = 'paid-marimba';
+
+      final context = const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: 'Rewrite the marimba rhythm.',
+        conversation: const <Map<String, String>>[],
+        validationState: validation,
+        audioTracks: <AudioTrack>[clip],
+        clientContext: client,
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      );
+
+      expect(context.data['instruments'], <String>['piano']);
+      expect(
+        (context.data['instrument_catalog'] as List)
+            .map((entry) => (entry as Map)['instrument_id'])
+            .toSet(),
+        <String>{'piano', 'paid-marimba'},
+      );
+    },
+  );
 
   test('includes exact one-shot audio stretch facts', () async {
     final clip = await _audioClip();

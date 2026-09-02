@@ -1,0 +1,56 @@
+{
+  "request_contract": "mixroom_v3_context_v1",
+  "original_request": "Restart playback.",
+  "conversation": [],
+  "core_context": {
+    "schema_version": "core_context_v3_prototype_1",
+    "profile": "essential",
+    "state_digest": "released-client-fixture",
+    "request_mode": "new_request",
+    "project": {
+      "project_id": "released-project",
+      "bpm": 120,
+      "beats_per_bar": 4,
+      "beat_unit": 4,
+      "playhead_ms": 0,
+      "playhead_beat": 0,
+      "row_capacity": {
+        "current_rows": 0,
+        "max_rows": 5,
+        "can_create": true
+      },
+      "tempo_stretch_enabled": false
+    },
+    "transport": {
+      "playing": false,
+      "recording": false
+    },
+    "selection": {
+      "selected_row_ids": [],
+      "selected_clip_ids": []
+    },
+    "rows": [],
+    "groups": [],
+    "master": {
+      "gain_db": 0,
+      "pan_signed": 0,
+      "effects": []
+    },
+    "clips": [],
+    "instruments": [],
+    "instrument_catalog": [],
+    "effects": [],
+    "library_assets": [],
+    "capabilities": [
+      "transport.restart"
+    ],
+    "runtime_capabilities": []
+  },
+  "plan_schema_version": "plan_v3_prototype_2",
+  "supported_command_types": [
+    "transport.restart"
+  ],
+  "resource_refs_enabled": false,
+  "project_id": "released-project",
+  "prompt_trace_id": "released-v1-trace"
+}

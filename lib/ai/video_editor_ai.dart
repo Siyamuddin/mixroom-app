@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/helpers/video_sequencer_engine.dart';
@@ -354,7 +355,7 @@ class VideoEditorAiService {
 
   bool get _isProxyEnabled => proxyApiBaseUrl.trim().isNotEmpty;
   bool get _canUseDirectOpenAi =>
-      apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
+      kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
 
   Future<VideoEditorAiResponse> handleUserText({
     required String userText,

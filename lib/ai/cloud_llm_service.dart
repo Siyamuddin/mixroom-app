@@ -261,7 +261,7 @@ class CloudLlmService {
       ? '24h'
       : _defaultPromptCacheRetention;
   bool get _canUseDirectOpenAi =>
-      apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
+      kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
   bool get _isProxyEnabled => proxyApiBaseUrl.trim().isNotEmpty;
   bool get _isUsingDebugSystemPrompt =>
       kDebugMode && kDebugSystemPrompt.trim().isNotEmpty;
@@ -5591,7 +5591,9 @@ class CloudLlmService {
         }
       } else {
         return LlmResult.text(
-          'AI is not configured. Launch with --dart-define=LLM_PROXY_API_BASE_URL=... or --dart-define=OPENAI_API_KEY=... --dart-define=OPENAI_MODEL=...',
+          kDebugMode
+              ? 'AI is not configured. Set LLM_PROXY_API_BASE_URL, or configure the direct provider for local debugging.'
+              : 'AI is temporarily unavailable. Please try again later.',
           null,
         );
       }

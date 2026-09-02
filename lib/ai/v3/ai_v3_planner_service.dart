@@ -7,7 +7,7 @@ import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_resources.dart';
 
-const String aiV3ContextRequestContract = 'mixroom_v3_context_v1';
+const String aiV3ContextRequestContract = 'mixroom_v3_context_v2';
 const String aiV3ServerResponseVersion = 'v3_plan_response_server_v1';
 
 const Set<String> _allowedResponseFields = <String>{
@@ -85,7 +85,6 @@ Map<String, dynamic> buildAiV3ContextRequestBody({
       : '';
   final normalizedTraceId = (promptTraceId ?? '').trim();
   final sortedCommandTypes = commandTypes.toList(growable: false)..sort();
-
   return <String, dynamic>{
     'request_contract': aiV3ContextRequestContract,
     'original_request': originalRequest.trim(),
@@ -138,11 +137,48 @@ class AiV3PlannerService implements AiV3Planner {
       commandTypes: commandTypes,
       resourceRefsEnabled: resourceRefsEnabled,
     );
+    final encodedBody = jsonEncode(body);
+    final requestBodyBytes = utf8.encode(encodedBody).length;
+    final stopwatch = Stopwatch()..start();
+    var requestStage = 'auth';
     try {
-      final response = await _postProxy(body);
-      return _parseResponse(response);
+      final response = await _postProxy(
+        encodedBody,
+        onStageChanged: (stage) => requestStage = stage,
+      );
+      stopwatch.stop();
+      late final AiV3PlannerResult result;
+      try {
+        result = _parseResponse(response);
+      } on AiV3PlannerException catch (error) {
+        throw AiV3PlannerException(error.code, error.detail, <String, dynamic>{
+          ...error.diagnostic,
+          'stage': 'proxy_response',
+          if ((promptTraceId ?? '').trim().isNotEmpty)
+            'prompt_trace_id': promptTraceId!.trim(),
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+          'request_timeout_ms': requestTimeout.inMilliseconds,
+          'request_body_bytes': requestBodyBytes,
+        });
+      }
+      return AiV3PlannerResult(
+        plan: result.plan,
+        meta: <String, dynamic>{
+          ...result.meta,
+          'v3_planner_request_ms': stopwatch.elapsedMilliseconds,
+          'v3_request_body_bytes': requestBodyBytes,
+        },
+      );
     } on TimeoutException {
-      throw const AiV3PlannerException('v3_planner_timeout');
+      stopwatch.stop();
+      throw AiV3PlannerException('v3_planner_timeout', '', <String, dynamic>{
+        'stage': requestStage,
+        if ((promptTraceId ?? '').trim().isNotEmpty)
+          'prompt_trace_id': promptTraceId!.trim(),
+        'elapsed_ms': stopwatch.elapsedMilliseconds,
+        'request_timeout_ms': requestTimeout.inMilliseconds,
+        'request_body_bytes': requestBodyBytes,
+      });
     }
   }
 
@@ -157,6 +193,7 @@ class AiV3PlannerService implements AiV3Planner {
       throw AiV3PlannerException(
         'v3_planner_response_invalid_json',
         'http_${response.statusCode}',
+        <String, dynamic>{'http_status': response.statusCode},
       );
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -165,9 +202,15 @@ class AiV3PlannerService implements AiV3Planner {
       final safeCode = RegExp(r'^[a-z0-9_]{1,80}$').hasMatch(rawCode)
           ? rawCode
           : 'server_error';
+      final isTimeout =
+          response.statusCode == 504 || safeCode == 'v3_upstream_timeout';
       throw AiV3PlannerException(
-        'v3_planner_http_error',
+        isTimeout ? 'v3_planner_timeout' : 'v3_planner_http_error',
         'http_${response.statusCode}:$safeCode',
+        <String, dynamic>{
+          'http_status': response.statusCode,
+          'server_error_code': safeCode,
+        },
       );
     }
     if (decoded['schema_version'] != aiV3ServerResponseVersion ||
@@ -247,32 +290,40 @@ class AiV3PlannerService implements AiV3Planner {
     };
   }
 
-  Future<http.Response> _postProxy(Map<String, dynamic> body) async {
+  Future<http.Response> _postProxy(
+    String encodedBody, {
+    void Function(String stage)? onStageChanged,
+  }) async {
+    onStageChanged?.call('auth');
     var token = await _resolveProxyAuthToken(authTokenProvider);
     var refreshUsed = false;
     if (token == null && refreshAuthTokenProvider != null) {
       refreshUsed = true;
+      onStageChanged?.call('auth_refresh');
       token = await _resolveProxyAuthToken(refreshAuthTokenProvider);
     }
     if (token == null) {
       throw const AiV3PlannerException('v3_proxy_auth_token_missing');
     }
-    var response = await _postProxyWithToken(body, token: token);
+    onStageChanged?.call('proxy_roundtrip');
+    var response = await _postProxyWithToken(encodedBody, token: token);
     if ((response.statusCode == 401 || response.statusCode == 403) &&
         !refreshUsed &&
         refreshAuthTokenProvider != null) {
       refreshUsed = true;
+      onStageChanged?.call('auth_refresh');
       token = await _resolveProxyAuthToken(refreshAuthTokenProvider);
       if (token == null) {
         throw const AiV3PlannerException('v3_proxy_auth_token_missing');
       }
-      response = await _postProxyWithToken(body, token: token);
+      onStageChanged?.call('proxy_roundtrip');
+      response = await _postProxyWithToken(encodedBody, token: token);
     }
     return response;
   }
 
   Future<http.Response> _postProxyWithToken(
-    Map<String, dynamic> body, {
+    String encodedBody, {
     required String token,
   }) => _httpClient
       .post(
@@ -281,7 +332,7 @@ class AiV3PlannerService implements AiV3Planner {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode(body),
+        body: encodedBody,
       )
       .timeout(requestTimeout);
 

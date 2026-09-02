@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../../helpers/effect_parameter_exposure.dart';
 import '../../models/goal_vector.dart';
 import '../../models/mixing_result.dart';
 import '../../models/project_state.dart';
@@ -40,12 +41,115 @@ const Set<String> _v3MasterMixActionTypes = <String>{
   'hard_reset_master_fx',
 };
 
+const Set<String> _v3EffectWritingMixActionTypes = <String>{
+  'ensure_effect',
+  'adjust_effect_param_by_name',
+  'ensure_master_effect',
+  'adjust_master_effect_param_by_name',
+};
+
+/// Copies validated mix actions into their executor-facing form.
+///
+/// V3 row scopes always refer to individual ready rows, even when those rows
+/// belong to a group. The editor's legacy mix executor otherwise redirects a
+/// row action to its group bus. Master actions retain their original data.
+List<MixAction> normalizeAiV3MixActionsForExecution(
+  Iterable<MixAction> actions,
+) => List<MixAction>.unmodifiable(
+  actions.map((action) {
+    final data = Map<String, dynamic>.from(action.data);
+    if (_v3RowMixActionTypes.contains(action.type)) {
+      data['force_individual_row'] = true;
+    }
+    return MixAction(action.type, data);
+  }),
+);
+
+void validateAiV3MixEffectCapabilities(
+  Iterable<MixAction> actions, {
+  required Set<String> allowedEffectIds,
+}) {
+  final canonicalAllowedEffectIds = <String>{
+    for (final effectId in allowedEffectIds)
+      if (canonicalMixroomBuiltInEffectId(effectId) case final canonical?)
+        canonical,
+  };
+  for (final action in actions) {
+    if (!_v3EffectWritingMixActionTypes.contains(action.type)) continue;
+    final submittedEffectId =
+        action.data['effect_name_contains']?.toString().trim() ?? '';
+    final canonicalEffectId = canonicalMixroomBuiltInEffectId(
+      submittedEffectId,
+    );
+    if (canonicalEffectId == null ||
+        !canonicalAllowedEffectIds.contains(canonicalEffectId)) {
+      throw AiV3PreparationException(
+        'v3_effect_id_unknown',
+        commandType: 'mix.apply_goal',
+        effectId: submittedEffectId,
+        reason: canonicalEffectId == null
+            ? 'unknown_effect'
+            : 'effect_unavailable',
+      );
+    }
+  }
+}
+
 Map<int, String> aiV3CurrentRoleOverrides(ProjectState project) =>
     <int, String>{
       for (final row in project.rows)
         if (row.roleOverride.trim().isNotEmpty)
           row.rowIndex: row.roleOverride.trim(),
     };
+
+/// Ordered explicit-effect decisions that later subjective mix goals must
+/// respect. This is intentionally not a project-state copy: it records only
+/// precedence that cannot be inferred from the current effect chain.
+class AiV3OrderedEffectConstraints {
+  final Map<int, Set<String>> _unavailableEffectIdsByRowId =
+      <int, Set<String>>{};
+
+  void observeAppliedAction(String type, Map<String, dynamic> data) {
+    final target = data['target'];
+    if (target is! Map) return;
+    final rawRowId = target['row_id'];
+    final rowId = rawRowId is int
+        ? rawRowId
+        : rawRowId is num
+        ? rawRowId.toInt()
+        : null;
+    if (rowId == null) return;
+    final effectId = canonicalMixroomBuiltInEffectId(
+      data['effect_id']?.toString() ?? '',
+    );
+    if (effectId == null) return;
+
+    if (type == 'v3_effect_instance_edit' && data['operation'] == 'remove') {
+      _unavailableEffectIdsByRowId
+          .putIfAbsent(rowId, () => <String>{})
+          .add(effectId);
+      return;
+    }
+    if (type == 'v3_effect_configure' &&
+        data['operation'] == 'ensure_configured') {
+      final effects = _unavailableEffectIdsByRowId[rowId];
+      effects?.remove(effectId);
+      if (effects?.isEmpty ?? false) {
+        _unavailableEffectIdsByRowId.remove(rowId);
+      }
+    }
+  }
+
+  Map<int, Set<String>> unavailableByRowIndex(ProjectState project) {
+    return Map<int, Set<String>>.unmodifiable(<int, Set<String>>{
+      for (final row in project.rows)
+        if (_unavailableEffectIdsByRowId[row.rowId]?.isNotEmpty ?? false)
+          row.rowIndex: Set<String>.unmodifiable(
+            _unavailableEffectIdsByRowId[row.rowId]!,
+          ),
+    });
+  }
+}
 
 class AiV3MixMaterializationResult {
   const AiV3MixMaterializationResult({
@@ -75,6 +179,112 @@ class AiV3SingleMixGoalResult {
   bool get isNoChange => actions.isEmpty;
 }
 
+class AiV3MixContainment {
+  const AiV3MixContainment({
+    required this.requiredTargetRow,
+    required this.allowedTargetRowIds,
+    required this.masterOnly,
+  });
+
+  final int? requiredTargetRow;
+  final Set<int>? allowedTargetRowIds;
+  final bool masterOnly;
+}
+
+AiV3MixContainment resolveAiV3MixContainment(
+  Map<String, dynamic> data,
+  ProjectState project,
+) {
+  final rawTarget = data['target'];
+  if (rawTarget is! Map) {
+    throw const AiV3PreparationException('v3_mix_action_target_invalid');
+  }
+  final target = Map<String, dynamic>.from(rawTarget);
+  switch (target['scope']) {
+    case 'row':
+      final rawRow = target['row_index'];
+      final rowIndex = rawRow is int
+          ? rawRow
+          : rawRow is num
+          ? rawRow.toInt()
+          : -1;
+      final rawRowId = target['row_id'];
+      final rowId = rawRowId is int
+          ? rawRowId
+          : rawRowId is num
+          ? rawRowId.toInt()
+          : null;
+      final projectRow = project.rows
+          .where(
+            (candidate) =>
+                candidate.rowIndex == rowIndex &&
+                (rowId == null || candidate.rowId == rowId),
+          )
+          .firstOrNull;
+      if (projectRow == null) {
+        throw const AiV3PreparationException('v3_mix_action_target_invalid');
+      }
+      if (!projectRow.hasAudio) {
+        throw const AiV3PreparationException('v3_mix_audio_missing');
+      }
+      return AiV3MixContainment(
+        requiredTargetRow: rowIndex,
+        allowedTargetRowIds: <int>{projectRow.rowId},
+        masterOnly: false,
+      );
+    case 'group':
+      final groupId = target['group_id']?.toString().trim() ?? '';
+      final group = project.trackGroups
+          .where((candidate) => candidate.id == groupId)
+          .firstOrNull;
+      if (group == null || group.rowIds.length < 2) {
+        throw const AiV3PreparationException('v3_mix_action_target_invalid');
+      }
+      final liveRowIds = project.rows.map((row) => row.rowId).toSet();
+      final memberRowIds = group.rowIds.toSet();
+      if (memberRowIds.length != group.rowIds.length ||
+          !liveRowIds.containsAll(memberRowIds)) {
+        throw const AiV3PreparationException('v3_mix_action_target_invalid');
+      }
+      final readyMemberRowIds = project.rows
+          .where((row) => memberRowIds.contains(row.rowId) && row.hasAudio)
+          .map((row) => row.rowId)
+          .toSet();
+      if (readyMemberRowIds.isEmpty) {
+        throw const AiV3PreparationException('v3_mix_audio_missing');
+      }
+      return AiV3MixContainment(
+        requiredTargetRow: null,
+        allowedTargetRowIds: readyMemberRowIds,
+        masterOnly: false,
+      );
+    case 'all_rows':
+      final readyRowIds = project.rows
+          .where((row) => row.hasAudio)
+          .map((row) => row.rowId)
+          .toSet();
+      if (readyRowIds.isEmpty) {
+        throw const AiV3PreparationException('v3_mix_audio_missing');
+      }
+      return AiV3MixContainment(
+        requiredTargetRow: null,
+        allowedTargetRowIds: readyRowIds,
+        masterOnly: false,
+      );
+    case 'master':
+      if (!project.rows.any((row) => row.hasAudio)) {
+        throw const AiV3PreparationException('v3_mix_audio_missing');
+      }
+      return const AiV3MixContainment(
+        requiredTargetRow: null,
+        allowedTargetRowIds: null,
+        masterOnly: true,
+      );
+    default:
+      throw const AiV3PreparationException('v3_mix_action_target_invalid');
+  }
+}
+
 class AiV3MixGoalMaterializer {
   const AiV3MixGoalMaterializer({
     required this.mixModel,
@@ -91,27 +301,25 @@ class AiV3MixGoalMaterializer {
     required ProjectState project,
     required Map<int, String> roleOverrides,
     required bool bypassLearnedMagnitudes,
+    required Set<String> allowedEffectIds,
     int? requiredTargetRow,
     Set<int>? allowedTargetRowIds,
+    AiV3OrderedEffectConstraints? effectConstraints,
     String? projectId,
   }) async {
     final goal = _goalFromPreparedAction(data);
-    final rawTarget = data['target'];
-    final masterOnly = rawTarget is Map && rawTarget['scope'] == 'master';
+    final inferredContainment = resolveAiV3MixContainment(data, project);
+    final masterOnly = inferredContainment.masterOnly;
     final protectedReferenceRow = goal.referenceTarget?.rowIndex;
-    final inferredContainment =
-        requiredTargetRow == null && allowedTargetRowIds == null
-        ? _containmentForPreparedMixGoal(data, project)
-        : null;
     final effectiveRequiredTargetRow =
-        requiredTargetRow ?? inferredContainment?.requiredTargetRow;
+        requiredTargetRow ?? inferredContainment.requiredTargetRow;
     if (effectiveRequiredTargetRow != null &&
         goal.target.rowIndex != effectiveRequiredTargetRow) {
       throw const AiV3PreparationException('v3_mix_action_target_invalid');
     }
     final effectiveAllowedRowIds =
         allowedTargetRowIds ??
-        inferredContainment?.allowedTargetRowIds ??
+        inferredContainment.allowedTargetRowIds ??
         (effectiveRequiredTargetRow == null
             ? null
             : <int>{
@@ -121,6 +329,23 @@ class AiV3MixGoalMaterializer {
                     )
                     .rowId,
               });
+    final inferredAllowedRowIds = inferredContainment.allowedTargetRowIds;
+    if (effectiveAllowedRowIds != null &&
+        inferredAllowedRowIds != null &&
+        !inferredAllowedRowIds.containsAll(effectiveAllowedRowIds)) {
+      throw const AiV3PreparationException('v3_mix_action_target_invalid');
+    }
+    final unavailableEffectIdsByRow =
+        effectConstraints?.unavailableByRowIndex(project) ??
+        const <int, Set<String>>{};
+    final generationScope = masterOnly
+        ? const MixGenerationScope.master()
+        : effectiveAllowedRowIds == null
+        ? null
+        : MixGenerationScope.rows(<int>{
+            for (final row in project.rows)
+              if (effectiveAllowedRowIds.contains(row.rowId)) row.rowIndex,
+          }, unavailableEffectIdsByRow: unavailableEffectIdsByRow);
 
     final heuristicStopwatch = Stopwatch()..start();
     final heuristic = mixModel.run(
@@ -128,11 +353,25 @@ class AiV3MixGoalMaterializer {
       goal: goal,
       strict: true,
       roleOverrides: roleOverrides,
+      generationScope: generationScope,
     );
     heuristicStopwatch.stop();
     var resolved = heuristic.actions
         .where((candidate) => candidate.type != 'noop')
         .toList(growable: false);
+    validateAiV3MixEffectCapabilities(
+      resolved,
+      allowedEffectIds: allowedEffectIds,
+    );
+    _validateResolvedMixActions(
+      resolved,
+      project: project,
+      protectedReferenceRow: protectedReferenceRow,
+      requiredTargetRow: effectiveRequiredTargetRow,
+      allowedTargetRowIds: effectiveAllowedRowIds,
+      masterOnly: masterOnly,
+      unavailableEffectIdsByRow: unavailableEffectIdsByRow,
+    );
     MagnitudeRefineResult? refinement;
     final refinementStopwatch = Stopwatch();
     if (resolved.isNotEmpty && !bypassLearnedMagnitudes) {
@@ -165,6 +404,10 @@ class AiV3MixGoalMaterializer {
           .where((candidate) => candidate.type != 'noop')
           .toList(growable: false);
     }
+    validateAiV3MixEffectCapabilities(
+      resolved,
+      allowedEffectIds: allowedEffectIds,
+    );
     _validateResolvedMixActions(
       resolved,
       project: project,
@@ -172,6 +415,7 @@ class AiV3MixGoalMaterializer {
       requiredTargetRow: effectiveRequiredTargetRow,
       allowedTargetRowIds: effectiveAllowedRowIds,
       masterOnly: masterOnly,
+      unavailableEffectIdsByRow: unavailableEffectIdsByRow,
     );
     return AiV3SingleMixGoalResult(
       actions: resolved,
@@ -211,6 +455,7 @@ class AiV3MixGoalMaterializer {
     required ProjectState project,
     required Map<int, String> roleOverrides,
     required bool bypassLearnedMagnitudes,
+    required Set<String> allowedEffectIds,
     String? projectId,
   }) async {
     if (!bundle.actions.any((action) => action.type == 'v3_mix_goal')) {
@@ -227,6 +472,7 @@ class AiV3MixGoalMaterializer {
         .toList(growable: false);
     final debugSteps = <Map<String, dynamic>>[];
     String? noChangeMessage;
+    final effectConstraints = AiV3OrderedEffectConstraints();
     final directlyTargetedEffectRows = bundle.actions
         .where((action) => action.type == 'v3_effect_instance_edit')
         .map((action) {
@@ -242,8 +488,9 @@ class AiV3MixGoalMaterializer {
       if (action.type != 'v3_mix_goal') {
         if (action.type == 'v3_row_role_override') {
           final target = action.data['target'];
-          final rowIndex =
-              target is Map ? (target['row_index'] as num?)?.toInt() : null;
+          final rowIndex = target is Map
+              ? (target['row_index'] as num?)?.toInt()
+              : null;
           if (rowIndex != null) {
             final role = action.data['role']?.toString().trim() ?? '';
             if (role.isEmpty) {
@@ -253,6 +500,7 @@ class AiV3MixGoalMaterializer {
             }
           }
         }
+        effectConstraints.observeAppliedAction(action.type, action.data);
         actions.add(action);
         continue;
       }
@@ -262,6 +510,8 @@ class AiV3MixGoalMaterializer {
         project: project,
         roleOverrides: effectiveRoleOverrides,
         bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+        allowedEffectIds: allowedEffectIds,
+        effectConstraints: effectConstraints,
         projectId: projectId,
       );
       final resolved = materializedGoal.actions;
@@ -275,12 +525,14 @@ class AiV3MixGoalMaterializer {
         final targetMap = target is Map
             ? Map<String, dynamic>.from(target)
             : const <String, dynamic>{};
-        final rawRow = candidate.data['row'] ??
+        final rawRow =
+            candidate.data['row'] ??
             candidate.data['row_index'] ??
             targetMap['row'] ??
             targetMap['row_index'];
-        final row =
-            rawRow is int ? rawRow : (rawRow is num ? rawRow.toInt() : -1);
+        final row = rawRow is int
+            ? rawRow
+            : (rawRow is num ? rawRow.toInt() : -1);
         if (directlyTargetedEffectRows.contains(row)) {
           throw const AiV3PreparationException(
             'v3_effect_instance_mix_conflict',
@@ -308,15 +560,21 @@ class AiV3MixGoalMaterializer {
         continue;
       }
 
-      actions.add(AssistantAction(
-        type: 'v3_mix_actions',
-        data: <String, dynamic>{
-          'command_id': commandId,
-          'actions': resolved.map((candidate) => candidate.toJson()).toList(),
-          if (protectedReferenceRow != null)
-            'protected_reference_row_index': protectedReferenceRow,
-        },
-      ));
+      final executionActions = normalizeAiV3MixActionsForExecution(resolved);
+
+      actions.add(
+        AssistantAction(
+          type: 'v3_mix_actions',
+          data: <String, dynamic>{
+            'command_id': commandId,
+            'actions': executionActions
+                .map((candidate) => candidate.toJson())
+                .toList(),
+            if (protectedReferenceRow != null)
+              'protected_reference_row_index': protectedReferenceRow,
+          },
+        ),
+      );
       receipts[receiptIndex] = <String, dynamic>{
         ...receipts[receiptIndex],
         'status': 'prepared',
@@ -353,68 +611,6 @@ class AiV3MixGoalMaterializer {
   }
 }
 
-({int? requiredTargetRow, Set<int>? allowedTargetRowIds})
-_containmentForPreparedMixGoal(
-  Map<String, dynamic> data,
-  ProjectState project,
-) {
-  final rawTarget = data['target'];
-  if (rawTarget is! Map) {
-    throw const AiV3PreparationException('v3_mix_action_target_invalid');
-  }
-  final target = Map<String, dynamic>.from(rawTarget);
-  switch (target['scope']) {
-    case 'row':
-      final rawRow = target['row_index'];
-      final row = rawRow is int
-          ? rawRow
-          : rawRow is num
-          ? rawRow.toInt()
-          : -1;
-      final projectRow = project.rows
-          .where((candidate) => candidate.rowIndex == row)
-          .firstOrNull;
-      if (projectRow == null) {
-        throw const AiV3PreparationException('v3_mix_action_target_invalid');
-      }
-      return (
-        requiredTargetRow: row,
-        allowedTargetRowIds: <int>{projectRow.rowId},
-      );
-    case 'group':
-      final groupId = target['group_id']?.toString().trim() ?? '';
-      final group = project.trackGroups
-          .where((candidate) => candidate.id == groupId)
-          .firstOrNull;
-      if (group == null || group.rowIds.length < 2) {
-        throw const AiV3PreparationException('v3_mix_action_target_invalid');
-      }
-      final liveRowIds = project.rows.map((row) => row.rowId).toSet();
-      final memberRowIds = group.rowIds.toSet();
-      if (memberRowIds.length != group.rowIds.length ||
-          !liveRowIds.containsAll(memberRowIds)) {
-        throw const AiV3PreparationException('v3_mix_action_target_invalid');
-      }
-      return (requiredTargetRow: null, allowedTargetRowIds: memberRowIds);
-    case 'all_rows':
-      final contentRowIds = project.rows
-          .where((row) => row.clips.isNotEmpty)
-          .map((row) => row.rowId)
-          .toSet();
-      if (contentRowIds.isEmpty) {
-        throw const AiV3PreparationException('v3_mix_audio_missing');
-      }
-      return (requiredTargetRow: null, allowedTargetRowIds: contentRowIds);
-    case 'master':
-      if (!project.rows.any((row) => row.clips.isNotEmpty)) {
-        throw const AiV3PreparationException('v3_mix_audio_missing');
-      }
-      return (requiredTargetRow: null, allowedTargetRowIds: null);
-    default:
-      throw const AiV3PreparationException('v3_mix_action_target_invalid');
-  }
-}
-
 GoalVector _goalFromPreparedAction(Map<String, dynamic> data) {
   final target = Map<String, dynamic>.from(data['target'] as Map);
   final scope = target['scope'] as String;
@@ -438,10 +634,12 @@ GoalVector _goalFromPreparedAction(Map<String, dynamic> data) {
     'target': goalTarget,
     'intents': (data['intents'] as List)
         .whereType<Map>()
-        .map((intent) => <String, dynamic>{
-              ...Map<String, dynamic>.from(intent),
-              'confidence': 1.0,
-            })
+        .map(
+          (intent) => <String, dynamic>{
+            ...Map<String, dynamic>.from(intent),
+            'confidence': 1.0,
+          },
+        )
         .toList(growable: false),
     'intensity': data['intensity'],
     'execution_profile': data['execution_profile'],
@@ -467,6 +665,7 @@ void _validateResolvedMixActions(
   int? requiredTargetRow,
   Set<int>? allowedTargetRowIds,
   bool masterOnly = false,
+  Map<int, Set<String>> unavailableEffectIdsByRow = const {},
 }) {
   for (final action in actions) {
     if (!_v3AllowedMixActionTypes.contains(action.type)) {
@@ -508,6 +707,20 @@ void _validateResolvedMixActions(
     }
     if (protectedReferenceRow != null && row == protectedReferenceRow) {
       throw const AiV3PreparationException('v3_mix_action_targets_reference');
+    }
+    if (action.type == 'ensure_effect' ||
+        action.type == 'adjust_effect_param_by_name') {
+      final effectId = canonicalMixroomBuiltInEffectId(
+        action.data['effect_name_contains']?.toString() ?? '',
+      );
+      if (effectId != null &&
+          (unavailableEffectIdsByRow[row] ?? const <String>{}).contains(
+            effectId,
+          )) {
+        throw const AiV3PreparationException(
+          'v3_mix_effect_constraint_violation',
+        );
+      }
     }
   }
 }

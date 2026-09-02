@@ -63,6 +63,39 @@ void main() {
       expect(kDebugSystemPrompt.trim(), serverPrompt);
     });
 
+    test('release builds cannot opt into direct provider access', () {
+      final configSource = File(
+        'lib/config/llm_config.dart',
+      ).readAsStringSync();
+      final audioServiceSource = File(
+        'lib/ai/cloud_llm_service.dart',
+      ).readAsStringSync();
+      final videoServiceSource = File(
+        'lib/ai/video_editor_ai.dart',
+      ).readAsStringSync();
+
+      expect(
+        configSource,
+        isNot(contains('LLM_ALLOW_DIRECT_OPENAI_IN_RELEASE')),
+      );
+      expect(
+        configSource,
+        contains('kDebugMode && hasOpenAiApiKey && hasOpenAiModel'),
+      );
+      expect(
+        audioServiceSource,
+        contains(
+          'kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty',
+        ),
+      );
+      expect(
+        videoServiceSource,
+        contains(
+          'kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty',
+        ),
+      );
+    });
+
     test(
       'preserves wrapped master tool args without prompt-based rewrites',
       () async {

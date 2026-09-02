@@ -81,14 +81,14 @@ Entry points:
 - `backend/llm_proxy/src/handlers/api_mix_resolve.py`
 
 The Flutter app builds deterministic project facts and executes validated
-actions. Backend contract v3 owns V3 semantic instructions, the canonical
-provider tool schema, model/runtime policy, and provider calls. It matches the
-reverted-main V3 behavior and excludes the reverted PR #27 AI additions.
-Updated clients send the context-only
-`mixroom_v3_context_v1` contract through authenticated
-`/v1/llm/v3/responses`; older released clients remain on the separately gated
-legacy contract during migration. Adaptive, compact, retrieval, and capture
-planners are not shipped in Flutter.
+actions. The backend owns V3 semantic instructions, the canonical provider tool
+schema, model/runtime policy, and provider calls. Already released context-only
+clients send `mixroom_v3_context_v1` and remain on frozen backend contract v3.
+Updated clients send `mixroom_v3_context_v2` to the current contract through
+authenticated `/v1/llm/v3/responses`; older provider-shaped clients remain on a
+third, separately gated legacy path. Backend V1 and V2 support must precede the
+updated app release. Adaptive, compact, retrieval, and capture planners are not
+shipped in Flutter.
 
 Current V3 commands are reversible and explicitly classified for immediate
 local execution. The client prepares the complete plan, rechecks its state
