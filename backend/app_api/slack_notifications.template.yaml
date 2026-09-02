@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Mixroom verified subscription payment notifications for Slack
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+  BillingSuccessTopicArn:
+    Type: String
+  SlackPaymentWebhookParameterName:
+    Type: String
+  BillingEventsTableName:
+    Type: String
+    Default: mixroom-billing-events-prod
+  GoogleServiceAccountParameterName:
+    Type: String
+    Default: /mixroom/prod/google-play/service-account
+  PaddleApiKeyParameterName:
+    Type: String
+    Default: /mixroom/prod/paddle/api-key
+
+Resources:
+  SlackPaymentNotificationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub mixroom-slack-payment-notifications-${StageName}
+      CodeUri: src/
+      Handler: handlers/slack_payment_notifications.handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 15
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref StageName
+          HTTP_TIMEOUT_SECONDS: '10'
+          SLACK_PAYMENT_WEBHOOK_PARAMETER_NAME: !Ref SlackPaymentWebhookParameterName
+          BILLING_EVENTS_TABLE: !Ref BillingEventsTableName
+          GOOGLE_SERVICE_ACCOUNT_PARAMETER_NAME: !Ref GoogleServiceAccountParameterName
+          PADDLE_API_KEY_PARAMETER_NAME: !Ref PaddleApiKeyParameterName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref BillingEventsTableName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SlackPaymentWebhookParameterName}
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GoogleServiceAccountParameterName}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PaddleApiKeyParameterName}
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+      Events:
+        BillingPurchaseSuccessTopic:
+          Type: SNS
+          Properties:
+            Topic: !Ref BillingSuccessTopicArn
+
+Outputs:
+  FunctionName:
+    Value: !Ref SlackPaymentNotificationsFunction

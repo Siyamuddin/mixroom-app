@@ -267,12 +267,17 @@ class GooglePlayTests(unittest.TestCase):
                     "packageName": "ai.mixroom.test",
                     "eventTimeMillis": "2026-03-21T00:00:00+00:00",
                     "subscriptionNotification": {
+                        "notificationType": 4,
                         "purchaseToken": "purchase-token",
                     },
                 },
             )
 
         self.assertEqual(result["provider_event_id"], "msg-1")
+        self.assertEqual(
+            result["provider_payload"]["subscriptionNotification"]["notificationType"],
+            4,
+        )
         self.assertEqual(result["normalized"]["source_occurred_at"], "2026-03-21T00:00:00+00:00")
 
     def test_build_google_webhook_event_for_voided_purchase(self):
