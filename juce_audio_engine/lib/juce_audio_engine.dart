@@ -388,6 +388,9 @@ class JuceAudioEngine {
 
   static Stream<Map<String, dynamic>> get eventsStream => _events;
 
+  static Stream<Map<String, dynamic>> get pluginScanProgressEvents =>
+      _events.where((event) => event['event'] == 'pluginScanProgress');
+
   static Stream<AudioRouteChangeEventV2> get audioRouteChangeEventsV2 => _events
       .where((event) => event['event'] == 'audioRouteChangedV2')
       .map(AudioRouteChangeEventV2.fromMap);
@@ -1159,6 +1162,37 @@ class JuceAudioEngine {
   // -------------------------------
   // Plugin scanning & export
   // -------------------------------
+  static Map<String, dynamic>? _normalizeScannedPlugin(Map rawItem) {
+    final raw = Map<String, dynamic>.from(rawItem);
+    final rawId = raw['id']?.toString().trim() ?? '';
+    final rawPath = raw['path']?.toString().trim() ?? '';
+    final rawName = raw['name']?.toString().trim() ?? '';
+    final id =
+        rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
+    if (id.isEmpty) return null;
+
+    final out = <String, dynamic>{
+      'id': id,
+      'name': rawName.isNotEmpty ? rawName : id,
+    };
+    final format = raw['format']?.toString().trim() ?? '';
+    if (format.isNotEmpty) out['format'] = format;
+    final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
+    if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
+    final category = raw['category']?.toString().trim() ?? '';
+    if (category.isNotEmpty) out['category'] = category;
+    if (raw['isInstrument'] is bool) {
+      out['isInstrument'] = raw['isInstrument'] == true;
+    }
+    if (raw['quarantined'] is bool) {
+      out['quarantined'] = raw['quarantined'] == true;
+    }
+    return out;
+  }
+
+  static Map<String, dynamic>? normalizeScannedPlugin(Map rawItem) =>
+      _normalizeScannedPlugin(rawItem);
+
   static JuceEngineCapabilities _fallbackEngineCapabilities() {
     if (kIsWeb) return JuceEngineCapabilities.none;
     switch (defaultTargetPlatform) {
@@ -1212,34 +1246,8 @@ class JuceAudioEngine {
       if (result == null) return normalized;
       for (final item in result) {
         if (item is! Map) continue;
-        final raw = Map<String, dynamic>.from(item);
-        final rawId = raw['id']?.toString().trim() ?? '';
-        final rawPath = raw['path']?.toString().trim() ?? '';
-        final rawName = raw['name']?.toString().trim() ?? '';
-
-        final id =
-            rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
-        if (id.isEmpty) continue;
-
-        final out = <String, dynamic>{
-          'id': id,
-          'name': rawName.isNotEmpty ? rawName : id,
-        };
-
-        final format = raw['format']?.toString().trim() ?? '';
-        if (format.isNotEmpty) out['format'] = format;
-        final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
-        if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
-        final category = raw['category']?.toString().trim() ?? '';
-        if (category.isNotEmpty) out['category'] = category;
-        if (raw['isInstrument'] is bool) {
-          out['isInstrument'] = raw['isInstrument'] == true;
-        }
-        if (raw['quarantined'] is bool) {
-          out['quarantined'] = raw['quarantined'] == true;
-        }
-
-        normalized.add(out);
+        final plugin = _normalizeScannedPlugin(item);
+        if (plugin != null) normalized.add(plugin);
       }
       return normalized;
     } on MissingPluginException catch (e) {
@@ -1262,34 +1270,8 @@ class JuceAudioEngine {
       if (result == null) return normalized;
       for (final item in result) {
         if (item is! Map) continue;
-        final raw = Map<String, dynamic>.from(item);
-        final rawId = raw['id']?.toString().trim() ?? '';
-        final rawPath = raw['path']?.toString().trim() ?? '';
-        final rawName = raw['name']?.toString().trim() ?? '';
-
-        final id =
-            rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
-        if (id.isEmpty) continue;
-
-        final out = <String, dynamic>{
-          'id': id,
-          'name': rawName.isNotEmpty ? rawName : id,
-        };
-
-        final format = raw['format']?.toString().trim() ?? '';
-        if (format.isNotEmpty) out['format'] = format;
-        final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
-        if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
-        final category = raw['category']?.toString().trim() ?? '';
-        if (category.isNotEmpty) out['category'] = category;
-        if (raw['isInstrument'] is bool) {
-          out['isInstrument'] = raw['isInstrument'] == true;
-        }
-        if (raw['quarantined'] is bool) {
-          out['quarantined'] = raw['quarantined'] == true;
-        }
-
-        normalized.add(out);
+        final plugin = _normalizeScannedPlugin(item);
+        if (plugin != null) normalized.add(plugin);
       }
       return normalized;
     } on MissingPluginException catch (e) {

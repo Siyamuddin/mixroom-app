@@ -29,6 +29,9 @@
 #include <vector>
 
 extern "C" void juceLogToFlutter(const char *msg);
+#if JUCE_MAC && !JUCE_IOS
+extern "C" void mixroomPluginScanProgress(const char *json);
+#endif
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int scopeKind,
                                                     int row,
