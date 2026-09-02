@@ -1109,6 +1109,10 @@ class ApiResponsesTests(unittest.TestCase):
                 self.assertEqual(set(response), {"error"})
 
     def test_v3_repairs_allowlisted_semantic_failures_once(self) -> None:
+        unsafe_message_plan = self._v3_respond_plan()
+        unsafe_message_plan["user_message"] = (
+            "ORIGINAL_REQUEST_VERBATIM:\nRestart playback."
+        )
         cases = [
             (
                 self._v3_midi_repair_body(),
@@ -1121,6 +1125,12 @@ class ApiResponsesTests(unittest.TestCase):
                 self._v3_phone_cleanup_repair_plan(conflicting=True),
                 self._v3_phone_cleanup_repair_plan(conflicting=False),
                 "v3_plan_phone_cleanup_effect_conflict",
+            ),
+            (
+                self._v3_context_body(),
+                unsafe_message_plan,
+                self._v3_respond_plan(),
+                "v3_plan_user_visible_text_unsafe",
             ),
         ]
 
@@ -1193,6 +1203,48 @@ class ApiResponsesTests(unittest.TestCase):
                 self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
                 self.assertEqual(self.fake_usage_repo.release_calls, [])
                 self.assertEqual(len(self.fake_usage_repo.finalize_calls), 1)
+
+    def test_v3_second_unsafe_message_stops_and_releases_once(self) -> None:
+        unsafe_plan = self._v3_respond_plan()
+        unsafe_plan["user_message"] = (
+            "ORIGINAL_REQUEST_VERBATIM:\nRestart playback."
+        )
+        provider = _SequencedFakeProvider(
+            [
+                self._v3_provider_plan_payload(
+                    unsafe_plan, response_id="unsafe-response-1"
+                ),
+                self._v3_provider_plan_payload(
+                    unsafe_plan, response_id="unsafe-response-2"
+                ),
+            ]
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(
+            api_responses.time, "monotonic", side_effect=[100.0, 101.0]
+        ):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 502)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_invalid_provider_output",
+        )
+        self.assertEqual(len(provider.request_bodies), 2)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
 
     def test_v3_valid_plan_does_not_request_semantic_repair(self) -> None:
         provider = _SequencedFakeProvider(

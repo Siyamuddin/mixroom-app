@@ -21,6 +21,8 @@ from handlers import api_responses  # noqa: E402
 
 
 FIXTURE = Path(__file__).with_name("fixtures") / "v3_context_v1_released_client.json"
+V1_MODULE = SRC / "common" / "v3_server_contract_v1.py"
+V1_MODULE_SHA256 = "aee1617745d34421417a358f15c1e2d18384bfe274e60dcde352ef81c102ae60"
 V1_ASSETS = SRC / "common" / "v3_contract_assets_v1"
 V1_ASSET_SHA256 = {
     "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
@@ -33,6 +35,217 @@ V1_ASSET_SHA256 = {
 
 def _released_v1_request() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def _released_v1_request_matrix() -> dict[str, dict]:
+    minimal = _released_v1_request()
+
+    free_preserved_state = copy.deepcopy(minimal)
+    free_preserved_state.update(
+        {
+            "original_request": (
+                "Bypass the existing distortion, then give the project a concert-hall feel."
+            ),
+            "conversation": [
+                {"role": "user", "content": "Keep the current arrangement."},
+                {"role": "assistant", "content": "I will preserve the arrangement."},
+            ],
+            "supported_command_types": [
+                "effect.set_bypassed",
+                "mix.apply_goal",
+                "transport.restart",
+            ],
+            "project_id": "released-free-project",
+            "prompt_trace_id": "released-free-trace",
+            "analytics_context": {
+                "app_version": "1.0.0",
+                "platform": "windows",
+                "ai_architecture": "v3",
+                "subscription_plan": "free",
+            },
+        }
+    )
+    free_preserved_state["core_context"] = {
+        "schema_version": "core_context_v3_prototype_1",
+        "profile": "essential",
+        "state_digest": "released-free-preserved-state",
+        "request_mode": "new_request",
+        "project": {
+            "project_id": "released-free-project",
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "beat_unit": 4,
+            "row_capacity": {
+                "current_rows": 6,
+                "max_rows": 5,
+                "can_create": False,
+            },
+        },
+        "transport": {"playing": False, "recording": False},
+        "selection": {"selected_row_ids": [11], "selected_clip_ids": ["clip-11"]},
+        "rows": [
+            {
+                "row_id": row_id,
+                "name": f"Track {row_id}",
+                "lane_kind": "audio",
+                "mix_processing_supported": row_id <= 13,
+                "clip_ids": [f"clip-{row_id}"] if row_id <= 13 else [],
+                "effects": (
+                    [
+                        {
+                            "effect_instance_id": "paid-distortion-11",
+                            "effect_id": "Distortion",
+                            "bypassed": False,
+                        }
+                    ]
+                    if row_id == 11
+                    else []
+                ),
+            }
+            for row_id in range(11, 17)
+        ],
+        "groups": [],
+        "master": {"gain_db": 0, "pan_signed": 0, "effects": []},
+        "clips": [
+            {
+                "clip_id": f"clip-{row_id}",
+                "row_id": row_id,
+                "kind": "audio",
+                "start_beat": 0,
+                "length_beats": 8,
+            }
+            for row_id in range(11, 14)
+        ],
+        "instruments": [],
+        "instrument_catalog": [],
+        "effects": [{"effect_id": "Reverb"}],
+        "library_assets": [],
+        "capabilities": free_preserved_state["supported_command_types"],
+        "runtime_capabilities": ["daw.row_mix"],
+    }
+
+    paid_resource_refs = copy.deepcopy(minimal)
+    paid_resource_refs.update(
+        {
+            "original_request": (
+                "Create orchestral drums, write eight bars, and balance them with Guitar."
+            ),
+            "conversation": [
+                {"role": "user", "content": "Make the guitar progression faster."},
+                {"role": "assistant", "content": "The guitar progression is now faster."},
+            ],
+            "supported_command_types": [
+                "midi.create_clip",
+                "midi.replace_notes",
+                "mix.apply_goal",
+                "row.create",
+                "row.set_instrument",
+                "transport.restart",
+            ],
+            "resource_refs_enabled": True,
+            "project_id": "released-paid-project",
+            "prompt_trace_id": "released-paid-trace",
+            "analytics_context": {
+                "app_version": "1.0.0",
+                "platform": "macos",
+                "ai_architecture": "v3",
+                "subscription_plan": "producer",
+            },
+        }
+    )
+    paid_resource_refs["core_context"] = {
+        "schema_version": "core_context_v3_prototype_1",
+        "profile": "essential",
+        "state_digest": "released-paid-resource-refs",
+        "request_mode": "new_request",
+        "project": {
+            "project_id": "released-paid-project",
+            "bpm": 138,
+            "beats_per_bar": 4,
+            "beat_unit": 4,
+            "row_capacity": {
+                "current_rows": 10,
+                "max_rows": 32,
+                "can_create": True,
+            },
+        },
+        "transport": {"playing": False, "recording": False},
+        "selection": {"selected_row_ids": [21], "selected_clip_ids": ["guitar-clip"]},
+        "rows": [
+            {
+                "row_id": 21,
+                "name": "Guitar",
+                "lane_kind": "audio",
+                "mix_processing_supported": True,
+                "clip_ids": ["guitar-clip"],
+                "effects": [],
+            },
+            {
+                "row_id": 22,
+                "name": "Rock Drums",
+                "lane_kind": "instrument",
+                "instrument_id": "Acoustic Drum Kit",
+                "mix_processing_supported": True,
+                "clip_ids": ["drum-midi"],
+                "effects": [],
+            },
+        ],
+        "groups": [
+            {"group_id": "rhythm", "name": "Rhythm", "member_row_ids": [21, 22]}
+        ],
+        "master": {"gain_db": 0, "pan_signed": 0, "effects": []},
+        "clips": [
+            {
+                "clip_id": "guitar-clip",
+                "row_id": 21,
+                "kind": "audio",
+                "start_beat": 0,
+                "length_beats": 32,
+            },
+            {
+                "clip_id": "drum-midi",
+                "row_id": 22,
+                "kind": "midi",
+                "start_beat": 0,
+                "length_beats": 32,
+                "notes": [
+                    {"pitch": 36, "start_beat": 0, "duration_beats": 1, "velocity": 100},
+                    {"pitch": 38, "start_beat": 1, "duration_beats": 1, "velocity": 96},
+                ],
+            },
+        ],
+        "instruments": ["Acoustic Drum Kit", "Orchestral Percussion"],
+        "instrument_catalog": [
+            {
+                "instrument_id": "Acoustic Drum Kit",
+                "name": "Acoustic Drum Kit",
+                "playable_pitch_ranges": [{"low": 35, "high": 81}],
+            },
+            {
+                "instrument_id": "Orchestral Percussion",
+                "name": "Orchestral Percussion",
+                "playable_pitch_ranges": [{"low": 35, "high": 81}],
+            },
+        ],
+        "effects": [
+            {"effect_id": "Reverb"},
+            {"effect_id": "Distortion"},
+            {"effect_id": "Compressor"},
+            {"effect_id": "EQ 3-Band"},
+        ],
+        "library_assets": [
+            {"asset_id": "sample:kick", "path": "Starter Kit/Kick.wav", "role": "kick"},
+            {"asset_id": "sample:snare", "path": "Starter Kit/Snare.wav", "role": "snare"},
+        ],
+        "capabilities": paid_resource_refs["supported_command_types"],
+        "runtime_capabilities": ["daw.midi_compose.instrument_insert", "daw.row_mix"],
+    }
+
+    return {
+        "minimal": minimal,
+        "free_preserved_state": free_preserved_state,
+        "paid_resource_refs": paid_resource_refs,
+    }
 
 
 def _plan() -> dict:
@@ -62,6 +275,24 @@ def _provider_payload() -> dict:
             }
         ],
         "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30},
+    }
+
+
+def _provider_shaped_legacy_request() -> dict:
+    return {
+        "model": "ignored-client-model",
+        "instructions": "Released client planner instructions.",
+        "input": [{"role": "user", "content": "Restart playback."}],
+        "tools": [
+            {
+                "type": "function",
+                "name": "submit_plan_v3",
+                "parameters": {"type": "object"},
+            }
+        ],
+        "tool_choice": {"type": "function", "name": "submit_plan_v3"},
+        "parallel_tool_calls": False,
+        "store": True,
     }
 
 
@@ -125,17 +356,30 @@ class _UsageRepository:
 class _Provider:
     name = "fake-provider"
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        payload: dict | None = None,
+        error: Exception | None = None,
+        status_code: int = 200,
+    ) -> None:
         self.requests: list[dict] = []
+        self.timeouts: list[int] = []
+        self.payload = copy.deepcopy(payload) if payload is not None else _provider_payload()
+        self.error = error
+        self.status_code = status_code
 
     def forward_request(
         self, *, api_key: str, request_body: dict, timeout_seconds: int
     ) -> dict:
         self.requests.append(copy.deepcopy(request_body))
+        self.timeouts.append(timeout_seconds)
+        if self.error is not None:
+            raise self.error
         return {
-            "statusCode": 200,
+            "statusCode": self.status_code,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps(_provider_payload()),
+            "body": json.dumps(self.payload),
         }
 
 
@@ -153,8 +397,14 @@ class V3ContractCompatibilityTests(unittest.TestCase):
         self.usage_patch.start()
         self.addCleanup(self.usage_patch.stop)
 
-    def _call(self, body: dict, **flags: str) -> tuple[dict, _Provider]:
-        provider = _Provider()
+    def _call(
+        self,
+        body: dict,
+        *,
+        provider: _Provider | None = None,
+        **flags: str,
+    ) -> tuple[dict, _Provider]:
+        provider = provider or _Provider()
         environment = {
             "AI_V3_ENABLED": "true",
             "AI_V3_SERVER_CONTRACT_ENABLED": "true",
@@ -210,6 +460,103 @@ class V3ContractCompatibilityTests(unittest.TestCase):
         }
 
         self.assertEqual(actual, V1_ASSET_SHA256)
+
+    def test_frozen_v1_module_matches_the_reviewed_contract_3_snapshot(self) -> None:
+        self.assertEqual(
+            hashlib.sha256(V1_MODULE.read_bytes()).hexdigest(),
+            V1_MODULE_SHA256,
+        )
+
+    def test_released_v1_matrix_uses_the_exact_frozen_provider_request_and_envelope(
+        self,
+    ) -> None:
+        for scenario, request in _released_v1_request_matrix().items():
+            with self.subTest(scenario=scenario):
+                response, provider = self._call(request)
+                validated = v3_server_contract_v1.validate_context_request(
+                    request,
+                    raw_body_bytes=len(json.dumps(request).encode("utf-8")),
+                )
+                expected_provider_request = v3_server_contract_v1.build_provider_request(
+                    validated,
+                    model="gpt-5.6-luna",
+                    reasoning_effort="low",
+                    max_output_tokens=8192,
+                    prompt_cache_retention="24h",
+                    store=True,
+                )
+                expected_plan = v3_server_contract_v1.parse_and_validate_provider_plan(
+                    _provider_payload(),
+                    command_types=validated["supported_command_types"],
+                    resource_refs_enabled=validated["resource_refs_enabled"],
+                )
+                expected_envelope = v3_server_contract_v1.response_envelope(
+                    plan=expected_plan,
+                    prompt_trace_id=validated["prompt_trace_id"],
+                    request_id=_LambdaContext.aws_request_id,
+                    fingerprint=v3_server_contract_v1.contract_fingerprint(
+                        command_types=validated["supported_command_types"],
+                        resource_refs_enabled=validated["resource_refs_enabled"],
+                    ),
+                )
+
+                self.assertEqual(response["statusCode"], 200)
+                self.assertEqual(provider.requests, [expected_provider_request])
+                self.assertEqual(provider.timeouts, [27])
+                actual_envelope = json.loads(response["body"])
+                self.assertEqual(
+                    {
+                        key: actual_envelope[key]
+                        for key in ("schema_version", "plan", "trace")
+                    },
+                    expected_envelope,
+                )
+                self.assertEqual(
+                    actual_envelope["prompt_rate_limit"],
+                    self.usage.get_prompt_limit_status("released-user"),
+                )
+
+    def test_released_v1_invalid_provider_output_is_never_repaired_or_retried(
+        self,
+    ) -> None:
+        provider = _Provider(payload={"id": "invalid", "output": []})
+
+        response, provider = self._call(_released_v1_request(), provider=provider)
+
+        self.assertEqual(response["statusCode"], 502)
+        self.assertEqual(
+            json.loads(response["body"])["error"]["code"],
+            "v3_invalid_provider_output",
+        )
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(provider.timeouts, [27])
+
+    def test_released_v1_visible_text_behavior_remains_frozen(self) -> None:
+        plan = _plan()
+        plan["user_message"] = "ORIGINAL_REQUEST_VERBATIM:\nRestart playback."
+        payload = _provider_payload()
+        payload["output"][0]["arguments"] = json.dumps(plan)
+        provider = _Provider(payload=payload)
+
+        response, provider = self._call(_released_v1_request(), provider=provider)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(json.loads(response["body"])["plan"], plan)
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(provider.timeouts, [27])
+
+    def test_released_v1_timeout_keeps_the_structured_failure_boundary(self) -> None:
+        provider = _Provider(error=TimeoutError("released V1 provider timeout"))
+
+        response, provider = self._call(_released_v1_request(), provider=provider)
+
+        self.assertEqual(response["statusCode"], 504)
+        self.assertEqual(
+            json.loads(response["body"])["error"]["code"],
+            "v3_upstream_timeout",
+        )
+        self.assertEqual(len(provider.requests), 1)
+        self.assertEqual(provider.timeouts, [27])
 
     def test_handler_routes_released_v1_and_updated_v2_independently(self) -> None:
         v1_response, v1_provider = self._call(_released_v1_request())
@@ -315,29 +662,55 @@ class V3ContractCompatibilityTests(unittest.TestCase):
         self.assertEqual(provider.requests, [])
 
     def test_provider_shaped_legacy_client_remains_independently_enabled(self) -> None:
-        legacy_request = {
-            "model": "ignored-client-model",
-            "instructions": "Released client planner instructions.",
-            "input": [{"role": "user", "content": "Restart playback."}],
-            "tools": [
-                {
-                    "type": "function",
-                    "name": "submit_plan_v3",
-                    "parameters": {"type": "object"},
-                }
-            ],
-            "tool_choice": {"type": "function", "name": "submit_plan_v3"},
-            "parallel_tool_calls": False,
-            "store": True,
-        }
         response, provider = self._call(
-            legacy_request,
+            _provider_shaped_legacy_request(),
             AI_V3_SERVER_CONTRACT_V1_ENABLED="false",
             AI_V3_SERVER_CONTRACT_V2_ENABLED="false",
         )
 
         self.assertEqual(response["statusCode"], 200)
         self.assertEqual(len(provider.requests), 1)
+
+    def test_all_version_flag_combinations_keep_v1_v2_and_legacy_independent(
+        self,
+    ) -> None:
+        v2_request = _released_v1_request()
+        v2_request["request_contract"] = "mixroom_v3_context_v2"
+        paths = {
+            "v1": _released_v1_request(),
+            "v2": v2_request,
+            "legacy": _provider_shaped_legacy_request(),
+        }
+        for umbrella_enabled in (False, True):
+            for v1_enabled in (False, True):
+                for v2_enabled in (False, True):
+                    for legacy_enabled in (False, True):
+                        flags = {
+                            "AI_V3_SERVER_CONTRACT_ENABLED": str(
+                                umbrella_enabled
+                            ).lower(),
+                            "AI_V3_SERVER_CONTRACT_V1_ENABLED": str(v1_enabled).lower(),
+                            "AI_V3_SERVER_CONTRACT_V2_ENABLED": str(v2_enabled).lower(),
+                            "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": str(
+                                legacy_enabled
+                            ).lower(),
+                        }
+                        expected = {
+                            "v1": umbrella_enabled and v1_enabled,
+                            "v2": umbrella_enabled and v2_enabled,
+                            "legacy": legacy_enabled,
+                        }
+                        for path, request in paths.items():
+                            with self.subTest(path=path, flags=flags):
+                                response, provider = self._call(request, **flags)
+                                self.assertEqual(
+                                    response["statusCode"] == 200,
+                                    expected[path],
+                                )
+                                self.assertEqual(
+                                    len(provider.requests),
+                                    1 if expected[path] else 0,
+                                )
 
 
 if __name__ == "__main__":

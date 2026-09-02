@@ -106,6 +106,18 @@ MAX_ACCEPTED_PROVIDER_PLAN_BYTES = 24_000
 _EFFECT_STATE_POLICY_VERSION = "ordered_semantic_effect_chain_v1"
 _MIX_SCOPE_POLICY_VERSION = "contained_local_mix_generation_v1"
 _PHONE_CLEANUP_CONFLICT_POLICY_VERSION = "phone_cleanup_sound_conflict_v1"
+_TYPED_CLIP_STATE_POLICY_VERSION = "ordered_typed_clip_reference_v1"
+_GROUP_STATE_POLICY_VERSION = "ordered_group_lifecycle_v1"
+_USER_VISIBLE_TEXT_POLICY_VERSION = "private_context_message_boundary_v1"
+
+_PRIVATE_PROMPT_MARKERS = frozenset(
+    {
+        "original_request_verbatim",
+        "recent_conversation_json",
+        "core_context_v3_json",
+        "semantic_repair_required",
+    }
+)
 
 _MIX_INTENT_REQUIRED_EFFECT_IDS = {
     "balance": frozenset({"EQ 3-Band", "Compressor", "Limiter"}),
@@ -995,7 +1007,10 @@ _AUDIO_CLIP_COMMANDS = frozenset(
 
 
 def _constrain_typed_command_targets(
-    variant: dict[str, Any], capability_surface: V3CapabilitySurface
+    variant: dict[str, Any],
+    capability_surface: V3CapabilitySurface,
+    *,
+    resource_refs_enabled: bool,
 ) -> bool:
     command_type = _command_type_for_variant(variant)
     if command_type == "row.set_instrument":
@@ -1003,14 +1018,35 @@ def _constrain_typed_command_targets(
             return False
         _set_property_enum(variant, "row_id", sorted(capability_surface.instrument_row_ids))
     elif command_type in _MIDI_CLIP_COMMANDS:
-        if not capability_surface.midi_clip_ids:
+        if capability_surface.midi_clip_ids:
+            _set_property_enum(
+                variant, "clip_id", sorted(capability_surface.midi_clip_ids)
+            )
+        elif not resource_refs_enabled:
             return False
-        _set_property_enum(variant, "clip_id", sorted(capability_surface.midi_clip_ids))
     elif command_type in _AUDIO_CLIP_COMMANDS:
-        if not capability_surface.audio_clip_ids:
+        if capability_surface.audio_clip_ids:
+            _set_property_enum(
+                variant, "clip_id", sorted(capability_surface.audio_clip_ids)
+            )
+        elif not resource_refs_enabled:
             return False
-        _set_property_enum(variant, "clip_id", sorted(capability_surface.audio_clip_ids))
     return True
+
+
+def _reachable_clip_kinds(
+    variants: Sequence[Mapping[str, Any]],
+    capability_surface: V3CapabilitySurface,
+) -> frozenset[str]:
+    available_types = {_command_type_for_variant(variant) for variant in variants}
+    kinds = {clip.kind for clip in capability_surface.clips}
+    if "sample.place" in available_types:
+        kinds.add("audio")
+    if "midi.create_clip" in available_types:
+        kinds.add("midi")
+    if "audio" in kinds and "clip.convert_to_midi" in available_types:
+        kinds.add("midi")
+    return frozenset(kinds)
 
 
 def _effect_command_variants(
@@ -1172,7 +1208,9 @@ def build_submit_plan_tool(
                 _constrain_mix_goal_intents(constrained_variant, capability_surface)
                 _constrain_mix_goal_targets(constrained_variant, capability_surface)
             if _constrain_typed_command_targets(
-                constrained_variant, capability_surface
+                constrained_variant,
+                capability_surface,
+                resource_refs_enabled=resource_refs_enabled,
             ) and _prune_unavailable_identifier_schemas(
                 constrained_variant, capability_surface
             ):
@@ -1181,6 +1219,25 @@ def build_submit_plan_tool(
         raise _contract_error(
             "v3_command_surface_empty", "No command is available in the current capability surface."
         )
+    if resource_refs_enabled:
+        reachable_clip_kinds = _reachable_clip_kinds(variants, capability_surface)
+        variants = [
+            variant
+            for variant in variants
+            if _command_type_for_variant(variant) not in _MIDI_CLIP_COMMANDS
+            or "midi" in reachable_clip_kinds
+        ]
+        variants = [
+            variant
+            for variant in variants
+            if _command_type_for_variant(variant) not in _AUDIO_CLIP_COMMANDS
+            or "audio" in reachable_clip_kinds
+        ]
+        if not variants:
+            raise _contract_error(
+                "v3_command_surface_empty",
+                "No command is available in the current capability surface.",
+            )
     command_items["anyOf"] = variants
     _constrain_identifier_properties(tool, capability_surface)
     if len(_canonical_json(tool).encode("utf-8")) > MAX_RUNTIME_TOOL_BYTES:
@@ -1302,6 +1359,9 @@ def contract_fingerprint(
         "effect_state_policy": _EFFECT_STATE_POLICY_VERSION,
         "mix_scope_policy": _MIX_SCOPE_POLICY_VERSION,
         "phone_cleanup_conflict_policy": _PHONE_CLEANUP_CONFLICT_POLICY_VERSION,
+        "typed_clip_state_policy": _TYPED_CLIP_STATE_POLICY_VERSION,
+        "group_state_policy": _GROUP_STATE_POLICY_VERSION,
+        "user_visible_text_policy": _USER_VISIBLE_TEXT_POLICY_VERSION,
         "max_output_tokens": max_output_tokens,
         "max_accepted_plan_bytes": MAX_ACCEPTED_PROVIDER_PLAN_BYTES,
     }
@@ -1318,6 +1378,41 @@ def _matches_type(value: Any, expected: str) -> bool:
         "number": isinstance(value, (int, float)) and not isinstance(value, bool),
         "null": value is None,
     }.get(expected, False)
+
+
+def _normalized_visible_text(value: Any) -> str:
+    return " ".join(str(value or "").split()).casefold()
+
+
+def _validate_user_visible_text(
+    plan: Mapping[str, Any], *, original_request: str
+) -> None:
+    user_message = str(plan.get("user_message") or "")
+    visible_text = [user_message]
+    question_options = plan.get("question_options")
+    if isinstance(question_options, list):
+        visible_text.extend(
+            option for option in question_options if isinstance(option, str)
+        )
+
+    for text in visible_text:
+        normalized = text.casefold()
+        if any(marker in normalized for marker in _PRIVATE_PROMPT_MARKERS):
+            raise _contract_error(
+                "v3_plan_user_visible_text_unsafe",
+                "Provider-visible text contains private request context.",
+            )
+
+    if (
+        plan.get("outcome") == "plan"
+        and _normalized_visible_text(original_request)
+        and _normalized_visible_text(user_message)
+        == _normalized_visible_text(original_request)
+    ):
+        raise _contract_error(
+            "v3_plan_user_visible_text_unsafe",
+            "Provider completion text repeats the original request.",
+        )
 
 
 def _validate_json_schema(value: Any, schema: Mapping[str, Any], path: str = "$", *, quiet: bool = False) -> None:
@@ -1456,11 +1551,26 @@ class _V3MutableRowState:
 
 @dataclass
 class _V3MutableClipState:
-    row_id: int
+    row_id: int | str | None
     kind: str
     instrument_id: str
     length_beats: float | None
-    midi_notes: list[V3MidiNote]
+    midi_notes: list[V3MidiNote] | None
+
+    def copy_to(self, row_id: int | str | None) -> "_V3MutableClipState":
+        return _V3MutableClipState(
+            row_id,
+            self.kind,
+            self.instrument_id,
+            self.length_beats,
+            None if self.midi_notes is None else list(self.midi_notes),
+        )
+
+
+@dataclass
+class _V3MutableGroupState:
+    members: list[int | str]
+    output_key: str | None = None
 
 
 def _plan_midi_notes(raw_notes: Any) -> list[V3MidiNote]:
@@ -1641,11 +1751,20 @@ def validate_plan_capabilities(
     available_outputs: dict[str, frozenset[str]] = {}
     command_ids: set[str] = set()
     simulated_rows = capability_surface.current_rows
+    generated_rows: dict[str, _V3MutableRowState] = {}
+    generated_clips: dict[str, _V3MutableClipState] = {}
     generated_material_by_stable_row: dict[int, int] = {}
     generated_row_material: dict[str, int] = {}
-    generated_group_members: dict[str, tuple[int | str, ...]] = {}
-    generated_clip_parent: dict[str, int | str | None] = {}
     unaddressed_generated_material = 0
+    active_groups: dict[tuple[str, str], _V3MutableGroupState] = {
+        ("id", group.group_id): _V3MutableGroupState(list(group.member_row_ids))
+        for group in capability_surface.groups
+    }
+    group_by_row: dict[int | str, tuple[str, str]] = {
+        row_id: ("id", group.group_id)
+        for group in capability_surface.groups
+        for row_id in group.member_row_ids
+    }
 
     def refresh_stable_row_readiness(row_id: int) -> None:
         if row_id not in active_rows:
@@ -1687,9 +1806,12 @@ def validate_plan_capabilities(
             )
 
     def consume_generated_clip(clip_key: str | None) -> int | str | None:
-        if clip_key is None or clip_key not in generated_clip_parent:
+        if clip_key is None:
             return None
-        parent = generated_clip_parent.pop(clip_key)
+        clip = generated_clips.pop(clip_key, None)
+        if clip is None:
+            return None
+        parent = clip.row_id
         remove_generated_material(parent)
         return parent
 
@@ -1699,6 +1821,121 @@ def validate_plan_capabilities(
         command_id = str(raw_ref.get("command_id") or "").strip()
         output = str(raw_ref.get("output") or "").strip()
         return f"{command_id}.{output}" if command_id and output else None
+
+    def group_key(arguments: Mapping[str, Any]) -> tuple[str, str] | None:
+        group_id = arguments.get("group_id")
+        if isinstance(group_id, str) and group_id:
+            return ("id", group_id)
+        group_ref_key = resource_key(arguments.get("group_ref"))
+        return ("ref", group_ref_key) if group_ref_key is not None else None
+
+    def row_key(arguments: Mapping[str, Any]) -> int | str | None:
+        row_id = arguments.get("row_id")
+        if isinstance(row_id, int) and not isinstance(row_id, bool):
+            return row_id
+        return resource_key(arguments.get("row_ref"))
+
+    def retire_group(group: tuple[str, str]) -> None:
+        state = active_groups.pop(group, None)
+        if state is None:
+            return
+        for member in state.members:
+            if group_by_row.get(member) == group:
+                group_by_row.pop(member, None)
+        if state.output_key is None:
+            return
+        producer_id, output = state.output_key.rsplit(".", 1)
+        available_outputs[producer_id] = frozenset(
+            candidate
+            for candidate in available_outputs.get(producer_id, frozenset())
+            if candidate != output
+        )
+
+    def detach_group_members(members: Sequence[int | str]) -> None:
+        moved = set(members)
+        affected_groups = {
+            group_by_row[member]
+            for member in moved
+            if member in group_by_row
+        }
+        for group in affected_groups:
+            state = active_groups.get(group)
+            if state is None:
+                continue
+            remaining = [member for member in state.members if member not in moved]
+            if len(remaining) < 2:
+                retire_group(group)
+                continue
+            state.members = remaining
+            for member in moved:
+                if group_by_row.get(member) == group:
+                    group_by_row.pop(member, None)
+
+    def remove_group_member(
+        group: tuple[str, str] | None, member: int | str | None
+    ) -> None:
+        state = active_groups.get(group) if group is not None else None
+        if (
+            state is None
+            or member is None
+            or member not in state.members
+            or group_by_row.get(member) != group
+        ):
+            raise _contract_error(
+                "v3_plan_capability_invalid",
+                "The provider plan references unavailable group membership.",
+            )
+        remaining = [candidate for candidate in state.members if candidate != member]
+        group_by_row.pop(member, None)
+        if len(remaining) < 2:
+            retire_group(group)
+        else:
+            state.members = remaining
+
+    def resolve_clip(arguments: Mapping[str, Any]) -> _V3MutableClipState | None:
+        clip_id = arguments.get("clip_id")
+        if isinstance(clip_id, str):
+            return active_clips.get(clip_id)
+        return generated_clips.get(resource_key(arguments.get("clip_ref")) or "")
+
+    def referenced_clips(
+        arguments: Mapping[str, Any],
+    ) -> list[_V3MutableClipState | None]:
+        clips: list[_V3MutableClipState | None] = [
+            active_clips.get(clip_id)
+            for clip_id in _direct_identifiers(arguments, "clip_id")
+        ]
+        for value in _walk_plan_values(arguments):
+            if not isinstance(value, dict) or "clip_ref" not in value:
+                continue
+            clips.append(
+                generated_clips.get(resource_key(value.get("clip_ref")) or "")
+            )
+        return clips
+
+    def destination_row_state(
+        destination: Any,
+    ) -> tuple[int | str | None, _V3MutableRowState | None]:
+        if not isinstance(destination, dict):
+            return None, None
+        row_id = destination.get("row_id")
+        if isinstance(row_id, int) and not isinstance(row_id, bool):
+            return row_id, active_rows.get(row_id)
+        row_ref_key = resource_key(destination.get("row_ref"))
+        if row_ref_key is not None:
+            return row_ref_key, generated_rows.get(row_ref_key)
+        new_row = destination.get("new_row")
+        if isinstance(new_row, dict):
+            lane_kind = str(new_row.get("kind") or "").strip()
+            instrument_id = str(new_row.get("instrument_id") or "").strip()
+            return None, _V3MutableRowState(
+                "instrument"
+                if lane_kind == "midi" or "instrument_id" in new_row
+                else "audio",
+                instrument_id,
+                False,
+            )
+        return None, None
 
     def stable_row_is_mixable(row_id: Any) -> bool:
         row = active_rows.get(row_id)
@@ -1722,21 +1959,18 @@ def validate_plan_capabilities(
         if scope == "group":
             group_id = target.get("group_id")
             if isinstance(group_id, str):
-                group = next(
-                    (
-                        item
-                        for item in capability_surface.groups
-                        if item.group_id == group_id
-                    ),
-                    None,
-                )
+                group = active_groups.get(("id", group_id))
                 return group is not None and any(
-                    row_key_is_mixable(row_id) for row_id in group.member_row_ids
+                    row_key_is_mixable(row_id) for row_id in group.members
                 )
             group_ref_key = resource_key(target.get("group_ref"))
-            return group_ref_key is not None and any(
-                row_key_is_mixable(row_key)
-                for row_key in generated_group_members.get(group_ref_key, ())
+            group = (
+                active_groups.get(("ref", group_ref_key))
+                if group_ref_key is not None
+                else None
+            )
+            return group is not None and any(
+                row_key_is_mixable(row_key) for row_key in group.members
             )
         if scope in {"all_rows", "master"}:
             return (
@@ -1782,8 +2016,11 @@ def validate_plan_capabilities(
                 "v3_plan_capability_invalid",
                 "The provider plan references an unavailable effect instance.",
             )
+        active_stable_group_ids = {
+            identifier for kind, identifier in active_groups if kind == "id"
+        }
         if not _direct_identifiers(arguments, "group_id").issubset(
-            capability_surface.group_ids
+            active_stable_group_ids
         ):
             raise _contract_error(
                 "v3_plan_capability_invalid", "The provider plan references an unavailable group."
@@ -1861,28 +2098,46 @@ def validate_plan_capabilities(
                     clip.instrument_id = instrument_id
 
         if command_type in _MIDI_CLIP_COMMANDS:
-            clip_id = arguments.get("clip_id")
-            clip = active_clips.get(clip_id)
+            clip = resolve_clip(arguments)
             if clip is None or clip.kind != "midi":
                 raise _contract_error(
                     "v3_plan_target_type_invalid", "A MIDI command targets a non-MIDI clip."
                 )
             if command_type in {"midi.replace_notes", "midi.append_notes"}:
                 notes = _plan_midi_notes(arguments.get("notes"))
-                _validate_playable_notes(
-                    notes,
-                    clip.instrument_id,
-                    instrument_by_id,
-                    maximum_end_beat=(
-                        clip.length_beats if command_type == "midi.replace_notes" else None
-                    ),
-                )
+                if clip.instrument_id:
+                    _validate_playable_notes(
+                        notes,
+                        clip.instrument_id,
+                        instrument_by_id,
+                        maximum_end_beat=(
+                            clip.length_beats
+                            if command_type == "midi.replace_notes"
+                            else None
+                        ),
+                    )
+                elif (
+                    command_type == "midi.replace_notes"
+                    and clip.length_beats is not None
+                    and any(
+                        note.start_beat + note.length_beats
+                        > clip.length_beats + 0.000001
+                        for note in notes
+                    )
+                ):
+                    raise _contract_error(
+                        "v3_plan_midi_note_out_of_bounds",
+                        "The provider plan contains a note outside its MIDI clip.",
+                    )
                 if command_type == "midi.replace_notes":
                     clip.midi_notes = notes
-                else:
+                elif clip.length_beats is not None or clip.midi_notes is not None:
                     current_end = max(
                         [clip.length_beats or 0.0]
-                        + [note.start_beat + note.length_beats for note in clip.midi_notes]
+                        + [
+                            note.start_beat + note.length_beats
+                            for note in (clip.midi_notes or [])
+                        ]
                     )
                     appended = [
                         V3MidiNote(
@@ -1893,7 +2148,8 @@ def validate_plan_capabilities(
                         )
                         for note in notes
                     ]
-                    clip.midi_notes.extend(appended)
+                    if clip.midi_notes is not None:
+                        clip.midi_notes.extend(appended)
                     clip.length_beats = max(
                         [current_end]
                         + [note.start_beat + note.length_beats for note in appended]
@@ -1904,26 +2160,26 @@ def validate_plan_capabilities(
                     raise _contract_error(
                         "v3_plan_semantic_invalid", "A MIDI transpose command is invalid."
                     )
-                transposed = [
-                    V3MidiNote(
-                        note.pitch + semitones,
-                        note.start_beat,
-                        note.length_beats,
-                        note.velocity,
-                    )
-                    for note in clip.midi_notes
-                ]
-                _validate_playable_notes(
-                    transposed, clip.instrument_id, instrument_by_id
-                )
-                clip.midi_notes = transposed
+                if clip.midi_notes is not None:
+                    transposed = [
+                        V3MidiNote(
+                            note.pitch + semitones,
+                            note.start_beat,
+                            note.length_beats,
+                            note.velocity,
+                        )
+                        for note in clip.midi_notes
+                    ]
+                    if clip.instrument_id:
+                        _validate_playable_notes(
+                            transposed, clip.instrument_id, instrument_by_id
+                        )
+                    clip.midi_notes = transposed
 
         if command_type in _AUDIO_CLIP_COMMANDS:
-            direct_clip_ids = _direct_identifiers(arguments, "clip_id")
-            if any(
-                active_clips.get(clip_id) is None
-                or active_clips[clip_id].kind != "audio"
-                for clip_id in direct_clip_ids
+            clip_targets = referenced_clips(arguments)
+            if not clip_targets or any(
+                clip is None or clip.kind != "audio" for clip in clip_targets
             ):
                 raise _contract_error(
                     "v3_plan_target_type_invalid", "An audio command targets a non-audio clip."
@@ -1933,16 +2189,13 @@ def validate_plan_capabilities(
             notes = _plan_midi_notes(arguments.get("notes"))
             destination = arguments.get("destination")
             instrument_id = ""
-            if isinstance(destination, dict) and isinstance(destination.get("row_id"), int):
-                row = active_rows.get(destination["row_id"])
-                if row is None or row.lane_kind != "instrument":
-                    raise _contract_error(
-                        "v3_plan_target_type_invalid",
-                        "A MIDI clip destination is not an instrument row.",
-                    )
-                instrument_id = row.instrument_id
-            elif isinstance(destination, dict) and isinstance(destination.get("new_row"), dict):
-                instrument_id = str(destination["new_row"].get("instrument_id") or "").strip()
+            _, row = destination_row_state(destination)
+            if row is None or row.lane_kind != "instrument":
+                raise _contract_error(
+                    "v3_plan_target_type_invalid",
+                    "A MIDI clip destination is not an instrument row.",
+                )
+            instrument_id = row.instrument_id
             if instrument_id:
                 _validate_playable_notes(notes, instrument_id, instrument_by_id)
 
@@ -1969,6 +2222,7 @@ def validate_plan_capabilities(
                         "v3_plan_capability_invalid",
                         "The provider plan cannot delete that row.",
                     )
+                detach_group_members([row_id])
                 active_rows.pop(row_id)
                 for clip_id in [
                     clip_id
@@ -1976,14 +2230,23 @@ def validate_plan_capabilities(
                     if clip.row_id == row_id
                 ]:
                     active_clips.pop(clip_id)
-            elif row_ref_key is not None and row_ref_key in generated_row_material:
-                generated_row_material.pop(row_ref_key)
                 for clip_key in [
                     clip_key
-                    for clip_key, parent in generated_clip_parent.items()
-                    if parent == row_ref_key
+                    for clip_key, clip in generated_clips.items()
+                    if clip.row_id == row_id
                 ]:
-                    generated_clip_parent.pop(clip_key)
+                    generated_clips.pop(clip_key, None)
+                generated_material_by_stable_row.pop(row_id, None)
+            elif row_ref_key is not None and row_ref_key in generated_row_material:
+                detach_group_members([row_ref_key])
+                generated_row_material.pop(row_ref_key)
+                generated_rows.pop(row_ref_key, None)
+                for clip_key in [
+                    clip_key
+                    for clip_key, clip in generated_clips.items()
+                    if clip.row_id == row_ref_key
+                ]:
+                    generated_clips.pop(clip_key, None)
             else:
                 raise _contract_error(
                     "v3_plan_capability_invalid",
@@ -1998,23 +2261,60 @@ def validate_plan_capabilities(
             consume_generated_clip(clip_ref_key)
         elif command_type == "effect.remove":
             active_effect_instances.discard(arguments.get("effect_instance_id"))
+        elif command_type == "group.remove_row":
+            remove_group_member(group_key(arguments), row_key(arguments))
+        elif command_type == "group.set_collapsed":
+            if group_key(arguments) not in active_groups:
+                raise _contract_error(
+                    "v3_plan_capability_invalid",
+                    "The provider plan references an unavailable group.",
+                )
 
         produced_outputs = _produced_outputs(command_type, arguments)
         available_outputs[command_id] = produced_outputs
         if command_type == "row.create" and "row" in produced_outputs:
-            generated_row_material[f"{command_id}.row"] = 0
+            row_key = f"{command_id}.row"
+            lane = arguments.get("lane")
+            lane_kind = str(lane.get("kind") or "") if isinstance(lane, dict) else ""
+            instrument_id = (
+                str(lane.get("instrument_id") or "").strip()
+                if isinstance(lane, dict)
+                else ""
+            )
+            generated_row_material[row_key] = 0
+            generated_rows[row_key] = _V3MutableRowState(
+                "instrument" if lane_kind == "midi" else "audio",
+                instrument_id,
+                False,
+            )
         elif command_type == "clip.separate_stems":
             for row_output, clip_output in (
                 ("vocals_row", "vocals_clip"),
                 ("instrumental_row", "instrumental_clip"),
             ):
                 row_key = f"{command_id}.{row_output}"
+                clip_key = f"{command_id}.{clip_output}"
                 generated_row_material[row_key] = 1
-                generated_clip_parent[f"{command_id}.{clip_output}"] = row_key
+                generated_rows[row_key] = _V3MutableRowState("audio", "", True)
+                generated_clips[clip_key] = _V3MutableClipState(
+                    row_key, "audio", "", None, None
+                )
         elif command_type == "clip.convert_to_midi":
             row_key = f"{command_id}.midi_row"
+            clip_key = f"{command_id}.midi_clip"
+            source = resolve_clip(arguments)
+            instrument_id = str(arguments.get("instrument_id") or "").strip()
             generated_row_material[row_key] = 1
-            generated_clip_parent[f"{command_id}.midi_clip"] = row_key
+            generated_rows[row_key] = _V3MutableRowState(
+                "instrument", instrument_id, True
+            )
+            generated_clips[clip_key] = _V3MutableClipState(
+                row_key,
+                "midi",
+                instrument_id,
+                source.length_beats if source is not None else None,
+                None,
+            )
 
         if command_type in {"midi.create_clip", "sample.place"}:
             destination = arguments.get("destination")
@@ -2024,21 +2324,28 @@ def validate_plan_capabilities(
                 and isinstance(arguments.get("placements"), list)
                 else 1
             )
-            parent: int | str | None = None
-            if isinstance(destination, dict):
-                row_id = destination.get("row_id")
-                if isinstance(row_id, int) and not isinstance(row_id, bool):
-                    parent = row_id
-                else:
-                    row_ref_key = resource_key(destination.get("row_ref"))
-                    if row_ref_key is not None:
-                        parent = row_ref_key
+            parent, destination_row = destination_row_state(destination)
             add_generated_material(parent, material_count)
             if len(produced_outputs) == 1:
                 output = next(iter(produced_outputs))
-                generated_clip_parent[f"{command_id}.{output}"] = parent
+                clip_key = f"{command_id}.{output}"
+                if command_type == "midi.create_clip":
+                    generated_clips[clip_key] = _V3MutableClipState(
+                        parent,
+                        "midi",
+                        destination_row.instrument_id
+                        if destination_row is not None
+                        else "",
+                        float(arguments["length_beats"]),
+                        _plan_midi_notes(arguments.get("notes")),
+                    )
+                else:
+                    generated_clips[clip_key] = _V3MutableClipState(
+                        parent, "audio", "", None, None
+                    )
 
         if command_type == "clip.duplicate_to" and "copy_clip" in produced_outputs:
+            source = resolve_clip(arguments)
             destination_row_id = arguments.get("destination_row_id")
             if isinstance(destination_row_id, int) and not isinstance(
                 destination_row_id, bool
@@ -2046,13 +2353,18 @@ def validate_plan_capabilities(
                 parent: int | str | None = destination_row_id
             else:
                 source_ref_key = resource_key(arguments.get("clip_ref"))
-                if source_ref_key in generated_clip_parent:
-                    parent = generated_clip_parent[source_ref_key]
+                if source_ref_key in generated_clips:
+                    parent = generated_clips[source_ref_key].row_id
                 else:
-                    source = active_clips.get(arguments.get("clip_id"))
                     parent = source.row_id if source is not None else None
+            if source is None:
+                raise _contract_error(
+                    "v3_plan_target_type_invalid",
+                    "A duplicate command targets an unavailable clip.",
+                )
             add_generated_material(parent)
-            generated_clip_parent[f"{command_id}.copy_clip"] = parent
+            clip_key = f"{command_id}.copy_clip"
+            generated_clips[clip_key] = source.copy_to(parent)
 
         if command_type == "clip.split_at":
             parent: int | str | None = None
@@ -2062,12 +2374,29 @@ def validate_plan_capabilities(
                 refresh_stable_row_readiness(source.row_id)
             else:
                 source_ref_key = resource_key(arguments.get("clip_ref"))
-                if source_ref_key in generated_clip_parent:
-                    parent = generated_clip_parent[source_ref_key]
+                if source_ref_key in generated_clips:
+                    source = generated_clips.get(source_ref_key)
+                    parent = source.row_id if source is not None else None
                     consume_generated_clip(source_ref_key)
+            if source is None:
+                raise _contract_error(
+                    "v3_plan_target_type_invalid",
+                    "A split command targets an unavailable clip.",
+                )
             add_generated_material(parent, 2)
-            generated_clip_parent[f"{command_id}.left_clip"] = parent
-            generated_clip_parent[f"{command_id}.right_clip"] = parent
+            left_key = f"{command_id}.left_clip"
+            right_key = f"{command_id}.right_clip"
+            split_beat = float(arguments.get("at_beat") or 0.0)
+            left = source.copy_to(parent)
+            right = source.copy_to(parent)
+            if source.length_beats is not None:
+                left.length_beats = min(source.length_beats, split_beat)
+                right.length_beats = max(0.0, source.length_beats - split_beat)
+            if source.kind == "midi":
+                left.midi_notes = None
+                right.midi_notes = None
+            generated_clips[left_key] = left
+            generated_clips[right_key] = right
 
         if command_type == "clip.glue" and "glued_clip" in produced_outputs:
             raw_sources = arguments.get("sources")
@@ -2077,17 +2406,22 @@ def validate_plan_capabilities(
                     for clip_id in arguments.get("clip_ids", [])
                 ]
             parents: list[int | str | None] = []
+            sources: list[_V3MutableClipState] = []
             for raw_source in raw_sources:
                 if not isinstance(raw_source, dict):
                     continue
                 source = active_clips.pop(raw_source.get("clip_id"), None)
                 if source is not None:
+                    sources.append(source)
                     parents.append(source.row_id)
                     refresh_stable_row_readiness(source.row_id)
                     continue
                 source_ref_key = resource_key(raw_source.get("clip_ref"))
-                if source_ref_key in generated_clip_parent:
-                    parents.append(generated_clip_parent[source_ref_key])
+                if source_ref_key in generated_clips:
+                    source = generated_clips.get(source_ref_key)
+                    if source is not None:
+                        sources.append(source)
+                        parents.append(source.row_id)
                     consume_generated_clip(source_ref_key)
             distinct_parents = set(parents)
             if len(distinct_parents) != 1:
@@ -2097,11 +2431,29 @@ def validate_plan_capabilities(
                 )
             parent = parents[0]
             add_generated_material(parent)
-            generated_clip_parent[f"{command_id}.glued_clip"] = parent
+            clip_key = f"{command_id}.glued_clip"
+            generated_clips[clip_key] = _V3MutableClipState(
+                parent,
+                "audio",
+                "",
+                (
+                    sum(source.length_beats for source in sources)
+                    if sources
+                    and all(source.length_beats is not None for source in sources)
+                    else None
+                ),
+                None,
+            )
 
         if command_type == "group.create" and "group" in produced_outputs:
             members: list[int | str] = []
-            for member in arguments.get("members", []):
+            raw_members = arguments.get("members")
+            if not isinstance(raw_members, list):
+                raw_members = [
+                    {"row_id": row_id}
+                    for row_id in arguments.get("row_ids", [])
+                ]
+            for member in raw_members:
                 if not isinstance(member, dict):
                     continue
                 row_id = member.get("row_id")
@@ -2111,7 +2463,28 @@ def validate_plan_capabilities(
                 row_ref_key = resource_key(member.get("row_ref"))
                 if row_ref_key is not None:
                     members.append(row_ref_key)
-            generated_group_members[f"{command_id}.group"] = tuple(members)
+            if (
+                len(members) < 2
+                or len(members) != len(set(members))
+                or any(
+                    member not in active_rows
+                    if isinstance(member, int)
+                    else member not in generated_rows
+                    for member in members
+                )
+            ):
+                raise _contract_error(
+                    "v3_plan_capability_invalid",
+                    "The provider plan contains invalid group membership.",
+                )
+            detach_group_members(members)
+            output_key = f"{command_id}.group"
+            created_group = ("ref", output_key)
+            active_groups[created_group] = _V3MutableGroupState(
+                members, output_key=output_key
+            )
+            for member in members:
+                group_by_row[member] = created_group
 
     _validate_phone_cleanup_sound_conflicts(plan, capability_surface)
 
@@ -2143,6 +2516,7 @@ def parse_and_validate_provider_plan(
     command_types: Sequence[str],
     resource_refs_enabled: bool,
     capability_surface: V3CapabilitySurface,
+    original_request: str = "",
 ) -> dict[str, Any]:
     status = str(payload.get("status") or "").strip().lower()
     incomplete = payload.get("incomplete_details")
@@ -2186,6 +2560,7 @@ def parse_and_validate_provider_plan(
         capability_surface=capability_surface,
     )
     _validate_json_schema(plan, tool["parameters"])
+    _validate_user_visible_text(plan, original_request=original_request)
     effective_types = frozenset(command_types) & SERVER_COMMAND_TYPES
     for command in plan.get("commands", []):
         if not isinstance(command, dict) or command.get("type") not in effective_types:

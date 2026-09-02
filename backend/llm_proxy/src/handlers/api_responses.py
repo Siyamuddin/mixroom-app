@@ -62,6 +62,7 @@ _V3_REPAIRABLE_SEMANTIC_CODES = frozenset(
     {
         "v3_plan_midi_note_out_of_bounds",
         "v3_plan_phone_cleanup_effect_conflict",
+        "v3_plan_user_visible_text_unsafe",
     }
 )
 _V3_SEMANTIC_REPAIR_GUIDANCE = {
@@ -73,6 +74,13 @@ _V3_SEMANTIC_REPAIR_GUIDANCE = {
         "Do not combine row.apply_phone_mic_cleanup with effect mutations or row, "
         "group, or all-row mixing that affects the same cleanup row. Return a "
         "complete corrected plan, not a partial patch."
+    ),
+    "v3_plan_user_visible_text_unsafe": (
+        "Rewrite every user-visible message and clarification option as concise, "
+        "natural customer-facing text. Do not copy the original request or include "
+        "private input-section labels, raw context, JSON, command names, validation "
+        "codes, or implementation details. Return a complete corrected plan, not a "
+        "partial patch."
     ),
 }
 _STRUCTURED_MIXROOM_FIELDS = frozenset(
@@ -500,6 +508,7 @@ def _parse_v3_provider_plan(
     }
     if contract is v3_server_contract_v2:
         kwargs["capability_surface"] = request["capability_surface"]
+        kwargs["original_request"] = request["original_request"]
     return dict(contract.parse_and_validate_provider_plan(payload, **kwargs))
 
 

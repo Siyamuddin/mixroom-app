@@ -76,6 +76,7 @@ import 'package:mixroom/ai/producer_data_collector.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/remote_mixing_magnitude_predictor.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
+import 'package:mixroom/ai/v3/ai_v3_execution_failure_message.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
@@ -17010,6 +17011,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           fallbackIndex: _commandInt(command, 'fallbackIndex') ?? -1,
           addClip: _addClipFromUndoPayload,
           removeClip: _removeClipForUndo,
+          restoreClipIndex: _restoreClipOrderIndex,
         );
       case 'rowCreate':
         final createdRowId = _commandInt(command, 'createdRowId');
@@ -69383,28 +69385,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertAiFailureSystemText(
         error.rollbackIncomplete || !artifactCleanupComplete
             ? 'The changes failed and could not be fully rolled back. Review the project state.'
-            : _aiV3RolledBackFailureMessage(error.cause),
+            : aiV3RolledBackFailureMessage(error.cause),
       );
     } finally {
       releaseTransactionNoticeCapture();
     }
-  }
-
-  String _aiV3RolledBackFailureMessage(Object cause) {
-    final code = cause.toString();
-    if (code.contains('v3_transport_recording_active')) {
-      return 'Playback controls cannot be changed while recording. Stop recording first, then try again. Nothing was changed.';
-    }
-    if (code.contains('v3_audio_to_midi_source_silent') ||
-        code.contains('v3_audio_to_midi_no_stable_notes') ||
-        code.contains('v3_audio_to_midi_render_unreadable') ||
-        code.contains('v3_audio_to_midi_transcription_failed')) {
-      return 'I could not detect usable notes in that audio. The project was unchanged. Try a clearer pitched clip or convert a different clip.';
-    }
-    if (code.contains('v3_audio_to_midi_source_unreadable')) {
-      return 'I could not read that audio clip for transcription. The project was unchanged. Try another readable audio clip.';
-    }
-    return 'I could not verify the complete change. The transaction was rolled back.';
   }
 
   Future<List<Map<String, dynamic>>> _captureAiV3Expectations(
@@ -80325,6 +80310,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _clipFadeRowIdByEngineId.remove(changedClip.engineClipId);
         }
       },
+      restoreClipIndex: _restoreClipOrderIndex,
     );
   }
 
@@ -82244,6 +82230,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : _audioTracks
               .where((clip) => clip.rowIndex == row)
               .toList(growable: false);
+    final deletedClipIdentities = HashSet<AudioTrack>.identity()
+      ..addAll(deletedClips);
+    final originalClipIndexes = <String, int>{};
+    for (int index = 0; index < _audioTracks.length; index++) {
+      final clip = _audioTracks[index];
+      final clipId = clip.clipId.trim();
+      if (clipId.isNotEmpty && deletedClipIdentities.contains(clip)) {
+        originalClipIndexes.putIfAbsent(clipId, () => index);
+      }
+    }
 
     final containsActiveMidiClip =
         _activeMidiClipEngineId != null &&
@@ -82284,6 +82280,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       ),
       rowEffects: await captureRowSnapshot(row, rowId: rowId),
       clips: deletedClips,
+      originalClipIndexes: originalClipIndexes,
       closesMidiEditor: containsActiveMidiClip,
       previousSelectedRowId: previousSelectedRowId,
       nextSelectedRowId: nextSelectedRowId,
@@ -82349,6 +82346,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         assumeFreshEngineDefaults: true,
       );
     }
+  }
+
+  void _restoreClipOrderIndexes(Map<String, int> originalIndexes) {
+    if (originalIndexes.isEmpty || _audioTracks.length < 2) return;
+    final orderedEntries = originalIndexes.entries.toList(growable: false)
+      ..sort((a, b) => a.value.compareTo(b.value));
+    var changed = false;
+    for (final entry in orderedEntries) {
+      final currentIndex = _clipIndexForPersistentId(entry.key);
+      if (currentIndex < 0) continue;
+      final targetIndex = entry.value.clamp(0, _audioTracks.length - 1);
+      if (currentIndex == targetIndex) continue;
+      final clip = _audioTracks.removeAt(currentIndex);
+      _audioTracks.insert(targetIndex, clip);
+      changed = true;
+    }
+    if (changed) {
+      _rebuildClipOperationIndexes();
+    }
+  }
+
+  void _restoreClipOrderIndex(String clipId, int originalIndex) {
+    if (clipId.trim().isEmpty || originalIndex < 0) return;
+    _restoreClipOrderIndexes(<String, int>{clipId: originalIndex});
   }
 
   Future<void> _restoreDeletedRowState(
@@ -82488,6 +82509,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _restoreDeletedRowClips(restoredRowIndex, snapshot.clips);
+    _restoreClipOrderIndexes(snapshot.originalClipIndexes);
     await _restoreRowSnapshot(
       RowEffectsSnapshot(
         restoredRowIndex,
@@ -82554,6 +82576,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Map<String, int> _commandDeletedRowClipIndexes(Object? raw) {
+    if (raw is! Map) return const <String, int>{};
+    final indexes = <String, int>{};
+    for (final entry in raw.entries) {
+      final clipId = entry.key.toString().trim();
+      final index = _valueInt(entry.value);
+      if (clipId.isNotEmpty && index != null && index >= 0) {
+        indexes.putIfAbsent(clipId, () => index);
+      }
+    }
+    return indexes;
+  }
+
   Future<int> _restoreDeletedRowFromPersistedSnapshot(
     Map<String, dynamic> snapshot,
   ) async {
@@ -82591,6 +82626,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
     final rowEffects = _commandRowEffectsSnapshot(snapshot['rowEffects']);
     final clipPayloads = _commandClipPayloads(snapshot['clips']);
+    final originalClipIndexes = _commandDeletedRowClipIndexes(
+      snapshot['originalClipIndexes'],
+    );
 
     var restoredRowIndex = originalIndex;
     final originalRowId = _valueInt(rowMap['rowId']) ?? -1;
@@ -82659,6 +82697,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     await _restoreDeletedRowClipPayloads(restoredRowIndex, clipPayloads);
+    _restoreClipOrderIndexes(originalClipIndexes);
     await _restoreRowSnapshot(
       RowEffectsSnapshot(
         restoredRowIndex,
@@ -89217,6 +89256,7 @@ class _DeletedRowSnapshot {
   final RowStateSnapshot rowState;
   final RowEffectsSnapshot rowEffects;
   final List<AudioTrack> clips;
+  final Map<String, int> originalClipIndexes;
   final bool closesMidiEditor;
   final int? previousSelectedRowId;
   final int? nextSelectedRowId;
@@ -89230,6 +89270,7 @@ class _DeletedRowSnapshot {
     required this.rowState,
     required this.rowEffects,
     required this.clips,
+    required this.originalClipIndexes,
     required this.closesMidiEditor,
     required this.previousSelectedRowId,
     required this.nextSelectedRowId,
@@ -89248,6 +89289,8 @@ class _DeletedRowSnapshot {
     'rowState': rowState.toJson(),
     'rowEffects': rowEffects.toJson(),
     'clips': clips.map(_persistedClipPayload).toList(),
+    if (originalClipIndexes.isNotEmpty)
+      'originalClipIndexes': originalClipIndexes,
     'closesMidiEditor': closesMidiEditor,
     'previousSelectedRowId': previousSelectedRowId,
     'nextSelectedRowId': nextSelectedRowId,
@@ -90959,6 +91002,7 @@ class DeleteClipAction extends EditorUndoAction {
   addTrack;
 
   final void Function(AudioTrack clip, {required bool removed}) onChange;
+  final void Function(String clipId, int originalIndex) restoreClipIndex;
 
   // snapshot
   // can deprecate all fields except clip, since all of them derive from clip anyways
@@ -90973,6 +91017,7 @@ class DeleteClipAction extends EditorUndoAction {
     required this.clip,
     required this.addTrack,
     required this.onChange,
+    required this.restoreClipIndex,
   }) {
     originalIndex = tracks.indexOf(clip);
     file = clip.file;
@@ -91014,6 +91059,10 @@ class DeleteClipAction extends EditorUndoAction {
 
   @override
   Future<void> undo() async {
+    await restore(notifyChange: true);
+  }
+
+  Future<void> restore({required bool notifyChange}) async {
     await addTrack(
       clip: clip,
       row: row,
@@ -91021,7 +91070,10 @@ class DeleteClipAction extends EditorUndoAction {
       trimStartRequested: trimStart,
       trimEndRequested: trimEnd,
     );
-    onChange(clip, removed: false);
+    restoreClipIndex(clip.clipId, originalIndex);
+    if (notifyChange) {
+      onChange(clip, removed: false);
+    }
   }
 }
 
@@ -91081,13 +91133,7 @@ class DeleteClipsAction extends EditorUndoAction {
     await beginRestoreBatch();
     try {
       for (final action in actions.reversed) {
-        await action.addTrack(
-          clip: action.clip,
-          row: action.row,
-          timeMs: action.timeMs,
-          trimStartRequested: action.trimStart,
-          trimEndRequested: action.trimEnd,
-        );
+        await action.restore(notifyChange: false);
       }
     } finally {
       await endRestoreBatch();
@@ -91106,6 +91152,7 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
   final int fallbackIndex;
   final Future<void> Function(Map<String, dynamic> payload) addClip;
   final Future<void> Function(String clipId, int fallbackIndex) removeClip;
+  final void Function(String clipId, int originalIndex) restoreClipIndex;
 
   _PersistedClipPresenceAction({
     required String descriptionText,
@@ -91114,6 +91161,7 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
     required this.fallbackIndex,
     required this.addClip,
     required this.removeClip,
+    required this.restoreClipIndex,
   }) : descriptionText = descriptionText.trim().isEmpty
            ? (addedByRedo ? 'Add audio clip' : 'Delete audio clip')
            : descriptionText.trim(),
@@ -91135,7 +91183,7 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
   @override
   Future<void> redo() {
     return addedByRedo
-        ? addClip(clipPayload)
+        ? _addClipAtSavedIndex()
         : removeClip(clipId, fallbackIndex);
   }
 
@@ -91143,7 +91191,12 @@ class _PersistedClipPresenceAction extends EditorUndoAction {
   Future<void> undo() {
     return addedByRedo
         ? removeClip(clipId, fallbackIndex)
-        : addClip(clipPayload);
+        : _addClipAtSavedIndex();
+  }
+
+  Future<void> _addClipAtSavedIndex() async {
+    await addClip(clipPayload);
+    restoreClipIndex(clipId, fallbackIndex);
   }
 }
 

@@ -9,6 +9,10 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
+PRIVATE_CONTEXT_ESCAPE_FIXTURE = (
+    Path(__file__).with_name("fixtures")
+    / "v3_private_context_message_escape.json"
+)
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
@@ -95,6 +99,38 @@ class V3ServerContractTests(unittest.TestCase):
 
     def _surface(self):
         return v3_server_contract.extract_capability_surface(self._core_context())
+
+    def _group_surface(
+        self,
+        *,
+        members: list[int] | None = None,
+        ready_rows: set[int] | None = None,
+    ):
+        context = self._core_context()
+        ready_rows = ready_rows if ready_rows is not None else {1, 2, 3, 4}
+        context["project"]["row_capacity"] = {
+            "current_rows": 4,
+            "max_rows": 5,
+            "can_create": True,
+        }
+        context["rows"] = [
+            {
+                "row_id": row_id,
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": row_id in ready_rows,
+                "has_usable_signal": row_id in ready_rows,
+                "effects": [],
+            }
+            for row_id in range(1, 5)
+        ]
+        context["clips"] = []
+        context["groups"] = (
+            []
+            if members is None
+            else [{"group_id": "group-1", "member_row_ids": members}]
+        )
+        return v3_server_contract.extract_capability_surface(context)
 
     def _free_context_with_preserved_paid_instrument(self) -> dict:
         context = self._core_context()
@@ -822,6 +858,38 @@ class V3ServerContractTests(unittest.TestCase):
 
         self.assertNotEqual(first, second)
 
+    def test_typed_clip_state_policy_participates_in_fingerprint(self) -> None:
+        kwargs = {
+            "command_types": {"midi.create_clip", "midi.transpose"},
+            "resource_refs_enabled": True,
+            "capability_surface": self._surface(),
+        }
+        first = v3_server_contract.contract_fingerprint(**kwargs)
+        with mock.patch.object(
+            v3_server_contract,
+            "_TYPED_CLIP_STATE_POLICY_VERSION",
+            "ordered_typed_clip_reference_test_version",
+        ):
+            second = v3_server_contract.contract_fingerprint(**kwargs)
+
+        self.assertNotEqual(first, second)
+
+    def test_group_state_policy_participates_in_fingerprint(self) -> None:
+        kwargs = {
+            "command_types": {"group.create", "group.remove_row"},
+            "resource_refs_enabled": True,
+            "capability_surface": self._group_surface(members=[1, 2]),
+        }
+        first = v3_server_contract.contract_fingerprint(**kwargs)
+        with mock.patch.object(
+            v3_server_contract,
+            "_GROUP_STATE_POLICY_VERSION",
+            "ordered_group_lifecycle_test_version",
+        ):
+            second = v3_server_contract.contract_fingerprint(**kwargs)
+
+        self.assertNotEqual(first, second)
+
     def test_capability_surface_rejects_duplicate_and_inconsistent_context(self) -> None:
         duplicate = self._core_context()
         duplicate["effects"].append(duplicate["effects"][0])
@@ -1308,7 +1376,7 @@ class V3ServerContractTests(unittest.TestCase):
         )
         self.assertLess(
             len(json.dumps(free_tool, separators=(",", ":")).encode("utf-8")),
-            96 * 1024,
+            100 * 1024,
         )
 
     def test_semantic_validation_rejects_stale_tiered_identifiers(self) -> None:
@@ -1508,6 +1576,115 @@ class V3ServerContractTests(unittest.TestCase):
             validated["question_options"], clarification["question_options"]
         )
 
+    def test_provider_visible_text_rejects_private_context_markers(self) -> None:
+        captured_escape = json.loads(
+            PRIVATE_CONTEXT_ESCAPE_FIXTURE.read_text(encoding="utf-8")
+        )["user_message"]
+        markers = (
+            captured_escape,
+            "recent_conversation_json:",
+            "Core_Context_V3_Json:",
+            "semantic_repair_required",
+        )
+        for marker in markers:
+            with self.subTest(marker=marker, field="user_message"):
+                plan = self._effect_plan("Distortion", [])
+                plan["user_message"] = f"{marker}\nUpdated the sound."
+                with self.assertRaises(
+                    v3_server_contract.V3ContractError
+                ) as raised:
+                    v3_server_contract.parse_and_validate_provider_plan(
+                        self._provider_payload(plan),
+                        command_types={"effect.ensure_configured"},
+                        resource_refs_enabled=False,
+                        capability_surface=self._surface(),
+                        original_request="Add distortion.",
+                    )
+                self.assertEqual(
+                    raised.exception.code,
+                    "v3_plan_user_visible_text_unsafe",
+                )
+
+            with self.subTest(marker=marker, field="question_options"):
+                plan = {
+                    "schema_version": "plan_v3_prototype_2",
+                    "outcome": "clarify",
+                    "user_message": "Which guitar should I change?",
+                    "commands": [],
+                    "question_options": ["Lead Guitar", marker],
+                }
+                with self.assertRaises(
+                    v3_server_contract.V3ContractError
+                ) as raised:
+                    v3_server_contract.parse_and_validate_provider_plan(
+                        self._provider_payload(plan),
+                        command_types={"effect.ensure_configured"},
+                        resource_refs_enabled=False,
+                        capability_surface=self._surface(),
+                        original_request="Change the guitar.",
+                    )
+                self.assertEqual(
+                    raised.exception.code,
+                    "v3_plan_user_visible_text_unsafe",
+                )
+
+    def test_successful_plan_rejects_verbatim_original_request_as_summary(self) -> None:
+        original_request = "  Add   distortion, EQ, and light reverb!  "
+        plan = self._effect_plan("Distortion", [])
+        plan["user_message"] = "Add distortion, EQ, and light reverb!"
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan),
+                command_types={"effect.ensure_configured"},
+                resource_refs_enabled=False,
+                capability_surface=self._surface(),
+                original_request=original_request,
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "v3_plan_user_visible_text_unsafe",
+        )
+
+    def test_provider_visible_text_allows_natural_technical_response(self) -> None:
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "respond",
+            "user_message": (
+                "A compressor reduces dynamic range by turning down louder parts "
+                "above its threshold."
+            ),
+            "commands": [],
+            "question_options": [],
+        }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan),
+            command_types={"effect.ensure_configured"},
+            resource_refs_enabled=False,
+            capability_surface=self._surface(),
+            original_request="What does a compressor do?",
+        )
+
+        self.assertEqual(validated, plan)
+
+    def test_user_visible_text_policy_participates_in_fingerprint(self) -> None:
+        kwargs = {
+            "command_types": {"effect.ensure_configured"},
+            "resource_refs_enabled": False,
+            "capability_surface": self._surface(),
+        }
+        first = v3_server_contract.contract_fingerprint(**kwargs)
+        with mock.patch.object(
+            v3_server_contract,
+            "_USER_VISIBLE_TEXT_POLICY_VERSION",
+            "user_visible_text_test_version",
+        ):
+            second = v3_server_contract.contract_fingerprint(**kwargs)
+
+        self.assertNotEqual(first, second)
+
     def test_provider_output_failures_have_safe_distinct_subtypes(self) -> None:
         cases = {
             "v3_provider_output_missing": {},
@@ -1615,6 +1792,540 @@ class V3ServerContractTests(unittest.TestCase):
             '"enum": ["midi-clip"]', encoded_by_type["midi.replace_notes"]
         )
         self.assertNotIn("audio-clip", encoded_by_type["midi.replace_notes"])
+
+    def test_runtime_schema_preserves_generated_clip_consumers(self) -> None:
+        context = self._core_context()
+        context["clips"] = []
+        context["rows"][0].update(
+            {"mix_processing_supported": False, "has_usable_signal": False}
+        )
+        surface = v3_server_contract.extract_capability_surface(context)
+        command_types = {
+            "midi.create_clip",
+            "midi.replace_notes",
+            "midi.append_notes",
+            "midi.chop_notes",
+            "midi.transpose",
+            "sample.place",
+            "clip.adjust_pitch_semitones",
+        }
+
+        ref_tool = v3_server_contract.build_submit_plan_tool(
+            command_types=command_types,
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+        ref_types = {
+            variant["properties"]["type"]["enum"][0]
+            for variant in ref_tool["parameters"]["properties"]["commands"][
+                "items"
+            ]["anyOf"]
+        }
+        self.assertTrue(command_types.issubset(ref_types))
+        for command_type in {
+            "midi.replace_notes",
+            "midi.append_notes",
+            "midi.chop_notes",
+            "midi.transpose",
+            "clip.adjust_pitch_semitones",
+        }:
+            variant = self._runtime_command_variant(ref_tool, command_type)
+            self.assertIsNotNone(variant)
+            encoded = json.dumps(variant)
+            self.assertIn('"clip_ref"', encoded)
+            self.assertNotIn('"clip_id"', encoded)
+
+        direct_tool = v3_server_contract.build_submit_plan_tool(
+            command_types=command_types,
+            resource_refs_enabled=False,
+            capability_surface=surface,
+        )
+        direct_types = {
+            variant["properties"]["type"]["enum"][0]
+            for variant in direct_tool["parameters"]["properties"]["commands"][
+                "items"
+            ]["anyOf"]
+        }
+        self.assertEqual(
+            direct_types,
+            {"midi.create_clip", "sample.place"},
+        )
+
+    def test_runtime_schema_rejects_orphan_generated_clip_consumers(self) -> None:
+        context = self._core_context()
+        context["clips"] = []
+        context["library_assets"] = []
+        context["rows"][0].update(
+            {"mix_processing_supported": False, "has_usable_signal": False}
+        )
+        surface = v3_server_contract.extract_capability_surface(context)
+
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types={
+                "row.create",
+                "midi.transpose",
+                "clip.adjust_pitch_semitones",
+            },
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+        command_types = {
+            variant["properties"]["type"]["enum"][0]
+            for variant in tool["parameters"]["properties"]["commands"][
+                "items"
+            ]["anyOf"]
+        }
+        self.assertEqual(command_types, {"row.create"})
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.build_submit_plan_tool(
+                command_types={
+                    "sample.place",
+                    "clip.adjust_pitch_semitones",
+                },
+                resource_refs_enabled=True,
+                capability_surface=surface,
+            )
+        self.assertEqual(raised.exception.code, "v3_command_surface_empty")
+
+    def test_generated_midi_clip_supports_every_typed_midi_consumer(self) -> None:
+        context = self._core_context()
+        context["clips"] = []
+        context["rows"][0].update(
+            {"mix_processing_supported": False, "has_usable_signal": False}
+        )
+        surfaces = [v3_server_contract.extract_capability_surface(context)]
+        context_with_unrelated_clip = self._core_context()
+        surfaces.append(
+            v3_server_contract.extract_capability_surface(
+                context_with_unrelated_clip
+            )
+        )
+        note = {
+            "pitch": 60,
+            "start_beat": 0,
+            "length_beats": 1,
+            "velocity": 0.8,
+        }
+        consumers = {
+            "midi.replace_notes": {"notes": [note]},
+            "midi.append_notes": {"notes": [note]},
+            "midi.chop_notes": {
+                "subdivision": 8,
+                "range": None,
+                "velocity_decay_per_slice": 0.1,
+            },
+            "midi.transpose": {"semitones": 2},
+        }
+
+        for surface in surfaces:
+            for command_type, extra_arguments in consumers.items():
+                with self.subTest(
+                    existing_clip_count=len(surface.clips),
+                    command_type=command_type,
+                ):
+                    plan = {
+                        "schema_version": "plan_v3_prototype_2",
+                        "outcome": "plan",
+                        "user_message": "Created and edited the MIDI part.",
+                        "commands": [
+                            {
+                                "command_id": "create-midi",
+                                "type": "midi.create_clip",
+                                "arguments": {
+                                    "destination": {"row_id": 101},
+                                    "start_beat": 0,
+                                    "length_beats": 4,
+                                    "notes": [note],
+                                },
+                            },
+                            {
+                                "command_id": "edit-midi",
+                                "type": command_type,
+                                "arguments": {
+                                    "clip_ref": {
+                                        "command_id": "create-midi",
+                                        "output": "midi_clip",
+                                    },
+                                    **extra_arguments,
+                                },
+                            },
+                        ],
+                        "question_options": [],
+                    }
+                    validated = v3_server_contract.parse_and_validate_provider_plan(
+                        self._provider_payload(plan),
+                        command_types={"midi.create_clip", command_type},
+                        resource_refs_enabled=True,
+                        capability_surface=surface,
+                    )
+                    self.assertEqual(validated, plan)
+
+    def test_generated_midi_clip_uses_generated_row_instrument(self) -> None:
+        context = self._core_context()
+        context["clips"] = []
+        surface = v3_server_contract.extract_capability_surface(context)
+        note = {
+            "pitch": 60,
+            "start_beat": 0,
+            "length_beats": 1,
+            "velocity": 0.8,
+        }
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Created and transposed a MIDI part.",
+            "commands": [
+                {
+                    "command_id": "create-row",
+                    "type": "row.create",
+                    "arguments": {
+                        "name": "New Piano",
+                        "lane": {
+                            "kind": "midi",
+                            "instrument_id": "free-piano",
+                        },
+                        "position": {"kind": "end"},
+                    },
+                },
+                {
+                    "command_id": "create-midi",
+                    "type": "midi.create_clip",
+                    "arguments": {
+                        "destination": {
+                            "row_ref": {
+                                "command_id": "create-row",
+                                "output": "row",
+                            }
+                        },
+                        "start_beat": 0,
+                        "length_beats": 4,
+                        "notes": [note],
+                    },
+                },
+                {
+                    "command_id": "transpose",
+                    "type": "midi.transpose",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "create-midi",
+                            "output": "midi_clip",
+                        },
+                        "semitones": 2,
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan),
+            command_types={"row.create", "midi.create_clip", "midi.transpose"},
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+        self.assertEqual(validated, plan)
+
+    def test_converted_midi_clip_supports_typed_midi_consumer(self) -> None:
+        context = self._core_context()
+        context["rows"][0].update(
+            {"lane_kind": "audio", "instrument_id": ""}
+        )
+        context["clips"] = [
+            {
+                "clip_id": "audio-source",
+                "row_id": 101,
+                "kind": "audio",
+                "length_beats": 8,
+            }
+        ]
+        surface = v3_server_contract.extract_capability_surface(context)
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Converted and transposed the clip.",
+            "commands": [
+                {
+                    "command_id": "convert",
+                    "type": "clip.convert_to_midi",
+                    "arguments": {
+                        "clip_id": "audio-source",
+                        "instrument_id": "free-piano",
+                    },
+                },
+                {
+                    "command_id": "transpose",
+                    "type": "midi.transpose",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "convert",
+                            "output": "midi_clip",
+                        },
+                        "semitones": 2,
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan),
+            command_types={"clip.convert_to_midi", "midi.transpose"},
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+        self.assertEqual(validated, plan)
+
+    def test_generated_midi_clip_preserves_note_validation(self) -> None:
+        context = self._core_context()
+        context["clips"] = []
+        surface = v3_server_contract.extract_capability_surface(context)
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Replaced the MIDI notes.",
+            "commands": [
+                {
+                    "command_id": "create-midi",
+                    "type": "midi.create_clip",
+                    "arguments": {
+                        "destination": {"row_id": 101},
+                        "start_beat": 0,
+                        "length_beats": 4,
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "start_beat": 0,
+                                "length_beats": 1,
+                                "velocity": 0.8,
+                            }
+                        ],
+                    },
+                },
+                {
+                    "command_id": "replace-midi",
+                    "type": "midi.replace_notes",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "create-midi",
+                            "output": "midi_clip",
+                        },
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "start_beat": 3.5,
+                                "length_beats": 1,
+                                "velocity": 0.8,
+                            }
+                        ],
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan),
+                command_types={"midi.create_clip", "midi.replace_notes"},
+                resource_refs_enabled=True,
+                capability_surface=surface,
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_midi_note_out_of_bounds")
+
+    def test_generated_audio_clip_supports_typed_audio_consumer(self) -> None:
+        context = self._core_context()
+        context["rows"][0].update(
+            {
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": False,
+                "has_usable_signal": False,
+            }
+        )
+        context["clips"] = []
+        surface = v3_server_contract.extract_capability_surface(context)
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Placed and tuned the sample.",
+            "commands": [
+                {
+                    "command_id": "place",
+                    "type": "sample.place",
+                    "arguments": {
+                        "destination": {"row_id": 101},
+                        "placements": [
+                            {"asset_id": "asset-1", "start_beat": 0}
+                        ],
+                    },
+                },
+                {
+                    "command_id": "pitch",
+                    "type": "clip.adjust_pitch_semitones",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "place",
+                            "output": "audio_clip",
+                        },
+                        "delta_semitones": -2,
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan),
+            command_types={"sample.place", "clip.adjust_pitch_semitones"},
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+        self.assertEqual(validated, plan)
+
+    def test_generated_clip_rejects_wrong_kind_and_deleted_reference(self) -> None:
+        context = self._core_context()
+        context["rows"][0].update(
+            {
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": False,
+                "has_usable_signal": False,
+            }
+        )
+        context["project"]["row_capacity"]["current_rows"] = 2
+        context["rows"].append(
+            {
+                "row_id": 102,
+                "lane_kind": "instrument",
+                "instrument_id": "free-piano",
+                "mix_processing_supported": True,
+                "has_usable_signal": True,
+                "effects": [],
+            }
+        )
+        context["clips"] = [
+            {
+                "clip_id": "existing-midi",
+                "row_id": 102,
+                "kind": "midi",
+                "instrument_id": "free-piano",
+                "length_beats": 4,
+                "midi_notes": [],
+            }
+        ]
+        surface = v3_server_contract.extract_capability_surface(context)
+        place = {
+            "command_id": "place",
+            "type": "sample.place",
+            "arguments": {
+                "destination": {"row_id": 101},
+                "placements": [{"asset_id": "asset-1", "start_beat": 0}],
+            },
+        }
+        duplicate = {
+            "command_id": "duplicate",
+            "type": "clip.duplicate_to",
+            "arguments": {
+                "clip_ref": {"command_id": "place", "output": "audio_clip"},
+                "destination_row_id": 101,
+                "start_beat": 4,
+            },
+        }
+        wrong_kind_plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Edited the clip.",
+            "commands": [
+                place,
+                duplicate,
+                {
+                    "command_id": "transpose",
+                    "type": "midi.transpose",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "duplicate",
+                            "output": "copy_clip",
+                        },
+                        "semitones": 2,
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(wrong_kind_plan),
+                command_types={
+                    "sample.place",
+                    "clip.duplicate_to",
+                    "midi.transpose",
+                },
+                resource_refs_enabled=True,
+                capability_surface=surface,
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_target_type_invalid")
+
+        midi_context = self._core_context()
+        midi_context["clips"] = []
+        midi_surface = v3_server_contract.extract_capability_surface(midi_context)
+        note = {
+            "pitch": 60,
+            "start_beat": 0,
+            "length_beats": 1,
+            "velocity": 0.8,
+        }
+        deleted_plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Edited the clip.",
+            "commands": [
+                {
+                    "command_id": "create-midi",
+                    "type": "midi.create_clip",
+                    "arguments": {
+                        "destination": {"row_id": 101},
+                        "start_beat": 0,
+                        "length_beats": 4,
+                        "notes": [note],
+                    },
+                },
+                {
+                    "command_id": "delete-midi",
+                    "type": "clip.delete",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "create-midi",
+                            "output": "midi_clip",
+                        }
+                    },
+                },
+                {
+                    "command_id": "transpose",
+                    "type": "midi.transpose",
+                    "arguments": {
+                        "clip_ref": {
+                            "command_id": "create-midi",
+                            "output": "midi_clip",
+                        },
+                        "semitones": 2,
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(deleted_plan),
+                command_types={
+                    "midi.create_clip",
+                    "clip.delete",
+                    "midi.transpose",
+                },
+                resource_refs_enabled=True,
+                capability_surface=midi_surface,
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_target_type_invalid")
 
     def test_runtime_mix_targets_include_only_ready_stable_rows_and_groups(self) -> None:
         surface = v3_server_contract.extract_capability_surface(
@@ -1739,6 +2450,137 @@ class V3ServerContractTests(unittest.TestCase):
         with self.assertRaises(v3_server_contract.V3ContractError) as raised:
             v3_server_contract.validate_plan_capabilities(
                 {"commands": commands}, surface
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
+
+    def test_dissolved_stable_groups_are_unavailable_to_later_commands(self) -> None:
+        surface = self._group_surface(members=[1, 2])
+        invalid_sequences = [
+            [
+                {
+                    "command_id": "remove-member",
+                    "type": "group.remove_row",
+                    "arguments": {"group_id": "group-1", "row_id": 2},
+                },
+                {
+                    "command_id": "collapse",
+                    "type": "group.set_collapsed",
+                    "arguments": {"group_id": "group-1", "collapsed": True},
+                },
+            ],
+            [
+                {
+                    "command_id": "delete-member",
+                    "type": "row.delete",
+                    "arguments": {"row_id": 2},
+                },
+                {
+                    "command_id": "collapse",
+                    "type": "group.set_collapsed",
+                    "arguments": {"group_id": "group-1", "collapsed": True},
+                },
+            ],
+            [
+                {
+                    "command_id": "replacement",
+                    "type": "group.create",
+                    "arguments": {"row_ids": [1, 3], "name": "Replacement"},
+                },
+                {
+                    "command_id": "collapse-old",
+                    "type": "group.set_collapsed",
+                    "arguments": {"group_id": "group-1", "collapsed": True},
+                },
+            ],
+        ]
+
+        for commands in invalid_sequences:
+            with self.subTest(first_command=commands[0]["type"]):
+                with self.assertRaises(
+                    v3_server_contract.V3ContractError
+                ) as raised:
+                    v3_server_contract.validate_plan_capabilities(
+                        {"commands": commands}, surface
+                    )
+                self.assertEqual(
+                    raised.exception.code, "v3_plan_capability_invalid"
+                )
+
+    def test_dissolved_generated_group_reference_is_retired(self) -> None:
+        group_ref = {"command_id": "create-group", "output": "group"}
+        commands = [
+            {
+                "command_id": "create-group",
+                "type": "group.create",
+                "arguments": {
+                    "members": [{"row_id": 1}, {"row_id": 2}],
+                    "name": "Pair",
+                },
+            },
+            {
+                "command_id": "remove-member",
+                "type": "group.remove_row",
+                "arguments": {"group_ref": group_ref, "row_id": 2},
+            },
+            {
+                "command_id": "collapse",
+                "type": "group.set_collapsed",
+                "arguments": {"group_ref": group_ref, "collapsed": True},
+            },
+        ]
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": commands}, self._group_surface()
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_resource_ref_invalid")
+
+    def test_surviving_group_uses_only_its_current_members(self) -> None:
+        commands = [
+            {
+                "command_id": "remove-member",
+                "type": "group.remove_row",
+                "arguments": {"group_id": "group-1", "row_id": 1},
+            },
+            {
+                "command_id": "collapse",
+                "type": "group.set_collapsed",
+                "arguments": {"group_id": "group-1", "collapsed": True},
+            },
+        ]
+        validated = v3_server_contract.validate_plan_capabilities(
+            {"commands": commands}, self._group_surface(members=[1, 2, 3])
+        )
+        self.assertEqual(validated["row_count"], 4)
+
+        mix = self._mix_plan("reverb")["commands"][0]
+        mix["arguments"]["target"] = {
+            "scope": "group",
+            "group_id": "group-1",
+        }
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": [commands[0], mix]},
+                self._group_surface(members=[1, 2, 3], ready_rows={1}),
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
+
+    def test_group_remove_requires_current_membership(self) -> None:
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_plan_capabilities(
+                {
+                    "commands": [
+                        {
+                            "command_id": "remove-non-member",
+                            "type": "group.remove_row",
+                            "arguments": {
+                                "group_id": "group-1",
+                                "row_id": 4,
+                            },
+                        }
+                    ]
+                },
+                self._group_surface(members=[1, 2, 3]),
             )
         self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
 
