@@ -7,9 +7,15 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/timeline_grid_policy.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/piano_roll_editor.dart';
+
+void _setTestTargetPlatform(TargetPlatform? platform) {
+  debugDefaultTargetPlatformOverride = platform;
+  PlatformCapabilities.debugResetForCurrentPlatform();
+}
 
 Future<AudioTrack> _buildMidiTrack(
   List<MidiNote> notes, {
@@ -102,6 +108,92 @@ Future<void> _boxSelectNotes(WidgetTester tester) async {
   await tester.pump();
   await gesture.up();
   await tester.pump(const Duration(milliseconds: 120));
+}
+
+Future<void> _desktopCommandBoxSelectNotes(WidgetTester tester) async {
+  final firstNote = find.byKey(const ValueKey<String>('piano_note_a'));
+  final lastNote = find.byKey(const ValueKey<String>('piano_note_b'));
+  final start = tester.getTopLeft(firstNote) + const Offset(-18, 6);
+  final end = tester.getBottomRight(lastNote) + const Offset(18, 6);
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  final gesture = await tester.createGesture(
+    kind: PointerDeviceKind.mouse,
+    buttons: kPrimaryMouseButton,
+  );
+  await gesture.down(start);
+  await tester.pump();
+  await gesture.moveTo(end);
+  await tester.pump();
+  await gesture.up();
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  await tester.pump(const Duration(milliseconds: 240));
+}
+
+Future<void> _tapEmptyPianoRollGrid(WidgetTester tester) async {
+  await _clickEmptyPianoRollGrid(
+    tester,
+    kind: PointerDeviceKind.touch,
+  );
+}
+
+Future<void> _clickEmptyPianoRollGrid(
+  WidgetTester tester, {
+  required PointerDeviceKind kind,
+}) async {
+  final noteA = tester.getRect(
+    find.byKey(const ValueKey<String>('piano_note_a')),
+  );
+  final noteB = tester.getRect(
+    find.byKey(const ValueKey<String>('piano_note_b')),
+  );
+  final lowerBottom =
+      noteA.bottom > noteB.bottom ? noteA.bottom : noteB.bottom;
+  final emptyTap = Offset(noteA.left, lowerBottom + 20);
+  await tester.pump(const Duration(milliseconds: 250));
+  if (kind == PointerDeviceKind.mouse) {
+    final gesture = await tester.createGesture(
+      kind: PointerDeviceKind.mouse,
+      buttons: kPrimaryMouseButton,
+    );
+    await gesture.down(emptyTap);
+    await tester.pump();
+    await gesture.up();
+  } else {
+    await tester.tapAt(emptyTap);
+  }
+  await tester.pump();
+}
+
+List<MidiNote> _twoSelectableNotes() {
+  return <MidiNote>[
+    MidiNote(
+      id: 'a',
+      pitch: 84,
+      startBeat: 2,
+      lengthBeats: 1,
+      velocity: 0.7,
+    ),
+    MidiNote(
+      id: 'b',
+      pitch: 82,
+      startBeat: 4,
+      lengthBeats: 1,
+      velocity: 0.8,
+    ),
+  ];
+}
+
+void _expectNotesSelected(WidgetTester tester, {required bool selected}) {
+  final matcher = selected ? findsOneWidget : findsNothing;
+  expect(
+    find.byKey(const ValueKey<String>('piano_note_handle_a')),
+    matcher,
+  );
+  expect(
+    find.byKey(const ValueKey<String>('piano_note_handle_b')),
+    matcher,
+  );
+  expect(find.byTooltip('Copy'), matcher);
 }
 
 MidiNote _noteById(List<MidiNote> notes, String id) {
@@ -275,6 +367,87 @@ void main() {
     expect(committedNotes, isNotNull);
     expect(_noteById(committedNotes!, 'a').startBeat, 3);
     expect(_noteById(committedNotes!, 'b').startBeat, 5);
+  });
+
+  testWidgets(
+      'empty-grid tap after long-press marquee clears selection without adding a note',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      var commitCount = 0;
+      List<MidiNote>? committedNotes;
+      final clip = await _buildMidiTrack(_twoSelectableNotes());
+
+      await tester.pumpWidget(
+        _buildEditor(
+          clip: clip,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {
+            commitCount++;
+            committedNotes = notes.map((note) => note.copy()).toList();
+          },
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 120));
+
+      await _boxSelectNotes(tester);
+      _expectNotesSelected(tester, selected: true);
+
+      await _tapEmptyPianoRollGrid(tester);
+
+      _expectNotesSelected(tester, selected: false);
+      expect(find.byKey(const ValueKey<String>('piano_note_a')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('piano_note_b')), findsOneWidget);
+      expect(commitCount, 0);
+      expect(committedNotes, isNull);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'empty-grid click after macOS Command marquee clears selection without adding a note',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      var commitCount = 0;
+      final clip = await _buildMidiTrack(_twoSelectableNotes());
+
+      await tester.pumpWidget(
+        _buildEditor(
+          clip: clip,
+          onCommit: ({
+            required List<MidiNote> notes,
+            required Map<String, double> instrumentParams,
+            required String instrumentId,
+            required String instrumentName,
+          }) async {
+            commitCount++;
+          },
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 120));
+
+      await _desktopCommandBoxSelectNotes(tester);
+      _expectNotesSelected(tester, selected: true);
+
+      await _clickEmptyPianoRollGrid(
+        tester,
+        kind: PointerDeviceKind.mouse,
+      );
+
+      _expectNotesSelected(tester, selected: false);
+      expect(find.byKey(const ValueKey<String>('piano_note_a')), findsOneWidget);
+      expect(find.byKey(const ValueKey<String>('piano_note_b')), findsOneWidget);
+      expect(commitCount, 0);
+    } finally {
+      HardwareKeyboard.instance.clearState();
+      _setTestTargetPlatform(null);
+    }
   });
 
   testWidgets('adaptive note snapping follows piano-roll zoom',

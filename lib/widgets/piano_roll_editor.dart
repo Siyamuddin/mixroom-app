@@ -291,6 +291,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   Offset? _desktopEraseLastLocal;
   bool _desktopEraseChanged = false;
   DateTime _ignoreGridTapUntil = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _boxSelectFinishedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  int? _emptyClickPointer;
+  Offset? _emptyClickStartLocal;
+  bool _emptyClickMoved = false;
   final Map<int, Offset> _activeGridPointers = <int, Offset>{};
   final Map<int, Offset> _activeGridGlobalPointers = <int, Offset>{};
   bool _manualPinchActive = false;
@@ -1868,7 +1872,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _boxSelectStartLocal = null;
       _boxSelectCurrentLocal = null;
       _lockGridScroll = false;
+      _suppressNextGridTap = true;
     });
+    _boxSelectFinishedAt = DateTime.now();
   }
 
   int _clampPitch(int pitch) {
@@ -2410,6 +2416,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final desktopErase = event.kind == PointerDeviceKind.mouse &&
         (event.buttons & kSecondaryMouseButton) != 0;
     if (desktopErase) {
+      _resetEmptyClickTracking();
       _startDesktopErase(event.pointer, event.localPosition);
       return;
     }
@@ -2418,6 +2425,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
         event.buttons == kPrimaryMouseButton &&
         _desktopSelectionModifierActive;
     if (desktopBoxSelect) {
+      _resetEmptyClickTracking();
       _setGridScrollLocked(true);
       _desktopBoxSelectPointer = event.pointer;
       _startBoxSelectionAt(
@@ -2426,6 +2434,15 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       );
       _suppressGridTapFor(const Duration(milliseconds: 220));
       return;
+    }
+    final isPrimaryPress = event.kind != PointerDeviceKind.mouse ||
+        event.buttons == kPrimaryMouseButton;
+    if (isPrimaryPress && !_desktopSelectionModifierActive) {
+      _emptyClickPointer = event.pointer;
+      _emptyClickStartLocal = event.localPosition;
+      _emptyClickMoved = false;
+    } else {
+      _resetEmptyClickTracking();
     }
     _maybeStartManualPinch();
   }
@@ -2442,6 +2459,11 @@ class _PianoRollEditorState extends State<PianoRollEditor>
       _eraseNotesThrough(event.localPosition);
       return;
     }
+    if (_emptyClickPointer == event.pointer &&
+        _emptyClickStartLocal != null &&
+        (event.localPosition - _emptyClickStartLocal!).distance > kTouchSlop) {
+      _emptyClickMoved = true;
+    }
     if (_desktopBoxSelectPointer == event.pointer &&
         _boxSelectStartLocal != null) {
       _updateBoxSelectionAt(event.localPosition);
@@ -2457,13 +2479,23 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _activeGridPointers.remove(event.pointer);
     _activeGridGlobalPointers.remove(event.pointer);
     if (_desktopErasePointer == event.pointer) {
+      _resetEmptyClickTracking();
       _finishDesktopErase();
       return;
     }
     if (_desktopBoxSelectPointer == event.pointer) {
+      _resetEmptyClickTracking();
       _desktopBoxSelectPointer = null;
       _finishBoxSelection();
       return;
+    }
+    if (_emptyClickPointer == event.pointer) {
+      final clickLocal = _emptyClickStartLocal;
+      final wasClick = !_emptyClickMoved && clickLocal != null;
+      _resetEmptyClickTracking();
+      if (wasClick) {
+        _clearSelectionOnEmptyGridPress(clickLocal);
+      }
     }
     if (_activeGridPointers.length < 2) {
       _endManualPinch();
@@ -2570,6 +2602,28 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     }
   }
 
+  void _resetEmptyClickTracking() {
+    _emptyClickPointer = null;
+    _emptyClickStartLocal = null;
+    _emptyClickMoved = false;
+  }
+
+  bool _shouldClearSelectionOnEmptyClick() {
+    return _suppressNextGridTap || _selectedNoteIds.length > 1;
+  }
+
+  bool _clearSelectionOnEmptyGridPress(Offset local) {
+    if (widget.isRecording) return false;
+    if (_hitNoteIdAt(local) != null) return false;
+    if (!_shouldClearSelectionOnEmptyClick()) return false;
+    setState(() {
+      _suppressNextGridTap = false;
+      _clearSelection();
+    });
+    _suppressGridTapFor(const Duration(milliseconds: 300));
+    return true;
+  }
+
   void _beginNoteDrag(
     MidiNote note,
     DragStartDetails details, {
@@ -2666,13 +2720,18 @@ class _PianoRollEditorState extends State<PianoRollEditor>
 
   void _addNoteAt(Offset local) {
     if (widget.isRecording) return;
-    if (DateTime.now().isBefore(_ignoreGridTapUntil)) return;
     if (_pinchZoomActive) return;
     if (_boxSelectStartLocal != null || _boxSelectCurrentLocal != null) return;
-    if (_suppressNextGridTap) {
-      _suppressNextGridTap = false;
+    // Mouse-up at the end of a marquee can still look like a tap.
+    if (DateTime.now().difference(_boxSelectFinishedAt) <
+        const Duration(milliseconds: 300)) {
       return;
     }
+    if (_shouldClearSelectionOnEmptyClick()) {
+      _clearSelectionOnEmptyGridPress(local);
+      return;
+    }
+    if (DateTime.now().isBefore(_ignoreGridTapUntil)) return;
     if (_hitNoteIdAt(local) != null) return;
     if (_followPlayhead && local.dx < _followLeadingPaddingPx) return;
 
