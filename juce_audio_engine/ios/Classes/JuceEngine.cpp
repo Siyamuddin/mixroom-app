@@ -8665,6 +8665,10 @@ void JuceEngine::performPluginScan(bool reuseUnchangedPlugins)
     pluginsScanned = true;
     pluginScanFailures.clear();
 
+#if JUCE_MAC && !JUCE_IOS
+    int scannedCandidateCount = 0;
+#endif
+
     auto appBundleRoot = juce::File::getSpecialLocation(juce::File::hostApplicationPath).getParentDirectory();
 
     for (int i = 0; i < pluginFormatManager.getNumFormats(); ++i)
@@ -8768,9 +8772,65 @@ void JuceEngine::performPluginScan(bool reuseUnchangedPlugins)
             if (pluginScanCancellationRequested.load(std::memory_order_relaxed))
                 break;
 
+            auto sendProgress = [&](const juce::String &phase,
+                                    const juce::PluginDescription *description)
+            {
+                auto *payload = new juce::DynamicObject();
+                payload->setProperty("event", "pluginScanProgress");
+                payload->setProperty("phase", phase);
+                auto displayName = description != nullptr
+                                       ? description->name.trim()
+                                       : juce::String();
+                if (displayName.isEmpty())
+                {
+                    for (const auto &known : pluginList.getTypes())
+                    {
+                        if (known.fileOrIdentifier == candidate)
+                        {
+                            displayName = known.name.trim();
+                            break;
+                        }
+                    }
+                }
+                if (displayName.isEmpty())
+                    displayName = juce::File(candidate).getFileNameWithoutExtension();
+                if (formatName == "AudioUnit" &&
+                    (displayName.isEmpty() || displayName.containsChar(',')))
+                    displayName = "Discovering Audio Unit";
+                if (displayName.isEmpty())
+                    displayName = candidate;
+                payload->setProperty("currentPlugin", displayName);
+                payload->setProperty("scannedCount", scannedCandidateCount);
+                const auto readableFormat = formatName == "AudioUnit"
+                                                ? juce::String("AU")
+                                                : formatName;
+                payload->setProperty("format", readableFormat);
+                if (description != nullptr)
+                {
+                    auto *plugin = new juce::DynamicObject();
+                    plugin->setProperty("id", description->fileOrIdentifier);
+                    plugin->setProperty("name", description->name);
+                    plugin->setProperty("format", description->pluginFormatName);
+                    plugin->setProperty("manufacturer", description->manufacturerName);
+                    plugin->setProperty("category", description->category);
+                    plugin->setProperty("isInstrument", description->isInstrument);
+                    payload->setProperty("plugin", juce::var(plugin));
+                }
+                const auto json = juce::JSON::toString(juce::var(payload), true);
+                mixroomPluginScanProgress(json.toRawUTF8());
+            };
+
+            sendProgress("scanning", nullptr);
+
             if (reuseUnchangedPlugins &&
                 pluginList.isListingUpToDate(candidate, *format))
+            {
+                ++scannedCandidateCount;
+                for (const auto &known : pluginList.getTypes())
+                    if (known.fileOrIdentifier == candidate)
+                        sendProgress("scanned", &known);
                 continue;
+            }
 
             juceLogToFlutter(
                 ("Validating plugin in isolated process: " + candidate).toRawUTF8());
@@ -8794,14 +8854,24 @@ void JuceEngine::performPluginScan(bool reuseUnchangedPlugins)
             if (succeeded)
             {
                 pluginList.removeFromBlacklist(candidate);
+                ++scannedCandidateCount;
                 for (const auto &description : descriptions)
+                {
                     pluginList.addType(description);
+                    sendProgress("scanned", &description);
+                }
+                if (descriptions.isEmpty())
+                {
+                    sendProgress("scanned", nullptr);
+                }
             }
             else
             {
                 pluginList.addToBlacklist(candidate);
                 pluginScanFailures.add(failure);
                 juceLogToFlutter(failure.toRawUTF8());
+                ++scannedCandidateCount;
+                sendProgress("failed", nullptr);
             }
 
             if (++validatedSinceCheckpoint >= kPluginCacheCheckpointInterval)

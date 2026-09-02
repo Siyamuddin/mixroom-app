@@ -11,5 +11,6 @@
 + (void)panicLiveMidiNotesForApplicationDeactivation;
 - (BOOL)hasActiveLogListener;
 - (void)sendFlutterLog:(NSString *)message;
+- (void)sendFlutterEvent:(NSDictionary<NSString *, id> *)event;
 
 @end

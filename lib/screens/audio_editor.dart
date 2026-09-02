@@ -42847,6 +42847,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     var filter = _DesktopPluginBrowserFilter.all;
     var rescanning = false;
     var scanFailureCount = 0;
+    var scannedCandidateCount = 0;
+    String currentScannedPlugin = '';
+    String currentScannedPluginFormat = '';
+    StreamSubscription<Map<String, dynamic>>? scanProgressSubscription;
 
     List<Map<String, dynamic>> filteredPlugins() {
       return currentPlugins
@@ -42921,7 +42925,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             const SizedBox(height: 3),
                             Text(
                               rescanning
-                                  ? 'Scanning Audio Unit and VST3 folders'
+                                  ? '$scannedCandidateCount scanned · ${currentPlugins.length} found'
                                   : _desktopLastPluginRescanAtMs == null
                                   ? '${currentPlugins.length} cached plug-ins${scanFailureCount > 0 ? ' - $scanFailureCount failed validation' : ''}'
                                   : '${currentPlugins.length} cached plug-ins${scanFailureCount > 0 ? ' - $scanFailureCount failed validation' : ''} - Last rescan ${DateTime.fromMillisecondsSinceEpoch(_desktopLastPluginRescanAtMs!).toLocal()}',
@@ -42940,7 +42944,64 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         onPressed: rescanning
                             ? () => JuceAudioEngine.cancelPluginScan()
                             : () async {
-                                setModalState(() => rescanning = true);
+                                await scanProgressSubscription?.cancel();
+                                setModalState(() {
+                                  rescanning = true;
+                                  scannedCandidateCount = 0;
+                                  currentScannedPlugin = '';
+                                  currentScannedPluginFormat = '';
+                                  currentPlugins = <Map<String, dynamic>>[];
+                                });
+                                scanProgressSubscription = JuceAudioEngine
+                                    .pluginScanProgressEvents
+                                    .listen((event) {
+                                      if (!context.mounted) return;
+                                      final rawCount = event['scannedCount'];
+                                      final rawPlugin = event['plugin'];
+                                      setModalState(() {
+                                        scannedCandidateCount = rawCount is num
+                                            ? rawCount.toInt()
+                                            : scannedCandidateCount;
+                                        currentScannedPlugin =
+                                            event['currentPlugin']
+                                                    ?.toString()
+                                                    .trim() ??
+                                                currentScannedPlugin;
+                                        currentScannedPluginFormat =
+                                            event['format']
+                                                    ?.toString()
+                                                    .trim() ??
+                                                currentScannedPluginFormat;
+                                        if (rawPlugin is Map) {
+                                          final plugin = JuceAudioEngine
+                                              .normalizeScannedPlugin(
+                                            rawPlugin,
+                                          );
+                                          if (plugin != null) {
+                                            currentScannedPlugin =
+                                                plugin['name'] as String;
+                                            final rawFormat =
+                                                (plugin['format'] as String?)
+                                                        ?.trim() ??
+                                                    '';
+                                            currentScannedPluginFormat =
+                                                rawFormat == 'AudioUnit'
+                                                    ? 'AU'
+                                                    : rawFormat;
+                                            final id = plugin['id'] as String;
+                                            currentPlugins =
+                                                _applyDesktopPluginPreferences(<
+                                              Map<String, dynamic>
+                                            >[
+                                              ...currentPlugins.where(
+                                                (entry) => entry['id'] != id,
+                                              ),
+                                              plugin,
+                                            ]);
+                                          }
+                                        }
+                                      });
+                                    });
                                 try {
                                   final rescanned = await _scanDesktopPlugins(
                                     forceRescan: true,
@@ -42957,6 +43018,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   });
                                   await _refreshDesktopHostedInstrumentCatalog();
                                 } finally {
+                                  await scanProgressSubscription?.cancel();
+                                  scanProgressSubscription = null;
                                   if (mounted && context.mounted) {
                                     setModalState(() => rescanning = false);
                                   }
@@ -42976,7 +43039,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         ),
                       ),
                       IconButton(
-                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        onPressed: () {
+                          if (rescanning) {
+                            unawaited(JuceAudioEngine.cancelPluginScan());
+                          }
+                          Navigator.of(dialogContext).pop();
+                        },
                         icon: const Icon(
                           Icons.close_rounded,
                           color: Color(0xFFEFEFEF),
@@ -43007,6 +43075,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             key: ValueKey<String>('plugin-scan-idle'),
                           ),
                   ),
+                  if (rescanning && currentScannedPlugin.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Text(
+                          'Current Plugin:',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.58),
+                            fontSize: 12.2,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Flexible(
+                          fit: FlexFit.loose,
+                          child: Text(
+                            currentScannedPlugin,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 12.8,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (currentScannedPluginFormat.isNotEmpty) ...[
+                          const SizedBox(width: 7),
+                          _buildDesktopPluginMetaChip(
+                            currentScannedPluginFormat,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
@@ -43449,6 +43552,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       },
     );
+    await scanProgressSubscription?.cancel();
   }
 
   Widget _buildDesktopPluginMetaChip(String label) {

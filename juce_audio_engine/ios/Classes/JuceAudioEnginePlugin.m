@@ -6894,6 +6894,12 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     }
 }
 
+- (void)sendFlutterEvent:(NSDictionary<NSString *, id> *)event {
+    if (self.eventSink != nil && event != nil) {
+        self.eventSink(event);
+    }
+}
+
 - (void)bindEventSink:(FlutterEventSink)events {
     self.eventSink = events;
 }

@@ -20,3 +20,26 @@ extern "C" void juceLogToFlutter(const char* cstr) {
         [plugin sendFlutterLog:message];
     });
 }
+
+extern "C" void mixroomPluginScanProgress(const char* json) {
+    if (json == nullptr) {
+        return;
+    }
+
+    NSString *jsonString = [NSString stringWithUTF8String:json];
+    NSData *data = [jsonString dataUsingEncoding:NSUTF8StringEncoding];
+    if (data == nil) {
+        return;
+    }
+
+    NSDictionary *payload = [NSJSONSerialization JSONObjectWithData:data
+                                                             options:0
+                                                               error:nil];
+    if (![payload isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[JuceAudioEnginePlugin sharedInstance] sendFlutterEvent:payload];
+    });
+}
