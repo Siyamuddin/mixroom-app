@@ -73,11 +73,6 @@ class LlmConfig {
     defaultValue: 35,
   );
 
-  static const bool allowDirectOpenAiInRelease = bool.fromEnvironment(
-    'LLM_ALLOW_DIRECT_OPENAI_IN_RELEASE',
-    defaultValue: false,
-  );
-
   static const bool disableProxyInDebug = bool.fromEnvironment(
     'LLM_DISABLE_PROXY_IN_DEBUG',
     defaultValue: false,
@@ -136,9 +131,7 @@ class LlmConfig {
   }
 
   static bool get canUseDirectOpenAi =>
-      hasOpenAiApiKey &&
-      hasOpenAiModel &&
-      (kDebugMode || allowDirectOpenAiInRelease);
+      kDebugMode && hasOpenAiApiKey && hasOpenAiModel;
 
   static String get normalizedConversationStateMode {
     final normalized = conversationStateMode.trim().toLowerCase();

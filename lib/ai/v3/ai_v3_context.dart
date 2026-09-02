@@ -524,7 +524,14 @@ class AiV3CoreContextBuilder {
       'clips': clips,
       'instruments':
           _sortedUniqueStrings(clientContext['allowed_instrument_ids']),
-      'instrument_catalog': _instrumentCatalogFacts(clientContext),
+      'instrument_catalog': _instrumentCatalogFacts(
+        clientContext,
+        existingInstrumentIds: rows
+            .where((row) => row['lane_kind'] == 'instrument')
+            .map((row) => row['instrument_id']?.toString().trim() ?? '')
+            .where((instrumentId) => instrumentId.isNotEmpty)
+            .toSet(),
+      ),
       'effects': _effectCatalog(clientContext, profile),
       'library_assets': libraryAssets.map((asset) {
         if (profile == AiV3ContextProfile.essential) {
@@ -620,10 +627,12 @@ List<String> _sortedUniqueStrings(Object? raw) {
 }
 
 List<Map<String, dynamic>> _instrumentCatalogFacts(
-  Map<String, dynamic> context,
-) {
+  Map<String, dynamic> context, {
+  required Set<String> existingInstrumentIds,
+}) {
   final allowedIds =
       _sortedUniqueStrings(context['allowed_instrument_ids']).toSet();
+  final describableIds = allowedIds.union(existingInstrumentIds);
   final raw = context['ai_v3_instrument_catalog'];
   if (raw == null) return const <Map<String, dynamic>>[];
   if (raw is! List || raw.any((value) => value is! Map)) {
@@ -635,7 +644,7 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
     final name = value['name']?.toString().trim() ?? '';
     if (instrumentId.isEmpty ||
         name.isEmpty ||
-        !allowedIds.contains(instrumentId) ||
+        !describableIds.contains(instrumentId) ||
         byId.containsKey(instrumentId)) {
       throw const AiV3ContextException('prototype_instrument_catalog_invalid');
     }

@@ -5,6 +5,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -222,6 +223,112 @@ class V3ServerContractTests(unittest.TestCase):
             "question_options": [],
         }
 
+    def _phone_cleanup_context(self) -> dict:
+        context = self._core_context()
+        context["project"]["row_capacity"] = {
+            "current_rows": 4,
+            "max_rows": 5,
+            "can_create": True,
+        }
+        context["rows"] = [
+            {
+                "row_id": 101,
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": True,
+                "has_usable_signal": True,
+                "effects": [
+                    {
+                        "effect_instance_id": "cleanup-row-effect",
+                        "effect_id": "Reverb",
+                    }
+                ],
+            },
+            {
+                "row_id": 102,
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": True,
+                "has_usable_signal": True,
+                "effects": [],
+            },
+            {
+                "row_id": 103,
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": True,
+                "has_usable_signal": True,
+                "effects": [],
+            },
+            {
+                "row_id": 104,
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": True,
+                "has_usable_signal": True,
+                "effects": [],
+            },
+        ]
+        context["clips"] = [
+            {
+                "clip_id": "audio-101",
+                "row_id": 101,
+                "kind": "audio",
+                "length_beats": 8,
+            },
+            {
+                "clip_id": "audio-102",
+                "row_id": 102,
+                "kind": "audio",
+                "length_beats": 8,
+            },
+            {
+                "clip_id": "audio-103",
+                "row_id": 103,
+                "kind": "audio",
+                "length_beats": 8,
+            },
+            {
+                "clip_id": "audio-104",
+                "row_id": 104,
+                "kind": "audio",
+                "length_beats": 8,
+            },
+        ]
+        context["groups"] = [
+            {"group_id": "cleanup-row", "member_row_ids": [101, 102]},
+            {"group_id": "other-row", "member_row_ids": [103, 104]},
+        ]
+        context["instruments"] = []
+        context["instrument_catalog"] = []
+        return context
+
+    def _phone_cleanup_plan(self, second_command: dict | None = None) -> dict:
+        commands = [
+            {
+                "command_id": "cleanup-1",
+                "type": "row.apply_phone_mic_cleanup",
+                "arguments": {"row_id": 101},
+            }
+        ]
+        if second_command is not None:
+            commands.append(second_command)
+        return {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Cleaned up the recording.",
+            "commands": commands,
+            "question_options": [],
+        }
+
+    def _mix_command(self, target: dict, *, command_id: str = "mix-1") -> dict:
+        command = self._mix_plan("reverb")["commands"][0]
+        return {
+            **command,
+            "command_id": command_id,
+            "arguments": {**command["arguments"], "target": target},
+        }
+
     def _surface_with_effects(self, effect_ids: set[str]):
         context = self._core_context()
         context["effects"] = [
@@ -334,7 +441,7 @@ class V3ServerContractTests(unittest.TestCase):
     def test_capability_intersection_cannot_expand_server_surface(self) -> None:
         request = v3_server_contract.validate_context_request(
             {
-                "request_contract": "mixroom_v3_context_v1",
+                "request_contract": "mixroom_v3_context_v2",
                 "original_request": "Restart.",
                 "conversation": [],
                 "core_context": {"schema_version": "core_context_v3_prototype_1"},
@@ -519,6 +626,202 @@ class V3ServerContractTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "v3_plan_parameter_duplicate")
 
+    def test_semantic_validation_rejects_replacement_notes_past_clip_end(
+        self,
+    ) -> None:
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Rewrote the percussion part.",
+            "commands": [
+                {
+                    "command_id": "replace-percussion",
+                    "type": "midi.replace_notes",
+                    "arguments": {
+                        "clip_id": "clip-1",
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "start_beat": 7.5,
+                                "length_beats": 1.0,
+                                "velocity": 0.8,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "question_options": [],
+        }
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan),
+                command_types={"midi.replace_notes"},
+                resource_refs_enabled=False,
+                capability_surface=self._surface(),
+            )
+
+        self.assertEqual(raised.exception.code, "v3_plan_midi_note_out_of_bounds")
+
+    def test_semantic_validation_rejects_phone_cleanup_sound_conflicts(self) -> None:
+        surface = v3_server_contract.extract_capability_surface(
+            self._phone_cleanup_context()
+        )
+        conflicting_commands = [
+            {
+                "command_id": "ensure-effect",
+                "type": "effect.ensure_configured",
+                "arguments": {
+                    "row_id": 101,
+                    "effect_id": "Reverb",
+                    "parameters": [],
+                },
+            },
+            {
+                "command_id": "remove-effect",
+                "type": "effect.remove",
+                "arguments": {"effect_instance_id": "cleanup-row-effect"},
+            },
+            {
+                "command_id": "bypass-effect",
+                "type": "effect.set_bypassed",
+                "arguments": {
+                    "effect_instance_id": "cleanup-row-effect",
+                    "bypassed": True,
+                },
+            },
+            self._mix_command({"scope": "row", "row_id": 101}),
+            self._mix_command({"scope": "group", "group_id": "cleanup-row"}),
+            self._mix_command({"scope": "all_rows"}),
+        ]
+        command_types = {
+            "row.apply_phone_mic_cleanup",
+            "effect.ensure_configured",
+            "effect.remove",
+            "effect.set_bypassed",
+            "mix.apply_goal",
+        }
+
+        for conflicting_command in conflicting_commands:
+            with self.subTest(command_type=conflicting_command["type"]):
+                with self.assertRaises(
+                    v3_server_contract.V3ContractError
+                ) as raised:
+                    v3_server_contract.parse_and_validate_provider_plan(
+                        self._provider_payload(
+                            self._phone_cleanup_plan(conflicting_command)
+                        ),
+                        command_types=command_types,
+                        resource_refs_enabled=False,
+                        capability_surface=surface,
+                    )
+                self.assertEqual(
+                    raised.exception.code,
+                    "v3_plan_phone_cleanup_effect_conflict",
+                )
+
+    def test_semantic_validation_allows_independent_phone_cleanup_operations(
+        self,
+    ) -> None:
+        surface = v3_server_contract.extract_capability_surface(
+            self._phone_cleanup_context()
+        )
+        independent_commands = [
+            None,
+            self._mix_command({"scope": "row", "row_id": 103}),
+            self._mix_command({"scope": "group", "group_id": "other-row"}),
+            self._mix_command({"scope": "master"}),
+            {
+                "command_id": "ensure-other-effect",
+                "type": "effect.ensure_configured",
+                "arguments": {
+                    "row_id": 103,
+                    "effect_id": "Reverb",
+                    "parameters": [],
+                },
+            },
+        ]
+        command_types = {
+            "row.apply_phone_mic_cleanup",
+            "effect.ensure_configured",
+            "mix.apply_goal",
+        }
+
+        for independent_command in independent_commands:
+            with self.subTest(command=independent_command):
+                plan = self._phone_cleanup_plan(independent_command)
+                validated = v3_server_contract.parse_and_validate_provider_plan(
+                    self._provider_payload(plan),
+                    command_types=command_types,
+                    resource_refs_enabled=False,
+                    capability_surface=surface,
+                )
+                self.assertEqual(validated, plan)
+
+    def test_semantic_validation_rejects_cleanup_row_in_generated_mix_group(
+        self,
+    ) -> None:
+        surface = v3_server_contract.extract_capability_surface(
+            self._phone_cleanup_context()
+        )
+        plan = self._phone_cleanup_plan()
+        plan["commands"].extend(
+            [
+                {
+                    "command_id": "create-cleanup-group",
+                    "type": "group.create",
+                    "arguments": {
+                        "members": [{"row_id": 101}, {"row_id": 102}],
+                        "name": "Cleanup Group",
+                    },
+                },
+                self._mix_command(
+                    {
+                        "scope": "group",
+                        "group_ref": {
+                            "command_id": "create-cleanup-group",
+                            "output": "group",
+                        },
+                    }
+                ),
+            ]
+        )
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan),
+                command_types={
+                    "row.apply_phone_mic_cleanup",
+                    "group.create",
+                    "mix.apply_goal",
+                },
+                resource_refs_enabled=True,
+                capability_surface=surface,
+            )
+
+        self.assertEqual(
+            raised.exception.code,
+            "v3_plan_phone_cleanup_effect_conflict",
+        )
+
+    def test_phone_cleanup_semantic_policy_participates_in_fingerprint(self) -> None:
+        kwargs = {
+            "command_types": {"row.apply_phone_mic_cleanup"},
+            "resource_refs_enabled": False,
+            "capability_surface": v3_server_contract.extract_capability_surface(
+                self._phone_cleanup_context()
+            ),
+        }
+        first = v3_server_contract.contract_fingerprint(**kwargs)
+        with mock.patch.object(
+            v3_server_contract,
+            "_PHONE_CLEANUP_CONFLICT_POLICY_VERSION",
+            "phone_cleanup_conflict_test_version",
+        ):
+            second = v3_server_contract.contract_fingerprint(**kwargs)
+
+        self.assertNotEqual(first, second)
+
     def test_capability_surface_rejects_duplicate_and_inconsistent_context(self) -> None:
         duplicate = self._core_context()
         duplicate["effects"].append(duplicate["effects"][0])
@@ -638,6 +941,103 @@ class V3ServerContractTests(unittest.TestCase):
         self.assertEqual(surface.current_rows, 2)
         self.assertEqual(validated, self._transport_restart_plan())
 
+    def test_preserved_instrument_capability_allows_note_edits_without_selection(self) -> None:
+        context = self._free_context_with_preserved_paid_instrument()
+        context["instrument_catalog"].append(
+            {
+                "instrument_id": "paid-orchestral-strings",
+                "name": "Orchestral Strings",
+                "playable_pitch_ranges": [{"low": 36, "high": 96}],
+            }
+        )
+        surface = v3_server_contract.extract_capability_surface(context)
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Rewrote the preserved strings.",
+            "commands": [
+                {
+                    "command_id": "rewrite-preserved",
+                    "type": "midi.replace_notes",
+                    "arguments": {
+                        "clip_id": "clip-paid",
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "start_beat": 0,
+                                "length_beats": 1,
+                                "velocity": 0.8,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "question_options": [],
+        }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan),
+            command_types={"midi.replace_notes"},
+            resource_refs_enabled=False,
+            capability_surface=surface,
+        )
+
+        self.assertEqual(validated, plan)
+        self.assertEqual(surface.instrument_ids, frozenset({"free-piano"}))
+        self.assertIn("paid-orchestral-strings", surface.instrument_by_id)
+
+    def test_legacy_context_can_edit_preserved_instrument_without_catalog_entry(self) -> None:
+        context = self._free_context_with_preserved_paid_instrument()
+        surface = v3_server_contract.extract_capability_surface(context)
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Changed the existing rhythm.",
+            "commands": [
+                {
+                    "command_id": "rewrite-existing",
+                    "type": "midi.replace_notes",
+                    "arguments": {
+                        "clip_id": "clip-paid",
+                        "notes": [
+                            {
+                                "pitch": 60,
+                                "start_beat": 0,
+                                "length_beats": 1,
+                                "velocity": 0.8,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "question_options": [],
+        }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan),
+            command_types={"midi.replace_notes"},
+            resource_refs_enabled=False,
+            capability_surface=surface,
+        )
+
+        self.assertEqual(validated, plan)
+        self.assertEqual(surface.instrument_ids, frozenset({"free-piano"}))
+
+    def test_nonselectable_instrument_capability_must_belong_to_existing_state(self) -> None:
+        context = self._core_context()
+        context["instrument_catalog"].append(
+            {
+                "instrument_id": "unrelated-paid-instrument",
+                "name": "Unrelated Paid Instrument",
+                "playable_pitch_ranges": [{"low": 0, "high": 127}],
+            }
+        )
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.extract_capability_surface(context)
+
+        self.assertEqual(raised.exception.code, "v3_capability_context_invalid")
+
     def test_free_context_accepts_rows_above_creation_limit(self) -> None:
         surface = v3_server_contract.extract_capability_surface(
             self._free_context_above_creation_limit()
@@ -655,9 +1055,15 @@ class V3ServerContractTests(unittest.TestCase):
         self.assertEqual(validated, self._transport_restart_plan())
 
     def test_free_plan_cannot_newly_select_preserved_paid_instrument(self) -> None:
-        surface = v3_server_contract.extract_capability_surface(
-            self._free_context_with_preserved_paid_instrument()
+        context = self._free_context_with_preserved_paid_instrument()
+        context["instrument_catalog"].append(
+            {
+                "instrument_id": "paid-orchestral-strings",
+                "name": "Orchestral Strings",
+                "playable_pitch_ranges": [{"low": 36, "high": 96}],
+            }
         )
+        surface = v3_server_contract.extract_capability_surface(context)
         plan = {
             "schema_version": "plan_v3_prototype_2",
             "outcome": "plan",

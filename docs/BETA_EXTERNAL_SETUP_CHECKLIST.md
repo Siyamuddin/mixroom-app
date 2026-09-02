@@ -76,9 +76,8 @@ Do not use EC2 for the beta LLM proxy path unless you have another unrelated rea
 - Build/run the app with:
   - `LLM_PROXY_API_BASE_URL=https://...`
 - Supply the Cognito config values expected by the app.
-- Do not enable direct OpenAI for release builds unless you explicitly want the fallback.
-  - Current release fallback requires `LLM_ALLOW_DIRECT_OPENAI_IN_RELEASE=true`
-  - Recommended beta path is proxy-only
+- Release builds are proxy-only. Direct provider access is restricted to local
+  debug builds and cannot be enabled with a release build flag.
 
 ## Auth / Chat QA On Real Devices
 

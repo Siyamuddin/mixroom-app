@@ -4539,6 +4539,88 @@ void main() {
     );
 
     test(
+      'rewrites a preserved instrument without allowing it to be selected',
+      () {
+        final data = Map<String, dynamic>.from(
+          jsonDecode(jsonEncode(_context().data)) as Map,
+        );
+        final row = (data['rows'] as List).whereType<Map>().singleWhere(
+          (value) => value['row_id'] == 200,
+        );
+        row['instrument_id'] = 'paid-marimba';
+        final clip = (data['clips'] as List).whereType<Map>().singleWhere(
+          (value) => value['clip_id'] == 'midi-clip',
+        );
+        clip['instrument_id'] = 'paid-marimba';
+        data['instruments'] = <String>['piano', 'bass'];
+        data['instrument_catalog'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'instrument_id': 'piano',
+            'name': 'Piano',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 21, 'high': 108},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'bass',
+            'name': 'Bass',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 28, 'high': 72},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'paid-marimba',
+            'name': 'Marimba',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 45, 'high': 96},
+            ],
+          },
+        ];
+        final context = AiV3CoreContext(
+          profile: AiV3ContextProfile.essential,
+          stateDigest: 'preserved-marimba',
+          data: data,
+        );
+
+        final prepared = const AiV3CommandPreparer().prepare(
+          plan: AiV3Plan.fromJson(
+            _plan(<Map<String, dynamic>>[
+              _command('rewrite', 'midi.replace_notes', <String, dynamic>{
+                'clip_id': 'midi-clip',
+                'notes': <Map<String, dynamic>>[_note(60, 0.0, 1.0)],
+              }),
+            ]),
+          ),
+          context: context,
+        );
+
+        expect(prepared.actions, hasLength(1));
+        expect(prepared.actions.single.type, 'midi_compose');
+        expect(prepared.actions.single.data['operation'], 'replace_notes');
+        expect(
+          () => const AiV3CommandPreparer().prepare(
+            plan: AiV3Plan.fromJson(
+              _plan(<Map<String, dynamic>>[
+                _command('select', 'row.set_instrument', <String, dynamic>{
+                  'row_id': 200,
+                  'instrument_id': 'paid-marimba',
+                }),
+              ]),
+            ),
+            context: context,
+          ),
+          throwsA(
+            isA<AiV3PreparationException>().having(
+              (error) => error.code,
+              'code',
+              'v3_instrument_id_unknown',
+            ),
+          ),
+        );
+      },
+    );
+
+    test(
       'propagates an instrument swap to existing MIDI before rewrite and mix',
       () {
         final data = Map<String, dynamic>.from(

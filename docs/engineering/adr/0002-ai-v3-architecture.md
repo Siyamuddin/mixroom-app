@@ -37,6 +37,19 @@ The planner contract and all semantic guidance live on the backend. Flutter
 supplies bounded facts, validates the returned PlanV3, and remains the only
 application execution authority.
 
+## Versioned compatibility amendment (2026-09-02)
+
+The context-only route is versioned at the request boundary. Already released
+Flutter clients continue sending `mixroom_v3_context_v1` and are routed to a
+frozen copy of backend contract v3, including byte-pinned prompt and tool
+assets. Updated clients send `mixroom_v3_context_v2` and are routed to the
+current PRO-4 contract. Provider-shaped legacy requests remain a third,
+independently gated compatibility path.
+
+Backend support for V1 and V2 must be deployed before an application release
+starts sending V2. V1 remains enabled until the installed V1 population has
+been intentionally retired; V2 never silently falls back to V1.
+
 ## Server-owned contract amendment (2026-08-29)
 
 Backend contract v3 is the sole source of truth for V3 system instructions,

@@ -388,6 +388,55 @@ void main() {
     },
   );
 
+  test(
+    'describes preserved instruments without making them selectable',
+    () async {
+      final validation = _validation();
+      final row = (validation['rows'] as List).single as Map<String, dynamic>;
+      row['instrument_id'] = 'paid-marimba';
+      final client = _clientContext()
+        ..['allowed_instrument_ids'] = <String>['piano']
+        ..['ai_v3_instrument_catalog'] = <Map<String, dynamic>>[
+          <String, dynamic>{
+            'instrument_id': 'piano',
+            'name': 'Piano',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 21, 'high': 108},
+            ],
+          },
+          <String, dynamic>{
+            'instrument_id': 'paid-marimba',
+            'name': 'Marimba',
+            'playable_pitch_ranges': <Map<String, int>>[
+              <String, int>{'low': 45, 'high': 96},
+            ],
+          },
+        ];
+      final clip = await _midiClip();
+      clip.instrumentId = 'paid-marimba';
+
+      final context = const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: 'Rewrite the marimba rhythm.',
+        conversation: const <Map<String, String>>[],
+        validationState: validation,
+        audioTracks: <AudioTrack>[clip],
+        clientContext: client,
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      );
+
+      expect(context.data['instruments'], <String>['piano']);
+      expect(
+        (context.data['instrument_catalog'] as List)
+            .map((entry) => (entry as Map)['instrument_id'])
+            .toSet(),
+        <String>{'piano', 'paid-marimba'},
+      );
+    },
+  );
+
   test('includes exact one-shot audio stretch facts', () async {
     final clip = await _audioClip();
     final validation = _validation();

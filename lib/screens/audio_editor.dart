@@ -8239,6 +8239,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .toList(growable: false);
   }
 
+  List<Map<String, dynamic>> _aiInstrumentCapabilityCatalog(
+    List<Map<String, dynamic>> selectableCatalog,
+  ) {
+    final byId = <String, Map<String, dynamic>>{
+      for (final spec in selectableCatalog)
+        if ((spec['id'] as String? ?? '').trim().isNotEmpty)
+          (spec['id'] as String).trim(): Map<String, dynamic>.from(spec),
+    };
+    for (final row in _rows) {
+      if (row.kind != TimelineRowKind.instrument) continue;
+      final instrumentId = row.instrumentId.trim();
+      if (instrumentId.isEmpty || byId.containsKey(instrumentId)) continue;
+      final spec = _findInstrumentSpecById(instrumentId);
+      if (spec == null) continue;
+      byId[instrumentId] = <String, dynamic>{...spec, 'id': instrumentId};
+    }
+    return byId.values.toList(growable: false);
+  }
+
   List<Map<String, dynamic>> _instrumentCatalogForCurrentPlan(
     List<Map<String, dynamic>> catalog,
   ) {
@@ -31971,6 +31990,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await _ensureDefaultSampleBrowserRoots();
     final catalog = _uiInstrumentCatalog().toList(growable: false)
       ..sort(_compareInstrumentSpecsForPicker);
+    final capabilityCatalog = _aiInstrumentCapabilityCatalog(catalog);
     final roots = _sampleBrowserRoots.map(p.normalize).toList(growable: false)
       ..sort();
     final cacheKey = jsonEncode(<String, dynamic>{
@@ -31984,6 +32004,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           )
           .where((entry) => entry['id']!.isNotEmpty)
           .toList(growable: false),
+      'capability_instrument_ids': capabilityCatalog
+          .map((spec) => (spec['id'] as String? ?? '').trim())
+          .where((id) => id.isNotEmpty)
+          .toList(growable: false),
       'sample_roots': roots,
     });
     if (_aiLibrarySnapshotCacheKey == cacheKey &&
@@ -31992,7 +32016,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final pitchRangeEntries = await Future.wait(
-      catalog.map((spec) async {
+      capabilityCatalog.map((spec) async {
         final instrumentId = (spec['id'] as String? ?? '').trim();
         if (instrumentId.isEmpty) {
           return null;
@@ -32194,6 +32218,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final allowedInstrumentCatalog = _instrumentCatalogForCurrentPlan(
       _uiInstrumentCatalog(),
     );
+    final instrumentCapabilityCatalog = _aiInstrumentCapabilityCatalog(
+      allowedInstrumentCatalog,
+    );
     final allowedInstruments = allowedInstrumentCatalog
         .map((spec) => (spec['id'] as String? ?? '').trim())
         .where((id) => id.isNotEmpty)
@@ -32250,7 +32277,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       'allowed_builtin_effects': allowedEffects,
       'allowed_instrument_ids': allowedInstruments,
       if (LlmConfig.effectiveAiV3Enabled) ...<String, dynamic>{
-        'ai_v3_instrument_catalog': allowedInstrumentCatalog
+        'ai_v3_instrument_catalog': instrumentCapabilityCatalog
             .map(
               (spec) => <String, dynamic>{
                 'instrument_id': (spec['id'] as String? ?? '').trim(),

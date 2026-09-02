@@ -9,24 +9,24 @@ Updated clients use the authenticated context-only contract:
 
 ```text
 original request + recent conversation + deterministic CoreContextV3 facts
-                    -> backend contract v3 semantic planner
+                    -> version-selected backend semantic planner
                     -> validated PlanV3 envelope
                     -> Flutter preparation, transaction, readback, and undo
 ```
 
-Flutter sends `request_contract: mixroom_v3_context_v1`, the PlanV3 schema
-version, its sorted command capability allowlist, and the resource-reference
-capability. It does not ship or send V3 system instructions, tool definitions,
-model or reasoning policy, provider input, cache/storage settings, or request
-overrides.
+Updated Flutter clients send `request_contract: mixroom_v3_context_v2`, the
+PlanV3 schema version, their sorted command capability allowlist, and the
+resource-reference capability. Released clients continue sending
+`mixroom_v3_context_v1` and are routed to frozen backend contract v3. Neither
+client ships or sends V3 system instructions, tool definitions, model or
+reasoning policy, provider input, cache/storage settings, or request overrides.
 
-Backend contract v3 owns all V3 semantics and provider policy. This includes
-the language, MIDI, mixing, and resource-reference instructions; the canonical
-`submit_plan_v3` provider schema; and the model, reasoning, token, cache, and
-provider-storage policy. Contract v3 matches the V3 behavior on reverted main;
-it contains none of the PR #27 compiler, goal-classification, skipped-capability,
-or align-only retry additions. An updated client makes exactly one authenticated
-request per user prompt.
+The selected backend contract owns all V3 semantics and provider policy. This
+includes the language, MIDI, mixing, and resource-reference instructions; the
+canonical `submit_plan_v3` provider schema; and the model, reasoning, token,
+cache, and provider-storage policy. V1 preserves the pre-PRO-4 contract v3
+behavior byte-for-byte at its asset boundary. V2 selects the current PRO-4
+contract without changing the public response envelope.
 
 ## Client boundary
 

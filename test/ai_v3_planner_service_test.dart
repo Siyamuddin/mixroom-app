@@ -92,6 +92,7 @@ void main() {
       'project_id',
       'prompt_trace_id',
     });
+    expect(aiV3ContextRequestContract, 'mixroom_v3_context_v2');
     expect(body['request_contract'], aiV3ContextRequestContract);
     expect(body['original_request'], 'Keep everything unchanged.');
     expect(body['plan_schema_version'], aiV3PlanVersion);

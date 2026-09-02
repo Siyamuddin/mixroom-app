@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 
-REQUEST_CONTRACT = "mixroom_v3_context_v1"
+REQUEST_CONTRACT = "mixroom_v3_context_v2"
 RESPONSE_SCHEMA_VERSION = "v3_plan_response_server_v1"
 CONTRACT_VERSION = "mixroom_v3_server_contract_6"
 
@@ -105,6 +105,7 @@ MAX_ACCEPTED_PROVIDER_PLAN_BYTES = 24_000
 
 _EFFECT_STATE_POLICY_VERSION = "ordered_semantic_effect_chain_v1"
 _MIX_SCOPE_POLICY_VERSION = "contained_local_mix_generation_v1"
+_PHONE_CLEANUP_CONFLICT_POLICY_VERSION = "phone_cleanup_sound_conflict_v1"
 
 _MIX_INTENT_REQUIRED_EFFECT_IDS = {
     "balance": frozenset({"EQ 3-Band", "Compressor", "Limiter"}),
@@ -200,6 +201,7 @@ class V3GroupCapability:
 class V3CapabilitySurface:
     effects: tuple[V3EffectCapability, ...]
     instruments: tuple[V3InstrumentCapability, ...]
+    selectable_instrument_ids: frozenset[str]
     rows: tuple[V3RowCapability, ...]
     clips: tuple[V3ClipCapability, ...]
     groups: tuple[V3GroupCapability, ...]
@@ -218,7 +220,7 @@ class V3CapabilitySurface:
 
     @property
     def instrument_ids(self) -> frozenset[str]:
-        return frozenset(self.instrument_by_id)
+        return self.selectable_instrument_ids
 
     @property
     def row_by_id(self) -> dict[int, V3RowCapability]:
@@ -399,11 +401,6 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
             raise _contract_error(
                 "v3_capability_context_duplicate", "'instrument_catalog' contains duplicate IDs."
             )
-        if instrument_id not in allowed_instrument_ids:
-            raise _contract_error(
-                "v3_capability_context_invalid",
-                "The instrument catalog contains an unavailable instrument.",
-            )
         seen_instrument_ids.add(instrument_id)
         raw_ranges = raw_instrument.get("playable_pitch_ranges", [])
         if not isinstance(raw_ranges, list):
@@ -435,12 +432,6 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
             ranges.append(V3MidiPitchRange(low, high))
             previous_high = high
         instruments.append(V3InstrumentCapability(instrument_id, tuple(ranges)))
-    if seen_instrument_ids != set(allowed_instrument_ids):
-        raise _contract_error(
-            "v3_capability_context_invalid",
-            "The instrument catalog must describe every available instrument.",
-        )
-
     rows = _capability_list(core_context, "rows")
     row_ids: set[int] = set()
     effect_instance_ids: set[str] = set()
@@ -502,6 +493,24 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
                 has_usable_signal=has_usable_signal,
             )
         )
+
+    existing_instrument_ids = {
+        row.instrument_id for row in typed_rows if row.lane_kind == "instrument"
+    }
+    if not set(allowed_instrument_ids).issubset(seen_instrument_ids):
+        raise _contract_error(
+            "v3_capability_context_invalid",
+            "The instrument catalog must describe every selectable instrument.",
+        )
+    if not seen_instrument_ids.issubset(
+        set(allowed_instrument_ids) | existing_instrument_ids
+    ):
+        raise _contract_error(
+            "v3_capability_context_invalid",
+            "The instrument catalog contains unrelated instrument state.",
+        )
+    for instrument_id in sorted(existing_instrument_ids - seen_instrument_ids):
+        instruments.append(V3InstrumentCapability(instrument_id, ()))
 
     clip_ids: set[str] = set()
     typed_clips: list[V3ClipCapability] = []
@@ -670,6 +679,7 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
     return V3CapabilitySurface(
         effects=tuple(effects),
         instruments=tuple(instruments),
+        selectable_instrument_ids=allowed_instrument_ids,
         rows=tuple(typed_rows),
         clips=tuple(typed_clips),
         groups=tuple(typed_groups),
@@ -1258,6 +1268,9 @@ def contract_fingerprint(
                 }
                 for instrument in capability_surface.instruments
             ],
+            "selectable_instrument_ids": sorted(
+                capability_surface.selectable_instrument_ids
+            ),
             "rows": [
                 [row.row_id, row.lane_kind, row.instrument_id]
                 for row in capability_surface.rows
@@ -1288,6 +1301,7 @@ def contract_fingerprint(
         "parallel_tool_calls": False,
         "effect_state_policy": _EFFECT_STATE_POLICY_VERSION,
         "mix_scope_policy": _MIX_SCOPE_POLICY_VERSION,
+        "phone_cleanup_conflict_policy": _PHONE_CLEANUP_CONFLICT_POLICY_VERSION,
         "max_output_tokens": max_output_tokens,
         "max_accepted_plan_bytes": MAX_ACCEPTED_PROVIDER_PLAN_BYTES,
     }
@@ -1500,6 +1514,106 @@ def _validate_playable_notes(
             "v3_plan_midi_note_out_of_bounds",
             "The provider plan contains a note outside its MIDI clip.",
         )
+
+
+def _validate_phone_cleanup_sound_conflicts(
+    plan: Mapping[str, Any], capability_surface: V3CapabilitySurface
+) -> None:
+    commands = plan.get("commands", [])
+    cleanup_row_ids = {
+        command.get("arguments", {}).get("row_id")
+        for command in commands
+        if isinstance(command, dict)
+        and command.get("type") == "row.apply_phone_mic_cleanup"
+        and isinstance(command.get("arguments"), dict)
+    }
+    cleanup_row_ids = {
+        row_id
+        for row_id in cleanup_row_ids
+        if isinstance(row_id, int) and not isinstance(row_id, bool)
+    }
+    if not cleanup_row_ids:
+        return
+
+    effect_row_by_instance_id = {
+        effect_instance_id: row.row_id
+        for row in capability_surface.rows
+        for effect_instance_id in row.effect_instance_ids
+    }
+    group_members_by_id = {
+        group.group_id: set(group.member_row_ids)
+        for group in capability_surface.groups
+    }
+    generated_group_members_by_ref: dict[str, set[int]] = {}
+    for command in commands:
+        if not isinstance(command, dict) or command.get("type") != "group.create":
+            continue
+        command_id = str(command.get("command_id") or "").strip()
+        arguments = command.get("arguments")
+        if not command_id or not isinstance(arguments, dict):
+            continue
+        generated_group_members_by_ref[f"{command_id}.group"] = {
+            row_id
+            for member in arguments.get("members", [])
+            if isinstance(member, dict)
+            for row_id in [member.get("row_id")]
+            if isinstance(row_id, int) and not isinstance(row_id, bool)
+        }
+
+    for command in commands:
+        if not isinstance(command, dict):
+            continue
+        command_type = command.get("type")
+        arguments = command.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+
+        effect_mutation_row_id: int | None = None
+        if command_type == "effect.ensure_configured":
+            row_id = arguments.get("row_id")
+            if isinstance(row_id, int) and not isinstance(row_id, bool):
+                effect_mutation_row_id = row_id
+        elif command_type in {"effect.remove", "effect.set_bypassed"}:
+            effect_mutation_row_id = effect_row_by_instance_id.get(
+                arguments.get("effect_instance_id")
+            )
+        if effect_mutation_row_id in cleanup_row_ids:
+            raise _contract_error(
+                "v3_plan_phone_cleanup_effect_conflict",
+                "Phone cleanup conflicts with another sound change on the same row.",
+            )
+
+        if command_type != "mix.apply_goal":
+            continue
+        target = arguments.get("target")
+        if not isinstance(target, dict):
+            continue
+        target_row_ids: set[int] = set()
+        scope = target.get("scope")
+        if scope == "row":
+            row_id = target.get("row_id")
+            if isinstance(row_id, int) and not isinstance(row_id, bool):
+                target_row_ids.add(row_id)
+        elif scope == "group":
+            target_row_ids.update(
+                group_members_by_id.get(target.get("group_id"), set())
+            )
+            group_ref = target.get("group_ref")
+            if isinstance(group_ref, dict):
+                producer_id = str(group_ref.get("command_id") or "").strip()
+                output = str(group_ref.get("output") or "").strip()
+                target_row_ids.update(
+                    generated_group_members_by_ref.get(
+                        f"{producer_id}.{output}", set()
+                    )
+                )
+        elif scope == "all_rows":
+            target_row_ids.update(row.row_id for row in capability_surface.rows)
+        if target_row_ids & cleanup_row_ids:
+            raise _contract_error(
+                "v3_plan_phone_cleanup_effect_conflict",
+                "Phone cleanup conflicts with mixing on the same row.",
+            )
 
 
 def validate_plan_capabilities(
@@ -1998,6 +2112,8 @@ def validate_plan_capabilities(
                 if row_ref_key is not None:
                     members.append(row_ref_key)
             generated_group_members[f"{command_id}.group"] = tuple(members)
+
+    _validate_phone_cleanup_sound_conflicts(plan, capability_surface)
 
     return {
         "rows": {

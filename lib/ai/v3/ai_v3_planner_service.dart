@@ -7,7 +7,7 @@ import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_resources.dart';
 
-const String aiV3ContextRequestContract = 'mixroom_v3_context_v1';
+const String aiV3ContextRequestContract = 'mixroom_v3_context_v2';
 const String aiV3ServerResponseVersion = 'v3_plan_response_server_v1';
 
 const Set<String> _allowedResponseFields = <String>{
