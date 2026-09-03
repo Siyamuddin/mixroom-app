@@ -11235,13 +11235,15 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   Widget _buildSelectionBoxOverlay() {
     final rect = _currentSelectionRect();
     if (rect == null) return const SizedBox.shrink();
+    // Lives inside the scrolled timeline stack, so use content Y.
     return Positioned(
       left: _headerWidth + rect.left,
-      top: _contentYToTimelineViewportY(rect.top),
+      top: rect.top,
       width: rect.width,
       height: rect.height,
       child: IgnorePointer(
         child: Container(
+          key: const ValueKey('timeline_selection_box'),
           decoration: BoxDecoration(
             color: const Color.fromRGBO(43, 136, 222, 0.18),
             border: Border.all(
@@ -11264,8 +11266,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final peakScale =
         _selectionArmIndicatorPulseRadius / _selectionArmIndicatorRadius;
     return Positioned(
+      key: const ValueKey('timeline_selection_arm_ring'),
       left: _headerWidth + point.dx - layoutRadius,
-      top: _contentYToTimelineViewportY(point.dy) - layoutRadius,
+      top: point.dy - layoutRadius,
       width: layoutDiameter,
       height: layoutDiameter,
       child: IgnorePointer(
