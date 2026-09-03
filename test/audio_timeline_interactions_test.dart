@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
@@ -183,6 +184,41 @@ Future<void> _openRowHeaderMenu(WidgetTester tester, int row) async {
     find.byKey(ValueKey('timeline_row_header_$row')),
   );
   await tester.longPressAt(headerRect.centerLeft + const Offset(22, 0));
+  await tester.pumpAndSettle();
+}
+
+List<TimelineRow> _namedTrackRows(int count) {
+  return List<TimelineRow>.generate(
+    count,
+    (index) => TimelineRow(
+      rowId: index + 1,
+      name: 'Track ${index + 1}',
+      iconId: 0,
+    ),
+  );
+}
+
+bool _rowHeaderIsSelected(WidgetTester tester, int row) {
+  final semantics = tester.getSemantics(
+    find.byKey(ValueKey('timeline_row_header_$row')),
+  );
+  return semantics.hasFlag(SemanticsFlag.isSelected);
+}
+
+Future<void> _tapRowHeader(WidgetTester tester, int row) async {
+  await tester.tap(find.byKey(ValueKey('timeline_row_header_$row')));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _tapRowHeaderWithModifier(
+  WidgetTester tester, {
+  required int row,
+  required LogicalKeyboardKey modifier,
+}) async {
+  await tester.sendKeyDownEvent(modifier);
+  await tester.tap(find.byKey(ValueKey('timeline_row_header_$row')));
+  await tester.pump();
+  await tester.sendKeyUpEvent(modifier);
   await tester.pumpAndSettle();
 }
 
@@ -2506,6 +2542,227 @@ void main() {
     expect(find.text('Volume'), findsNothing);
   });
 
+  testWidgets('desktop command-click selects a visible track header range',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop shift-click selects a visible track header range',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('plain header click after a range keeps only that track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      await _tapRowHeader(tester, 1);
+
+      expect(_rowHeaderIsSelected(tester, 0), isFalse);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isFalse);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('command range-click does not expand every track in the range',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+      expect(find.byKey(const ValueKey('expanded_row_2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('expanded_row_3')), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'grouping mode still toggles grouping rows instead of range-select',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final toggledRows = <int>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          rowGroupingSelectionMode: true,
+          groupingSelectedRows: const <int>{1},
+          onToggleGroupingRowSelection: toggledRows.add,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(toggledRows, <int>[2]);
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isFalse);
+      expect(_rowHeaderIsSelected(tester, 2), isFalse);
+      expect(find.text('Volume'), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('mute on a range-selected header mutes every selected track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final muteRequests = <MapEntry<int, bool>>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+          onMuteRow: (row, muted) async {
+            muteRequests.add(MapEntry<int, bool>(row, muted));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await tester.tap(find.text('M').first);
+      await tester.pumpAndSettle();
+
+      expect(
+        muteRequests.map((entry) => '${entry.key}:${entry.value}').toList(),
+        <String>['0:true', '1:true', '2:true'],
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'backspace deletes every range-selected track when no clips are selected',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rowDeleteRequests = <int>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+          onDeleteRow: (row) async {
+            rowDeleteRequests.add(row);
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await tester.pumpAndSettle();
+
+      expect(rowDeleteRequests, <int>[2, 1, 0]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('tablet row grouping mode toggles tablet row headers',
       (tester) async {
     final rows = <TimelineRow>[
@@ -3016,6 +3273,45 @@ void main() {
     expect(groupRequests, <List<int>>[
       <int>[0, 1],
     ]);
+  });
+
+  testWidgets('row menu groups command-selected tracks without clip selection',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final groupRequests = <List<int>>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          onCreateRowGroup: (rows) async {
+            groupRequests.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 1,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 0);
+
+      expect(find.text('Group Selected Rows'), findsOneWidget);
+
+      await tester.tap(find.text('Group Selected Rows'));
+      await tester.pumpAndSettle();
+
+      expect(groupRequests, <List<int>>[
+        <int>[0, 1],
+      ]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
   });
 
   testWidgets('row menu hides create group action for a single row',
