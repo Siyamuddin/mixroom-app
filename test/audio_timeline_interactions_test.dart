@@ -132,6 +132,23 @@ Offset _clipCenter(
       );
 }
 
+Offset _visibleClipCenter(
+  WidgetTester tester, {
+  double additionalDx = 0.0,
+  double clipDurationMs = _kClipDurationMs,
+  int row = 0,
+  double rowHeight = 80.0,
+}) {
+  return _clipCenter(
+        tester,
+        additionalDx: additionalDx,
+        clipDurationMs: clipDurationMs,
+        row: row,
+        rowHeight: rowHeight,
+      ) -
+      Offset(0, _timelineVerticalScrollController(tester).offset);
+}
+
 Offset _clipLeftHandle(WidgetTester tester, {double additionalDx = 0.0}) {
   final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
   final playheadPx = (_kTestTimelineWidth / 2.0) - _kHeaderWidth;
@@ -776,6 +793,157 @@ void main() {
       await tester.pump();
       expect(selectionSnapshots.last, <int>[0, 1]);
       await downGesture.up();
+      await tester.pumpAndSettle();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'mobile long-press ring and box stay on the finger after vertical scroll',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      const rowCount = 8;
+      const rowHeight = 80.0;
+      const scrollOffset = 120.0;
+      final rows = List<TimelineRow>.generate(
+        rowCount,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final bottom = await _buildClip(row: 4, rowId: 5, engineClipId: 5);
+      final selectionSnapshots = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[bottom],
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (selectedClipIndices, _, __) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final verticalController = _timelineVerticalScrollController(tester);
+      expect(verticalController.position.maxScrollExtent, greaterThan(scrollOffset));
+      verticalController.jumpTo(scrollOffset);
+      await tester.pumpAndSettle();
+
+      final press = _visibleClipCenter(
+        tester,
+        row: 4,
+        rowHeight: rowHeight,
+      );
+      final gesture = await tester.startGesture(press);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+
+      expect(
+        selectionSnapshots.where((snapshot) => snapshot.contains(0)),
+        isNotEmpty,
+        reason: 'starting clip must stay selected when the box begins',
+      );
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('timeline_selection_arm_ring'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+
+      await gesture.moveBy(const Offset(24.0, 24.0));
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('timeline_selection_box'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+      expect(selectionSnapshots.last, <int>[0]);
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'mobile long-press ring stays on the finger after closing an effects row',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      const rowCount = 8;
+      const rowHeight = 80.0;
+      final rows = List<TimelineRow>.generate(
+        rowCount,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final bottom = await _buildClip(row: 6, rowId: 7, engineClipId: 7);
+      final selectionSnapshots = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[bottom],
+          controller: controller,
+          rowsOverride: rows,
+          rowEffects: const <String>['EQ'],
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (selectedClipIndices, _, __) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller.ensureRowExpanded(0, tab: 1);
+      await tester.pumpAndSettle();
+      final effectsPanel = tester.widget<RowEffectsPanel>(
+        find.byType(RowEffectsPanel),
+      );
+      effectsPanel.onHeightChanged(800.0);
+      await tester.pumpAndSettle();
+      controller.collapseExpandedRows();
+      await tester.pumpAndSettle();
+
+      final press = _visibleClipCenter(
+        tester,
+        row: 6,
+        rowHeight: rowHeight,
+      );
+      final gesture = await tester.startGesture(press);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+
+      expect(
+        selectionSnapshots.where((snapshot) => snapshot.contains(0)),
+        isNotEmpty,
+        reason: 'starting clip must stay selected when the box begins',
+      );
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('timeline_selection_arm_ring'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+
+      await gesture.moveBy(const Offset(24.0, 24.0));
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('timeline_selection_box'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+      expect(selectionSnapshots.last, <int>[0]);
+
+      await gesture.up();
       await tester.pumpAndSettle();
     } finally {
       _setTestTargetPlatform(null);
