@@ -26159,6 +26159,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final attackSec = ((params['attackMs'] ?? 4.0) / 1000.0)
         .clamp(0.0, 1.0)
         .toDouble();
+    final decaySec = ((params['decayMs'] ?? 80.0) / 1000.0)
+        .clamp(0.0, 2.0)
+        .toDouble();
+    final sustainLevel = (params['sustainLevel'] ?? 0.92)
+        .clamp(0.05, 1.0)
+        .toDouble();
     final releaseSec = ((params['releaseMs'] ?? 260.0) / 1000.0)
         .clamp(0.02, 2.4)
         .toDouble();
@@ -26330,8 +26336,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ageSec: noteAge,
             holdSec: holdSec,
             attackSec: attackSec,
-            decaySec: 0.08,
-            sustainLevel: 0.92,
+            decaySec: decaySec,
+            sustainLevel: sustainLevel,
             releaseSec: releaseSec,
           ).clamp(0.0, 1.0);
           if (noteEnv <= 0.0) continue;
@@ -26427,7 +26433,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final outputGain = (params['outputGain'] ?? 0.72).clamp(0.2, 2.0);
-    final attackOverrideSec = ((params['attackMs'] ?? -1.0) / 1000.0);
+    final attackOverrideMs = params['attackMs'];
+    final attackOverrideSec =
+        attackOverrideMs != null && attackOverrideMs.isFinite
+            ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
+            : null;
     final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
       0.0,
       2.0,
@@ -26583,9 +26593,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         1,
         (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
       );
-      final attackSec = attackOverrideSec > 0
-          ? attackOverrideSec
-          : region.attackSec.clamp(0.0, 2.0);
+      final attackSec =
+          attackOverrideSec ?? region.attackSec.clamp(0.0, 2.0).toDouble();
       final releaseSec = releaseOverrideSec > 0
           ? releaseOverrideSec
           : region.releaseSec.clamp(0.02, 12.0);
