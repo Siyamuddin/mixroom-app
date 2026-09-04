@@ -2121,8 +2121,8 @@ _FallbackInstrumentPreset _fallbackPresetForInstrument({
     cutoffHz: getParam('cutoffHz', preset.cutoffHz, 200.0, 16000.0),
     attackMs: getParam('attackMs', preset.attackMs, 0.0, 1000.0),
     decayMs: getParam('decayMs', preset.decayMs, 0.0, 2000.0),
-    sustainLevel: getParam('sustainLevel', preset.sustainLevel, 0.05, 1.0),
-    releaseMs: getParam('releaseMs', preset.releaseMs, 20.0, 2400.0),
+    sustainLevel: getParam('sustainLevel', preset.sustainLevel, 0.0, 1.0),
+    releaseMs: getParam('releaseMs', preset.releaseMs, 0.0, 2400.0),
     drive: getParam('drive', preset.drive, 0.0, 1.0),
     outputGain: getParam('outputGain', preset.outputGain, 0.15, 0.75),
     detune: getParam('detune', preset.detune, 0.0, 0.03),
@@ -2802,14 +2802,14 @@ double _fallbackEnvelopeHoldLevel({
   required double decaySec,
   required double sustainLevel,
 }) {
-  final safeAttack = math.max(0.001, attackSec);
-  final safeDecay = math.max(0.001, decaySec);
-  final safeSustain = sustainLevel.clamp(0.05, 1.0).toDouble();
-  if (ageSec < safeAttack) {
+  final safeAttack = math.max(0.0, attackSec);
+  final safeDecay = math.max(0.0, decaySec);
+  final safeSustain = sustainLevel.clamp(0.0, 1.0).toDouble();
+  if (safeAttack > 0.0 && ageSec < safeAttack) {
     return (ageSec / safeAttack).clamp(0.0, 1.0).toDouble();
   }
   final decayAge = ageSec - safeAttack;
-  if (decayAge < safeDecay) {
+  if (safeDecay > 0.0 && decayAge < safeDecay) {
     final t = decayAge / safeDecay;
     return 1.0 + ((safeSustain - 1.0) * t);
   }
@@ -2832,7 +2832,8 @@ double _fallbackEnvelopeLevel({
       sustainLevel: sustainLevel,
     );
   }
-  final safeRelease = math.max(0.02, releaseSec);
+  final safeRelease = math.max(0.0, releaseSec);
+  if (safeRelease <= 0.0) return 0.0;
   final releaseAge = ageSec - holdSec;
   final releaseStart = _fallbackEnvelopeHoldLevel(
     ageSec: holdSec,
@@ -26163,10 +26164,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .clamp(0.0, 2.0)
         .toDouble();
     final sustainLevel = (params['sustainLevel'] ?? 0.92)
-        .clamp(0.05, 1.0)
+        .clamp(0.0, 1.0)
         .toDouble();
     final releaseSec = ((params['releaseMs'] ?? 260.0) / 1000.0)
-        .clamp(0.02, 2.4)
+        .clamp(0.0, 2.4)
         .toDouble();
     final grainAttackMs = (params['grainAttackMs'] ?? 18.0)
         .clamp(0.0, 250.0)
@@ -26443,9 +26444,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       2.0,
     )).toDouble();
     final sustainLevel = (params['sustainLevel'] ?? 0.86)
-        .clamp(0.05, 1.0)
+        .clamp(0.0, 1.0)
         .toDouble();
-    final releaseOverrideSec = ((params['releaseMs'] ?? -1.0) / 1000.0);
+    final releaseOverrideMs = params['releaseMs'];
+    final releaseOverrideSec =
+        releaseOverrideMs != null && releaseOverrideMs.isFinite
+            ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
+            : null;
     final sampleStartNorm = (params['sampleStartNorm'] ?? 0.0)
         .clamp(0.0, 0.98)
         .toDouble();
@@ -26468,9 +26473,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       80.0,
       20000.0,
     );
-    final tailSec = releaseOverrideSec > 0
-        ? releaseOverrideSec
-        : definition.defaultReleaseSec;
+    final tailSec = releaseOverrideSec ?? definition.defaultReleaseSec;
     var totalMs = math.max(
       minimumDurationMs,
       endBeat * msPerBeat + tailSec * 1000.0 + 180.0,
@@ -26595,10 +26598,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       final attackSec =
           attackOverrideSec ?? region.attackSec.clamp(0.0, 2.0).toDouble();
-      final releaseSec = releaseOverrideSec > 0
-          ? releaseOverrideSec
-          : region.releaseSec.clamp(0.02, 12.0);
-      final releaseSamples = math.max(1, (releaseSec * sampleRate).round());
+      final releaseSec =
+          releaseOverrideSec ?? region.releaseSec.clamp(0.0, 12.0);
+      final releaseSamples = math.max(0, (releaseSec * sampleRate).round());
       final playbackRate = _sfzPlaybackRate(
         sample: sample,
         region: region,
@@ -26874,15 +26876,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
       );
       final attackSamples = math.max(
-        1,
+        0,
         (preset.attackMs * sampleRate / 1000.0).round(),
       );
       final decaySamples = math.max(
-        1,
+        0,
         (preset.decayMs * sampleRate / 1000.0).round(),
       );
       final releaseSamples = math.max(
-        1,
+        0,
         (preset.releaseMs * sampleRate / 1000.0).round(),
       );
       final totalNoteSamples = sustainSamples + releaseSamples;

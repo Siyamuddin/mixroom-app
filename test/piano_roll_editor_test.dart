@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -429,6 +430,8 @@ void main() {
     expect(slider('releaseMs').value, 950.0);
     expect(slider('attackMs').max, 300.0);
     expect(slider('decayMs').max, 2000.0);
+    expect(slider('sustainLevel').min, 0.0);
+    expect(slider('releaseMs').min, 0.0);
     expect(slider('releaseMs').max, 1200.0);
 
     await tester.tap(find.text('Basic Synth').last);
@@ -440,7 +443,7 @@ void main() {
     expect(slider('releaseMs').value, 180.0);
   });
 
-  testWidgets('release graph geometry stays valid across the slider range',
+  testWidgets('zero-time stages collapse and release geometry scales',
       (tester) async {
     final clip = await _buildMidiTrack(
       const <MidiNote>[],
@@ -468,20 +471,63 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    Slider releaseSlider() => tester.widget<Slider>(
+    Slider slider(String parameter) => tester.widget<Slider>(
           find.descendant(
             of: find.byKey(
-              const ValueKey<String>('synth_releaseMs_slider'),
+              ValueKey<String>('synth_${parameter}_slider'),
             ),
             matching: find.byType(Slider),
           ),
         );
 
-    for (final releaseMs in <double>[20.0, 300.0, 600.0, 1200.0]) {
-      releaseSlider().onChanged!(releaseMs);
+    List<double> phaseWidths() {
+      final graph = find.byKey(const ValueKey<String>('synth_adsr_graph'));
+      final paint = find.descendant(
+        of: graph,
+        matching: find.byType(CustomPaint),
+      );
+      final dynamic painter = tester.widget<CustomPaint>(paint).painter!;
+      return List<double>.from(painter.debugPhaseWidths() as List);
+    }
+
+    slider('attackMs').onChanged!(0.0);
+    slider('decayMs').onChanged!(0.0);
+    slider('sustainLevel').onChanged!(0.0);
+    slider('releaseMs').onChanged!(0.0);
+    await tester.pump();
+
+    expect(slider('sustainLevel').min, 0.0);
+    expect(slider('releaseMs').min, 0.0);
+    expect(phaseWidths(), <double>[0.0, 0.0, 1.0, 0.0]);
+    expect(find.text('0 ms'), findsNWidgets(3));
+    expect(find.text('0%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    final graph = find.byKey(const ValueKey<String>('synth_adsr_graph'));
+    final paint = find.descendant(
+      of: graph,
+      matching: find.byType(CustomPaint),
+    );
+    final dynamic painter = tester.widget<CustomPaint>(paint).painter!;
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    expect(
+      () => painter.paint(canvas, const ui.Size(1026.8, 106.0)),
+      returnsNormally,
+    );
+    recorder.endRecording().dispose();
+
+    final releaseWidths = <double>[];
+    for (final releaseMs in <double>[0.0, 20.0, 600.0, 1200.0]) {
+      slider('releaseMs').onChanged!(releaseMs);
       await tester.pump();
+      releaseWidths.add(phaseWidths()[3]);
       expect(tester.takeException(), isNull);
     }
+    expect(releaseWidths[0], 0.0);
+    expect(releaseWidths[1], lessThan(releaseWidths[2]));
+    expect(releaseWidths[2], lessThan(releaseWidths[3]));
+    expect(releaseWidths[1], lessThan(releaseWidths[3] * 0.2));
   });
 
   testWidgets('external plugins keep the existing attack release envelope',
@@ -526,6 +572,12 @@ void main() {
     expect(
       find.byKey(const ValueKey<String>('synth_sustainLevel_slider')),
       findsNothing,
+    );
+    expect(
+      tester.widgetList<Slider>(find.byType(Slider)).any(
+            (slider) => slider.min == 20.0 && slider.max == 1200.0,
+          ),
+      isTrue,
     );
   });
 
@@ -585,16 +637,19 @@ void main() {
     expect(slider('attackMs').max, 600.0);
     expect(slider('decayMs').value, 340.0);
     expect(slider('decayMs').max, 900.0);
+    expect(slider('sustainLevel').min, 0.0);
+    expect(slider('releaseMs').min, 0.0);
     expect(slider('releaseMs').max, 1800.0);
 
     slider('decayMs').onChanged!(500.0);
+    slider('releaseMs').onChanged!(0.0);
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(committedParams, isNotNull);
     expect(committedParams!['attackMs'], 12.0);
     expect(committedParams!['decayMs'], 500.0);
     expect(committedParams!['sustainLevel'], 0.65);
-    expect(committedParams!['releaseMs'], 1200.0);
+    expect(committedParams!['releaseMs'], 0.0);
     expect(committedParams!['outputGain'], 0.8);
   });
 
@@ -649,6 +704,18 @@ void main() {
       ),
     );
     expect(attack.max, 600.0);
+    expect(
+      tester.widget<Slider>(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('sampler_sustainLevel_slider'),
+          ),
+          matching: find.byType(Slider),
+        ),
+      ).min,
+      0.0,
+    );
+    expect(release.min, 0.0);
     expect(release.max, 1800.0);
   });
 
@@ -697,6 +764,27 @@ void main() {
     expect(
       find.byKey(const ValueKey<String>('granularizer_attackMs_slider')),
       findsOneWidget,
+    );
+    final release = tester.widget<Slider>(
+      find.descendant(
+        of: find.byKey(
+          const ValueKey<String>('granularizer_releaseMs_slider'),
+        ),
+        matching: find.byType(Slider),
+      ),
+    );
+    expect(release.min, 0.0);
+    expect(release.max, 1800.0);
+    expect(
+      tester.widget<Slider>(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('granularizer_sustainLevel_slider'),
+          ),
+          matching: find.byType(Slider),
+        ),
+      ).min,
+      0.0,
     );
     expect(find.byKey(const ValueKey<String>('sampler_adsr_graph')),
         findsNothing);

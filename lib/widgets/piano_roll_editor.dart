@@ -5593,10 +5593,10 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                           .toDouble(),
                       decayMaxMs: 2000.0,
                       sustainLevel: (_params['sustainLevel'] ?? 0.86)
-                          .clamp(0.05, 1.0)
+                          .clamp(0.0, 1.0)
                           .toDouble(),
                       releaseMs: (_params['releaseMs'] ?? 180.0)
-                          .clamp(20.0, 1200.0)
+                          .clamp(0.0, 1200.0)
                           .toDouble(),
                       releaseMaxMs: 1200.0,
                       onChanged: (key, value) {
@@ -5736,7 +5736,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           label: 'S',
           name: 'Sustain',
           value: sustainLevel,
-          min: 0.05,
+          min: 0.0,
           max: 1.0,
           valueLabelBuilder: (value) => '${(value * 100).round()}%',
         ),
@@ -5745,7 +5745,7 @@ class _PianoRollEditorState extends State<PianoRollEditor>
           label: 'R',
           name: 'Release',
           value: releaseMs,
-          min: 20.0,
+          min: 0.0,
           max: releaseMaxMs,
           valueLabelBuilder: _formatEnvelopeMs,
         ),
@@ -5757,9 +5757,9 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     final attack = (_params['attackMs'] ?? 6.0).clamp(0.0, 600.0).toDouble();
     final decay = (_params['decayMs'] ?? 120.0).clamp(0.0, 900.0).toDouble();
     final sustain =
-        (_params['sustainLevel'] ?? 0.86).clamp(0.05, 1.0).toDouble();
+        (_params['sustainLevel'] ?? 0.86).clamp(0.0, 1.0).toDouble();
     final release =
-        (_params['releaseMs'] ?? 520.0).clamp(20.0, 1800.0).toDouble();
+        (_params['releaseMs'] ?? 520.0).clamp(0.0, 1800.0).toDouble();
     final output = (_params['outputGain'] ?? 0.72).clamp(0.2, 2.0).toDouble();
     final filterCutoff = (_params['sampleFilterCutoffHz'] ?? 20000.0)
         .clamp(80.0, 20000.0)
@@ -7603,6 +7603,17 @@ class _AdsrEnvelopePainter extends CustomPainter {
   final double releaseMaxMs;
   final Color accent;
 
+  List<double> _phaseWidths() {
+    final attackW = _phaseWidth(attackMs, attackMaxMs, 0.24);
+    final decayW = _phaseWidth(decayMs, decayMaxMs, 0.24);
+    final releaseW = _phaseWidth(releaseMs, releaseMaxMs, 0.30);
+    final sustainW = math.max(0.20, 1.0 - attackW - decayW - releaseW);
+    return <double>[attackW, decayW, sustainW, releaseW];
+  }
+
+  @visibleForTesting
+  List<double> debugPhaseWidths() => _phaseWidths();
+
   @override
   void paint(Canvas canvas, Size size) {
     final rect = Offset.zero & size;
@@ -7635,30 +7646,54 @@ class _AdsrEnvelopePainter extends CustomPainter {
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
     }
 
-    final attackW = _phaseWidth(attackMs, attackMaxMs, 0.08, 0.24);
-    final decayW = _phaseWidth(decayMs, decayMaxMs, 0.09, 0.24);
-    final releaseW = _phaseWidth(releaseMs, releaseMaxMs, 0.13, 0.30);
-    final sustainW = math.max(0.20, 1.0 - attackW - decayW - releaseW);
+    final phaseWidths = _phaseWidths();
+    final attackW = phaseWidths[0];
+    final decayW = phaseWidths[1];
+    final sustainW = phaseWidths[2];
+    final releaseW = phaseWidths[3];
     final total = attackW + decayW + sustainW + releaseW;
 
     final x0 = plot.left;
-    final xA = plot.left + plot.width * attackW / total;
-    final xD = xA + plot.width * decayW / total;
-    final xS = xD + plot.width * sustainW / total;
     final xR = plot.right;
+    final xA = (plot.left + plot.width * attackW / total)
+        .clamp(x0, xR)
+        .toDouble();
+    final xD = (xA + plot.width * decayW / total)
+        .clamp(xA, xR)
+        .toDouble();
+    final xS = releaseW <= 0.0
+        ? xR
+        : (xD + plot.width * sustainW / total)
+            .clamp(xD, xR)
+            .toDouble();
+    assert(x0 <= xA && xA <= xD && xD <= xS && xS <= xR);
     final yBase = plot.bottom - 4;
     final yPeak = plot.top + 5;
-    final safeSustain = sustainLevel.clamp(0.05, 1.0).toDouble();
+    final safeSustain = sustainLevel.clamp(0.0, 1.0).toDouble();
     final ySustain = yBase - ((yBase - yPeak) * safeSustain);
-    final releaseControlX = xS + ((xR - xS) * 0.58);
-    assert(releaseControlX >= xS && releaseControlX <= xR);
-
     final curve = Path()
       ..moveTo(x0, yBase)
-      ..lineTo(xA, yPeak)
-      ..quadraticBezierTo((xA + xD) * 0.5, ySustain, xD, ySustain)
-      ..lineTo(xS, ySustain)
-      ..quadraticBezierTo(releaseControlX, yBase, xR, yBase);
+      ..lineTo(xA, yPeak);
+    if (decayMs <= 0.0) {
+      curve.lineTo(xD, ySustain);
+    } else {
+      curve.quadraticBezierTo(
+        (xA + xD) * 0.5,
+        ySustain,
+        xD,
+        ySustain,
+      );
+    }
+    curve.lineTo(xS, ySustain);
+    if (releaseMs <= 0.0) {
+      curve.lineTo(xR, yBase);
+    } else {
+      final releaseControlX = (xS + ((xR - xS) * 0.58))
+          .clamp(xS, xR)
+          .toDouble();
+      assert(releaseControlX >= xS && releaseControlX <= xR);
+      curve.quadraticBezierTo(releaseControlX, yBase, xR, yBase);
+    }
 
     final fill = Path.from(curve)
       ..lineTo(xR, yBase)
@@ -7676,6 +7711,12 @@ class _AdsrEnvelopePainter extends CustomPainter {
           ],
         ).createShader(plot),
     );
+    final guidePaint = Paint()
+      ..strokeWidth = 1
+      ..color = Colors.white.withValues(alpha: 0.10);
+    for (final x in [xA, xD, xS]) {
+      canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), guidePaint);
+    }
     canvas.drawPath(
       curve,
       Paint()
@@ -7686,27 +7727,22 @@ class _AdsrEnvelopePainter extends CustomPainter {
         ..color = accent,
     );
 
-    final guidePaint = Paint()
-      ..strokeWidth = 1
-      ..color = Colors.white.withValues(alpha: 0.10);
-    for (final x in [xA, xD, xS]) {
-      canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), guidePaint);
+    if (xA - x0 >= 18.0) {
+      _drawPhaseLabel(canvas, 'A', Offset((x0 + xA) * 0.5, plot.bottom - 13));
     }
-
-    _drawPhaseLabel(canvas, 'A', Offset((x0 + xA) * 0.5, plot.bottom - 13));
-    _drawPhaseLabel(canvas, 'D', Offset((xA + xD) * 0.5, plot.bottom - 13));
+    if (xD - xA >= 18.0) {
+      _drawPhaseLabel(canvas, 'D', Offset((xA + xD) * 0.5, plot.bottom - 13));
+    }
     _drawPhaseLabel(canvas, 'S', Offset((xD + xS) * 0.5, plot.bottom - 13));
-    _drawPhaseLabel(canvas, 'R', Offset((xS + xR) * 0.5, plot.bottom - 13));
+    if (xR - xS >= 18.0) {
+      _drawPhaseLabel(canvas, 'R', Offset((xS + xR) * 0.5, plot.bottom - 13));
+    }
   }
 
-  double _phaseWidth(
-    double value,
-    double max,
-    double minWidth,
-    double maxWidth,
-  ) {
+  double _phaseWidth(double value, double max, double maxWidth) {
+    if (value <= 0.0 || max <= 0.0) return 0.0;
     final t = (value / max).clamp(0.0, 1.0).toDouble();
-    return minWidth + (maxWidth - minWidth) * math.sqrt(t);
+    return maxWidth * math.sqrt(t);
   }
 
   void _drawPhaseLabel(Canvas canvas, String label, Offset center) {

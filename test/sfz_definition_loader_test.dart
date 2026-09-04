@@ -72,6 +72,25 @@ void main() {
       },
     );
 
+    test('preserves an explicit zero amplitude release', () async {
+      final directory = await Directory.systemTemp.createTemp('mixroom_sfz_');
+      addTearDown(() => directory.delete(recursive: true));
+      final sfz = File('${directory.path}/zero_release.sfz');
+      await sfz.writeAsString('''
+<global> ampeg_release=0
+<region> sample=global.wav key=60
+<region> sample=region.wav key=61 ampeg_release=0
+''');
+
+      final definition = await SfzDefinitionLoader().load(sfz.path);
+
+      expect(definition, isNotNull);
+      expect(definition!.defaultReleaseSec, 0.0);
+      expect(definition.regions, hasLength(2));
+      expect(definition.regions.every((region) => region.releaseSec == 0.0),
+          isTrue);
+    });
+
     test(
       'applies pitch remapping and sampler key limits to sparse regions',
       () async {

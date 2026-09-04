@@ -214,7 +214,7 @@ class SfzDefinitionLoader {
           values,
           'ampeg_release',
           globalReleaseSec,
-        ).clamp(0.02, 12.0).toDouble();
+        ).clamp(0.0, 12.0).toDouble();
         final pitchKeytrack = _readNumeric(
           values,
           'pitch_keytrack',
@@ -286,7 +286,7 @@ class SfzDefinitionLoader {
         sfzAssetPath: sfzAssetPath,
         regions: List<SfzRegion>.unmodifiable(parsedRegions),
         defaultAttackSec: globalAttackSec.clamp(0.0, 4.0),
-        defaultReleaseSec: globalReleaseSec.clamp(0.02, 12.0),
+        defaultReleaseSec: globalReleaseSec.clamp(0.0, 12.0),
       );
     } catch (_) {
       return null;
