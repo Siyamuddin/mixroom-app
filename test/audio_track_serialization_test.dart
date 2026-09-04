@@ -93,4 +93,38 @@ void main() {
     expect(json['hostedInstrumentStateB64'],
         'dmVyeV9pbXBvcnRhbnRfc3ludGhfc3RhdGU=');
   });
+
+  test('AudioTrack JSON preserves exact zero-time built-in ADSR values',
+      () async {
+    final track = await AudioTrack.create(
+      file: File('audio/basic_synth.mid'),
+      originalFile: File('audio/basic_synth.mid'),
+      audioDuration: const Duration(milliseconds: 2400),
+      trimStart: Duration.zero,
+      trimEnd: const Duration(milliseconds: 2400),
+      offset: 0.0,
+      rowIndex: 0,
+      rowId: 3,
+      clipId: 'clip_basic_synth',
+      label: 'Basic Synth',
+      clipKind: ClipKind.midi,
+      instrumentId: 'mixroom.basic_synth',
+      instrumentName: 'Basic Synth',
+      instrumentParams: <String, double>{
+        'attackMs': 0.0,
+        'decayMs': 0.0,
+        'sustainLevel': 0.0,
+        'releaseMs': 0.0,
+      },
+    );
+
+    final json = track.toJson('basic_synth.mid');
+
+    expect(json['instrumentParams'], <String, double>{
+      'attackMs': 0.0,
+      'decayMs': 0.0,
+      'sustainLevel': 0.0,
+      'releaseMs': 0.0,
+    });
+  });
 }

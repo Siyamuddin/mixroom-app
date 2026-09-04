@@ -236,7 +236,13 @@ void main() {
       ..sourceTempoBpm = 117.5
       ..stretchToProjectTempo = false
       ..tempoStretchPreservePitch = false
-      ..tempoWarpMode = 'repitch';
+      ..tempoWarpMode = 'repitch'
+      ..instrumentParams = <String, double>{
+        'attackMs': 18.0,
+        'decayMs': 120.0,
+        'sustainLevel': 0.86,
+        'releaseMs': 180.0,
+      };
     final notes = clip.midiNotes.map((note) => note.copy()).toList();
     final action = EditMidiClipAction(
       tracks: <AudioTrack>[clip],
@@ -245,14 +251,21 @@ void main() {
       newNotes: notes.map((note) => note.copy()).toList(),
       oldInstrumentId: clip.instrumentId,
       oldInstrumentName: clip.instrumentName,
-      oldInstrumentParams: const <String, double>{},
+      oldInstrumentParams: const <String, double>{
+        'attackMs': 18.0,
+        'decayMs': 120.0,
+        'sustainLevel': 0.86,
+        'releaseMs': 180.0,
+      },
       oldHostedInstrumentStateBase64: 'old-state',
       newInstrumentId: 'sfz.guitar.clean_electric',
       newInstrumentName: 'Electric Guitar',
       newInstrumentParams: const <String, double>{
         'outputGain': 2.0,
-        'attackMs': 2.0,
-        'releaseMs': 250.0,
+        'attackMs': 0.0,
+        'decayMs': 0.0,
+        'sustainLevel': 0.65,
+        'releaseMs': 0.0,
       },
       newHostedInstrumentStateBase64: '',
       applyToClip:
@@ -278,8 +291,10 @@ void main() {
     expect(clip.instrumentName, 'Electric Guitar');
     expect(clip.instrumentParams, <String, double>{
       'outputGain': 2.0,
-      'attackMs': 2.0,
-      'releaseMs': 250.0,
+      'attackMs': 0.0,
+      'decayMs': 0.0,
+      'sustainLevel': 0.65,
+      'releaseMs': 0.0,
     });
     expect(clip.midiNotes.single.id, 'old');
     expect(clip.trimStart, Duration.zero);
@@ -293,6 +308,12 @@ void main() {
     await action.undo();
     expect(clip.instrumentId, 'mixroom.basic_synth');
     expect(clip.instrumentName, 'Basic Synth');
+    expect(clip.instrumentParams, <String, double>{
+      'attackMs': 18.0,
+      'decayMs': 120.0,
+      'sustainLevel': 0.86,
+      'releaseMs': 180.0,
+    });
     expect(clip.midiNotes.single.id, 'old');
     expect(clip.trimEnd, const Duration(seconds: 4));
     expect(clip.sourceTempoBpm, 117.5);
@@ -302,6 +323,7 @@ void main() {
 
     await action.redo();
     expect(clip.instrumentId, 'sfz.guitar.clean_electric');
+    expect(clip.instrumentParams['releaseMs'], 0.0);
   });
 
   test('MIDI edit restores all command-owned tempo state exactly', () async {

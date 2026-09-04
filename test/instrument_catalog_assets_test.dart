@@ -232,6 +232,17 @@ Future<void> _expectChromaticGuitarMapping({
 }
 
 void main() {
+  test('Basic Synth catalog includes backward-compatible ADSR defaults', () {
+    final basicSynth = kInstrumentCatalog.singleWhere(
+      (entry) => entry['id'] == 'mixroom.basic_synth',
+    );
+
+    expect(basicSynth['attackMs'], 18.0);
+    expect(basicSynth['decayMs'], 120.0);
+    expect(basicSynth['sustainLevel'], 0.86);
+    expect(basicSynth['releaseMs'], 180.0);
+  });
+
   test('bundled instrument catalog resolves every indexed SFZ preset',
       () async {
     final repoRoot = Directory.current;

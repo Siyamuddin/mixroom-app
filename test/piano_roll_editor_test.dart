@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
@@ -53,6 +54,8 @@ Widget _buildEditor({
   PianoRollGridResolutionChanged? onEffectiveGridResolutionChanged,
   int initialTab = 0,
   int tabRequestRevision = 0,
+  double width = 900,
+  double height = 620,
   List<Map<String, dynamic>> availableInstruments =
       const <Map<String, dynamic>>[],
 }) {
@@ -60,8 +63,8 @@ Widget _buildEditor({
     home: Scaffold(
       body: Center(
         child: SizedBox(
-          width: 900,
-          height: 620,
+          width: width,
+          height: height,
           child: PianoRollEditor(
             clip: clip,
             availableInstruments: availableInstruments,
@@ -236,6 +239,590 @@ void main() {
     await tester.pump(const Duration(milliseconds: 180));
 
     expect(tester.widget<TabBar>(find.byType(TabBar)).controller!.index, 0);
+  });
+
+  testWidgets('built-in synth uses shared ADSR graph and commits all values',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    Map<String, double>? committedParams;
+    var commitCount = 0;
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.basic_synth',
+      instrumentName: 'Basic Synth',
+    );
+    clip.instrumentParams = <String, double>{
+      'attackMs': 42.0,
+      'releaseMs': 777.0,
+      'drive': 0.24,
+    };
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'mixroom.basic_synth',
+            'name': 'Basic Synth',
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          commitCount += 1;
+          committedParams = Map<String, double>.from(instrumentParams);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final graph = find.byKey(const ValueKey<String>('synth_adsr_graph'));
+    final attackRow = find.byKey(
+      const ValueKey<String>('synth_attackMs_slider'),
+    );
+    final decayRow = find.byKey(
+      const ValueKey<String>('synth_decayMs_slider'),
+    );
+    final sustainRow = find.byKey(
+      const ValueKey<String>('synth_sustainLevel_slider'),
+    );
+    final releaseRow = find.byKey(
+      const ValueKey<String>('synth_releaseMs_slider'),
+    );
+    expect(graph, findsOneWidget);
+    expect(attackRow, findsOneWidget);
+    expect(decayRow, findsOneWidget);
+    expect(sustainRow, findsOneWidget);
+    expect(releaseRow, findsOneWidget);
+    expect(find.descendant(of: attackRow, matching: find.text('42 ms')),
+        findsOneWidget);
+    expect(find.descendant(of: decayRow, matching: find.text('120 ms')),
+        findsOneWidget);
+    expect(find.descendant(of: sustainRow, matching: find.text('86%')),
+        findsOneWidget);
+    expect(find.descendant(of: releaseRow, matching: find.text('777 ms')),
+        findsOneWidget);
+
+    final attackSlider = find.descendant(
+      of: attackRow,
+      matching: find.byType(Slider),
+    );
+    final decaySlider = find.descendant(
+      of: decayRow,
+      matching: find.byType(Slider),
+    );
+    expect(tester.getSemantics(attackSlider).label, 'Attack');
+    expect(
+      tester.widget<Slider>(attackSlider).semanticFormatterCallback!(42.0),
+      '42 ms',
+    );
+    expect(tester.getSemantics(decaySlider).label, 'Decay');
+    expect(
+      tester.widget<Slider>(decaySlider).semanticFormatterCallback!(120.0),
+      '120 ms',
+    );
+
+    final graphPaint = find.descendant(
+      of: graph,
+      matching: find.byType(CustomPaint),
+    );
+    final beforePainter = tester.widget<CustomPaint>(graphPaint).painter!;
+
+    tester
+        .widget<Slider>(
+          find.descendant(of: attackRow, matching: find.byType(Slider)),
+        )
+        .onChanged!(300.0);
+    tester
+        .widget<Slider>(
+          find.descendant(of: decayRow, matching: find.byType(Slider)),
+        )
+        .onChanged!(1200.0);
+    tester
+        .widget<Slider>(
+          find.descendant(of: sustainRow, matching: find.byType(Slider)),
+        )
+        .onChanged!(0.55);
+    tester
+        .widget<Slider>(
+          find.descendant(of: releaseRow, matching: find.byType(Slider)),
+        )
+        .onChanged!(1100.0);
+    await tester.pump();
+
+    final afterPainter = tester.widget<CustomPaint>(graphPaint).painter!;
+    expect(afterPainter.shouldRepaint(beforePainter), isTrue);
+    expect(commitCount, 0);
+    expect(find.descendant(of: decayRow, matching: find.text('1.2 s')),
+        findsOneWidget);
+    expect(find.descendant(of: sustainRow, matching: find.text('55%')),
+        findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(commitCount, 1);
+    expect(committedParams, isNotNull);
+    expect(committedParams!['attackMs'], 300.0);
+    expect(committedParams!['decayMs'], 1200.0);
+    expect(committedParams!['sustainLevel'], 0.55);
+    expect(committedParams!['releaseMs'], 1100.0);
+    expect(committedParams!['drive'], 0.24);
+    semantics.dispose();
+  });
+
+  testWidgets('oscillator presets share ADSR defaults without stale values',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.basic_synth',
+      instrumentName: 'Basic Synth',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'mixroom.basic_synth',
+            'name': 'Basic Synth',
+            'attackMs': 18.0,
+            'releaseMs': 180.0,
+          },
+          <String, dynamic>{
+            'id': 'mixroom.soft_pad',
+            'name': 'Soft Pad',
+            'pickerCategory': 'Synths',
+            'attackMs': 210.0,
+            'releaseMs': 950.0,
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Slider slider(String parameter) => tester.widget<Slider>(
+          find.descendant(
+            of: find.byKey(
+              ValueKey<String>('synth_${parameter}_slider'),
+            ),
+            matching: find.byType(Slider),
+          ),
+        );
+
+    await tester.tap(find.text('Soft Pad'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('synth_adsr_graph')),
+        findsOneWidget);
+    expect(slider('attackMs').value, 210.0);
+    expect(slider('decayMs').value, 120.0);
+    expect(slider('sustainLevel').value, 0.86);
+    expect(slider('releaseMs').value, 950.0);
+    expect(slider('attackMs').max, 300.0);
+    expect(slider('decayMs').max, 2000.0);
+    expect(slider('sustainLevel').min, 0.0);
+    expect(slider('releaseMs').min, 0.0);
+    expect(slider('releaseMs').max, 1200.0);
+
+    await tester.tap(find.text('Basic Synth').last);
+    await tester.pumpAndSettle();
+
+    expect(slider('attackMs').value, 18.0);
+    expect(slider('decayMs').value, 120.0);
+    expect(slider('sustainLevel').value, 0.86);
+    expect(slider('releaseMs').value, 180.0);
+  });
+
+  testWidgets('zero-time stages collapse and release geometry scales',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.basic_synth',
+      instrumentName: 'Basic Synth',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'mixroom.basic_synth',
+            'name': 'Basic Synth',
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Slider slider(String parameter) => tester.widget<Slider>(
+          find.descendant(
+            of: find.byKey(
+              ValueKey<String>('synth_${parameter}_slider'),
+            ),
+            matching: find.byType(Slider),
+          ),
+        );
+
+    List<double> phaseWidths() {
+      final graph = find.byKey(const ValueKey<String>('synth_adsr_graph'));
+      final paint = find.descendant(
+        of: graph,
+        matching: find.byType(CustomPaint),
+      );
+      final dynamic painter = tester.widget<CustomPaint>(paint).painter!;
+      return List<double>.from(painter.debugPhaseWidths() as List);
+    }
+
+    slider('attackMs').onChanged!(0.0);
+    slider('decayMs').onChanged!(0.0);
+    slider('sustainLevel').onChanged!(0.0);
+    slider('releaseMs').onChanged!(0.0);
+    await tester.pump();
+
+    expect(slider('sustainLevel').min, 0.0);
+    expect(slider('releaseMs').min, 0.0);
+    expect(phaseWidths(), <double>[0.0, 0.0, 1.0, 0.0]);
+    expect(find.text('0 ms'), findsNWidgets(3));
+    expect(find.text('0%'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    final graph = find.byKey(const ValueKey<String>('synth_adsr_graph'));
+    final paint = find.descendant(
+      of: graph,
+      matching: find.byType(CustomPaint),
+    );
+    final dynamic painter = tester.widget<CustomPaint>(paint).painter!;
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    expect(
+      () => painter.paint(canvas, const ui.Size(1026.8, 106.0)),
+      returnsNormally,
+    );
+    recorder.endRecording().dispose();
+
+    final releaseWidths = <double>[];
+    for (final releaseMs in <double>[0.0, 20.0, 600.0, 1200.0]) {
+      slider('releaseMs').onChanged!(releaseMs);
+      await tester.pump();
+      releaseWidths.add(phaseWidths()[3]);
+      expect(tester.takeException(), isNull);
+    }
+    expect(releaseWidths[0], 0.0);
+    expect(releaseWidths[1], lessThan(releaseWidths[2]));
+    expect(releaseWidths[2], lessThan(releaseWidths[3]));
+    expect(releaseWidths[1], lessThan(releaseWidths[3] * 0.2));
+  });
+
+  testWidgets('external plugins keep the existing attack release envelope',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'plugin.test',
+      instrumentName: 'External Test',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'plugin.test',
+            'name': 'External Test',
+            'isExternalPlugin': true,
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Attack'), findsOneWidget);
+    expect(find.text('Release'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('synth_adsr_graph')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('synth_decayMs_slider')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey<String>('synth_sustainLevel_slider')),
+      findsNothing,
+    );
+    expect(
+      tester.widgetList<Slider>(find.byType(Slider)).any(
+            (slider) => slider.min == 20.0 && slider.max == 1200.0,
+          ),
+      isTrue,
+    );
+  });
+
+  testWidgets('sampler keeps its controls with the shared ADSR editor',
+      (tester) async {
+    Map<String, double>? committedParams;
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'sfz.test_sampler',
+      instrumentName: 'Test Sampler',
+    );
+    clip.instrumentParams = <String, double>{
+      'attackMs': 12.0,
+      'decayMs': 340.0,
+      'sustainLevel': 0.65,
+      'releaseMs': 1200.0,
+      'outputGain': 0.8,
+    };
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'sfz.test_sampler',
+            'name': 'Test Sampler',
+            'isSampled': true,
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {
+          committedParams = Map<String, double>.from(instrumentParams);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sampler envelope'), findsOneWidget);
+    expect(find.text('Gain'), findsOneWidget);
+    expect(find.text('Filter'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('sampler_adsr_graph')),
+        findsOneWidget);
+
+    Slider slider(String parameter) => tester.widget<Slider>(
+          find.descendant(
+            of: find.byKey(
+              ValueKey<String>('sampler_${parameter}_slider'),
+            ),
+            matching: find.byType(Slider),
+          ),
+        );
+    expect(slider('attackMs').max, 600.0);
+    expect(slider('decayMs').value, 340.0);
+    expect(slider('decayMs').max, 900.0);
+    expect(slider('sustainLevel').min, 0.0);
+    expect(slider('releaseMs').min, 0.0);
+    expect(slider('releaseMs').max, 1800.0);
+
+    slider('decayMs').onChanged!(500.0);
+    slider('releaseMs').onChanged!(0.0);
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(committedParams, isNotNull);
+    expect(committedParams!['attackMs'], 12.0);
+    expect(committedParams!['decayMs'], 500.0);
+    expect(committedParams!['sustainLevel'], 0.65);
+    expect(committedParams!['releaseMs'], 0.0);
+    expect(committedParams!['outputGain'], 0.8);
+  });
+
+  testWidgets('catalog-marked sampled instruments use sampler ADSR ranges',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.sampled_drum_test',
+      instrumentName: 'Sampled Drum Test',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'mixroom.sampled_drum_test',
+            'name': 'Sampled Drum Test',
+            'category': 'drum',
+            'isSampled': true,
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey<String>('sampler_adsr_graph')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('synth_adsr_graph')),
+        findsNothing);
+    final attack = tester.widget<Slider>(
+      find.descendant(
+        of: find.byKey(
+          const ValueKey<String>('sampler_attackMs_slider'),
+        ),
+        matching: find.byType(Slider),
+      ),
+    );
+    final release = tester.widget<Slider>(
+      find.descendant(
+        of: find.byKey(
+          const ValueKey<String>('sampler_releaseMs_slider'),
+        ),
+        matching: find.byType(Slider),
+      ),
+    );
+    expect(attack.max, 600.0);
+    expect(
+      tester.widget<Slider>(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('sampler_sustainLevel_slider'),
+          ),
+          matching: find.byType(Slider),
+        ),
+      ).min,
+      0.0,
+    );
+    expect(release.min, 0.0);
+    expect(release.max, 1800.0);
+  });
+
+  testWidgets('granularizer keeps grain controls and shared amplitude ADSR',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'sfz.test_granularizer',
+      instrumentName: 'Test Granularizer',
+    );
+    clip.instrumentParams = <String, double>{
+      'granularMode': 1.0,
+      'grainAttackMs': 21.0,
+      'attackMs': 9.0,
+      'decayMs': 180.0,
+      'sustainLevel': 0.72,
+      'releaseMs': 640.0,
+    };
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'sfz.test_granularizer',
+            'name': 'Test Granularizer',
+            'isSampled': true,
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Granularizer'), findsWidgets);
+    expect(find.text('Grain'), findsOneWidget);
+    expect(find.text('Depth'), findsOneWidget);
+    expect(find.byKey(const ValueKey<String>('granularizer_adsr_graph')),
+        findsOneWidget);
+    expect(
+      find.byKey(const ValueKey<String>('granularizer_attackMs_slider')),
+      findsOneWidget,
+    );
+    final release = tester.widget<Slider>(
+      find.descendant(
+        of: find.byKey(
+          const ValueKey<String>('granularizer_releaseMs_slider'),
+        ),
+        matching: find.byType(Slider),
+      ),
+    );
+    expect(release.min, 0.0);
+    expect(release.max, 1800.0);
+    expect(
+      tester.widget<Slider>(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('granularizer_sustainLevel_slider'),
+          ),
+          matching: find.byType(Slider),
+        ),
+      ).min,
+      0.0,
+    );
+    expect(find.byKey(const ValueKey<String>('sampler_adsr_graph')),
+        findsNothing);
+  });
+
+  testWidgets('shared synth ADSR fits a narrow mobile-sized editor',
+      (tester) async {
+    final clip = await _buildMidiTrack(
+      const <MidiNote>[],
+      instrumentId: 'mixroom.basic_synth',
+      instrumentName: 'Basic Synth',
+    );
+
+    await tester.pumpWidget(
+      _buildEditor(
+        clip: clip,
+        initialTab: 2,
+        width: 390,
+        availableInstruments: const <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'mixroom.basic_synth',
+            'name': 'Basic Synth',
+          },
+        ],
+        onCommit: ({
+          required List<MidiNote> notes,
+          required Map<String, double> instrumentParams,
+          required String instrumentId,
+          required String instrumentName,
+        }) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey<String>('synth_adsr_graph')),
+        findsOneWidget);
+    expect(find.byType(SingleChildScrollView), findsWidgets);
   });
 
   testWidgets(
