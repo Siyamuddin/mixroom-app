@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/ai/ai_gain_units.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
 import 'package:mixroom/helpers/timeline_grid_policy.dart';
@@ -198,15 +199,20 @@ List<TimelineRow> _namedTrackRows(int count) {
   );
 }
 
+/// Resolves the row header key for whichever header layout is mounted.
+Finder _rowHeaderFinder(int row) {
+  final tablet = find.byKey(ValueKey('timeline_tablet_row_header_$row'));
+  if (tablet.evaluate().isNotEmpty) return tablet;
+  return find.byKey(ValueKey('timeline_row_header_$row'));
+}
+
 bool _rowHeaderIsSelected(WidgetTester tester, int row) {
-  final semantics = tester.getSemantics(
-    find.byKey(ValueKey('timeline_row_header_$row')),
-  );
+  final semantics = tester.getSemantics(_rowHeaderFinder(row));
   return semantics.hasFlag(SemanticsFlag.isSelected);
 }
 
 Future<void> _tapRowHeader(WidgetTester tester, int row) async {
-  await tester.tap(find.byKey(ValueKey('timeline_row_header_$row')));
+  await tester.tap(_rowHeaderFinder(row));
   await tester.pumpAndSettle();
 }
 
@@ -216,7 +222,7 @@ Future<void> _tapRowHeaderWithModifier(
   required LogicalKeyboardKey modifier,
 }) async {
   await tester.sendKeyDownEvent(modifier);
-  await tester.tap(find.byKey(ValueKey('timeline_row_header_$row')));
+  await tester.tap(_rowHeaderFinder(row));
   await tester.pump();
   await tester.sendKeyUpEvent(modifier);
   await tester.pumpAndSettle();
@@ -341,6 +347,32 @@ Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
   return rect.centerRight - const Offset(6, 0);
 }
 
+/// Drags a tablet header gain slider from its centre to [fraction] of the
+/// slider's usable track width.
+Future<void> _dragTabletHeaderGainTo(
+  WidgetTester tester, {
+  required int row,
+  required double fraction,
+}) async {
+  final rect = tester.getRect(
+    find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
+  );
+  // Matches the knob inset the slider reserves at both ends.
+  const inset = 11.0;
+  final usable = (rect.width - (inset * 2)).clamp(1.0, double.infinity);
+  final target = Offset(rect.left + inset + (usable * fraction), rect.center.dy);
+  final gesture = await tester.startGesture(rect.center);
+  await tester.pump(const Duration(milliseconds: 30));
+  // The first move only wins the gesture arena; a second one is needed before
+  // the recognizer reports a drag update.
+  await gesture.moveTo(target);
+  await tester.pump(const Duration(milliseconds: 30));
+  await gesture.moveTo(target);
+  await tester.pump(const Duration(milliseconds: 30));
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
 Widget _buildHarness({
   required List<AudioTrack> clips,
   required Future<void> Function(int clipIndex, double newStartMs, int newRow)
@@ -400,6 +432,10 @@ Widget _buildHarness({
   List<bool>? rowSoloedOverride,
   Future<void> Function(int row, double gain)? onSetRowGain,
   void Function(int row, double oldGain, double newGain)? onRowGainCommit,
+  List<double>? rowGainOverride,
+  Future<void> Function(int fromIndex, int toIndex)? onMoveRow,
+  Future<void> Function(List<int> rows, int delta)? onMoveRows,
+  Future<void> Function(List<int> rows)? onDuplicateRows,
   Future<void> Function(int row, double pan)? onSetRowPan,
   void Function(int row, double oldPan, double newPan)? onRowPanCommit,
   Future<void> Function(int row, int color)? onSetRowColor,
@@ -464,7 +500,8 @@ Widget _buildHarness({
       <TimelineRow>[
         TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
       ];
-  final rowGain = List<double>.filled(rows.length, 1.0);
+  final rowGain =
+      rowGainOverride ?? List<double>.filled(rows.length, 1.0);
   final rowPan = List<double>.filled(rows.length, 0.5);
   final rowMuted = rowMutedOverride ?? List<bool>.filled(rows.length, false);
   final rowSoloed = rowSoloedOverride ?? List<bool>.filled(rows.length, false);
@@ -548,7 +585,9 @@ Widget _buildHarness({
           onInsertRowBelow: (_) async {},
           onChangeInstrumentLane: onChangeInstrumentLane,
           onDeleteRow: onDeleteRow ?? (_) async {},
-          onMoveRow: (_, __) async {},
+          onMoveRow: onMoveRow ?? (_, __) async {},
+          onMoveRows: onMoveRows,
+          onDuplicateRows: onDuplicateRows,
           onRenameRow: (_, __) async {},
           onRenameRowGroup: onRenameRowGroup,
           onSetRowIcon: (_, __) async {},
@@ -2763,6 +2802,557 @@ void main() {
     }
   });
 
+  testWidgets(
+      'header gain drag shifts every selected track by the same dB offset',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      // Deliberately unequal so a flattening bug is impossible to miss.
+      final startGains = <double>[1.5, 2.0, 1.8];
+      final liveUpdates = <({int row, double gain})>[];
+      final commits = <({int row, double oldGain, double newGain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: List<double>.of(startGains),
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (row, oldGain, newGain) {
+            commits.add((row: row, oldGain: oldGain, newGain: newGain));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Anchor on the bottom row: expanding it only pushes rows below it, so
+      // the rows we still need to reach keep their positions.
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 0,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+
+      // Drag down so no row can hit the +6 dB ceiling.
+      await _dragTabletHeaderGainTo(tester, row: 0, fraction: 0.3);
+
+      expect(liveUpdates.map((entry) => entry.row).toSet(), <int>{0, 1, 2});
+
+      final finalGainByRow = <int, double>{};
+      for (final commit in commits) {
+        finalGainByRow[commit.row] = commit.newGain;
+      }
+      expect(finalGainByRow.keys.toSet(), <int>{0, 1, 2});
+
+      final anchorDeltaDb =
+          rowGainUiToDb(finalGainByRow[0]!) - rowGainUiToDb(startGains[0]);
+      expect(anchorDeltaDb.abs(), greaterThan(1.0));
+
+      for (final row in <int>[1, 2]) {
+        expect(
+          rowGainUiToDb(finalGainByRow[row]!) - rowGainUiToDb(startGains[row]),
+          closeTo(anchorDeltaDb, 0.05),
+        );
+      }
+
+      // Relative balance survives: the rows did not collapse onto one value.
+      expect(finalGainByRow[1], isNot(closeTo(finalGainByRow[0]!, 0.01)));
+      expect(finalGainByRow[2], isNot(closeTo(finalGainByRow[0]!, 0.01)));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('header gain drag on a single selection touches only that track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final liveUpdates = <({int row, double gain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: <double>[1.5, 2.0, 1.8],
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (_, __, ___) {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _dragTabletHeaderGainTo(tester, row: 1, fraction: 0.3);
+
+      expect(liveUpdates, isNotEmpty);
+      expect(liveUpdates.map((entry) => entry.row).toSet(), <int>{1});
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu labels count the range-selected tracks',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onDuplicateRows: (_) async {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 1);
+
+      expect(find.text('Move 3 Rows Up'), findsOneWidget);
+      expect(find.text('Move 3 Rows Down'), findsOneWidget);
+      expect(find.text('Duplicate 3 Rows'), findsOneWidget);
+      expect(find.text('Delete 3 Rows'), findsOneWidget);
+      expect(find.text('Move Up'), findsNothing);
+      expect(find.text('Delete Row'), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu keeps singular labels for one selected track',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: _namedTrackRows(3),
+        onDuplicateRows: (_) async {},
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 1);
+
+    expect(find.text('Move Up'), findsOneWidget);
+    expect(find.text('Move Down'), findsOneWidget);
+    expect(find.text('Duplicate Row'), findsOneWidget);
+    expect(find.text('Delete Row'), findsOneWidget);
+  });
+
+  testWidgets('row menu moves the range-selected tracks as one block',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 1);
+      await tester.tap(find.text('Move 2 Rows Up'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves.length, 1);
+      expect(blockMoves.single.rows, <int>[1, 2]);
+      expect(blockMoves.single.delta, -1);
+      // The block path replaces the per-row path rather than doubling it up.
+      expect(singleMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu refuses a block move that would fall off the top',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 1,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 0);
+      await tester.tap(find.text('Move 2 Rows Up'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves, isEmpty);
+      expect(singleMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu duplicates every range-selected track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final duplicateRequests = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onDuplicateRows: (rows) async {
+            duplicateRequests.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 2);
+      await tester.tap(find.text('Duplicate 2 Rows'));
+      await tester.pumpAndSettle();
+
+      expect(duplicateRequests, <List<int>>[
+        <int>[1, 2],
+      ]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu hides duplicate when the host provides no handler',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: _namedTrackRows(3),
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 1);
+
+    expect(find.text('Duplicate Row'), findsNothing);
+  });
+
+  testWidgets('row menu refuses a block move that would fall off the bottom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Anchor on the lower row so expanding it cannot push the row we still
+      // need to click out of reach.
+      await _tapRowHeader(tester, 3);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 2);
+      await tester.tap(find.text('Move 2 Rows Down'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves, isEmpty);
+      expect(singleMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu moves a three-row selection down as a block',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      await _openRowHeaderMenu(tester, 2);
+      await tester.tap(find.text('Move 3 Rows Down'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves.length, 1);
+      expect(blockMoves.single.rows, <int>[0, 1, 2]);
+      expect(blockMoves.single.delta, 1);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu on an unselected header acts on that row alone',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+      final duplicateRequests = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onDuplicateRows: (rows) async {
+            duplicateRequests.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Select rows 1 and 2, anchoring low so row 0 keeps its position.
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 1,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      // Row 0 is outside the selection, so the menu must ignore the selection.
+      await _openRowHeaderMenu(tester, 0);
+      expect(find.text('Move Down'), findsOneWidget);
+      expect(find.text('Duplicate Row'), findsOneWidget);
+      expect(find.text('Move 2 Rows Down'), findsNothing);
+
+      await tester.tap(find.text('Duplicate Row'));
+      await tester.pumpAndSettle();
+
+      expect(duplicateRequests, <List<int>>[
+        <int>[0],
+      ]);
+
+      await _openRowHeaderMenu(tester, 0);
+      await tester.tap(find.text('Move Down'));
+      await tester.pumpAndSettle();
+
+      // A single row keeps using the per-row path, not the block path.
+      expect(singleMoves, <({int from, int to})>[(from: 0, to: 1)]);
+      expect(blockMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('a plain header click collapses the menu back to one row',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onDuplicateRows: (_) async {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      await _tapRowHeader(tester, 1);
+
+      await _openRowHeaderMenu(tester, 1);
+
+      expect(find.text('Delete Row'), findsOneWidget);
+      expect(find.text('Delete 3 Rows'), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('double tapping a selected header gain resets the whole set',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final liveUpdates = <({int row, double gain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: <double>[1.5, 2.6, 0.8],
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (_, __, ___) {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 0,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      final gainRect = tester.getRect(
+        find.byKey(const ValueKey('timeline_tablet_row_gain_0')),
+      );
+      await tester.tapAt(gainRect.center);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(gainRect.center);
+      await tester.pumpAndSettle();
+
+      // Reset is absolute: every selected row lands on unity together.
+      final lastByRow = <int, double>{};
+      for (final update in liveUpdates) {
+        lastByRow[update.row] = update.gain;
+      }
+      expect(lastByRow.keys.toSet(), <int>{0, 1, 2});
+      for (final row in <int>[0, 1, 2]) {
+        expect(lastByRow[row], closeTo(2.0, 0.0001));
+      }
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('gain drag clamps at the floor without desyncing the selection',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final liveUpdates = <({int row, double gain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: <double>[2.4, 0.2, 1.0],
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (_, __, ___) {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 0,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      // Slam the anchor to the far left; row 1 starts near silence already.
+      await _dragTabletHeaderGainTo(tester, row: 0, fraction: 0.0);
+
+      final lastByRow = <int, double>{};
+      for (final update in liveUpdates) {
+        lastByRow[update.row] = update.gain;
+      }
+      expect(lastByRow.keys.toSet(), <int>{0, 1, 2});
+      for (final row in <int>[0, 1, 2]) {
+        expect(lastByRow[row], greaterThanOrEqualTo(0.0));
+        expect(lastByRow[row], lessThanOrEqualTo(3.0));
+      }
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('tablet row grouping mode toggles tablet row headers',
       (tester) async {
     final rows = <TimelineRow>[
@@ -3038,6 +3628,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tapAt(_tabletHeaderGainPoint(tester, 1));
+    // The slider also listens for a double tap, so the single-tap callbacks
+    // stay deferred until that window closes.
+    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
     expect(liveUpdates.map((entry) => entry.row), contains(1));

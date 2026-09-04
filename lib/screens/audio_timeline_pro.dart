@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'dart:math' as math;
+import 'package:mixroom/ai/ai_gain_units.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/widgets/desktop_panel_shell.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -603,6 +604,12 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int row)? onChangeInstrumentLane;
   final Future<void> Function(int row) onDeleteRow;
   final Future<void> Function(int fromIndex, int toIndex) onMoveRow;
+
+  /// Moves [rows] as one block by [delta] positions in a single undo step.
+  final Future<void> Function(List<int> rows, int delta)? onMoveRows;
+
+  /// Clones [rows] with their clips and mix state directly below the block.
+  final Future<void> Function(List<int> rows)? onDuplicateRows;
   final Future<void> Function(int row, String name) onRenameRow;
   final Future<void> Function(String groupId, String name)? onRenameRowGroup;
   final Future<void> Function(int row, int iconId) onSetRowIcon;
@@ -875,6 +882,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onChangeInstrumentLane,
     required this.onDeleteRow,
     required this.onMoveRow,
+    this.onMoveRows,
+    this.onDuplicateRows,
     required this.onRenameRow,
     this.onRenameRowGroup,
     required this.onSetRowIcon,
@@ -2078,6 +2087,35 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
   }
 
+  /// Shifts [rows] by [delta] positions. A multi-row selection travels as one
+  /// block, so it stops at the edge instead of collapsing into itself.
+  Future<void> _moveHeaderRowsBy(List<int> rows, int delta) async {
+    if (delta == 0) return;
+    final ordered =
+        rows.where((row) => row >= 0 && row < _rowCount).toList()..sort();
+    if (ordered.isEmpty) return;
+
+    if (ordered.length == 1) {
+      final row = ordered.first;
+      final target = row + delta;
+      if (target < 0 || target >= _rowCount) return;
+      return widget.onMoveRow(row, target);
+    }
+
+    if (delta < 0 && ordered.first + delta < 0) return;
+    if (delta > 0 && ordered.last + delta >= _rowCount) return;
+
+    final moveRows = widget.onMoveRows;
+    if (moveRows != null) {
+      return moveRows(ordered, delta);
+    }
+
+    // Fallback: walk in the direction that keeps the untouched indices stable.
+    for (final row in delta < 0 ? ordered : ordered.reversed) {
+      await widget.onMoveRow(row, row + delta);
+    }
+  }
+
   double _quantizeMsForTimelineClipDrag(double rawMs) {
     return _timelineClipDragSnapEnabled ? _quantizeMs(rawMs) : rawMs;
   }
@@ -2202,6 +2240,28 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         .toList(growable: false);
   }
 
+  /// Rows a header-level action should target: the whole multi-selection when
+  /// this header belongs to it, otherwise just this row. Unlike
+  /// [_actionRowsForHeader] this never expands group children, so it suits
+  /// structural actions (move, duplicate) and mix gestures alike.
+  List<int> _selectedRowsForHeaderAction(int row) {
+    final selected = _selectedRowIndices.toList()..sort();
+    if (selected.length > 1 && selected.contains(row)) {
+      return selected
+          .where((item) => item >= 0 && item < _rowCount)
+          .toList(growable: false);
+    }
+    return <int>[row];
+  }
+
+  /// Rows a header mix gesture should write to. Multi-selected headers move
+  /// together; a lone group lead row keeps driving only its own bus.
+  List<int> _mixGestureRows(int row) {
+    final rows = _selectedRowsForHeaderAction(row);
+    if (rows.length > 1) return rows;
+    return _mixControlRows(row);
+  }
+
   void _setMixRowsGainLive(List<int> rows, double gain) {
     setState(() {
       for (final item in rows) {
@@ -2215,6 +2275,41 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         unawaited(widget.setRowGain(item, gain));
       }
     }
+  }
+
+  /// Moves every row by the same dB offset the dragged header travelled, so a
+  /// multi-track gain gesture preserves the relative balance of the selection.
+  void _setMixRowsGainRelativeLive({
+    required List<int> rows,
+    required int anchorRow,
+    required double anchorGain,
+  }) {
+    final targetAnchorGain = anchorGain.clamp(0.0, 3.0).toDouble();
+    final anchorStart =
+        _gainDragStartByRow[anchorRow] ??
+        (anchorRow >= 0 && anchorRow < widget.rowGain.length
+            ? widget.rowGain[anchorRow]
+            : targetAnchorGain);
+    final deltaDb = rowGainUiToDb(targetAnchorGain) - rowGainUiToDb(anchorStart);
+
+    final next = <int, double>{};
+    for (final item in rows) {
+      if (item < 0 || item >= widget.rowGain.length) continue;
+      if (item == anchorRow) {
+        next[item] = targetAnchorGain;
+        continue;
+      }
+      final start = _gainDragStartByRow[item] ?? widget.rowGain[item];
+      next[item] = adjustRowGainUiByDb(start, deltaDb)
+          .clamp(0.0, 3.0)
+          .toDouble();
+    }
+    if (next.isEmpty) return;
+
+    setState(() {
+      next.forEach((item, gain) => widget.rowGain[item] = gain);
+    });
+    next.forEach((item, gain) => unawaited(widget.setRowGain(item, gain)));
   }
 
   void _snapshotMixRowsGain(List<int> rows) {
@@ -2259,13 +2354,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   void _updateHeaderGainFromLocalDx({
     required List<int> rows,
+    required int anchorRow,
     required double localDx,
     required double width,
   }) {
     if (width <= 0 || rows.isEmpty) return;
     final normalized = (localDx / width).clamp(0.0, 1.0).toDouble();
     final gain = normalized * 3.0;
-    _setMixRowsGainLive(rows, gain);
+    if (rows.length <= 1) {
+      _setMixRowsGainLive(rows, gain);
+      return;
+    }
+    _setMixRowsGainRelativeLive(
+      rows: rows,
+      anchorRow: anchorRow,
+      anchorGain: gain,
+    );
   }
 
   void _setMixRowsPanLive(List<int> rows, double pan) {
@@ -13969,6 +14073,26 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         : 0;
     final canCreateGroup =
         widget.onCreateRowGroup != null && groupingRows.length >= 2;
+    // Structural actions (move, duplicate, delete) follow the header
+    // multi-selection so the menu reads and behaves in bulk.
+    final menuRows = _selectedRowsForHeaderAction(row);
+    final menuRowCount = menuRows.length;
+    final isMultiRowMenu = menuRowCount > 1;
+    String bulkLabel(String singular, String pluralKey) {
+      if (!isMultiRowMenu) return L10n.translate(context, singular);
+      return L10n.translateWithParams(context, pluralKey, <String, String>{
+        'count': '$menuRowCount',
+      });
+    }
+
+    final moveUpLabel = bulkLabel('Move Up', 'Move {count} Rows Up');
+    final moveDownLabel = bulkLabel('Move Down', 'Move {count} Rows Down');
+    final duplicateLabel = bulkLabel(
+      'Duplicate Row',
+      'Duplicate {count} Rows',
+    );
+    final deleteLabel = bulkLabel('Delete Row', 'Delete {count} Rows');
+    final canDuplicateRows = widget.onDuplicateRows != null;
     final canEditGroup =
         rowGroup != null &&
         (widget.onRemoveRowFromGroup != null ||
@@ -14143,7 +14267,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       color: _kTimelineShellText,
                     ),
                     title: Text(
-                      L10n.translate(ctx, 'Move Up'),
+                      moveUpLabel,
                       style: const TextStyle(
                         fontFamily: 'Pretendard',
                         color: _kTimelineShellText,
@@ -14157,7 +14281,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       color: _kTimelineShellText,
                     ),
                     title: Text(
-                      L10n.translate(ctx, 'Move Down'),
+                      moveDownLabel,
                       style: const TextStyle(
                         fontFamily: 'Pretendard',
                         color: _kTimelineShellText,
@@ -14165,6 +14289,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     ),
                     onTap: () => Navigator.pop(ctx, 'move_down'),
                   ),
+                  if (canDuplicateRows)
+                    ListTile(
+                      key: ValueKey('timeline_row_menu_duplicate_$row'),
+                      leading: const Icon(
+                        Icons.copy_all_outlined,
+                        color: _kTimelineShellText,
+                      ),
+                      title: Text(
+                        duplicateLabel,
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: _kTimelineShellText,
+                        ),
+                      ),
+                      onTap: () => Navigator.pop(ctx, 'duplicate'),
+                    ),
                   ListTile(
                     leading: const Icon(
                       Icons.drive_file_rename_outline,
@@ -14259,7 +14399,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                       color: Color(0xFFFFA4A4),
                     ),
                     title: Text(
-                      L10n.translate(ctx, 'Delete Row'),
+                      deleteLabel,
                       style: const TextStyle(color: Color(0xFFFFA4A4)),
                     ),
                     onTap: () => Navigator.pop(ctx, 'delete'),
@@ -14291,11 +14431,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     if (action == 'change_instrument') {
       return widget.onChangeInstrumentLane?.call(row);
     }
-    if (action == 'move_up' && row > 0) {
-      return widget.onMoveRow(row, row - 1);
+    if (action == 'move_up') {
+      return _moveHeaderRowsBy(menuRows, -1);
     }
-    if (action == 'move_down' && row < _rowCount - 1) {
-      return widget.onMoveRow(row, row + 1);
+    if (action == 'move_down') {
+      return _moveHeaderRowsBy(menuRows, 1);
+    }
+    if (action == 'duplicate') {
+      return widget.onDuplicateRows?.call(menuRows);
     }
     if (action == 'delete') {
       return _deleteRowsInOrder(_selectedRowsForDelete(row));
@@ -15851,9 +15994,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               (visualInset + visualWidth * gainProgress - knobSize / 2.0)
                   .clamp(0.0, math.max(0.0, width - knobSize))
                   .toDouble();
+          // Resolved per gesture so a selection change between gestures is
+          // always honoured by the next one.
+          List<int> gainGestureRows() => _mixGestureRows(row);
+
           void updateGainFromLocalDx(double localDx) {
             _updateHeaderGainFromLocalDx(
-              rows: headerMixControlRows,
+              rows: gainGestureRows(),
+              anchorRow: row,
               localDx: localDx - visualInset,
               width: visualWidth,
             );
@@ -15874,9 +16022,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               3.0,
             );
             if ((next - headerMixGain).abs() < 0.000001) return;
-            _snapshotMixRowsGain(headerMixControlRows);
-            _setMixRowsGainLive(headerMixControlRows, next.toDouble());
-            _commitMixRowsGainFromSnapshot(headerMixControlRows);
+            final rows = gainGestureRows();
+            _snapshotMixRowsGain(rows);
+            if (rows.length <= 1) {
+              _setMixRowsGainLive(rows, next.toDouble());
+            } else {
+              _setMixRowsGainRelativeLive(
+                rows: rows,
+                anchorRow: row,
+                anchorGain: next.toDouble(),
+              );
+            }
+            _commitMixRowsGainFromSnapshot(rows);
           }
 
           return Listener(
@@ -15897,23 +16054,27 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               key: ValueKey('timeline_tablet_row_gain_$row'),
               behavior: HitTestBehavior.opaque,
               onTapDown: (details) {
-                _snapshotMixRowsGain(headerMixControlRows);
+                final rows = gainGestureRows();
+                _snapshotMixRowsGain(rows);
                 updateGainFromLocalDx(details.localPosition.dx);
-                _commitMixRowsGainFromSnapshot(headerMixControlRows);
+                _commitMixRowsGainFromSnapshot(rows);
               },
               onDoubleTap: () {
-                _snapshotMixRowsGain(headerMixControlRows);
-                _setMixRowsGainLive(headerMixControlRows, 2.0);
-                _commitMixRowsGainFromSnapshot(headerMixControlRows);
+                // Reset is absolute on purpose: every selected row returns to
+                // unity rather than shifting by the anchor's offset.
+                final rows = gainGestureRows();
+                _snapshotMixRowsGain(rows);
+                _setMixRowsGainLive(rows, 2.0);
+                _commitMixRowsGainFromSnapshot(rows);
               },
               onHorizontalDragStart: (_) {
-                _snapshotMixRowsGain(headerMixControlRows);
+                _snapshotMixRowsGain(gainGestureRows());
               },
               onHorizontalDragUpdate: (details) {
                 updateGainFromLocalDx(details.localPosition.dx);
               },
               onHorizontalDragEnd: (_) {
-                _commitMixRowsGainFromSnapshot(headerMixControlRows);
+                _commitMixRowsGainFromSnapshot(gainGestureRows());
               },
               onHorizontalDragCancel: () {
                 _gainDragStartByRow.clear();
