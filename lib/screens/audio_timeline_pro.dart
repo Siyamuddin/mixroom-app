@@ -21297,7 +21297,13 @@ class _TimelinePainter extends CustomPainter {
 
       final barHeight = maxAmp.clamp(0.0, 1.0) * maxAmplitude;
       final topY = snapToDevicePixel(centerY - barHeight);
-      final bottomY = snapToDevicePixel(centerY + barHeight);
+      var bottomY = snapToDevicePixel(centerY + barHeight);
+      if (bottomY <= topY) {
+        // Device-pixel snapping collapsed the bar onto one grid line, and a
+        // zero-length butt-capped stroke paints nothing. Give quiet audio a
+        // single-pixel bar so it reads as a faint line instead of vanishing.
+        bottomY = topY + 1.0 / dpr;
+      }
       path.moveTo(x0, topY);
       path.lineTo(x0, bottomY);
     }

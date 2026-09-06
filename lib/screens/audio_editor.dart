@@ -30097,7 +30097,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (extracted != null && extracted.isNotEmpty) {
       clip.normWaveformData = extracted;
-      _waveformCacheByPath[_normalizedClipPath(clip.file.path)] = extracted;
+      if (!_isAllZeroWaveform(extracted)) {
+        // Keep silent peaks out of the shared cache; every later clip on this
+        // path would be served them and paint an empty waveform.
+        _waveformCacheByPath[_normalizedClipPath(clip.file.path)] = extracted;
+      }
       clip.didExtractWaveform = true;
     }
   }
@@ -30456,7 +30460,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final cacheKey = _normalizedClipPath(inputPath);
     try {
       final cached = _waveformCacheByPath[cacheKey];
-      if (cached != null && cached.isNotEmpty) {
+      // Silent peaks are treated as unusable here, matching
+      // `_ensureAiV3ClipWaveformReady`. Adopting them would mark the clip as
+      // extracted and leave it painting an empty waveform for good.
+      if (cached != null && cached.isNotEmpty && !_isAllZeroWaveform(cached)) {
         if (!mounted) return;
         final waitingTracks =
             _waveformPendingTracksByPath.remove(cacheKey) ?? <AudioTrack>{};
@@ -30506,7 +30513,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final future =
                 _extractWaveformData(inputPath, durSec: durSec, target: target)
                     .then((waveform) {
-                      if (waveform != null && waveform.isNotEmpty) {
+                      if (waveform != null &&
+                          waveform.isNotEmpty &&
+                          !_isAllZeroWaveform(waveform)) {
                         _waveformCacheByPath[cacheKey] = waveform;
                       }
                       return waveform;
@@ -30524,6 +30533,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _waveformPendingTracksByPath.remove(cacheKey) ?? <AudioTrack>{c};
       if (waveform == null || waveform.isEmpty) {
         _markWaveformExtractionFailed(cacheKey, waitingTracks, 'empty result');
+        return;
+      }
+      if (_isAllZeroWaveform(waveform)) {
+        // All-silent peaks from a file that decodes fine usually mean ffmpeg
+        // read it while it was still being written, which is common for
+        // freshly generated or exported audio. Retry rather than accept a
+        // waveform that would paint the clip as empty.
+        _markWaveformExtractionFailed(cacheKey, waitingTracks, 'silent result');
         return;
       }
       _waveformFailureCountByPath.remove(cacheKey);
