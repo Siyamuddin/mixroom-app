@@ -108,7 +108,7 @@ _MIX_SCOPE_POLICY_VERSION = "contained_local_mix_generation_v1"
 _PHONE_CLEANUP_CONFLICT_POLICY_VERSION = "phone_cleanup_sound_conflict_v1"
 _TYPED_CLIP_STATE_POLICY_VERSION = "ordered_typed_clip_reference_v1"
 _GROUP_STATE_POLICY_VERSION = "ordered_group_lifecycle_v1"
-_USER_VISIBLE_TEXT_POLICY_VERSION = "private_context_message_boundary_v1"
+_USER_VISIBLE_TEXT_POLICY_VERSION = "current_request_language_anchor_v2"
 
 _PRIVATE_PROMPT_MARKERS = frozenset(
     {
@@ -1277,9 +1277,9 @@ def build_provider_request(
             {
                 "role": "user",
                 "content": [
-                    {"type": "input_text", "text": f"ORIGINAL_REQUEST_VERBATIM:\n{request['original_request']}"},
                     {"type": "input_text", "text": f"RECENT_CONVERSATION_JSON:\n{_canonical_json(request['conversation'])}"},
                     {"type": "input_text", "text": f"CORE_CONTEXT_V3_JSON:\n{_canonical_json(request['core_context'])}"},
+                    {"type": "input_text", "text": f"ORIGINAL_REQUEST_VERBATIM:\n{request['original_request']}"},
                 ],
             }
         ],
@@ -1413,7 +1413,6 @@ def _validate_user_visible_text(
             "v3_plan_user_visible_text_unsafe",
             "Provider completion text repeats the original request.",
         )
-
 
 def _validate_json_schema(value: Any, schema: Mapping[str, Any], path: str = "$", *, quiet: bool = False) -> None:
     def fail(message: str) -> None:

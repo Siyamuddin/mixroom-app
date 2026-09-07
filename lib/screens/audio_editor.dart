@@ -9439,6 +9439,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(_magnitudePredictor.startBackgroundRefresh());
 
     _mixModel = LocalMixingModel();
+    final aiV3RequestRoute = LlmConfig.effectiveAiV3RequestRoute;
     _chatPipeline = ChatPipeline(
       llm: CloudLlmService(
         apiKey: LlmConfig.canUseDirectOpenAi ? LlmConfig.openAiApiKey : '',
@@ -9456,9 +9457,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
               requestTimeout: Duration(
-                seconds: LlmConfig.aiV3RequestTimeoutSeconds,
+                seconds: aiV3RequestRoute.requestTimeoutSeconds,
               ),
-              proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+              proxyApiBaseUrl: aiV3RequestRoute.proxyApiBaseUrl,
               proxyPath: LlmConfig.aiV3ProxyPath,
               authTokenProvider: authService.getIdTokenOrNull,
               refreshAuthTokenProvider: authService.refreshIdTokenOrNull,

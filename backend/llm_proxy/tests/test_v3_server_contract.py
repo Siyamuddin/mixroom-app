@@ -461,8 +461,8 @@ class V3ServerContractTests(unittest.TestCase):
     def test_approved_v3_contract_assets_match_golden_hashes(self) -> None:
         expected = {
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
-            "v3_instructions.txt": "fb0a3898a849210cde4c537c2b60e60de563e94d3b37af8da1ee4b4734bda3d1",
-            "v3_instructions_resource_refs.txt": "ac804724070fbd8898990be49d6586b003cd543bd4b48da402de6d73242ed79f",
+            "v3_instructions.txt": "543e3f18c70727d28a7955561aa72e0839b31e36a39cd9e04d79f3d677fe2e87",
+            "v3_instructions_resource_refs.txt": "672654abaf7b3ae4a5db984df47388d92a580d31bfd09ca5629f8e0d69b1a84a",
             "v3_submit_plan_tool.json": "4376926c5add3526a1402aa9056d659457be8c479efa2675be743fdcb7c1a301",
             "v3_submit_plan_tool_resource_refs.json": "770858c5722b9aba83826773b4a48b98cf08f4f776718afecc0ce02236ac9775",
         }
@@ -560,14 +560,31 @@ class V3ServerContractTests(unittest.TestCase):
             provider_request["instructions"],
         )
         self.assertIn(
-            "language of the latest user",
+            "only authority for response language",
             provider_request["instructions"],
         )
-        self.assertEqual(len(provider_request["messages"][0]["content"]), 3)
+        provider_content = provider_request["messages"][0]["content"]
+        self.assertEqual(len(provider_content), 3)
+        self.assertTrue(
+            provider_content[0]["text"].startswith("RECENT_CONVERSATION_JSON:")
+        )
+        self.assertTrue(
+            provider_content[1]["text"].startswith("CORE_CONTEXT_V3_JSON:")
+        )
+        self.assertTrue(
+            provider_content[2]["text"].startswith("ORIGINAL_REQUEST_VERBATIM:")
+        )
+        self.assertEqual(
+            sum(
+                item["text"].startswith("ORIGINAL_REQUEST_VERBATIM:")
+                for item in provider_content
+            ),
+            1,
+        )
         self.assertNotIn("RESPONSE_LANGUAGE", json.dumps(provider_request))
         self.assertNotIn(
             "row_creation_policy",
-            provider_request["messages"][0]["content"][2]["text"],
+            provider_content[1]["text"],
         )
 
     def test_provider_schema_rejects_unknown_plan_fields(self) -> None:

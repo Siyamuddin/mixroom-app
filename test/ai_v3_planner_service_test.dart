@@ -188,8 +188,9 @@ void main() {
         calls += 1;
         authorizations.add(request.headers['authorization'] ?? '');
         bodies.add(request.body);
-        if (calls == 1)
+        if (calls == 1) {
           return http.Response('{"error":{"code":"expired"}}', 401);
+        }
         return http.Response(jsonEncode(_serverResponse(_respondPlan())), 200);
       });
 
@@ -279,7 +280,7 @@ void main() {
       return http.Response(jsonEncode(_serverResponse(plan)), 200);
     });
 
-    final result = await _service(
+    await _service(
       client,
       commandTypes: const <String>{'clip.align_tempo_to_project'},
     ).plan(context: _context(), originalRequest: 'Make this a remix.');
@@ -466,5 +467,63 @@ void main() {
             ),
       ),
     );
+  });
+
+  test('does not resubmit a request after its client deadline', () async {
+    var calls = 0;
+    final timeoutClient = MockClient((_) async {
+      calls += 1;
+      await Completer<void>().future;
+      return http.Response('{}', 200);
+    });
+
+    await expectLater(
+      _service(
+        timeoutClient,
+        timeout: const Duration(milliseconds: 1),
+      ).plan(context: _context(), originalRequest: 'Make one change.'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_timeout',
+        ),
+      ),
+    );
+    expect(calls, 1);
+  });
+
+  test('does not cross-route retry or resubmit throttled requests', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls += 1;
+      expect(
+        request.url,
+        Uri.parse('https://proxy.example/v1/llm/v3/responses'),
+      );
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'error': <String, dynamic>{'code': 'too_many_requests'},
+        }),
+        429,
+      );
+    });
+
+    await expectLater(
+      _service(
+        client,
+        refreshAuthTokenProvider: () async => 'unused-refresh-token',
+      ).plan(context: _context(), originalRequest: 'Make one change.'),
+      throwsA(
+        isA<AiV3PlannerException>()
+            .having((error) => error.code, 'code', 'v3_planner_http_error')
+            .having(
+              (error) => error.diagnostic['http_status'],
+              'http status',
+              429,
+            ),
+      ),
+    );
+    expect(calls, 1);
   });
 }
