@@ -146,11 +146,27 @@ flutter_native_splash:
   # background_image:
 
   # command to refresh: dart run flutter_launcher_icons
-flutter_icons:
+flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/app_icon_shadow.png"
+  image_path: "assets/app_icon_rounded.png"
+  image_path_android: "assets/app_icon_rounded.png"
+  image_path_ios: "assets/app_icon_ios.png"
+  adaptive_icon_background: "#1D6BA7"
+  adaptive_icon_foreground: "assets/app_icon_all_platforms.png"
+  web:
+    generate: true
+    image_path: "assets/app_icon_ios.png"
+    background_color: "#000000"
+    theme_color: "#000000"
+  windows:
+    generate: true
+    image_path: "assets/app_icon_rounded.png"
+    icon_size: 256
+  macos:
+    generate: true
+    image_path: "assets/app_icon_rounded.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
