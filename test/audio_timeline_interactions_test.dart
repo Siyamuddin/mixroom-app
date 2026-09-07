@@ -2749,7 +2749,7 @@ void main() {
     expect(find.text('Volume'), findsNothing);
   });
 
-  testWidgets('desktop command-click selects a visible track header range',
+  testWidgets('desktop command-click toggles individual track headers',
       (tester) async {
     _setTestTargetPlatform(TargetPlatform.macOS);
     try {
@@ -2770,9 +2770,55 @@ void main() {
       );
 
       expect(_rowHeaderIsSelected(tester, 0), isTrue);
-      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isFalse);
       expect(_rowHeaderIsSelected(tester, 2), isTrue);
       expect(_rowHeaderIsSelected(tester, 3), isFalse);
+
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isFalse);
+      expect(_rowHeaderIsSelected(tester, 2), isFalse);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'desktop shift-click still ranges from the original header after command-clicks',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          expandRowsOnTrackSelect: false,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -2824,7 +2870,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 2,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
       await _tapRowHeader(tester, 1);
 
@@ -2837,7 +2883,7 @@ void main() {
     }
   });
 
-  testWidgets('command range-click does not expand every track in the range',
+  testWidgets('command-click does not expand the added track',
       (tester) async {
     _setTestTargetPlatform(TargetPlatform.macOS);
     try {
@@ -2921,7 +2967,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 2,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
 
       await tester.tap(find.text('M').first);
@@ -2958,7 +3004,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 2,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
@@ -3003,7 +3049,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 0,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
       expect(_rowHeaderIsSelected(tester, 1), isTrue);
 
@@ -3086,7 +3132,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 2,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
 
       await _openRowHeaderMenu(tester, 1);
@@ -3322,7 +3368,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 2,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
       await _openRowHeaderMenu(tester, 2);
       await tester.tap(find.text('Move 3 Rows Down'));
@@ -3413,7 +3459,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 2,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
       await _tapRowHeader(tester, 1);
 
@@ -3451,7 +3497,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 0,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
 
       final gainRect = tester.getRect(
@@ -3501,7 +3547,7 @@ void main() {
       await _tapRowHeaderWithModifier(
         tester,
         row: 0,
-        modifier: LogicalKeyboardKey.metaLeft,
+        modifier: LogicalKeyboardKey.shiftLeft,
       );
 
       // Slam the anchor to the far left; row 1 starts near silence already.
