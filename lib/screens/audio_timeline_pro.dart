@@ -1857,6 +1857,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _headerMoved = false;
   bool _headerMenuOpened = false;
   bool _headerRangeSelectModifierHeld = false;
+  bool _headerToggleSelectModifierHeld = false;
   final Map<int, int> _groupFoldHeaderPointerRows = <int, int>{};
   final Set<int> _instrumentUiHeaderPointers = <int>{};
   Timer? _deadZoneHoldTimer;
@@ -1995,13 +1996,22 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return metaPressed || (!Platform.isMacOS && controlPressed);
   }
 
-  bool get _desktopAdditiveSelectionModifierPressed {
+  bool get _desktopToggleSelectionModifierPressed {
     if (!PlatformCapabilities.current.isDesktop) return false;
     final keyboard = HardwareKeyboard.instance;
-    final primaryModifier = Platform.isMacOS
+    return Platform.isMacOS
         ? keyboard.isMetaPressed
         : keyboard.isControlPressed;
-    return primaryModifier || keyboard.isShiftPressed;
+  }
+
+  bool get _desktopRangeSelectionModifierPressed {
+    if (!PlatformCapabilities.current.isDesktop) return false;
+    return HardwareKeyboard.instance.isShiftPressed;
+  }
+
+  bool get _desktopAdditiveSelectionModifierPressed {
+    return _desktopToggleSelectionModifierPressed ||
+        _desktopRangeSelectionModifierPressed;
   }
 
   bool _isRowSelected(int row) {
@@ -2048,6 +2058,28 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ..clear()
       ..addAll(range.isEmpty ? <int>[tappedRow] : range);
     _focusRowSelection(tappedRow);
+  }
+
+  void _toggleRowInSelection(int row) {
+    if (row < 0 || row >= _rowCount) return;
+    if (_selectedRowIndices.isEmpty && _selectedRowIndex >= 0) {
+      _selectedRowIndices.add(_selectedRowIndex);
+    }
+    if (_selectedRowIndices.contains(row)) {
+      if (_selectedRowIndices.length <= 1) {
+        _focusRowSelection(row);
+        return;
+      }
+      _selectedRowIndices.remove(row);
+      final remaining = _selectedRowIndices.toList()..sort();
+      final next = remaining.contains(_rowSelectionAnchor)
+          ? _rowSelectionAnchor
+          : remaining.last;
+      _focusRowSelection(next);
+      return;
+    }
+    _selectedRowIndices.add(row);
+    _focusRowSelection(row);
   }
 
   List<int> _actionRowsForHeader(int row) {
@@ -6498,6 +6530,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _headerMoved = false;
     _headerMenuOpened = false;
     _headerRangeSelectModifierHeld = false;
+    _headerToggleSelectModifierHeld = false;
   }
 
   void _startRowMenuHold(int row, Offset localPos, int pointer) {
@@ -6508,7 +6541,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _headerEligible = _isHoldEligibleInHeader(localPos);
     _headerMoved = false;
     _headerMenuOpened = false;
-    _headerRangeSelectModifierHeld = _desktopAdditiveSelectionModifierPressed;
+    _headerRangeSelectModifierHeld = _desktopRangeSelectionModifierPressed;
+    _headerToggleSelectModifierHeld = _desktopToggleSelectionModifierPressed;
     if (!_headerEligible) return;
 
     _headerHoldTimer = Timer(_rowMenuHoldDelay, () {
@@ -6599,7 +6633,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _headerEligible = true;
       _headerMoved = false;
       _headerMenuOpened = false;
-      _headerRangeSelectModifierHeld = _desktopAdditiveSelectionModifierPressed;
+      _headerRangeSelectModifierHeld = _desktopRangeSelectionModifierPressed;
+      _headerToggleSelectModifierHeld = _desktopToggleSelectionModifierPressed;
       return;
     }
     if (PlatformCapabilities.current.isDesktop &&
@@ -6650,6 +6685,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final bool shouldToggleRow =
         row != null && _headerEligible && !_headerMoved && !_headerMenuOpened;
     final rangeSelectModifierHeld = _headerRangeSelectModifierHeld;
+    final toggleSelectModifierHeld = _headerToggleSelectModifierHeld;
 
     _cancelHeaderHoldTimer();
     _resetHeaderPointerState();
@@ -6663,6 +6699,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _handleHeaderTapSelectionAndExpand(
         tappedRow,
         rangeSelectModifierHeld: rangeSelectModifierHeld,
+        toggleSelectModifierHeld: toggleSelectModifierHeld,
       );
     }
   }
@@ -6760,13 +6797,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   void _handleHeaderTapSelectionAndExpand(
     int tappedRow, {
     bool rangeSelectModifierHeld = false,
+    bool toggleSelectModifierHeld = false,
   }) {
     final rangeSelect = rangeSelectModifierHeld ||
-        _desktopAdditiveSelectionModifierPressed;
+        _desktopRangeSelectionModifierPressed;
+    final toggleSelect = !rangeSelect &&
+        (toggleSelectModifierHeld || _desktopToggleSelectionModifierPressed);
     final wasSelected = tappedRow == _selectedRowIndex;
     final oldExpanded = List<bool>.from(_rowExpanded);
 
     setState(() {
+      if (toggleSelect) {
+        _toggleRowInSelection(tappedRow);
+        return;
+      }
+
       if (rangeSelect) {
         _applyRowRangeSelection(tappedRow);
         return;
