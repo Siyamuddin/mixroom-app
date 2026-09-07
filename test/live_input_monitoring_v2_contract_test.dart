@@ -27,7 +27,10 @@ void main() {
       contains('final monitoringEnabled = _isBluetoothV2Session'),
     );
     expect(routingSheet, contains('onChanged: monitoringAvailable'));
-    expect(routingSheet, contains('!monitoringAvailable && !monitoringEnabled'));
+    expect(
+      routingSheet,
+      contains('!monitoringAvailable && !monitoringEnabled'),
+    );
     expect(
       routingSheet,
       contains('Monitoring is unavailable for the current audio route.'),
@@ -54,27 +57,6 @@ void main() {
       contains('_setNativeMeteringEnabled(_shouldPollMetersDuringPlayback)'),
     );
   });
-
-  test(
-    'automatic monitoring resume fails silently when playback is healthy',
-    () {
-      final editor = File(editorPath).readAsStringSync();
-      final activation = _between(
-        editor,
-        'Future<bool> _activateV2LiveMonitoringTarget({',
-        'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording()',
-      );
-      final resumeAndroid = _between(
-        editor,
-        'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording()',
-        'Future<bool> _disableV2MonitoringBeforeRemovingRow(',
-      );
-
-      expect(activation, contains('bool notifyOnUnavailable = true'));
-      expect(activation, contains('if (notifyOnUnavailable)'));
-      expect(resumeAndroid, contains('notifyOnUnavailable: false'));
-    },
-  );
 
   test(
     'legacy monitoring action remains wired to the existing engine path',
@@ -114,20 +96,23 @@ void main() {
     expect(policyCard, contains('Advanced: monitor anyway'));
   });
 
-  test('platform monitoring is coordinator owned and Bluetooth fail closed', () {
-    final editor = File(editorPath).readAsStringSync();
-    final action = _between(
-      editor,
-      'Future<bool> _activateV2LiveMonitoringTarget({',
-      'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording() async {',
-    );
-    expect(action, contains('AudioRouteIntentV2.monitoring'));
-    expect(action, contains('systemSelectedMonitoring'));
-    expect(action, contains('AudioRouteKindV2.builtIn'));
-    expect(action, contains('AudioRouteKindV2.wired'));
-    expect(action, contains('AudioRouteKindV2.external'));
-    expect(action, isNot(contains('AudioRouteKindV2.bluetoothMedia')));
-  });
+  test(
+    'platform monitoring is coordinator owned and Bluetooth fail closed',
+    () {
+      final editor = File(editorPath).readAsStringSync();
+      final action = _between(
+        editor,
+        'Future<bool> _activateV2LiveMonitoringTarget({',
+        'Future<bool> _disableV2MonitoringBeforeRemovingRow(',
+      );
+      expect(action, contains('AudioRouteIntentV2.monitoring'));
+      expect(action, contains('systemSelectedMonitoring'));
+      expect(action, contains('AudioRouteKindV2.builtIn'));
+      expect(action, contains('AudioRouteKindV2.wired'));
+      expect(action, contains('AudioRouteKindV2.external'));
+      expect(action, isNot(contains('AudioRouteKindV2.bluetoothMedia')));
+    },
+  );
 
   test('monitoring ownership follows stable row identity', () {
     final editor = File(editorPath).readAsStringSync();
@@ -322,8 +307,8 @@ void main() {
     );
     final mac = _between(
       preflight,
-      'if (Platform.isMacOS) {',
-      '} else if (Platform.isAndroid) {',
+      'if (Platform.isMacOS || Platform.isAndroid) {',
+      '} else {',
     );
     expect(mac, contains('_preparedRecordingChannelStart ='));
     expect(mac, contains('_v2LiveMonitoringChannelCount'));
@@ -392,7 +377,8 @@ void main() {
       'Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {',
       'String _normalizeEffectText(',
     );
-    expect(handler, contains('!(Platform.isMacOS && _v2LiveMonitoringActive)'));
+    expect(handler, contains('!((Platform.isMacOS || Platform.isAndroid) &&'));
+    expect(handler, contains('_v2LiveMonitoringActive)'));
     final plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
     ).readAsStringSync();
@@ -488,7 +474,7 @@ void main() {
       RegExp(
         r'if \(!activateVerifiedMonitorGraphV2\(',
       ).allMatches(plugin).length,
-      2,
+      1,
     );
     final preparation = _between(
       plugin,
@@ -509,7 +495,9 @@ void main() {
       'private fun verifyMonitoringIntentV2(',
       'private fun restoreRecordingPlaybackV2(',
     );
-    expect(verification, contains('if (!activateVerifiedMonitorGraphV2('));
+    expect(verification, isNot(contains('activateVerifiedMonitorGraphV2(')));
+    expect(verification, contains('validatePreparedRecordingV2(operation)'));
+    expect(plugin, contains('getLiveInputMonitoringFactsV2JNI()'));
     expect(
       plugin,
       contains('facts.intValue("connectionCount") == channelCount'),
@@ -546,50 +534,78 @@ void main() {
     );
   });
 
-  test('Android recording suspends and freshly restores monitoring', () {
-    final editor = File(editorPath).readAsStringSync();
-    final plugin = File(
-      'juce_audio_engine/android/src/main/kotlin/com/mixroom/juce_audio_engine/JuceAudioEnginePlugin.kt',
-    ).readAsStringSync();
-    final preflight = _between(
-      editor,
-      'Future<bool> _prepareAudioRecordingStartPreflight() async {',
-      'Future<void> _startAudioRecordingJuce() async {',
-    );
-    final stop = _between(
-      editor,
-      'Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {',
-      'Future<void> _addAudioTrackFromFile(',
-    );
+  test(
+    'Android recording retains the monitor owner and restores before publication',
+    () {
+      final editor = File(editorPath).readAsStringSync();
+      expect(
+        editor,
+        isNot(contains('_androidV2MonitoringSuspendedForRecording')),
+      );
+      expect(
+        editor,
+        isNot(contains('_suspendAndroidV2MonitoringForRecording')),
+      );
+      expect(
+        editor,
+        isNot(contains('_resumeAndroidV2MonitoringAfterPublishedRecording')),
+      );
+      final stop = _between(
+        editor,
+        'Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {',
+        'Future<void> _addAudioTrackFromFile(',
+      );
+      expect(
+        stop.indexOf('_restoreV2RouteAfterAudioRecording()'),
+        lessThan(stop.indexOf('if (!captureResult.success)')),
+      );
+      final plugin = File(
+        'juce_audio_engine/android/src/main/kotlin/com/mixroom/juce_audio_engine/JuceAudioEnginePlugin.kt',
+      ).readAsStringSync();
+      expect(plugin, contains('captureLifecycleV2.start('));
+      expect(plugin, contains('captureLifecycleV2.stop(preserveMonitoring)'));
+      expect(plugin, contains('AndroidNativeStreamEpochV2.matches('));
+      final abort = _between(
+        plugin,
+        'private fun abortRecordingV2(',
+        'private fun prepareV2TeardownV2()',
+      );
+      expect(
+        abort.indexOf('operation.captureCancelRequested.set(true)'),
+        lessThan(abort.indexOf('operation?.cancelled?.set(true)')),
+      );
+      expect(abort, contains('args.boolValue("cancelOnly")'));
+    },
+  );
 
-    expect(preflight, contains('_suspendAndroidV2MonitoringForRecording()'));
-    expect(editor, contains('_androidV2MonitoringSuspendedForRecording'));
-    expect(
-      editor,
-      contains('_resumeAndroidV2MonitoringAfterPublishedRecording'),
+  test('Android capture-only JNI operations do not perform route cleanup', () {
+    final bridge = File(
+      'juce_audio_engine/android/src/main/cpp/JuceBridge.cpp',
+    ).readAsStringSync();
+    final captureOnly = _between(
+      bridge,
+      'Java_com_mixroom_juce_1audio_1engine_JuceBridge_finalizeRecordingForMonitoringV2JNI',
+      'Java_com_mixroom_juce_1audio_1engine_JuceBridge_getLiveInputMonitoringFactsV2JNI',
     );
-    expect(stop, contains('recordingPublished &&'));
-    expect(
-      stop.indexOf('_recordTransitionInFlight = false;'),
-      lessThan(
-        stop.indexOf('_resumeAndroidV2MonitoringAfterPublishedRecording()'),
-      ),
+    expect(captureOnly, contains('finalizeRecordingCapture()'));
+    expect(captureOnly, contains('discardRecordingForMonitoringV2Android()'));
+    expect(captureOnly, isNot(contains('completeRecordingStop')));
+    final engine = File(
+      'juce_audio_engine/android/src/main/cpp/JuceEngine.cpp',
+    ).readAsStringSync();
+    final discard = _between(
+      engine,
+      'void JuceEngine::discardRecordingForMonitoringV2Android()',
+      'void JuceEngine::discardRecordingCaptureV2Android()',
     );
-    expect(plugin, isNot(contains('stopRecordingForMonitoringV2JNI')));
-    expect(plugin, contains('stopRecordingWithoutPlaybackRestoreJNI()'));
-    final captureStart = _between(
-      plugin,
-      'private fun startPreparedCaptureV2(',
-      'private fun stopPreparedCaptureV2(',
+    expect(discard, contains('wavCapture.stop(true)'));
+    expect(discard, isNot(contains('routeLiveInputToRow')));
+    final facts = _between(
+      engine,
+      'juce::NamedValueSet JuceEngine::getLiveInputMonitoringFactsV2()',
+      'bool JuceEngine::shouldRouteLiveInputToGraphV2()',
     );
-    expect(
-      captureStart,
-      contains('operation.purpose != InputLifecyclePurposeV2.RECORDING'),
-    );
-    expect(
-      captureStart,
-      contains('audioRouteIntentV2 != AudioRouteIntentV2.PREPARING_RECORDING'),
-    );
-    expect(captureStart, isNot(contains('AudioRouteIntentV2.MONITORING')));
+    expect(facts, contains('graph.isConnected(connection)'));
+    expect(facts, isNot(contains('syncLiveInputMonitorRoutingLocked')));
   });
 }

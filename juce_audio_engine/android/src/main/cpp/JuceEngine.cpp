@@ -10746,6 +10746,31 @@ juce::NamedValueSet JuceEngine::activateLiveInputMonitoringV2(int row,
     return facts;
 }
 
+// Read-only proof: never reconnect the graph just to verify an existing monitor.
+juce::NamedValueSet JuceEngine::getLiveInputMonitoringFactsV2()
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const bool active = androidV2RecordingPrepared && device != nullptr &&
+        liveInputMonitoringEnabled &&
+        liveInputMonitoringActiveV2.load(std::memory_order_acquire) &&
+        liveMonitorTargetRow >= 0 && liveMonitorTargetRow < (int)rows.size() &&
+        liveMonitorChannelStart >= 0 &&
+        (liveMonitorChannelCount == 1 || liveMonitorChannelCount == 2) &&
+        liveMonitorChannelStart + liveMonitorChannelCount <=
+            device->getActiveInputChannels().countNumberOfSetBits() &&
+        liveMonitorConnections.size() == liveMonitorChannelCount &&
+        std::all_of(liveMonitorConnections.begin(), liveMonitorConnections.end(),
+                    [this](const auto &connection) { return graph.isConnected(connection); });
+    juce::NamedValueSet facts;
+    facts.set("active", active);
+    facts.set("targetRow", liveMonitorTargetRow);
+    facts.set("channelStart", liveMonitorChannelStart);
+    facts.set("channelCount", liveMonitorChannelCount);
+    facts.set("connectionCount", liveMonitorConnections.size());
+    return facts;
+}
+
 bool JuceEngine::shouldRouteLiveInputToGraphV2() const noexcept
 {
     return liveInputMonitoringActiveV2.load(std::memory_order_acquire);
@@ -10896,6 +10921,11 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
         routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
     logCurrentAudioDeviceState("recording-started");
     return true;
+}
+
+void JuceEngine::discardRecordingForMonitoringV2Android()
+{
+    wavCapture.stop(true);
 }
 
 void JuceEngine::discardRecordingCaptureV2Android()

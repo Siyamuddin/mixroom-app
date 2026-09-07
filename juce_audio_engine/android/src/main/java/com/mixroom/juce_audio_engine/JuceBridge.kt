@@ -33,6 +33,9 @@ object JuceBridge {
     @JvmStatic external fun shutdownEngineJNI()
     @JvmStatic external fun shutdownEngineSynchronouslyJNI()
     @JvmStatic external fun discardRecordingCaptureV2JNI()
+    @JvmStatic external fun discardRecordingForMonitoringV2JNI()
+    @JvmStatic external fun finalizeRecordingForMonitoringV2JNI(): HashMap<String, Any>
+    @JvmStatic external fun getLiveInputMonitoringFactsV2JNI(): HashMap<String, Any>
 
     // Playback control
     @JvmStatic external fun playJNI()
