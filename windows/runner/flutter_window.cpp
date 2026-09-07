@@ -4,9 +4,6 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
-FlutterWindow::FlutterWindow(const flutter::DartProject& project)
-    : FlutterWindow(project, {}) {}
-
 FlutterWindow::FlutterWindow(const flutter::DartProject& project,
                              std::string initial_mixroom_path)
     : project_(project),
