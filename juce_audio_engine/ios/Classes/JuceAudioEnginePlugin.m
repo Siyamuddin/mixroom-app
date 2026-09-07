@@ -133,6 +133,7 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 - (void)finishMacIntentOperationV2;
 - (void)emitMacIntentRouteInvalidationEventV2:(BOOL)recordingWasActive
                            monitoringWasActive:(BOOL)monitoringWasActive;
+- (BOOL)isMacMonitoringSessionReusableV2;
 - (BOOL)startMacIndependentInputRecordingV2:(NSString *)path
                                 channelStart:(NSInteger)channelStart
                                 channelCount:(NSInteger)channelCount;
@@ -3100,15 +3101,60 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     });
 }
 
+// Validate the existing monitor session without opening, closing, or retargeting it.
+// Recording is a second consumer of this session, not a new input lifecycle.
+- (BOOL)isMacMonitoringSessionReusableV2 {
+    if (!self.macIntentOperationActiveV2 || self.macIntentOperationCancelledV2 ||
+        ![self.macIntentOperationModeV2 isEqualToString:@"systemSelectedMonitoring"] ||
+        self.macIntentOperationGenerationV2 != self.audioRouteGenerationV2 ||
+        (![self.currentAudioRouteIntentV2 isEqualToString:@"monitoring"] &&
+         ![self.currentAudioRouteIntentV2 isEqualToString:@"recording"])) {
+        return NO;
+    }
+    NSArray *inventory = MixroomCoreAudioDeviceInventory() ?: @[];
+    NSDictionary *input = [self currentMacRecordingInputV2:inventory];
+    NSDictionary *output = [self currentMacPlaybackOutputV2:inventory];
+    NSDictionary *inputFacts = [JuceBridge getMacInputProbeFactsV2ObjC] ?: @{};
+    NSDictionary *monitor = [JuceBridge getMacIndependentInputMonitoringFactsV2ObjC] ?: @{};
+    NSDictionary *snapshot = [self buildAudioRouteSnapshotV2];
+    NSDictionary *juce = snapshot[@"juce"] ?: @{};
+    return input != nil && output != nil &&
+        [input[@"uid"] isEqualToString:self.macIntentTargetInputV2[@"uid"]] &&
+        [output[@"uid"] isEqualToString:self.macIntentVerifiedOutputV2[@"uid"]] &&
+        MixroomCoreAudioDeviceIsAlive([input[@"deviceID"] unsignedIntValue]) &&
+        MixroomCoreAudioDeviceIsAlive([output[@"deviceID"] unsignedIntValue]) &&
+        [MixroomOutputFingerprint(output) isEqualToString:self.macIntentSourceFingerprintV2] &&
+        MixroomMacMonitoringSharesClockDomain(input, output) &&
+        [inputFacts[@"running"] boolValue] &&
+        [inputFacts[@"callbackCount"] unsignedLongLongValue] > 0 &&
+        [inputFacts[@"invalidCallbackCount"] unsignedLongLongValue] == 0 &&
+        [inputFacts[@"channelStart"] integerValue] == self.macIntentRecordingChannelStartV2 &&
+        [inputFacts[@"channelCount"] integerValue] == self.macIntentRecordingChannelCountV2 &&
+        fabs([input[@"sampleRateHz"] doubleValue] - [inputFacts[@"sampleRateHz"] doubleValue]) < 1.0 &&
+        [input[@"bufferFrames"] integerValue] == [inputFacts[@"bufferFrames"] integerValue] &&
+        [monitor[@"active"] boolValue] &&
+        [monitor[@"targetRow"] integerValue] == self.macIntentMonitoringTargetRowV2 &&
+        [monitor[@"channelCount"] integerValue] == self.macIntentRecordingChannelCountV2 &&
+        [snapshot[@"captureConsistency"] isEqualToString:@"stable"] &&
+        [juce[@"deviceOpen"] boolValue] && [juce[@"audioCallbackAttached"] boolValue] &&
+        [juce[@"activeInputChannels"] integerValue] == 0 &&
+        [juce[@"activeOutputChannels"] integerValue] > 0 &&
+        fabs([juce[@"sampleRateHz"] doubleValue] - [inputFacts[@"sampleRateHz"] doubleValue]) < 1.0;
+}
+
 - (BOOL)startMacIndependentInputRecordingV2:(NSString *)path
                                 channelStart:(NSInteger)channelStart
                                 channelCount:(NSInteger)channelCount {
-    if (!self.macIntentOperationActiveV2 ||
+    const BOOL monitoringCapture =
+        [self.currentAudioRouteIntentV2 isEqualToString:@"monitoring"] &&
+        [self isMacMonitoringSessionReusableV2];
+    const BOOL preparedCapture =
+        [self.macIntentOperationModeV2 isEqualToString:@"systemSelectedRecording"] &&
+        [self.currentAudioRouteIntentV2 isEqualToString:@"preparingRecording"];
+    if ((!monitoringCapture && !preparedCapture) ||
+        [JuceBridge isMacInputRecordingV2ObjC] ||
+        !self.macIntentOperationActiveV2 ||
         self.macIntentOperationCancelledV2 ||
-        ![self.macIntentOperationModeV2
-            isEqualToString:@"systemSelectedRecording"] ||
-        ![self.currentAudioRouteIntentV2
-            isEqualToString:@"preparingRecording"] ||
         self.macIntentOperationGenerationV2 != self.audioRouteGenerationV2 ||
         path.length == 0 ||
         channelStart != self.macIntentRecordingChannelStartV2 ||
@@ -3463,11 +3509,12 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 self.macIntentRecordingChannelCountV2 &&
             [captureFacts[@"droppedSamples"] longLongValue] == 0 &&
             [captureFacts[@"invalidBlockCount"] longLongValue] == 0;
+        const BOOL monitoringCapture = [self isMacMonitoringSessionReusableV2];
+        const BOOL preparedCapture =
+            [self.macIntentOperationModeV2 isEqualToString:@"systemSelectedRecording"] &&
+            [self.currentAudioRouteIntentV2 isEqualToString:@"preparingRecording"];
         success = self.macIntentOperationActiveV2 &&
-            [self.macIntentOperationModeV2
-                isEqualToString:@"systemSelectedRecording"] &&
-            [self.currentAudioRouteIntentV2
-                isEqualToString:@"preparingRecording"] &&
+            (monitoringCapture || preparedCapture) &&
             !self.macIntentOperationCancelledV2 && routeStable &&
             captureReady && outputSnapshotIsValid(snapshot, expectedOutput);
         if (success) {
@@ -3494,6 +3541,27 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         } else {
             diagnosticCode = self.macIntentOperationCancelledV2 || !routeStable
                 ? @"route_unstable" : @"actual_state_unavailable";
+        }
+    } else if (monitoringIntent && systemSelectedMonitoring &&
+               self.macIntentOperationActiveV2 &&
+               [self.macIntentOperationModeV2 isEqualToString:@"systemSelectedMonitoring"]) {
+        const BOOL reusesMacMonitoringRoute =
+            [self isMacMonitoringSessionReusableV2] &&
+            ![JuceBridge isMacInputRecordingV2ObjC] &&
+            monitoringTargetRow == self.macIntentMonitoringTargetRowV2 &&
+            recordingChannelStart == self.macIntentRecordingChannelStartV2 &&
+            recordingChannelCount == self.macIntentRecordingChannelCountV2;
+        success = reusesMacMonitoringRoute;
+        diagnosticCode = success ? @"ok" : @"route_unstable";
+        if (success) {
+            self.currentAudioRouteIntentV2 = @"monitoring";
+            self.macIntentLifecyclePhaseV2 = @"monitoring";
+            NSMutableDictionary *facts = [NSMutableDictionary dictionaryWithDictionary:
+                self.iosLastDuplexProbeV2 ?: @{}];
+            facts[@"status"] = @"monitoring";
+            facts[@"phase"] = @"monitoring";
+            facts[@"captureActive"] = @NO;
+            self.iosLastDuplexProbeV2 = facts;
         }
     } else if (inputLifecycleIntent &&
                ((!monitoringIntent &&
@@ -5689,7 +5757,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         NSDictionary *ownedOutput = expectedOutput == nil
             ? nil : MixroomOutputForUID(inventory, expectedOutput[@"uid"]);
         const BOOL monitoringWasActive =
-            [self.currentAudioRouteIntentV2 isEqualToString:@"monitoring"];
+            [self.macIntentOperationModeV2 isEqualToString:@"systemSelectedMonitoring"];
         NSDictionary *monitoringFacts = monitoringWasActive
             ? ([JuceBridge getMacIndependentInputMonitoringFactsV2ObjC] ?: @{})
             : @{};
@@ -8379,6 +8447,16 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     }
     else if ([call.method isEqualToString:@"abortRecordingV2"]) {
 #if TARGET_OS_OSX
+        // A cancel-only record tap must not cancel the monitor's input owner.
+        // Dart waits for the in-flight start and finalizes any capture it armed.
+        const BOOL cancelOnly = [args[@"cancelOnly"] boolValue];
+        if (cancelOnly && self.macIntentOperationActiveV2 &&
+            [self.macIntentOperationModeV2 isEqualToString:@"systemSelectedMonitoring"] &&
+            ([self.currentAudioRouteIntentV2 isEqualToString:@"monitoring"] ||
+             [self.currentAudioRouteIntentV2 isEqualToString:@"recording"])) {
+            result(nil);
+            return;
+        }
         if (self.macIntentOperationActiveV2) {
             self.macIntentOperationCancelledV2 = YES;
             self.macIntentTerminalCauseV2 = @"cancelled";

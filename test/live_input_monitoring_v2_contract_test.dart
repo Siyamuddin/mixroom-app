@@ -27,6 +27,7 @@ void main() {
       contains('final monitoringEnabled = _isBluetoothV2Session'),
     );
     expect(routingSheet, contains('onChanged: monitoringAvailable'));
+    expect(routingSheet, contains('!monitoringAvailable && !monitoringEnabled'));
     expect(
       routingSheet,
       contains('Monitoring is unavailable for the current audio route.'),
@@ -61,11 +62,6 @@ void main() {
       final activation = _between(
         editor,
         'Future<bool> _activateV2LiveMonitoringTarget({',
-        'Future<void> _resumeMacV2MonitoringAfterPublishedRecording()',
-      );
-      final resumeMac = _between(
-        editor,
-        'Future<void> _resumeMacV2MonitoringAfterPublishedRecording()',
         'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording()',
       );
       final resumeAndroid = _between(
@@ -76,7 +72,6 @@ void main() {
 
       expect(activation, contains('bool notifyOnUnavailable = true'));
       expect(activation, contains('if (notifyOnUnavailable)'));
-      expect(resumeMac, contains('notifyOnUnavailable: false'));
       expect(resumeAndroid, contains('notifyOnUnavailable: false'));
     },
   );
@@ -119,23 +114,20 @@ void main() {
     expect(policyCard, contains('Advanced: monitor anyway'));
   });
 
-  test(
-    'platform monitoring is coordinator owned and Bluetooth fail closed',
-    () {
-      final editor = File(editorPath).readAsStringSync();
-      final action = _between(
-        editor,
-        'Future<bool> _activateV2LiveMonitoringTarget({',
-        'Future<void> _resumeMacV2MonitoringAfterPublishedRecording() async {',
-      );
-      expect(action, contains('AudioRouteIntentV2.monitoring'));
-      expect(action, contains('systemSelectedMonitoring'));
-      expect(action, contains('AudioRouteKindV2.builtIn'));
-      expect(action, contains('AudioRouteKindV2.wired'));
-      expect(action, contains('AudioRouteKindV2.external'));
-      expect(action, isNot(contains('AudioRouteKindV2.bluetoothMedia')));
-    },
-  );
+  test('platform monitoring is coordinator owned and Bluetooth fail closed', () {
+    final editor = File(editorPath).readAsStringSync();
+    final action = _between(
+      editor,
+      'Future<bool> _activateV2LiveMonitoringTarget({',
+      'Future<void> _resumeAndroidV2MonitoringAfterPublishedRecording() async {',
+    );
+    expect(action, contains('AudioRouteIntentV2.monitoring'));
+    expect(action, contains('systemSelectedMonitoring'));
+    expect(action, contains('AudioRouteKindV2.builtIn'));
+    expect(action, contains('AudioRouteKindV2.wired'));
+    expect(action, contains('AudioRouteKindV2.external'));
+    expect(action, isNot(contains('AudioRouteKindV2.bluetoothMedia')));
+  });
 
   test('monitoring ownership follows stable row identity', () {
     final editor = File(editorPath).readAsStringSync();
@@ -214,7 +206,7 @@ void main() {
     ).readAsStringSync();
 
     expect(header, contains('#if JUCE_MAC && !JUCE_IOS'));
-    expect(header, contains('class MacIndependentMonitorBuffer'));
+    expect(header, contains('MacIndependentMonitorBuffer.h'));
     expect(header, contains('class MacIndependentMonitorSourceProcessor'));
     expect(bridge, contains('prepareMacIndependentInputMonitoringV2ObjC'));
     expect(plugin, contains('systemSelectedMonitoring'));
@@ -321,87 +313,105 @@ void main() {
     expect(plugin, contains('!monitoringProfileStable'));
   });
 
-  test('macOS recording suspends monitoring instead of reusing its route', () {
+  test('macOS capture reuses monitoring without changing its target', () {
     final editor = File(editorPath).readAsStringSync();
     final preflight = _between(
       editor,
       'Future<bool> _prepareAudioRecordingStartPreflight() async {',
       'Future<void> _startAudioRecordingJuce() async {',
     );
-    final suspension = _between(
-      editor,
-      'Future<bool> _suspendMacV2MonitoringForRecording() async {',
-      'Future<bool> _activateV2LiveMonitoringTarget({',
-    );
-    final macPreflight = _between(
+    final mac = _between(
       preflight,
       'if (Platform.isMacOS) {',
-      '} else {',
+      '} else if (Platform.isAndroid) {',
     );
-
-    expect(macPreflight, contains('_suspendMacV2MonitoringForRecording()'));
-    expect(macPreflight, isNot(contains('_setV2LiveMonitoring(false)')));
-    expect(suspension, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(
-      suspension,
-      contains('_macV2MonitoringSuspendedForRecording = true'),
-    );
-    expect(
-      preflight.indexOf('if (Platform.isMacOS)'),
-      lessThan(preflight.indexOf('final targetMatches')),
-    );
+    expect(mac, contains('_preparedRecordingChannelStart ='));
+    expect(mac, contains('_v2LiveMonitoringChannelCount'));
+    expect(mac, isNot(contains('_suspendMacV2MonitoringForRecording')));
+    expect(mac, isNot(contains('_setV2LiveMonitoring(false)')));
+    expect(mac, isNot(contains('_v2LiveMonitoringTargetRowId ==')));
+    expect(editor, isNot(contains('_macV2MonitoringSuspendedForRecording')));
   });
 
-  test('macOS monitoring resumes only after successful take publication', () {
-    final editor = File(editorPath).readAsStringSync();
-    final activeState = _between(
-      editor,
-      'bool get _v2LiveMonitoringActive =>',
-      'bool get _v2LiveMonitoringAvailable {',
-    );
-    final resume = _between(
-      editor,
-      'Future<void> _resumeMacV2MonitoringAfterPublishedRecording() async {',
-      'Future<bool> _disableV2MonitoringBeforeRemovingRow',
-    );
-    final stop = _between(
-      editor,
-      'Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {',
-      'Future<void> _addAudioTrackFromFile(',
-    );
+  test(
+    'macOS returns to monitoring before publication, including failed takes',
+    () {
+      final editor = File(editorPath).readAsStringSync();
+      final restore = _between(
+        editor,
+        'Future<bool> _restoreV2RouteAfterAudioRecording() async {',
+        'Future<bool> _ensureMicrophonePermissionForRecording() async {',
+      );
+      expect(restore, contains('Platform.isMacOS'));
+      expect(restore, contains('AudioRouteIntentV2.monitoring'));
+      final stop = _between(
+        editor,
+        'Future<void> _stopAudioRecordingJuce({bool keepPlaying = true}) async {',
+        'Future<void> _addAudioTrackFromFile(',
+      );
+      expect(
+        stop.indexOf('_restoreV2RouteAfterAudioRecording()'),
+        lessThan(stop.indexOf('if (!captureResult.success)')),
+      );
+      expect(
+        stop,
+        isNot(contains('_resumeMacV2MonitoringAfterPublishedRecording')),
+      );
+    },
+  );
 
-    expect(
-      activeState,
-      contains('!(Platform.isMacOS && _macV2MonitoringSuspendedForRecording)'),
+  test(
+    'native macOS validates retained monitoring for capture and route changes',
+    () {
+      final plugin = File(
+        'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+      ).readAsStringSync();
+      final start = _between(
+        plugin.substring(
+          plugin.indexOf('@implementation JuceAudioEnginePlugin'),
+        ),
+        '- (BOOL)startMacIndependentInputRecordingV2:(NSString *)path\n',
+        '#else\n- (void)signalIOSIntentRouteConditionV2',
+      );
+      expect(start, contains('monitoringCapture'));
+      expect(start, contains('[self isMacMonitoringSessionReusableV2]'));
+      expect(plugin, contains('reusesMacMonitoringRoute'));
+      final route = _between(
+        plugin,
+        'const BOOL monitoringWasActive =\n',
+        'const BOOL invalidated = expectedInput',
+      );
+      expect(route, contains('systemSelectedMonitoring'));
+    },
+  );
+
+  test('cancel-only record taps preserve the macOS monitor owner', () {
+    final editor = File(editorPath).readAsStringSync();
+    final handler = _between(
+      editor,
+      'Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {',
+      'String _normalizeEffectText(',
     );
-    expect(resume, contains('_rowIndexForId(rowId)'));
-    expect(resume, contains('_rows[rowIndex].rowId == rowId'));
-    expect(resume, contains('inputChannelStart == channelStart'));
-    expect(resume, contains('inputChannelCount == channelCount'));
-    expect(resume, contains('!_audioRouteInfo.isBluetoothOutput'));
-    expect(resume, contains('_v2MonitoringClockCompatible'));
-    expect(resume, contains('AudioRouteIntentV2.playbackOnly'));
-    expect(resume, contains('_activateV2LiveMonitoringTarget('));
-    expect(
-      stop.indexOf('recordingPublished &&'),
-      lessThan(stop.indexOf('_recordTransitionInFlight = false;')),
+    expect(handler, contains('!(Platform.isMacOS && _v2LiveMonitoringActive)'));
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final abort = _between(
+      plugin,
+      'else if ([call.method isEqualToString:@"abortRecordingV2"]) {',
+      '#else\n        if ([[JuceBridge getAudioRouteImplementationObjC]',
     );
+    expect(abort, contains('cancelOnly && self.macIntentOperationActiveV2'));
     expect(
-      stop.indexOf('_recordTransitionInFlight = false;'),
-      lessThan(stop.indexOf('_resumeMacV2MonitoringAfterPublishedRecording()')),
+      abort.indexOf('systemSelectedMonitoring'),
+      lessThan(abort.indexOf('self.macIntentOperationCancelledV2 = YES')),
     );
-    expect(stop, contains('else if (_macV2MonitoringSuspendedForRecording)'));
   });
 
   test('macOS monitoring callbacks use a bounded fail-closed transport', () {
-    final header = File(
-      'juce_audio_engine/ios/Classes/JuceEngine.h',
+    final buffer = File(
+      'juce_audio_engine/native/MacIndependentMonitorBuffer.h',
     ).readAsStringSync();
-    final buffer = _between(
-      header,
-      'class MacIndependentMonitorBuffer',
-      'class MacIndependentMonitorSourceProcessor',
-    );
     final push = _between(buffer, 'bool push(', 'void read(');
     final read = _between(buffer, 'void read(', 'bool isActive()');
 
@@ -475,9 +485,9 @@ void main() {
     expect(plugin, contains('activateVerifiedMonitorGraphV2('));
     expect(plugin, contains('activateLiveInputMonitoringV2JNI('));
     expect(
-      RegExp(r'if \(!activateVerifiedMonitorGraphV2\(')
-          .allMatches(plugin)
-          .length,
+      RegExp(
+        r'if \(!activateVerifiedMonitorGraphV2\(',
+      ).allMatches(plugin).length,
       2,
     );
     final preparation = _between(
@@ -523,9 +533,7 @@ void main() {
     expect(callback, contains('chunkInputPointers[(size_t)ch]'));
     expect(
       callback,
-      contains(
-        'playerInputChannels > 0 ? chunkInputPointers.data() : nullptr',
-      ),
+      contains('playerInputChannels > 0 ? chunkInputPointers.data() : nullptr'),
     );
     expect(
       engineHeader,
@@ -534,9 +542,7 @@ void main() {
     expect(engine, contains('liveInputMonitoringActiveV2.store(true'));
     expect(
       engine,
-      contains(
-        'liveInputMonitoringActiveV2.load(std::memory_order_acquire)',
-      ),
+      contains('liveInputMonitoringActiveV2.load(std::memory_order_acquire)'),
     );
   });
 
@@ -582,9 +588,7 @@ void main() {
     );
     expect(
       captureStart,
-      contains(
-        'audioRouteIntentV2 != AudioRouteIntentV2.PREPARING_RECORDING',
-      ),
+      contains('audioRouteIntentV2 != AudioRouteIntentV2.PREPARING_RECORDING'),
     );
     expect(captureStart, isNot(contains('AudioRouteIntentV2.MONITORING')));
   });

@@ -15273,7 +15273,10 @@ RealtimeWavCapture::StopResult JuceEngine::stopRecording()
     auto captureResult = wavCapture.stop();
     independentInputCaptureMode.store(false, std::memory_order_release);
 
-    routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
+#if JUCE_MAC && !JUCE_IOS
+    if (!isV2PlaybackSession())
+#endif
+        routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 #if JUCE_IOS
     logCurrentAudioDeviceState("recording-stopped");
 #else
@@ -15295,7 +15298,10 @@ void JuceEngine::discardRecordingCapture()
 {
     wavCapture.stop(true);
     independentInputCaptureMode.store(false, std::memory_order_release);
-    routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
+#if JUCE_MAC && !JUCE_IOS
+    if (!isV2PlaybackSession())
+#endif
+        routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 }
 
 bool JuceEngine::isRecording() const
