@@ -1300,7 +1300,7 @@ void CompressorAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, ju
 
         // smoothing (VU-ish)
         constexpr float alpha = 0.12f;
-        auto smooth = [](float prev, float next)
+        auto smooth = [alpha](float prev, float next)
         { return prev + alpha * (next - prev); };
 
         inRmsL.store(smooth(inRmsL.load(std::memory_order_relaxed), rmL), std::memory_order_relaxed);
@@ -1335,7 +1335,7 @@ void CompressorAudioProcessor::processBlock(juce::AudioBuffer<float> &buffer, ju
         const float rmR = (float)std::sqrt(ssR / (double)n);
 
         constexpr float alpha = 0.12f;
-        auto smooth = [](float prev, float next)
+        auto smooth = [alpha](float prev, float next)
         { return prev + alpha * (next - prev); };
 
         outRmsL.store(smooth(outRmsL.load(std::memory_order_relaxed), rmL), std::memory_order_relaxed);

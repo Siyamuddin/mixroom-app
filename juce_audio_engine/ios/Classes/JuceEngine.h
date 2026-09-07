@@ -1399,7 +1399,7 @@ public:
 
         // smoothing (slightly slower than your master, looks nicer in mini meters)
         constexpr float alpha = 0.18f;
-        auto smooth = [](float prev, float next)
+        auto smooth = [alpha](float prev, float next)
         { return prev + alpha * (next - prev); };
 
         if (peakL && peakR && rmsL && rmsR)

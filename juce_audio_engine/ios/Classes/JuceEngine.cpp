@@ -15533,7 +15533,7 @@ void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
 
     // light smoothing (UI jitter reduction)
     constexpr float alpha = 0.25f;
-    auto smooth = [](float prev, float next)
+    auto smooth = [alpha](float prev, float next)
     { return prev + alpha * (next - prev); };
 
     const float prevPeakL = masterMeter.peakL.load(std::memory_order_relaxed);
