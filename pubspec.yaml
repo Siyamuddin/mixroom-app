@@ -73,7 +73,7 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   provider: ^6.1.4
   package_info_plus: ^8.3.1
-  posthog_flutter: ^5.17.1
+  posthog_flutter: ^5.39.0
   sentry_flutter: ^9.14.0
   # 0.5.x upgrades the Android implementation to Google Play Billing 8.0.0.
   # Play requires Billing Library 8+ for Android submissions after 2026-08-31.
