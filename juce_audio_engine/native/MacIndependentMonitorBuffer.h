@@ -227,4 +227,3 @@ private:
     std::atomic<std::uint64_t> overflows{0};
     std::atomic<std::uint64_t> invalidBlocks{0};
 };
-
