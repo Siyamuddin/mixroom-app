@@ -27,6 +27,12 @@ replacement ownership. Fake hooks control when cancellation or invalidation
 arrives; the test checks that capture-only cleanup leaves the monitor intact and
 never restores an invalidated monitor or touches replacement capture.
 
+The host runner also compiles the plugin's actual capture-start reply expression
+and verifies that every success/failure combination produces a Core Foundation
+boolean. Boxing a C logical expression directly produces an integer instead,
+which violates Dart's `invokeMethod<bool>` contract. This regression failed before
+the explicit `@YES`/`@NO` fix and passed afterward.
+
 The host does not execute AVAudioSession or the entire Flutter plugin. Source
 contracts verify plugin dispatch, capture-only bridge wiring, read-only graph
 verification and shared Dart preflight. The existing graph/WAV signal test
@@ -86,5 +92,18 @@ do not damage app storage to reproduce them manually.
   for shifted line numbers; no new diagnostics.
 - Final iOS unsigned device and macOS debug builds passed after the ownership
   review. Build-generated Podfile checksum churn was excluded from the change.
-- iPhone hardware listening, device-disconnection and interruption acceptance:
-  **pending user verification**. No iPhone installation was attempted.
+- Hardware acceptance was performed on the iPad below; no separate iPhone
+  installation or acceptance was performed.
+- iPad mini 5 (iPad11,1), iOS 26.5: in-place signed deployment succeeded.
+  User testing exposed a flickering Record button with monitoring enabled.
+  Logs showed native capture starting without a Dart capture result. The native
+  reply was incorrectly boxed as an integer; the host regression reproduced it.
+  The corrected signed build passed. Logs confirmed four monitored captures with
+  successful recording-intent verification and stable routes, four readable
+  48 kHz mono WAV files, and one successful monitoring-off capture.
+  The user reported the listening test worked and subsequently reported that the
+  requested edge-case checks all seemed fine. Individual accessory details and
+  per-case measurements were not supplied; this is user-reported acceptance,
+  not independently observed disconnection/interruption or audibility evidence.
+  Temporary Dart diagnostics were removed after acceptance. The native boolean
+  reply regression and lifecycle tests remain as automated coverage.

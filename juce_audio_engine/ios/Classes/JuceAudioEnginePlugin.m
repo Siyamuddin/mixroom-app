@@ -5230,7 +5230,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             } else {
                 if (transition == self.iosLifecycleCompletionTokenV2)
                     self.iosLifecycleTransitionActiveV2 = NO;
-                result(@(started && current));
+                // Box explicitly as a boolean for Dart's invokeMethod<bool>.
+                // Boxing a C logical expression produces an NSNumber integer.
+                result(started && current ? @YES : @NO);
             }
         });
     });
