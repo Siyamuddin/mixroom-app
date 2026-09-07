@@ -48,34 +48,34 @@ const double kMixroomDesktopTitleBarHeight = 34;
 const double _kMixroomBrandMarkAspectRatio = 2616 / 1644;
 const double _kMixroomWordmarkAspectRatio = 4096 / 591;
 
-enum MixroomMainTab {
-  home,
-  platform,
-  projects,
-  account,
-}
+enum MixroomMainTab { home, platform, projects, account }
 
 BoxDecoration mixroomShellSurfaceDecoration({
   double radius = 24,
   Color color = const Color.fromRGBO(244, 244, 244, 0.18),
   bool strong = false,
 }) {
-  final topTone =
-      Color.lerp(color, Colors.white, strong ? 0.12 : 0.07)!.withValues(
-    alpha: strong ? 0.24 : 0.20,
-  );
-  final bottomTone =
-      Color.lerp(color, const Color(0xFF08111B), strong ? 0.68 : 0.56)!
-          .withValues(alpha: strong ? 0.78 : 0.68);
+  final topTone = Color.lerp(
+    color,
+    Colors.white,
+    strong ? 0.12 : 0.07,
+  )!.withValues(alpha: strong ? 0.24 : 0.20);
+  final bottomTone = Color.lerp(
+    color,
+    const Color(0xFF08111B),
+    strong ? 0.68 : 0.56,
+  )!.withValues(alpha: strong ? 0.78 : 0.68);
   return BoxDecoration(
     gradient: LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
         topTone,
-        Color.lerp(color, const Color(0xFF0B1726), 0.42)!.withValues(
-          alpha: strong ? 0.46 : 0.38,
-        ),
+        Color.lerp(
+          color,
+          const Color(0xFF0B1726),
+          0.42,
+        )!.withValues(alpha: strong ? 0.46 : 0.38),
         bottomTone,
       ],
       stops: const [0.0, 0.38, 1.0],
@@ -97,9 +97,7 @@ BoxDecoration mixroomShellSurfaceDecoration({
         offset: const Offset(0, 14),
       ),
       BoxShadow(
-        color: const Color(0xFF2E9DFF).withValues(
-          alpha: strong ? 0.10 : 0.05,
-        ),
+        color: const Color(0xFF2E9DFF).withValues(alpha: strong ? 0.10 : 0.05),
         blurRadius: strong ? 28 : 20,
         spreadRadius: 0,
         offset: const Offset(0, 8),
@@ -121,10 +119,7 @@ BoxDecoration mixroomShellDockDecoration() {
       stops: <double>[0.05, 0.42, 1.0],
     ),
     borderRadius: const BorderRadius.vertical(top: Radius.circular(39)),
-    border: Border.all(
-      color: Colors.white.withValues(alpha: 0.14),
-      width: 0.8,
-    ),
+    border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 0.8),
     boxShadow: [
       BoxShadow(
         color: Colors.black.withValues(alpha: 0.46),
@@ -220,6 +215,17 @@ bool mixroomUsesTabletLandscapeShell(BuildContext context) {
         logicalDisplaySize: displaySize,
       ) &&
       size.width >= size.height;
+}
+
+bool mixroomUsesPhoneLayout(BuildContext context) {
+  final platform = PlatformCapabilities.current;
+  final size = MediaQuery.sizeOf(context);
+  final displaySize = currentFlutterDisplayLogicalSize();
+  return platform.isMobile &&
+      !isTabletLogicalWindowOrDisplaySize(
+        logicalWindowSize: size,
+        logicalDisplaySize: displaySize,
+      );
 }
 
 bool mixroomUsesSideRailNavigation(BuildContext context) {
@@ -588,10 +594,11 @@ class MixroomShellDialogButton extends StatelessWidget {
     final backgroundColor = accent
         ? const Color.fromRGBO(0, 149, 255, 0.52)
         : danger
-            ? const Color.fromRGBO(255, 119, 119, 0.18)
-            : Colors.white.withValues(alpha: 0.10);
-    final foregroundColor =
-        danger ? const Color(0xFFFFB4B4) : const Color(0xFFF4F4F4);
+        ? const Color.fromRGBO(255, 119, 119, 0.18)
+        : Colors.white.withValues(alpha: 0.10);
+    final foregroundColor = danger
+        ? const Color(0xFFFFB4B4)
+        : const Color(0xFFF4F4F4);
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -647,11 +654,12 @@ class MixroomShellRoundButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = activeWide ? 76.0 : size;
-    final fill = fillColor ??
+    final fill =
+        fillColor ??
         (active
             ? (activeWide
-                ? const Color.fromRGBO(0, 149, 255, 0.60)
-                : const Color.fromRGBO(244, 244, 244, 0.60))
+                  ? const Color.fromRGBO(0, 149, 255, 0.60)
+                  : const Color.fromRGBO(244, 244, 244, 0.60))
             : const Color.fromRGBO(244, 244, 244, 0.22));
     return Material(
       color: Colors.transparent,
@@ -688,8 +696,9 @@ class MixroomShellRoundButton extends StatelessWidget {
                     color: fill,
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
-                      color:
-                          Colors.white.withValues(alpha: active ? 0.14 : 0.10),
+                      color: Colors.white.withValues(
+                        alpha: active ? 0.14 : 0.10,
+                      ),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -701,7 +710,8 @@ class MixroomShellRoundButton extends StatelessWidget {
                     ],
                   ),
                   alignment: Alignment.center,
-                  child: icon ??
+                  child:
+                      icon ??
                       SvgPicture.asset(
                         assetPath!,
                         width: iconExtent ?? (activeWide ? 16 : 20),
@@ -838,23 +848,31 @@ class MixroomShellSegmentedControl<T> extends StatelessWidget {
                               },
                               borderRadius: thumbRadiusForIndex(i),
                               overlayColor:
-                                  WidgetStateProperty.resolveWith<Color?>(
-                                      (states) {
-                                if (states.contains(WidgetState.pressed)) {
-                                  return Colors.white.withValues(alpha: 0.12);
-                                }
-                                if (states.contains(WidgetState.hovered)) {
-                                  return Colors.white.withValues(alpha: 0.06);
-                                }
-                                if (states.contains(WidgetState.focused)) {
-                                  return Colors.white.withValues(alpha: 0.08);
-                                }
-                                return Colors.transparent;
-                              }),
+                                  WidgetStateProperty.resolveWith<Color?>((
+                                    states,
+                                  ) {
+                                    if (states.contains(WidgetState.pressed)) {
+                                      return Colors.white.withValues(
+                                        alpha: 0.12,
+                                      );
+                                    }
+                                    if (states.contains(WidgetState.hovered)) {
+                                      return Colors.white.withValues(
+                                        alpha: 0.06,
+                                      );
+                                    }
+                                    if (states.contains(WidgetState.focused)) {
+                                      return Colors.white.withValues(
+                                        alpha: 0.08,
+                                      );
+                                    }
+                                    return Colors.transparent;
+                                  }),
                               child: Container(
                                 alignment: Alignment.center,
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
                                 child: FittedBox(
                                   fit: BoxFit.scaleDown,
                                   child: Text(
@@ -864,8 +882,9 @@ class MixroomShellSegmentedControl<T> extends StatelessWidget {
                                     style: TextStyle(
                                       fontFamily: 'Pretendard',
                                       color: Colors.white.withValues(
-                                        alpha:
-                                            options[i] == value ? 0.98 : 0.62,
+                                        alpha: options[i] == value
+                                            ? 0.98
+                                            : 0.62,
                                       ),
                                       fontSize: 15,
                                       fontWeight: options[i] == value
@@ -937,13 +956,17 @@ class MixroomMainBottomDock extends StatelessWidget {
           children: [
             MixroomShellRoundButton(
               assetPath: _iconForTab(
-                  MixroomMainTab.home, selectedTab == MixroomMainTab.home),
+                MixroomMainTab.home,
+                selectedTab == MixroomMainTab.home,
+              ),
               active: selectedTab == MixroomMainTab.home,
               onTap: () => onTabSelected(MixroomMainTab.home),
             ),
             MixroomShellRoundButton(
-              assetPath: _iconForTab(MixroomMainTab.platform,
-                  selectedTab == MixroomMainTab.platform),
+              assetPath: _iconForTab(
+                MixroomMainTab.platform,
+                selectedTab == MixroomMainTab.platform,
+              ),
               active: selectedTab == MixroomMainTab.platform,
               onTap: () => onTabSelected(MixroomMainTab.platform),
             ),
@@ -961,14 +984,18 @@ class MixroomMainBottomDock extends StatelessWidget {
               onTap: onAddTap,
             ),
             MixroomShellRoundButton(
-              assetPath: _iconForTab(MixroomMainTab.projects,
-                  selectedTab == MixroomMainTab.projects),
+              assetPath: _iconForTab(
+                MixroomMainTab.projects,
+                selectedTab == MixroomMainTab.projects,
+              ),
               active: selectedTab == MixroomMainTab.projects,
               onTap: () => onTabSelected(MixroomMainTab.projects),
             ),
             MixroomShellRoundButton(
-              assetPath: _iconForTab(MixroomMainTab.account,
-                  selectedTab == MixroomMainTab.account),
+              assetPath: _iconForTab(
+                MixroomMainTab.account,
+                selectedTab == MixroomMainTab.account,
+              ),
               active: selectedTab == MixroomMainTab.account,
               onTap: () => onTabSelected(MixroomMainTab.account),
             ),
@@ -985,12 +1012,16 @@ class MixroomMainSideRail extends StatelessWidget {
     required this.selectedTab,
     required this.onTabSelected,
     required this.onAddTap,
+    this.onBrandTap,
+    this.showBrandNotificationDot = false,
     this.topContentInset = 22,
   });
 
   final MixroomMainTab selectedTab;
   final ValueChanged<MixroomMainTab> onTabSelected;
   final VoidCallback onAddTap;
+  final VoidCallback? onBrandTap;
+  final bool showBrandNotificationDot;
   final double topContentInset;
 
   String _iconForTab(MixroomMainTab tab, bool active) {
@@ -1041,19 +1072,67 @@ class MixroomMainSideRail extends StatelessWidget {
           padding: EdgeInsets.fromLTRB(10, topContentInset, 10, 12),
           child: Column(
             children: [
-              Container(
-                width: 43,
-                height: 43,
-                alignment: Alignment.center,
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF111A25),
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.14),
+              Tooltip(
+                message: showBrandNotificationDot
+                    ? L10n.translate(context, 'Update Available')
+                    : L10n.translate(context, 'About Mixroom'),
+                child: Material(
+                  color: Colors.transparent,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      InkWell(
+                        onTap: onBrandTap,
+                        borderRadius: BorderRadius.circular(15),
+                        child: Ink(
+                          width: 43,
+                          height: 43,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF111A25),
+                            borderRadius: BorderRadius.circular(15),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.14),
+                            ),
+                          ),
+                          child: const MixroomShellShortLogo(),
+                        ),
+                      ),
+                      if (showBrandNotificationDot)
+                        Positioned(
+                          top: -2,
+                          right: -2,
+                          child: Semantics(
+                            label: L10n.translate(context, 'Update Available'),
+                            child: Container(
+                              key: const ValueKey(
+                                'mixroom-update-available-dot',
+                              ),
+                              width: 11,
+                              height: 11,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF8A34),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF080E15),
+                                  width: 2,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x66FF8A34),
+                                    blurRadius: 7,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                child: const MixroomShellShortLogo(),
               ),
               const SizedBox(height: 24),
               _MixroomDesktopRailIconButton(
@@ -1064,16 +1143,6 @@ class MixroomMainSideRail extends StatelessWidget {
                   selectedTab == MixroomMainTab.home,
                 ),
                 onTap: () => onTabSelected(MixroomMainTab.home),
-              ),
-              const SizedBox(height: 14),
-              _MixroomDesktopRailIconButton(
-                label: L10n.translate(context, 'Platform'),
-                active: selectedTab == MixroomMainTab.platform,
-                assetPath: _iconForTab(
-                  MixroomMainTab.platform,
-                  selectedTab == MixroomMainTab.platform,
-                ),
-                onTap: () => onTabSelected(MixroomMainTab.platform),
               ),
               const SizedBox(height: 14),
               _MixroomDesktopRailIconButton(
@@ -1149,8 +1218,9 @@ class _MixroomDesktopRailIconButtonState
     final activeColor = emphasize
         ? const Color(0xFF0A84FF)
         : const Color(0xFF132132).withValues(alpha: 0.98);
-    final idleColor =
-        _hovered ? Colors.white.withValues(alpha: 0.075) : Colors.transparent;
+    final idleColor = _hovered
+        ? Colors.white.withValues(alpha: 0.075)
+        : Colors.transparent;
     return Tooltip(
       message: widget.label,
       waitDuration: const Duration(milliseconds: 450),
@@ -1192,8 +1262,9 @@ class _MixroomDesktopRailIconButtonState
                       boxShadow: emphasize
                           ? [
                               BoxShadow(
-                                color: const Color(0xFF0A84FF)
-                                    .withValues(alpha: 0.34),
+                                color: const Color(
+                                  0xFF0A84FF,
+                                ).withValues(alpha: 0.34),
                                 blurRadius: 20,
                                 offset: const Offset(0, 8),
                               ),
@@ -1217,7 +1288,8 @@ class _MixroomDesktopRailIconButtonState
                     width: emphasize ? 28 : 24,
                     height: emphasize ? 28 : 24,
                     child: Center(
-                      child: widget.icon ??
+                      child:
+                          widget.icon ??
                           SvgPicture.asset(
                             widget.assetPath!,
                             width: 23,
@@ -1241,10 +1313,7 @@ class _MixroomDesktopRailIconButtonState
   }
 }
 
-enum MixroomFeedbackComposerState {
-  feedback,
-  bugReport,
-}
+enum MixroomFeedbackComposerState { feedback, bugReport }
 
 class MixroomInlineFeedbackComposer extends StatefulWidget {
   const MixroomInlineFeedbackComposer({
@@ -1253,16 +1322,19 @@ class MixroomInlineFeedbackComposer extends StatefulWidget {
     this.initialSubmitted = false,
     this.compact = false,
     this.showBetaNotice = false,
+    this.showBranding = true,
   });
 
   final Future<void> Function(
     FeedbackCategory category,
     String message,
     bool allowEmailContact,
-  ) onSubmit;
+  )
+  onSubmit;
   final bool initialSubmitted;
   final bool compact;
   final bool showBetaNotice;
+  final bool showBranding;
 
   @override
   State<MixroomInlineFeedbackComposer> createState() =>
@@ -1295,8 +1367,8 @@ class _MixroomInlineFeedbackComposerState
 
   FeedbackCategory get _category =>
       _state == MixroomFeedbackComposerState.bugReport
-          ? FeedbackCategory.bugReport
-          : FeedbackCategory.feedback;
+      ? FeedbackCategory.bugReport
+      : FeedbackCategory.feedback;
 
   Future<void> _handleSubmit() async {
     _messageFocusNode.unfocus();
@@ -1304,11 +1376,7 @@ class _MixroomInlineFeedbackComposerState
     if (message.isEmpty || _submitting) return;
     setState(() => _submitting = true);
     try {
-      await widget.onSubmit(
-        _category,
-        message,
-        _allowEmailContact,
-      );
+      await widget.onSubmit(_category, message, _allowEmailContact);
       if (!mounted) return;
       setState(() {
         _submitted = true;
@@ -1324,19 +1392,21 @@ class _MixroomInlineFeedbackComposerState
   @override
   Widget build(BuildContext context) {
     final topGap = widget.compact ? 14.0 : 96.0;
-    final betaNoticeTopGap =
-        widget.showBetaNotice && !widget.compact ? 34.0 : 0.0;
-    final betaNoticeBottomGap =
-        widget.showBetaNotice && !widget.compact ? 40.0 : topGap;
+    final betaNoticeTopGap = widget.showBetaNotice && !widget.compact
+        ? 34.0
+        : 0.0;
+    final betaNoticeBottomGap = widget.showBetaNotice && !widget.compact
+        ? 40.0
+        : widget.showBranding || widget.showBetaNotice
+        ? topGap
+        : 0.0;
     return Column(
       children: [
-        if (widget.compact)
-          const MixroomShellBrandMark(
-            width: 54,
-            fit: BoxFit.contain,
-          )
-        else
-          MixroomShellWordmarkHeader(showWordmark: true),
+        if (widget.showBranding)
+          if (widget.compact)
+            const MixroomShellBrandMark(width: 54, fit: BoxFit.contain)
+          else
+            MixroomShellWordmarkHeader(showWordmark: true),
         if (widget.showBetaNotice) ...[
           SizedBox(height: betaNoticeTopGap),
           ConstrainedBox(

@@ -1,5 +1,6 @@
 #include <float.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -2355,7 +2356,9 @@ public:
         stop();
     }
 
-    bool start(AudioDeviceID requestedDevice)
+    bool start(AudioDeviceID requestedDevice,
+               int requestedChannelStart,
+               int requestedChannelCount)
     {
         const std::lock_guard<std::mutex> lock(controlMutex);
         stopLocked();
@@ -2369,7 +2372,8 @@ public:
             return false;
         };
 
-        if (requestedDevice == kAudioObjectUnknown)
+        if (requestedDevice == kAudioObjectUnknown || requestedChannelStart < 0 ||
+            (requestedChannelCount != 1 && requestedChannelCount != 2))
             return failStart("missingDevice", kAudio_ParamError);
 
         Float64 requestedSampleRate = 0.0;
@@ -2445,16 +2449,31 @@ public:
         if (status != noErr)
             return failStart("selectDevice", status);
 
+        SInt32 channelMap[2] = {
+            static_cast<SInt32>(requestedChannelStart),
+            static_cast<SInt32>(requestedChannelStart + 1),
+        };
+        status = AudioUnitSetProperty(unit,
+                                      kAudioOutputUnitProperty_ChannelMap,
+                                      kAudioUnitScope_Output,
+                                      1,
+                                      channelMap,
+                                      sizeof(SInt32) * requestedChannelCount);
+        if (status != noErr)
+            return failStart("setChannelMap", status);
+
         AudioStreamBasicDescription clientFormat{};
         clientFormat.mSampleRate = requestedSampleRate;
         clientFormat.mFormatID = kAudioFormatLinearPCM;
         clientFormat.mFormatFlags = kAudioFormatFlagIsFloat |
             kAudioFormatFlagIsPacked |
+            kAudioFormatFlagIsNonInterleaved |
             kAudioFormatFlagsNativeEndian;
         clientFormat.mBytesPerPacket = sizeof(float);
         clientFormat.mFramesPerPacket = 1;
         clientFormat.mBytesPerFrame = sizeof(float);
-        clientFormat.mChannelsPerFrame = 1;
+        clientFormat.mChannelsPerFrame =
+            static_cast<UInt32>(requestedChannelCount);
         clientFormat.mBitsPerChannel = 8 * sizeof(float);
         status = AudioUnitSetProperty(unit,
                                       kAudioUnitProperty_StreamFormat,
@@ -2477,7 +2496,8 @@ public:
         capacityFrames = std::max(requestedBufferFrames, unitMaximumFrames);
         if (capacityFrames == 0)
             return failStart("resolveCapacity", kAudio_ParamError);
-        scratch.assign(capacityFrames, 0.0f);
+        for (int channel = 0; channel < requestedChannelCount; ++channel)
+            scratch[static_cast<size_t>(channel)].assign(capacityFrames, 0.0f);
 
         AURenderCallbackStruct callback{};
         callback.inputProc = renderCallback;
@@ -2497,6 +2517,8 @@ public:
         deviceID.store(requestedDevice, std::memory_order_release);
         sampleRate.store(requestedSampleRate, std::memory_order_release);
         bufferFrames.store(requestedBufferFrames, std::memory_order_release);
+        channelStart.store(requestedChannelStart, std::memory_order_release);
+        channelCount.store(requestedChannelCount, std::memory_order_release);
         callbackCount.store(0, std::memory_order_release);
         invalidCallbackCount.store(0, std::memory_order_release);
         lastFrames.store(0, std::memory_order_release);
@@ -2555,6 +2577,16 @@ public:
         return bufferFrames.load(std::memory_order_acquire);
     }
 
+    int getChannelStart() const noexcept
+    {
+        return channelStart.load(std::memory_order_acquire);
+    }
+
+    int getChannelCount() const noexcept
+    {
+        return channelCount.load(std::memory_order_acquire);
+    }
+
     std::uint64_t getCallbackCount() const noexcept
     {
         return callbackCount.load(std::memory_order_acquire);
@@ -2600,7 +2632,9 @@ public:
             return false;
 
         if (!JuceEngine::get().startIndependentInputRecordingToWav(
-                file, sampleRate.load(std::memory_order_acquire)))
+                file,
+                sampleRate.load(std::memory_order_acquire),
+                channelCount.load(std::memory_order_acquire)))
             return false;
 
         captureEnabled.store(true, std::memory_order_release);
@@ -2660,33 +2694,51 @@ private:
             recordRenderError(kAudio_ParamError);
             if (captureEnabled.load(std::memory_order_acquire))
                 JuceEngine::get().captureIndependentInput(
-                    nullptr, static_cast<int>(numberFrames));
+                    nullptr, 0, static_cast<int>(numberFrames));
             lastFrames.store(numberFrames, std::memory_order_relaxed);
             lastStatus.store(kAudio_ParamError, std::memory_order_relaxed);
             callbackEvent.signal();
             return kAudio_ParamError;
         }
 
-        AudioBufferList bufferList{};
-        bufferList.mNumberBuffers = 1;
-        bufferList.mBuffers[0].mNumberChannels = 1;
-        bufferList.mBuffers[0].mDataByteSize = numberFrames * sizeof(float);
-        bufferList.mBuffers[0].mData = scratch.data();
+        struct InputBufferList
+        {
+            UInt32 numberBuffers;
+            AudioBuffer buffers[2];
+        } bufferList{};
+        const int activeChannels = channelCount.load(std::memory_order_acquire);
+        bufferList.numberBuffers = static_cast<UInt32>(activeChannels);
+        const float *captureChannels[2] = {nullptr, nullptr};
+        for (int channel = 0; channel < activeChannels; ++channel)
+        {
+            auto &buffer = bufferList.buffers[channel];
+            buffer.mNumberChannels = 1;
+            buffer.mDataByteSize = numberFrames * sizeof(float);
+            buffer.mData = scratch[static_cast<size_t>(channel)].data();
+            captureChannels[channel] =
+                scratch[static_cast<size_t>(channel)].data();
+        }
         const OSStatus status = AudioUnitRender(unit,
                                                 flags,
                                                 timestamp,
                                                 1,
                                                 numberFrames,
-                                                &bufferList);
+                                                reinterpret_cast<AudioBufferList *>(&bufferList));
         lastFrames.store(numberFrames, std::memory_order_relaxed);
         lastStatus.store(status, std::memory_order_relaxed);
         if (status == noErr)
         {
             callbackCount.fetch_add(1, std::memory_order_relaxed);
             callbackReady.store(true, std::memory_order_release);
+            JuceEngine::get().publishMacIndependentInputMonitoringV2(
+                captureChannels,
+                activeChannels,
+                static_cast<int>(numberFrames));
             if (captureEnabled.load(std::memory_order_acquire))
                 JuceEngine::get().captureIndependentInput(
-                    scratch.data(), static_cast<int>(numberFrames));
+                    captureChannels,
+                    activeChannels,
+                    static_cast<int>(numberFrames));
         }
         else
         {
@@ -2694,7 +2746,7 @@ private:
             recordRenderError(status);
             if (captureEnabled.load(std::memory_order_acquire))
                 JuceEngine::get().captureIndependentInput(
-                    nullptr, static_cast<int>(numberFrames));
+                    nullptr, 0, static_cast<int>(numberFrames));
         }
         callbackEvent.signal();
         return status;
@@ -2726,11 +2778,14 @@ private:
             AudioComponentInstanceDispose(unit);
             unit = nullptr;
         }
-        scratch.clear();
+        for (auto &channelScratch : scratch)
+            channelScratch.clear();
         capacityFrames = 0;
         deviceID.store(kAudioObjectUnknown, std::memory_order_release);
         sampleRate.store(0.0, std::memory_order_release);
         bufferFrames.store(0, std::memory_order_release);
+        channelStart.store(0, std::memory_order_release);
+        channelCount.store(0, std::memory_order_release);
         callbackCount.store(0, std::memory_order_release);
         invalidCallbackCount.store(0, std::memory_order_release);
         lastFrames.store(0, std::memory_order_release);
@@ -2742,12 +2797,14 @@ private:
 
     std::mutex controlMutex;
     AudioUnit unit = nullptr;
-    std::vector<float> scratch;
+    std::array<std::vector<float>, 2> scratch;
     UInt32 capacityFrames = 0;
     juce::WaitableEvent callbackEvent;
     std::atomic<AudioDeviceID> deviceID{kAudioObjectUnknown};
     std::atomic<double> sampleRate{0.0};
     std::atomic<UInt32> bufferFrames{0};
+    std::atomic<int> channelStart{0};
+    std::atomic<int> channelCount{0};
     std::atomic<std::uint64_t> callbackCount{0};
     std::atomic<std::uint64_t> invalidCallbackCount{0};
     std::atomic<UInt32> lastFrames{0};
@@ -2935,8 +2992,11 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 }
 
 + (BOOL)startMacInputProbeV2ObjC:(uint32_t)deviceID
+                    channelStart:(NSInteger)channelStart
+                    channelCount:(NSInteger)channelCount
 {
-    return mixroomMacInputProbeV2().start((AudioDeviceID)deviceID);
+    return mixroomMacInputProbeV2().start(
+        (AudioDeviceID)deviceID, (int)channelStart, (int)channelCount);
 }
 
 + (BOOL)waitForMacInputProbeCallbackV2ObjC:(NSInteger)timeoutMilliseconds
@@ -2957,6 +3017,8 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
         @"deviceID": @((uint32_t)probe.getDeviceID()),
         @"sampleRateHz": @(probe.getSampleRate()),
         @"bufferFrames": @(probe.getBufferFrames()),
+        @"channelStart": @(probe.getChannelStart()),
+        @"channelCount": @(probe.getChannelCount()),
         @"callbackCount": @((unsigned long long)probe.getCallbackCount()),
         @"invalidCallbackCount": @((unsigned long long)
             probe.getInvalidCallbackCount()),
@@ -2974,7 +3036,13 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 }
 
 + (BOOL)startMacInputRecordingV2ObjC:(NSString *)path
+                         channelStart:(NSInteger)channelStart
+                         channelCount:(NSInteger)channelCount
 {
+    const auto &probe = mixroomMacInputProbeV2();
+    if (probe.getChannelStart() != channelStart ||
+        probe.getChannelCount() != channelCount)
+        return NO;
     return mixroomMacInputProbeV2().startCapture(juceFileFromNSString(path));
 }
 
@@ -3019,6 +3087,47 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 {
     return namedValueStatsToNSDictionary(
         mixroomMacInputProbeV2().getCaptureFacts());
+}
+
++ (BOOL)prepareMacIndependentInputMonitoringV2ObjC:(NSInteger)row
+                                      channelCount:(NSInteger)channelCount
+                                   inputSampleRate:(double)inputSampleRate
+                                  outputSampleRate:(double)outputSampleRate
+                                  inputBlockFrames:(NSInteger)inputBlockFrames
+                                 outputBlockFrames:(NSInteger)outputBlockFrames
+{
+    __block BOOL success = NO;
+    void (^apply)(void) = ^{
+        success = JuceEngine::get().prepareMacIndependentInputMonitoringV2(
+            static_cast<int>(row),
+            static_cast<int>(channelCount),
+            inputSampleRate,
+            outputSampleRate,
+            static_cast<int>(inputBlockFrames),
+            static_cast<int>(outputBlockFrames));
+    };
+    if ([NSThread isMainThread])
+        apply();
+    else
+        dispatch_sync(dispatch_get_main_queue(), apply);
+    return success;
+}
+
++ (void)disableMacIndependentInputMonitoringV2ObjC
+{
+    void (^apply)(void) = ^{
+        JuceEngine::get().disableMacIndependentInputMonitoringV2();
+    };
+    if ([NSThread isMainThread])
+        apply();
+    else
+        dispatch_sync(dispatch_get_main_queue(), apply);
+}
+
++ (NSDictionary<NSString *, NSNumber *> *)getMacIndependentInputMonitoringFactsV2ObjC
+{
+    return namedValueStatsToNSDictionary(
+        JuceEngine::get().getMacIndependentInputMonitoringFactsV2());
 }
 
 #endif
@@ -3081,15 +3190,48 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 + (BOOL)openPreparedSystemSelectedDuplexRouteV2ObjC:
             (NSInteger)timeoutMilliseconds
                                       outputChannels:(NSInteger)outputChannels
+                                       inputChannels:(NSInteger)inputChannels
 {
     return JuceEngine::get().openPreparedSystemSelectedDuplexRouteV2(
         static_cast<int>(timeoutMilliseconds),
-        static_cast<int>(outputChannels));
+        static_cast<int>(outputChannels),
+        static_cast<int>(inputChannels));
 }
 
 + (BOOL)validateRecordingRouteV2ObjC
 {
     return JuceEngine::get().validateRecordingRouteV2();
+}
+
++ (BOOL)setLiveInputMonitorTargetV2ObjC:(NSInteger)row
+                           channelStart:(NSInteger)channelStart
+                           channelCount:(NSInteger)channelCount
+{
+    __block BOOL success = NO;
+    void (^apply)(void) = ^{
+        success = JuceEngine::get().setLiveInputMonitorTargetV2(
+            static_cast<int>(row),
+            static_cast<int>(channelStart),
+            static_cast<int>(channelCount));
+    };
+    if ([NSThread isMainThread]) {
+        apply();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), apply);
+    }
+    return success;
+}
+
++ (void)disableLiveInputMonitoringV2ObjC
+{
+    void (^apply)(void) = ^{
+        JuceEngine::get().disableLiveInputMonitoringV2();
+    };
+    if ([NSThread isMainThread]) {
+        apply();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), apply);
+    }
 }
 
 + (BOOL)isBluetoothDuplexProjectCallbackReadyV2ObjC
@@ -3196,6 +3338,28 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     {
         JuceEngine::get().shutdownEngine();
     }
+}
+
++ (void)shutdownForApplicationTerminationObjC
+{
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            JuceEngine::get().shutdownForApplicationTermination();
+        else
+            messageManager->callSync([] {
+                JuceEngine::get().shutdownForApplicationTermination();
+            });
+    }
+    else
+    {
+        JuceEngine::get().shutdownForApplicationTermination();
+    }
+}
+
++ (void)panicLiveMidiNotesForApplicationDeactivationObjC
+{
+    JuceEngine::get().panicLiveMidiNotesForApplicationDeactivation();
 }
 
 // DEPRECATED: use loadClipObjC:rowId:path:startSec:lengthSec:inFileOffsetSec: instead
@@ -4054,6 +4218,12 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return result.load();
 }
 
++ (void)setLoopRegionObjC:(BOOL)enabled startSeconds:(double)startSeconds endSeconds:(double)endSeconds
+{
+    JuceEngine::get().setLoopRegion(
+        enabled != NO, startSeconds, endSeconds);
+}
+
 + (BOOL)insertTrackEffectObjC:(NSInteger)trackRow path:(NSString *)pluginPath forceIndividualRow:(BOOL)forceIndividualRow
 {
     if (pluginPath == nil || pluginPath.length == 0)
@@ -4619,6 +4789,14 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return (BOOL)supported;
 }
 
++ (BOOL)isBuiltInMidiInstrumentObjC:(NSString *)instrumentId
+{
+    const juce::String iid =
+        instrumentId != nil ? juceStringFromNSString(instrumentId)
+                            : juce::String();
+    return (BOOL)JuceEngine::isBuiltInMidiInstrumentIdentifier(iid);
+}
+
 + (BOOL)loadMidiClipObjC:(NSInteger)clipIndex
                    rowId:(NSInteger)rowId
             instrumentId:(NSString *)instrumentId
@@ -4629,6 +4807,7 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                 startSec:(double)startSec
                lengthSec:(double)lengthSec
          inFileOffsetSec:(double)inFileOffsetSec
+           loadRequestId:(int64_t)loadRequestId
 {
     const juce::String iid =
         instrumentId != nil ? juceStringFromNSString(instrumentId)
@@ -4638,6 +4817,43 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                               : juce::String();
     const auto parsedNotes = parseTimelineMidiNotes(notes);
     const auto parsedParams = parseMidiParams(params);
+
+    if (JuceEngine::isBuiltInMidiInstrumentIdentifier(iid))
+    {
+        auto prepared = JuceEngine::get().prepareBuiltInMidiClipLoad(
+            (int)clipIndex,
+            (int)rowId,
+            iid,
+            iname,
+            parsedNotes,
+            parsedParams,
+            sourceTempoBpm,
+            startSec,
+            lengthSec,
+            inFileOffsetSec,
+            (std::int64_t)loadRequestId);
+        if (prepared == nullptr)
+            return NO;
+
+        bool ok = false;
+        auto installPreparedMidiClip = [&]
+        {
+            ok = JuceEngine::get().installPreparedMidiClipLoad(
+                prepared);
+        };
+        if (auto *mm = juce::MessageManager::getInstance())
+        {
+            if (mm->isThisTheMessageThread())
+                installPreparedMidiClip();
+            else
+                mm->callSync(installPreparedMidiClip);
+        }
+        else
+        {
+            installPreparedMidiClip();
+        }
+        return (BOOL)ok;
+    }
 
     if (!JuceEngine::get().prepareMidiClipSampleAssets(iid, iname, parsedNotes))
         return NO;
@@ -4654,7 +4870,8 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
                                             sourceTempoBpm,
                                             startSec,
                                             lengthSec,
-                                            inFileOffsetSec);
+                                            inFileOffsetSec,
+                                            (std::int64_t)loadRequestId);
     };
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -4670,6 +4887,14 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     }
 
     return (BOOL)ok;
+}
+
++ (BOOL)cancelMidiClipLoadObjC:(NSInteger)clipIndex
+                     requestId:(int64_t)loadRequestId
+{
+    return (BOOL)JuceEngine::get().cancelMidiClipLoad(
+        (int)clipIndex,
+        (std::int64_t)loadRequestId);
 }
 
 + (BOOL)updateMidiClipObjC:(NSInteger)clipIndex
@@ -5714,6 +5939,21 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     };
 }
 
++ (NSDictionary<NSString *, id> *)finalizeRecordingForMonitoringV2ObjC
+{
+    const auto result = JuceEngine::get().finalizeRecordingCaptureV2();
+    return @{
+        @"success" : @(result.success),
+        @"diagnosticCode" : [NSString stringWithUTF8String:result.diagnosticCode.toRawUTF8()] ?: @"writer_finalize_failed",
+        @"attemptedSamples" : @(result.attemptedSamples),
+        @"acceptedSamples" : @(result.acceptedSamples),
+        @"droppedSamples" : @(result.droppedSamples),
+        @"invalidBlockCount" : @(result.invalidBlockCount),
+        @"actualSampleRate" : @(result.actualSampleRate),
+        @"channelCount" : @(result.channelCount),
+    };
+}
+
 + (void)discardRecordingCaptureObjC
 {
     JuceEngine::get().discardRecordingCapture();
@@ -5805,6 +6045,15 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 + (NSArray<NSNumber*>*)getRecentMasterWaveformObjC:(NSInteger)sampleCount
 {
     const auto v = JuceEngine::get().getRecentMasterWaveform((int)sampleCount);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
+    for (float s : v)
+        [arr addObject:@(s)];
+    return arr;
+}
+
++ (NSArray<NSNumber*>*)getRecentMasterStereoWaveformObjC:(NSInteger)sampleCount
+{
+    const auto v = JuceEngine::get().getRecentMasterStereoWaveform((int)sampleCount);
     NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:v.size()];
     for (float s : v)
         [arr addObject:@(s)];

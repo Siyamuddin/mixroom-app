@@ -35,6 +35,18 @@ void main() {
       expect(empty.remainingPercent, 0);
     });
 
+    test(
+      'prompt rate limit status exposes the most constrained percentage',
+      () {
+        final status = AiPromptRateLimitStatus.fromJson({
+          'daily': {'used': 25, 'limit': 100, 'remaining': 75},
+          'weekly': {'used': 600, 'limit': 1000, 'remaining': 400},
+        });
+
+        expect(status.remainingPercent, 40);
+      },
+    );
+
     test('kDebugSystemPrompt stays in sync with the server prompt', () {
       final serverText = File(
         'backend/llm_proxy/src/common/llm_contract.py',
@@ -49,6 +61,39 @@ void main() {
 
       final serverPrompt = serverText.substring(promptStart, promptEnd).trim();
       expect(kDebugSystemPrompt.trim(), serverPrompt);
+    });
+
+    test('release builds cannot opt into direct provider access', () {
+      final configSource = File(
+        'lib/config/llm_config.dart',
+      ).readAsStringSync();
+      final audioServiceSource = File(
+        'lib/ai/cloud_llm_service.dart',
+      ).readAsStringSync();
+      final videoServiceSource = File(
+        'lib/ai/video_editor_ai.dart',
+      ).readAsStringSync();
+
+      expect(
+        configSource,
+        isNot(contains('LLM_ALLOW_DIRECT_OPENAI_IN_RELEASE')),
+      );
+      expect(
+        configSource,
+        contains('kDebugMode && hasOpenAiApiKey && hasOpenAiModel'),
+      );
+      expect(
+        audioServiceSource,
+        contains(
+          'kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty',
+        ),
+      );
+      expect(
+        videoServiceSource,
+        contains(
+          'kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty',
+        ),
+      );
     });
 
     test(
@@ -666,6 +711,74 @@ void main() {
         expect(requestBodies, hasLength(1));
       },
     );
+
+    test('direct AI receives both production guitars and their allowed IDs',
+        () async {
+      final catalog = jsonDecode(
+        File('assets/instruments/index.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
+      final guitars = (catalog['presets'] as List<dynamic>)
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .where((entry) => entry['category'] == 'Guitars')
+          .toList(growable: false);
+      expect(guitars, hasLength(2));
+
+      final ids = guitars
+          .map((entry) => entry['id'].toString())
+          .toList(growable: false);
+      const playableRanges = <String, String>{
+        'sfz.guitar.steel_acoustic': '40-84',
+        'sfz.guitar.clean_electric': '40-86',
+      };
+      final libraryEntries = guitars
+          .map(
+            (entry) =>
+                '${entry['name']}<${entry['id']}>'
+                '{playable_midi=${playableRanges[entry['id']]}}',
+          )
+          .join(', ');
+      late Map<String, dynamic> requestBody;
+      final client = MockClient((request) async {
+        requestBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'output': [
+              {
+                'type': 'function_call',
+                'name': 'informational_response',
+                'arguments': {'message': 'Done.', 'cancels_pending': false},
+              },
+            ],
+          }),
+          200,
+        );
+      });
+
+      await CloudLlmService(
+        apiKey: 'sk-test',
+        model: 'gpt-5.4-mini',
+        httpClient: client,
+      ).send(
+        conversation: const [],
+        userText: 'Create an electric guitar MIDI row.',
+        projectSnapshot: 'No occupied tracks.',
+        librarySnapshot:
+            'built_in_instruments:\n- Guitars: [$libraryEntries]',
+        clientContext: <String, dynamic>{
+          'subscription_plan': 'free',
+          'allowed_instrument_ids': ids,
+        },
+      );
+
+      final encoded = jsonEncode(requestBody);
+      for (final guitar in guitars) {
+        expect(encoded, contains(guitar['id']));
+        expect(encoded, contains(guitar['name']));
+        expect(encoded, contains(playableRanges[guitar['id']]));
+      }
+      expect(encoded, contains('CLIENT ENTITLEMENT POLICY'));
+    });
 
     test(
       'retries direct OpenAI by dropping pending mix while retaining library snapshot',

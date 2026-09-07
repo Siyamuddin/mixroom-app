@@ -95,6 +95,9 @@ class AiPromptRateLimitStatus {
 
   bool get isBlocked => !canSubmit;
 
+  int get remainingPercent =>
+      math.min(daily.remainingPercent, weekly.remainingPercent);
+
   DateTime? get blockedResetAt {
     switch (blockedBy) {
       case 'weekly_prompts':
@@ -207,6 +210,7 @@ class CloudLlmService {
   final Duration requestTimeout;
   final String conversationStateMode;
   final http.Client _httpClient;
+  final bool _ownsHttpClient;
   final Map<String, String> _directConversationIds = <String, String>{};
   final Map<String, int> _conversationTurnCounts = <String, int>{};
 
@@ -220,7 +224,14 @@ class CloudLlmService {
     this.requestTimeout = const Duration(seconds: 25),
     this.conversationStateMode = 'manual_history',
     http.Client? httpClient,
-  }) : _httpClient = httpClient ?? http.Client();
+  }) : _ownsHttpClient = httpClient == null,
+       _httpClient = httpClient ?? http.Client();
+
+  void dispose() {
+    if (_ownsHttpClient) {
+      _httpClient.close();
+    }
+  }
 
   bool get _supportsTemperature => !model.toLowerCase().startsWith('gpt-5');
   Map<String, dynamic>? get _defaultReasoning {
@@ -250,7 +261,7 @@ class CloudLlmService {
       ? '24h'
       : _defaultPromptCacheRetention;
   bool get _canUseDirectOpenAi =>
-      apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
+      kDebugMode && apiKey.trim().isNotEmpty && model.trim().isNotEmpty;
   bool get _isProxyEnabled => proxyApiBaseUrl.trim().isNotEmpty;
   bool get _isUsingDebugSystemPrompt =>
       kDebugMode && kDebugSystemPrompt.trim().isNotEmpty;
@@ -5580,7 +5591,9 @@ class CloudLlmService {
         }
       } else {
         return LlmResult.text(
-          'AI is not configured. Launch with --dart-define=LLM_PROXY_API_BASE_URL=... or --dart-define=OPENAI_API_KEY=... --dart-define=OPENAI_MODEL=...',
+          kDebugMode
+              ? 'AI is not configured. Set LLM_PROXY_API_BASE_URL, or configure the direct provider for local debugging.'
+              : 'AI is temporarily unavailable. Please try again later.',
           null,
         );
       }

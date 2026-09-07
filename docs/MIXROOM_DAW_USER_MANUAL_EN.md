@@ -165,6 +165,17 @@ The transport controls are available at the bottom of the editor. On desktop, th
 | Record/Stop | Starts recording on the selected row, or stops the active recording. |
 | One-Button Mix | Runs an automatic Mixroom mix pass. |
 
+On desktop, the playhead and timeline view also have keyboard shortcuts. These can be remapped in Project Settings → Keyboard Shortcuts.
+
+| Shortcut | Function |
+| --- | --- |
+| `,` | Moves the playhead to the previous bar line. |
+| `.` | Moves the playhead to the next bar line. |
+| Left arrow | Scrolls the timeline view left by one bar, without moving the playhead. |
+| Right arrow | Scrolls the timeline view right by one bar, without moving the playhead. |
+
+Hold `,` `.` or the arrow keys to repeat. Arrow-key scrolling is skipped while typing, while the file browser tree is focused, or while the piano roll is open.
+
 Recording requires a selected row and an available input device. If input access is not available, Mixroom shows a permission or input warning.
 
 ### One-Button Mix
@@ -211,6 +222,8 @@ The timeline has five main tools.
 
 On phones and tablets, long-press a clip with Select active to begin a multi-selection, then tap the other clips to add them. Drag any selected clip to move the selected group. Tap empty timeline space to clear the group. Long-press and drag empty timeline space to draw a selection box around several clips.
 
+On desktop, drag empty lane space to draw a selection box. Command-click (Control-click on Windows) adds or removes a clip from the selection. Command-drag starts a box even when the drag begins on a clip. On Mac, a three-finger trackpad drag also starts a selection box; turn on Three Finger Drag in System Settings → Accessibility → Pointer Control → Trackpad Options if the system swallows the gesture. When several clips are selected, trim handles appear on each clip and dragging one handle trims the whole selection.
+
 The timeline tool menu also includes **Foreground grid**. When enabled, bar, beat, and quantize lines render over audio and MIDI regions so waveform timing remains visible against the musical grid.
 
 ### Magnet and Quantize
@@ -220,14 +233,18 @@ The magnet button controls timeline snapping.
 | Action | Result |
 | --- | --- |
 | Tap magnet | Turns snapping on or off. |
-| Hold magnet | Opens the quantize menu. |
-| Choose a quantize value | Sets the grid used by snapping, such as 1/4, 1/8, or 1/16. |
+| Desktop/tablet: open the quantize dropdown | Opens the grid menu. |
+| Phone: hold magnet | Opens the grid menu. |
+| Choose Auto | Adapts the visible grid and snap interval from 1/4 through fine tick-level subdivisions up to 1/512 when the arrangement zoom provides enough spacing. |
+| Choose a fixed value | Keeps the selected grid, such as 1/4, 1/8, or 1/16, at every zoom level. |
 
 When magnet is on, timeline edits snap to the selected musical grid. This helps clips, cuts, pasted clips, painted clips, loop regions, and automation regions land exactly on beats or subdivisions.
 
 When magnet is off, users can place and edit items freely without grid snapping. This is better for dialogue, sound design, loose performances, or detailed cleanup.
 
-Quantize values are divisions of one bar:
+Auto is the default for a new editor session. The arrangement and piano roll each calculate their effective Auto grid from their own zoom, so zooming one editor does not change the other. Both editors can continue through 1/64, 1/128, 1/256, and 1/512 when their zoom provides enough space. The grid becomes finer only when the next subdivision can remain at least 30 logical pixels apart. Grid lines and magnetic snapping always use the same effective value. Turning the magnet off disables snapping but does not stop the visible Auto grid from adapting. Fixed choices remain available through 1/32 and do not change with zoom.
+
+Fixed quantize values are divisions of one bar:
 
 | Value | Meaning |
 | --- | --- |
@@ -237,7 +254,7 @@ Quantize values are divisions of one bar:
 | 1/8 | Eighth-note grid. |
 | 1/16 | Sixteenth-note grid for tighter edits. |
 
-Practical rule: turn the magnet on for musical arrangement work, and hold the magnet button when the edit grid feels too coarse or too fine.
+Practical rule: leave Auto selected for normal zoom-aware editing. Choose a fixed value when an edit must stay on one exact subdivision regardless of zoom.
 
 The timeline also supports:
 
@@ -309,13 +326,15 @@ Selecting a clip opens a compact action popover.
 | --- | --- |
 | Copy | Copies the selected clip or selected clip group. |
 | Place clone | Pastes/clones the copied clip near the selection. |
-| Clip settings | Opens detailed clip settings. |
+| Clip settings | Opens detailed clip settings. On desktop and tablet this is the right inspector for audio and MIDI. On phones it stays a compact overlay. On desktop, double-click an audio clip to open this too. |
 | Split at playhead | Splits an audio clip at the current playhead position, when valid. |
 | Delete | Removes the selected clip or selected clip group. |
 
 ### Clip Settings
 
-Clip settings include:
+On desktop and tablet, Clip settings opens the right inspector. While it remains open, selecting another clip updates the inspector to that clip's properties. On phones, Clip settings opens a compact overlay on the timeline.
+
+Audio clip settings include:
 
 - rename clip
 - clip gain
@@ -325,6 +344,8 @@ Clip settings include:
 - reverse audio
 - detect tempo
 - split vocals, when stem separation is available
+
+MIDI clip settings reuse that inspector layout on desktop and tablet, but hide audio-only actions. MIDI keeps rename, gain, and pitch, and shows that the clip follows project BPM automatically.
 
 ### Tempo Stretching and Clip Stretching
 
@@ -380,7 +401,7 @@ On desktop:
 - right-click the ruler to create or clear a loop region
 - right-drag on the ruler to create, resize, or move the loop region
 
-When looping is active, Restart returns to the loop start. During playback, Mixroom wraps from the loop end back to the loop start.
+When looping is active, Restart returns to the loop start. During playback, Mixroom wraps from the loop end back to the loop start. Short loop regions, including ranges around 0.1 to 0.5 seconds, stay inside the markers. The playhead does not run past the loop end, and playback wraps without a pause.
 
 ### Crossfades
 
@@ -666,7 +687,7 @@ Audio import behavior may vary by platform because Android, iOS, macOS, and Wind
 
 Instrument clips open in the piano roll.
 
-Use Add Instrument Clip to create a MIDI/instrument clip. Open the clip to edit notes in the piano roll.
+Use Add Instrument Clip to create a MIDI/instrument clip. Open the clip to edit notes in the piano roll. On desktop, double-click a MIDI clip to open the piano roll. Phone and tablet keep the piano button on the clip popover.
 
 ### Piano Roll Header
 
@@ -701,6 +722,8 @@ Users can:
 - scale note lengths
 
 Tap-to-add is the fastest mobile workflow: open a MIDI clip, choose the note row and beat position, then tap the grid. Drag horizontally to move timing, drag vertically to change pitch, and resize note edges to change duration.
+
+Horizontal Piano Roll zoom supports fine Auto grid and snapping values through 1/512 in meters and zoom levels that preserve readable spacing. Zoom buttons, desktop modifier-wheel zoom, macOS trackpad pinch, and touch pinch zoom keep the musical position beneath the zoom focus stable. The active desktop/tablet quantize readout follows the Piano Roll while it is open. Explicit fixed grid choices remain available through 1/32.
 
 ### Piano Roll Tools
 
@@ -1269,9 +1292,9 @@ Use screenshots from the latest production-like build so labels and layout match
 | Timeline tools | Select, stretch, paint, cut, delete, magnet snap, quantize grid |
 | Row header | Select, expand, mute, solo, row menu, add row |
 | Clip popover | Copy, clone, settings, split, delete |
-| Clip settings | Rename, gain, normalize, pitch, tempo mode, reverse, detect tempo, split vocals |
+| Clip settings | Rename, gain, pitch. Audio also has normalize, tempo mode, reverse, detect tempo, split vocals. Desktop/tablet opens the right inspector for audio and MIDI. |
 | Tempo stretching | Project Tempo Mode plus per-clip Stretch/Resample setting |
-| Loops | Create on ruler, drag handles, move loop region, restart from loop start |
+| Loops | Create on ruler, drag handles, move loop region, restart from loop start, playhead stays inside markers |
 | Row effects | Presets, add, reorder, bypass, delete, copy, paste, clear |
 | Master bus | Master gain, master pan, level metering, master effects, FX bypass |
 | Automation | Points, ramps, copy/paste, range copy, automation clips |

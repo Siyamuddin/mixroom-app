@@ -244,7 +244,7 @@ double estimateMidiMaterialLengthSec(const juce::Array<TimelineMidiNote> &notes,
         if (v->isInt() || v->isInt64() || v->isDouble())
             releaseMs = (double)(*v);
     }
-    releaseMs = juce::jlimit(10.0, 4000.0, releaseMs);
+    releaseMs = juce::jlimit(0.0, 4000.0, releaseMs);
 
     const double minimumDurationSec = 1.2;
     const double renderedSec =
@@ -372,6 +372,32 @@ JuceEngine::JuceEngine()
 JuceEngine::~JuceEngine()
 {
     // shutdownEngine();
+}
+
+struct JuceEngine::PreparedMidiClipLoad
+{
+    int clipId = -1;
+    int rowId = -1;
+    juce::String instrumentId;
+    juce::String instrumentName;
+    juce::Array<TimelineMidiNote> notes;
+    juce::NamedValueSet params;
+    double sourceTempoBpm = 120.0;
+    double startSec = 0.0;
+    double lengthSec = 0.0;
+    double inFileOffsetSec = 0.0;
+    std::int64_t loadRequestId = 0;
+    std::uint64_t engineGeneration = 0;
+    std::unique_ptr<juce::AudioProcessor> processor;
+};
+
+bool JuceEngine::isBuiltInMidiInstrumentIdentifier(
+    const juce::String &instrumentId)
+{
+    const auto id = instrumentId.trim().toLowerCase();
+    return id.startsWith("mixroom.") ||
+           id.startsWith("sfz.") ||
+           id.startsWith("sfz_asset:");
 }
 
 void JuceEngine::logCurrentAudioDeviceState(const juce::String &reason) const
@@ -1111,6 +1137,7 @@ void JuceEngine::initialiseSharedPlaybackGraph()
 
 void JuceEngine::initialiseEngine()
 {
+    const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
     juceLogToFlutter("Hello from JuceEngine::initialiseEngine()");
 
     if (engineInitialized)
@@ -1161,12 +1188,14 @@ void JuceEngine::initialiseEngine()
 bool JuceEngine::initialisePlaybackV2Android()
 {
 #if JUCE_ANDROID
+    const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
     if (engineInitialized)
         return false;
 
     desiredInputOpenChannels.store(0, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     hasRecordingRestorePlaybackSetup = false;
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
@@ -1212,6 +1241,7 @@ bool JuceEngine::quiescePlaybackV2Android(bool closeDevice)
     if (!engineInitialized || metronomeCallback == nullptr)
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     const bool wasPlaying = isPlayingAtomic.load(std::memory_order_relaxed);
     pause();
     if (!v2PlaybackCallbackDetached && audioCallbackAttached)
@@ -1235,6 +1265,7 @@ bool JuceEngine::reconfigurePlaybackV2Android()
     if (!engineInitialized || metronomeCallback == nullptr)
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_release);
@@ -1274,22 +1305,25 @@ bool JuceEngine::reconfigurePlaybackV2Android()
 #endif
 }
 
-bool JuceEngine::prepareRecordingV2Android()
+bool JuceEngine::prepareRecordingV2Android(int inputChannels)
 {
-    return prepareDefaultDuplexV2Android();
+    return prepareDefaultDuplexV2Android(inputChannels);
 }
 
-bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android()
+bool JuceEngine::prepareSystemSelectedMediaDuplexV2Android(int inputChannels)
 {
-    return prepareDefaultDuplexV2Android();
+    return prepareDefaultDuplexV2Android(inputChannels);
 }
 
-bool JuceEngine::prepareDefaultDuplexV2Android()
+bool JuceEngine::prepareDefaultDuplexV2Android(int inputChannels)
 {
 #if JUCE_ANDROID
-    if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
+    const int requestedInputs = juce::jlimit(1, 32, inputChannels);
+    if (requestedInputs != inputChannels || !engineInitialized ||
+        metronomeCallback == nullptr || wavCapture.isActive())
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     pause();
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
@@ -1303,13 +1337,13 @@ bool JuceEngine::prepareDefaultDuplexV2Android()
 
     deviceManager.closeAudioDevice();
     const juce::String initError = deviceManager.initialise(
-        1,
+        requestedInputs,
         2,
         nullptr,
         true);
     auto *device = deviceManager.getCurrentAudioDevice();
     const bool valid = initError.isEmpty() && device != nullptr && device->isOpen() &&
-        device->getActiveInputChannels().countNumberOfSetBits() == 1 &&
+        device->getActiveInputChannels().countNumberOfSetBits() == requestedInputs &&
         device->getActiveOutputChannels().countNumberOfSetBits() > 0 &&
         device->getCurrentSampleRate() > 1000.0 &&
         device->getCurrentBufferSizeSamples() > 0;
@@ -1321,7 +1355,7 @@ bool JuceEngine::prepareDefaultDuplexV2Android()
         return false;
     }
 
-    desiredInputOpenChannels.store(1, std::memory_order_relaxed);
+    desiredInputOpenChannels.store(requestedInputs, std::memory_order_relaxed);
     recordingRestoreDesiredInputs.store(0, std::memory_order_relaxed);
     liveInputMonitoringEnabled = false;
     hostSampleRateAtomic.store(device->getCurrentSampleRate(), std::memory_order_relaxed);
@@ -1335,6 +1369,7 @@ bool JuceEngine::prepareDefaultDuplexV2Android()
     logCurrentAudioDeviceState("android-v2-recording-prepared");
     return true;
 #else
+    juce::ignoreUnused(inputChannels);
     return false;
 #endif
 }
@@ -1345,6 +1380,7 @@ bool JuceEngine::prepareBluetoothDuplexV2Android()
     if (!engineInitialized || metronomeCallback == nullptr || wavCapture.isActive())
         return false;
 
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     pause();
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
@@ -1404,9 +1440,13 @@ bool JuceEngine::waitForV2CallbackReady(int timeoutMs)
 
 void JuceEngine::shutdownEngine()
 {
+    const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
+    engineLifecycleGeneration.fetch_add(1, std::memory_order_acq_rel);
     juceLogToFlutter("JuceEngine::shutdownEngine called");
+    requestLiveMidiPanicForAll(LiveMidiPanicMode::full);
 
     wavCapture.stop(true);
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     androidV2RecordingPrepared = false;
     androidV2CallbackReady.reset();
     androidV2CallbackProofPending.store(false, std::memory_order_relaxed);
@@ -2205,6 +2245,128 @@ bool JuceEngine::prepareMidiClipSampleAssets(const juce::String &instrumentId,
         notes);
 }
 
+bool JuceEngine::isMidiClipLoadRequestCancelled(
+    int clipId,
+    std::int64_t loadRequestId)
+{
+    if (loadRequestId <= 0)
+        return false;
+    const std::lock_guard<std::mutex> requestLock(midiLoadRequestMutex);
+    const auto cancelled = cancelledMidiLoadRequestThrough.find(clipId);
+    return cancelled != cancelledMidiLoadRequestThrough.end() &&
+           loadRequestId <= cancelled->second;
+}
+
+JuceEngine::PreparedMidiClipLoadPtr JuceEngine::prepareBuiltInMidiClipLoad(
+    int clipId,
+    int rowId,
+    const juce::String &instrumentId,
+    const juce::String &instrumentName,
+    const juce::Array<TimelineMidiNote> &notes,
+    const juce::NamedValueSet &params,
+    double sourceTempoBpm,
+    double startSec,
+    double lengthSec,
+    double inFileOffsetSec,
+    std::int64_t loadRequestId)
+{
+    std::uint64_t engineGeneration = 0;
+    {
+        const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
+        if (!engineInitialized)
+            return nullptr;
+        engineGeneration =
+            engineLifecycleGeneration.load(std::memory_order_acquire);
+    }
+    if (clipId < 0 || clipId >= kMaxClips ||
+        !isBuiltInMidiInstrumentIdentifier(instrumentId) ||
+        isMidiClipLoadRequestCancelled(clipId, loadRequestId))
+        return nullptr;
+
+    const auto requestLabel =
+        "clip=" + juce::String(clipId) +
+        " request=" + juce::String((juce::int64)loadRequestId);
+    juce::String preparationStage = "sample assets";
+    try
+    {
+        if (!prepareMidiClipSampleAssets(instrumentId, instrumentName, notes))
+            return nullptr;
+        if (isMidiClipLoadRequestCancelled(clipId, loadRequestId))
+            return nullptr;
+
+        preparationStage = "processor construction";
+        const double safeSourceTempo = clampSourceTempo(sourceTempoBpm);
+        const double safeStartSec = juce::jmax(0.0, startSec);
+        const double safeOffsetSec = juce::jmax(0.0, inFileOffsetSec);
+        const double resolvedLengthSec =
+            lengthSec > 0.0
+                ? juce::jmax(0.0, lengthSec)
+                : estimateMidiMaterialLengthSec(
+                      notes, params, safeSourceTempo, safeOffsetSec);
+        if (!TimelineMidiClipProcessor::canResolveSampledInstrument(
+                instrumentId, instrumentName))
+            return nullptr;
+
+        auto processor = std::make_unique<TimelineMidiClipProcessor>(
+            &blockTransportStartSec,
+            &hostSampleRateAtomic,
+            &blockIsPlayingAtomic);
+        preparationStage = "processor state";
+        processor->setMidiData(
+            notes, instrumentId, instrumentName, params, safeSourceTempo);
+        processor->setTimeline(
+            safeStartSec, resolvedLengthSec, safeOffsetSec);
+        processor->setStretchOptions(1.0, true);
+        const double prepareSampleRate = juce::jmax(
+            1.0, hostSampleRateAtomic.load(std::memory_order_acquire));
+        constexpr int prepareBlockSize = 512;
+        preparationStage = "prepareToPlay";
+        processor->setPlayConfigDetails(
+            0, 2, prepareSampleRate, prepareBlockSize);
+        processor->prepareToPlay(prepareSampleRate, prepareBlockSize);
+
+        {
+            const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
+            if (!engineInitialized ||
+                engineGeneration !=
+                    engineLifecycleGeneration.load(std::memory_order_acquire))
+                return nullptr;
+        }
+        if (isMidiClipLoadRequestCancelled(clipId, loadRequestId))
+            return nullptr;
+
+        auto prepared = std::make_shared<PreparedMidiClipLoad>();
+        prepared->clipId = clipId;
+        prepared->rowId = rowId;
+        prepared->instrumentId = instrumentId;
+        prepared->instrumentName = instrumentName;
+        prepared->notes = notes;
+        prepared->params = params;
+        prepared->sourceTempoBpm = safeSourceTempo;
+        prepared->startSec = safeStartSec;
+        prepared->lengthSec = resolvedLengthSec;
+        prepared->inFileOffsetSec = safeOffsetSec;
+        prepared->loadRequestId = loadRequestId;
+        prepared->engineGeneration = engineGeneration;
+        prepared->processor = std::move(processor);
+        return prepared;
+    }
+    catch (const std::exception &exception)
+    {
+        juce::Logger::writeToLog(
+            "Android built-in MIDI preparation failed " + requestLabel +
+            " stage=" + preparationStage + ": " +
+            juce::String(exception.what()));
+    }
+    catch (...)
+    {
+        juce::Logger::writeToLog(
+            "Android built-in MIDI preparation failed " + requestLabel +
+            " stage=" + preparationStage + " with unknown exception");
+    }
+    return nullptr;
+}
+
 bool JuceEngine::loadMidiClip(int clipId,
                               int rowId,
                               const juce::String &instrumentId,
@@ -2214,44 +2376,46 @@ bool JuceEngine::loadMidiClip(int clipId,
                               double sourceTempoBpm,
                               double startSec,
                               double lengthSec,
-                              double inFileOffsetSec)
+                              double inFileOffsetSec,
+                              std::int64_t loadRequestId)
 {
-    if (clipId < 0 || clipId >= kMaxClips)
+    auto prepared = prepareBuiltInMidiClipLoad(
+        clipId,
+        rowId,
+        instrumentId,
+        instrumentName,
+        notes,
+        params,
+        sourceTempoBpm,
+        startSec,
+        lengthSec,
+        inFileOffsetSec,
+        loadRequestId);
+    return installPreparedMidiClipLoad(prepared);
+}
+
+bool JuceEngine::installPreparedMidiClipLoad(
+    const PreparedMidiClipLoadPtr &preparedLoad)
+{
+    if (preparedLoad == nullptr || preparedLoad->processor == nullptr)
         return false;
 
-    const double safeStartSec = juce::jmax(0.0, startSec);
-    const double safeOffsetSec = juce::jmax(0.0, inFileOffsetSec);
-    const double safeSourceTempo = clampSourceTempo(sourceTempoBpm);
-    const double resolvedLengthSec = (lengthSec > 0.0)
-                                         ? juce::jmax(0.0, lengthSec)
-                                         : estimateMidiMaterialLengthSec(notes, params, safeSourceTempo, safeOffsetSec);
-
-    auto player = std::make_unique<TimelineMidiClipProcessor>(
-        &blockTransportStartSec,
-        &hostSampleRateAtomic,
-        &blockIsPlayingAtomic);
-    player->setTimeline(safeStartSec, resolvedLengthSec, safeOffsetSec);
-    player->setStretchOptions(1.0, true);
-    if (!TimelineMidiClipProcessor::canResolveSampledInstrument(
-            instrumentId,
-            instrumentName))
-    {
-        juce::Logger::writeToLog(
-            "Live MIDI load failed sampled instrument resolution. instrumentId=" +
-            instrumentId +
-            " instrumentName=" + instrumentName);
+    const int clipId = preparedLoad->clipId;
+    const auto loadRequestId = preparedLoad->loadRequestId;
+    const std::lock_guard<std::mutex> lifecycleLock(engineLifecycleMutex);
+    if (!engineInitialized ||
+        preparedLoad->engineGeneration !=
+            engineLifecycleGeneration.load(std::memory_order_acquire) ||
+        clipId < 0 || clipId >= kMaxClips ||
+        isMidiClipLoadRequestCancelled(clipId, loadRequestId))
         return false;
-    }
-    player->setMidiData(notes, instrumentId, instrumentName, params, safeSourceTempo);
-    const double prepareSampleRate =
-        getKnownDeviceSampleRate(deviceManager, hostSampleRateAtomic.load(std::memory_order_relaxed));
-    const int prepareBlockSize = getKnownDeviceBufferSize(deviceManager, 512);
-    player->setPlayConfigDetails(0, 2, prepareSampleRate, prepareBlockSize);
-    player->prepareToPlay(prepareSampleRate, prepareBlockSize);
 
     std::shared_ptr<juce::AudioProcessor> detachedProcessor;
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+
+        if (isMidiClipLoadRequestCancelled(clipId, loadRequestId))
+            return false;
 
         if (clips.empty())
             clips.resize(kMaxClips);
@@ -2275,11 +2439,11 @@ bool JuceEngine::loadMidiClip(int clipId,
         c.alive = true;
         c.isMidi = true;
         c.clipId = clipId;
-        const int rowIndex = getRowIndexById(rowId);
-        c.rowId = (rowIndex >= 0) ? rowId : rows[0].rowId;
-        c.startSec = safeStartSec;
-        c.lengthSec = resolvedLengthSec;
-        c.inFileOffsetSec = safeOffsetSec;
+        const int rowIndex = getRowIndexById(preparedLoad->rowId);
+        c.rowId = rowIndex >= 0 ? preparedLoad->rowId : rows[0].rowId;
+        c.startSec = preparedLoad->startSec;
+        c.lengthSec = preparedLoad->lengthSec;
+        c.inFileOffsetSec = preparedLoad->inFileOffsetSec;
         c.pitchSemitones = 0.0f;
         c.reversed = false;
         c.tempoRatio = 1.0;
@@ -2288,15 +2452,17 @@ bool JuceEngine::loadMidiClip(int clipId,
         c.extraGainLinear = 1.0f;
         c.panNormalized = 0.0f;
         c.sourceFilePath = {};
-        c.midiInstrumentId = instrumentId;
-        c.midiInstrumentName = instrumentName;
-        c.midiNotes = notes;
-        c.midiParams = params;
-        c.midiSourceTempoBpm = safeSourceTempo;
+        c.midiInstrumentId = preparedLoad->instrumentId;
+        c.midiInstrumentName = preparedLoad->instrumentName;
+        c.midiNotes = preparedLoad->notes;
+        c.midiParams = preparedLoad->params;
+        c.midiSourceTempoBpm = preparedLoad->sourceTempoBpm;
+        c.midiLoadRequestId = loadRequestId;
 
         std::atomic_store_explicit(
             &c.playerProcessor,
-            std::shared_ptr<juce::AudioProcessor>(std::move(player)),
+            std::shared_ptr<juce::AudioProcessor>(
+                std::move(preparedLoad->processor)),
             std::memory_order_release);
         c.playerNode = nullptr;
         c.fxChain.clear();
@@ -2319,6 +2485,30 @@ bool JuceEngine::loadMidiClip(int clipId,
     }
 
     return true;
+}
+
+bool JuceEngine::cancelMidiClipLoad(
+    int clipId,
+    std::int64_t loadRequestId)
+{
+    if (clipId < 0 || clipId >= kMaxClips || loadRequestId <= 0)
+        return false;
+
+    {
+        const std::lock_guard<std::mutex> requestLock(midiLoadRequestMutex);
+        auto &cancelledThrough = cancelledMidiLoadRequestThrough[clipId];
+        cancelledThrough = juce::jmax(cancelledThrough, loadRequestId);
+    }
+
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (clips.empty() || clipId >= (int)clips.size())
+        return true;
+    const auto &clip = clips[(size_t)clipId];
+    if (!clip.alive || !clip.isMidi ||
+        clip.midiLoadRequestId != loadRequestId)
+        return true;
+
+    return unloadClip(clipId);
 }
 
 bool JuceEngine::updateMidiClipEvents(int clipId,
@@ -2396,6 +2586,7 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
     replacement->setFades(fadeInSec, fadeOutSec, fadeCurve);
     prepareLiveClipProcessor(*replacement);
 
+    requestLiveMidiPanicForClip(clipId, LiveMidiPanicMode::liveOnly);
     std::shared_ptr<juce::AudioProcessor> detachedProcessor;
     bool routedProcessorReady = false;
     {
@@ -2443,6 +2634,41 @@ bool JuceEngine::updateMidiClipEvents(int clipId,
     return routedProcessorReady;
 }
 
+void JuceEngine::requestLiveMidiPanicForClip(
+    int clipId,
+    LiveMidiPanicMode mode) noexcept
+{
+    const auto snapshot = std::atomic_load_explicit(
+        &routedClipItemSnapshot, std::memory_order_acquire);
+    const auto *item =
+        snapshot != nullptr ? snapshot->findClip(clipId) : nullptr;
+    if (item == nullptr || !item->isMidi || item->processor == nullptr)
+        return;
+    if (auto *processor = dynamic_cast<TimelineClipProcessorBase *>(
+            item->processor.get()))
+        processor->requestLiveMidiPanic(mode);
+}
+
+void JuceEngine::requestLiveMidiPanicForAll(
+    LiveMidiPanicMode mode) noexcept
+{
+    clearLiveMidiInputAudioQueue();
+    const auto snapshot = std::atomic_load_explicit(
+        &routedClipItemSnapshot, std::memory_order_acquire);
+    if (snapshot == nullptr)
+        return;
+
+    for (int clipId = 0; clipId < kMaxClips; ++clipId)
+    {
+        const auto *item = snapshot->findClip(clipId);
+        if (item == nullptr || !item->isMidi || item->processor == nullptr)
+            continue;
+        if (auto *processor = dynamic_cast<TimelineClipProcessorBase *>(
+                item->processor.get()))
+            processor->requestLiveMidiPanic(mode);
+    }
+}
+
 bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
 {
     const int previousClipId =
@@ -2481,10 +2707,15 @@ bool JuceEngine::setLiveMidiInputTargetClip(int clipId)
     if (previousClipId == clipId)
         return true;
 
-    liveMidiInputTargetClip.store(clipId, std::memory_order_relaxed);
+    liveMidiInputTargetClip.store(clipId, std::memory_order_release);
     clearLiveMidiInputAudioQueue();
-    const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
-    liveMidiInputPendingForFlutter.clear();
+    {
+        const std::lock_guard<std::mutex> lock(liveMidiInputQueueMutex);
+        liveMidiInputPendingForFlutter.clear();
+    }
+    if (previousClipId >= 0)
+        requestLiveMidiPanicForClip(
+            previousClipId, LiveMidiPanicMode::liveOnly);
     return true;
 }
 
@@ -2535,12 +2766,14 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
             safeVelocity,
             preparedSample))
         return false;
+    const std::weak_ptr<juce::AudioProcessor> previewProcessorIdentity =
+        currentProcessor;
     juce::Timer::callAfterDelay(
         safeDurationMs,
-        [clipId, safePitch]
+        [clipId, safePitch, previewProcessorIdentity]
         {
             juce::MessageManager::callAsync(
-                [clipId, safePitch]
+                [clipId, safePitch, previewProcessorIdentity]
                 {
                     auto &engine = JuceEngine::get();
                     if (engine.clips.empty() ||
@@ -2549,11 +2782,17 @@ bool JuceEngine::playPreviewMidiNote(int clipId,
                         return;
 
                     auto &clip = engine.clips[(size_t)clipId];
-                    if (!clip.alive || !clip.isMidi || engine.liveProcessorForClip(clip) == nullptr)
+                    const auto expectedProcessor =
+                        previewProcessorIdentity.lock();
+                    const auto currentProcessor =
+                        engine.liveProcessorSharedForClip(clip);
+                    if (!clip.alive || !clip.isMidi ||
+                        expectedProcessor == nullptr ||
+                        currentProcessor != expectedProcessor)
                         return;
 
                     auto *activeProc = dynamic_cast<TimelineMidiClipProcessor *>(
-                        engine.liveProcessorForClip(clip));
+                        currentProcessor.get());
                     if (activeProc == nullptr)
                         return;
 
@@ -2906,6 +3145,9 @@ std::shared_ptr<juce::AudioProcessor> JuceEngine::clearClipGraphNodes(
         &c.playerProcessor,
         std::shared_ptr<juce::AudioProcessor>{},
         std::memory_order_acq_rel);
+    if (auto *processor = dynamic_cast<TimelineClipProcessorBase *>(
+            detachedProcessor.get()))
+        processor->requestLiveMidiPanic(LiveMidiPanicMode::liveOnly);
 
     if (c.playerNode)
         graph.removeNode(c.playerNode->nodeID, updateKind);
@@ -5592,15 +5834,19 @@ bool JuceEngine::playPlaybackV2Android()
     auto *device = deviceManager.getCurrentAudioDevice();
     const int activeInputChannels =
         device != nullptr ? device->getActiveInputChannels().countNumberOfSetBits() : 0;
-    const bool verifiedRecordingInputActive =
-        wavCapture.isActive() &&
+    const int desiredInputChannels =
+        desiredInputOpenChannels.load(std::memory_order_relaxed);
+    const bool verifiedPreparedInputShape =
         androidV2RecordingPrepared &&
-        desiredInputOpenChannels.load(std::memory_order_relaxed) == 1 &&
-        activeInputChannels == 1;
+        desiredInputChannels > 0 &&
+        activeInputChannels == desiredInputChannels;
+    const bool verifiedOwnedInputActive =
+        verifiedPreparedInputShape &&
+        (wavCapture.isActive() || shouldRouteLiveInputToGraphV2());
     if (!engineInitialized || !audioCallbackAttached ||
         metronomeCallback == nullptr || device == nullptr || !device->isOpen() ||
         device->getActiveOutputChannels().countNumberOfSetBits() <= 0 ||
-        (activeInputChannels != 0 && !verifiedRecordingInputActive))
+        (activeInputChannels != 0 && !verifiedOwnedInputActive))
         return false;
 
     {
@@ -5621,6 +5867,7 @@ void JuceEngine::pause()
 {
     isPlayingAtomic.store(false, std::memory_order_relaxed);
     mixroom::fx::setGlobalTransportPlaying(false);
+    requestLiveMidiPanicForAll(LiveMidiPanicMode::full);
 
     if (metronomeCallback)
         metronomeCallback->setIsPlaying(false);
@@ -10432,6 +10679,8 @@ int JuceEngine::getActiveOutputChannelCount() const
 
 void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 {
+    if (!enabled)
+        liveInputMonitoringActiveV2.store(false, std::memory_order_release);
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     if (liveInputMonitoringEnabled == enabled)
         return;
@@ -10445,6 +10694,61 @@ void JuceEngine::setLiveInputMonitoringEnabled(bool enabled)
 bool JuceEngine::isLiveInputMonitoringEnabled() const noexcept
 {
     return liveInputMonitoringEnabled;
+}
+
+juce::NamedValueSet JuceEngine::activateLiveInputMonitoringV2(int row,
+                                                              int channelStart,
+                                                              int channelCount)
+{
+    juce::NamedValueSet facts;
+    liveInputMonitoringActiveV2.store(false, std::memory_order_release);
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    auto *device = deviceManager.getCurrentAudioDevice();
+    const int activeInputs = device == nullptr
+        ? 0
+        : device->getActiveInputChannels().countNumberOfSetBits();
+    const bool valid = androidV2RecordingPrepared && row >= 0 &&
+        row < (int)rows.size() && channelStart >= 0 &&
+        (channelCount == 1 || channelCount == 2) &&
+        channelStart + channelCount <= activeInputs;
+
+    if (valid)
+    {
+        liveMonitorTargetRow = row;
+        liveMonitorChannelStart = channelStart;
+        liveMonitorChannelCount = channelCount;
+        liveInputMonitoringEnabled = true;
+        constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+        syncLiveInputMonitorRoutingLocked(batchUpdate);
+        commitGraphMutationLocked(false);
+    }
+
+    const int connectionCount = liveMonitorConnections.size();
+    const bool active = valid && liveInputMonitoringEnabled &&
+        connectionCount == channelCount;
+    if (!active)
+    {
+        liveInputMonitoringEnabled = false;
+        constexpr auto batchUpdate = juce::AudioProcessorGraph::UpdateKind::none;
+        clearLiveInputMonitorConnectionsLocked(batchUpdate);
+        commitGraphMutationLocked(false);
+    }
+    else
+    {
+        liveInputMonitoringActiveV2.store(true, std::memory_order_release);
+    }
+
+    facts.set("active", active);
+    facts.set("targetRow", active ? row : -1);
+    facts.set("channelStart", active ? channelStart : 0);
+    facts.set("channelCount", active ? channelCount : 0);
+    facts.set("connectionCount", active ? connectionCount : 0);
+    return facts;
+}
+
+bool JuceEngine::shouldRouteLiveInputToGraphV2() const noexcept
+{
+    return liveInputMonitoringActiveV2.load(std::memory_order_acquire);
 }
 
 void JuceEngine::clearLiveInputMonitorConnectionsLocked(
@@ -10536,7 +10840,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     const int requiredInputs = juce::jmax(1, channelStart + channelCount);
     if (v2Recording)
     {
-        if (channelStart != 0 || channelCount != 1)
+        if (channelStart < 0 || (channelCount != 1 && channelCount != 2) ||
+            requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed))
             return false;
     }
     else if (!applyPreferredAudioDeviceSetup(requiredInputs, false, "startRecording"))
@@ -10587,7 +10892,8 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
                           channelStart))
         return failAndRestorePlaybackMode();
 
-    routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
+    if (!v2Recording || !liveInputMonitoringEnabled)
+        routeLiveInputToRow(/*row=*/0, channelCount, channelStart);
     logCurrentAudioDeviceState("recording-started");
     return true;
 }
@@ -10808,10 +11114,35 @@ const std::array<float, 4> JuceEngine::getMasterMeterValues()
     };
 }
 
+void JuceEngine::pushMasterWaveformSamples(const float *const *out,
+                                           int numOutCh,
+                                           int numSamples) noexcept
+{
+    if (numOutCh <= 0 || out == nullptr || out[0] == nullptr || numSamples <= 0)
+        return;
+
+    const float *outL = out[0];
+    const float *outR = (numOutCh > 1 && out[1] != nullptr) ? out[1] : outL;
+    int writePos = masterWaveformWritePos.load(std::memory_order_relaxed);
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        const float left = std::isfinite(outL[i]) ? outL[i] : 0.0f;
+        const float right = std::isfinite(outR[i]) ? outR[i] : 0.0f;
+        masterWaveformRingL[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, left);
+        masterWaveformRingR[(size_t)writePos] = juce::jlimit(-1.0f, 1.0f, right);
+        writePos = (writePos + 1) % kMasterWaveformRingSize;
+    }
+
+    masterWaveformWritePos.store(writePos, std::memory_order_release);
+}
+
 void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
                                              int numOutCh,
                                              int numSamples) noexcept
 {
+    pushMasterWaveformSamples(out, numOutCh, numSamples);
+
     if (!masterMeterEnabled.load(std::memory_order_relaxed))
         return;
     if (numOutCh <= 0 || out == nullptr || out[0] == nullptr)
@@ -10941,6 +11272,26 @@ std::vector<float> JuceEngine::getAllMeterValues() const
         out[base + 4] = 0.0f;
         // If you DO have it:
         // out[base + 4] = rowMeters[row].clip.load(std::memory_order_relaxed) ? 1.0f : 0.0f;
+    }
+
+    return out;
+}
+
+std::vector<float> JuceEngine::getRecentMasterStereoWaveform(int sampleCount) const
+{
+    const int count = juce::jlimit(64, kMasterWaveformRingSize, sampleCount);
+    std::vector<float> out((size_t)(count * 2), 0.0f);
+
+    const int writePos = masterWaveformWritePos.load(std::memory_order_acquire);
+    int readPos = writePos - count;
+    while (readPos < 0)
+        readPos += kMasterWaveformRingSize;
+
+    for (int i = 0; i < count; ++i)
+    {
+        out[(size_t)(i * 2)] = masterWaveformRingL[(size_t)readPos];
+        out[(size_t)(i * 2 + 1)] = masterWaveformRingR[(size_t)readPos];
+        readPos = (readPos + 1) % kMasterWaveformRingSize;
     }
 
     return out;

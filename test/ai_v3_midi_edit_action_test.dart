@@ -29,6 +29,42 @@ Future<AudioTrack> _midiClip() => AudioTrack.create(
     );
 
 void main() {
+  test('guitar IDs, names, parameters, and notes serialize unchanged',
+      () async {
+    for (final guitar in <Map<String, Object>>[
+      <String, Object>{
+        'id': 'sfz.guitar.steel_acoustic',
+        'name': 'Acoustic Guitar',
+        'params': <String, double>{
+          'outputGain': 1.0,
+          'attackMs': 2.0,
+          'releaseMs': 350.0,
+        },
+      },
+      <String, Object>{
+        'id': 'sfz.guitar.clean_electric',
+        'name': 'Electric Guitar',
+        'params': <String, double>{
+          'outputGain': 2.0,
+          'attackMs': 2.0,
+          'releaseMs': 250.0,
+        },
+      },
+    ]) {
+      final clip = await _midiClip()
+        ..instrumentId = guitar['id']! as String
+        ..instrumentName = guitar['name']! as String
+        ..instrumentParams = Map<String, double>.from(
+          guitar['params']! as Map,
+        );
+      final json = clip.toJson('guitar.mid');
+      expect(json['instrumentId'], guitar['id']);
+      expect(json['instrumentName'], guitar['name']);
+      expect(json['instrumentParams'], guitar['params']);
+      expect((json['midiNotes'] as List).single['pitch'], 60);
+    }
+  });
+
   group('instrument-derived MIDI clip labels', () {
     test('empty and default instrument labels follow an instrument swap', () {
       expect(
@@ -57,11 +93,12 @@ void main() {
       );
     });
 
-    test('label rename action survives undo and redo', () async {
+    test('label rename action survives topology changes', () async {
       final clip = await _midiClip()
         ..label = 'Upright Piano';
+      final tracks = <AudioTrack>[clip];
       final action = SetClipLabelAction(
-        tracks: <AudioTrack>[clip],
+        tracks: tracks,
         originalIndex: 0,
         oldLabel: 'Upright Piano',
         newLabel: 'Dream Pad',
@@ -70,10 +107,17 @@ void main() {
 
       await action.redo();
       expect(clip.label, 'Dream Pad');
+
+      final precedingClip = await _midiClip()
+        ..label = 'Intro';
+      tracks.insert(0, precedingClip);
+
       await action.undo();
       expect(clip.label, 'Upright Piano');
+      expect(precedingClip.label, 'Intro');
       await action.redo();
       expect(clip.label, 'Dream Pad');
+      expect(precedingClip.label, 'Intro');
     });
   });
 
@@ -192,7 +236,13 @@ void main() {
       ..sourceTempoBpm = 117.5
       ..stretchToProjectTempo = false
       ..tempoStretchPreservePitch = false
-      ..tempoWarpMode = 'repitch';
+      ..tempoWarpMode = 'repitch'
+      ..instrumentParams = <String, double>{
+        'attackMs': 18.0,
+        'decayMs': 120.0,
+        'sustainLevel': 0.86,
+        'releaseMs': 180.0,
+      };
     final notes = clip.midiNotes.map((note) => note.copy()).toList();
     final action = EditMidiClipAction(
       tracks: <AudioTrack>[clip],
@@ -201,11 +251,22 @@ void main() {
       newNotes: notes.map((note) => note.copy()).toList(),
       oldInstrumentId: clip.instrumentId,
       oldInstrumentName: clip.instrumentName,
-      oldInstrumentParams: const <String, double>{},
+      oldInstrumentParams: const <String, double>{
+        'attackMs': 18.0,
+        'decayMs': 120.0,
+        'sustainLevel': 0.86,
+        'releaseMs': 180.0,
+      },
       oldHostedInstrumentStateBase64: 'old-state',
-      newInstrumentId: 'mixroom.bass',
-      newInstrumentName: 'Bass',
-      newInstrumentParams: const <String, double>{'tone': 0.4},
+      newInstrumentId: 'sfz.guitar.clean_electric',
+      newInstrumentName: 'Electric Guitar',
+      newInstrumentParams: const <String, double>{
+        'outputGain': 2.0,
+        'attackMs': 0.0,
+        'decayMs': 0.0,
+        'sustainLevel': 0.65,
+        'releaseMs': 0.0,
+      },
       newHostedInstrumentStateBase64: '',
       applyToClip:
           (
@@ -226,9 +287,15 @@ void main() {
     );
 
     await action.redo();
-    expect(clip.instrumentId, 'mixroom.bass');
-    expect(clip.instrumentName, 'Bass');
-    expect(clip.instrumentParams, <String, double>{'tone': 0.4});
+    expect(clip.instrumentId, 'sfz.guitar.clean_electric');
+    expect(clip.instrumentName, 'Electric Guitar');
+    expect(clip.instrumentParams, <String, double>{
+      'outputGain': 2.0,
+      'attackMs': 0.0,
+      'decayMs': 0.0,
+      'sustainLevel': 0.65,
+      'releaseMs': 0.0,
+    });
     expect(clip.midiNotes.single.id, 'old');
     expect(clip.trimStart, Duration.zero);
     expect(clip.trimEnd, const Duration(seconds: 4));
@@ -241,6 +308,12 @@ void main() {
     await action.undo();
     expect(clip.instrumentId, 'mixroom.basic_synth');
     expect(clip.instrumentName, 'Basic Synth');
+    expect(clip.instrumentParams, <String, double>{
+      'attackMs': 18.0,
+      'decayMs': 120.0,
+      'sustainLevel': 0.86,
+      'releaseMs': 180.0,
+    });
     expect(clip.midiNotes.single.id, 'old');
     expect(clip.trimEnd, const Duration(seconds: 4));
     expect(clip.sourceTempoBpm, 117.5);
@@ -249,7 +322,8 @@ void main() {
     expect(clip.tempoWarpMode, 'repitch');
 
     await action.redo();
-    expect(clip.instrumentId, 'mixroom.bass');
+    expect(clip.instrumentId, 'sfz.guitar.clean_electric');
+    expect(clip.instrumentParams['releaseMs'], 0.0);
   });
 
   test('MIDI edit restores all command-owned tempo state exactly', () async {

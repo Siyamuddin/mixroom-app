@@ -81,7 +81,13 @@ void main() {
 
     expect(handler, contains('Audio was interrupted. Recording stopped.'));
     expect(handler, contains('Audio is temporarily unavailable.'));
-    expect(handler, contains('Audio is ready. Press Play to continue.'));
+    expect(
+      handler,
+      isNot(contains('Audio is ready. Press Play to continue.')),
+      reason: 'routine recovery must not announce internal audio readiness',
+    );
+    expect(handler, contains('if (interruptionImpactNotice != null)'));
+    expect(handler, isNot(contains('_showSmallNotice(pendingNotice)')));
     expect(handler, contains('_cleanupV2InterruptedAudio'));
     expect(handler, contains('abortRecordingV2(restorePlayback: false)'));
     expect(
@@ -141,6 +147,8 @@ void main() {
     final handler = editor.substring(handlerStart, handlerEnd);
     expect(handler, contains('foregroundRecoveryEvent'));
     expect(handler, contains('_iosV2ForegroundRecoveryPending = false'));
+    expect(handler, contains('_iosV2ForegroundImpactNotice'));
+    expect(handler, contains('successNotice: successNotice'));
     expect(handler, contains('if (cleanup != null) await cleanup'));
     expect(
       handler.indexOf('if (_v2AudioSessionInvalidated)'),

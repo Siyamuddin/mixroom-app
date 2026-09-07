@@ -2,7 +2,7 @@
 
 Owner: Audio Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-09-01
 Update trigger: Update this when playback, recording, plugin scanning,
 rendering/export, MIDI, routing, bundled native libraries, or JUCE build inputs
 change.
@@ -29,6 +29,7 @@ playback, recording, plugin handling, and export.
 The engine owns:
 
 - playback transport and real-time routing
+- loop-region wrap on the audio thread
 - audio recording lifecycle
 - clip and track rendering
 - mix and track export
@@ -45,11 +46,33 @@ Flutter owns:
 - user-facing error handling
 - deciding when to call engine methods
 - saving restored project state after native operations
+- telling the engine the current loop region via `setLoopRegion`
 
 V3 action-first chat changes do not bypass this boundary. Prepared AI actions
 still use the same Flutter-owned transaction, native synchronization, exact
 readback, and rollback paths. Slow local rendering or analysis may show
 progress, but chat cannot report success until native verification completes.
+The PRO-62 server-owned planner cutover changes only how semantic plans arrive;
+it does not change audio-engine APIs, execution ordering, or native build inputs.
+
+## Loop Playback
+
+The engine owns wrapping when looping is enabled. Flutter sends
+`setLoopRegion(enabled, startSeconds, endSeconds)` and must not pause or
+restart transport to wrap. On each audio callback the engine clamps transport
+to `[start, end)` and splits the render buffer at the wrap point so short
+regions (about 100-500 ms) do not overshoot.
+
+The Flutter playhead follows the same wrap for display only. Recording still
+stops at the loop end; Flutter disables native wrap while a take is armed or
+in progress.
+
+V3 action-first chat changes do not bypass this boundary. Prepared AI actions
+still use the same Flutter-owned transaction, native synchronization, exact
+readback, and rollback paths. Slow local rendering or analysis may show
+progress, but chat cannot report success until native verification completes.
+The PRO-62 server-owned planner cutover changes only how semantic plans arrive;
+it does not change audio-engine APIs, execution ordering, or native build inputs.
 
 ## Export Path
 

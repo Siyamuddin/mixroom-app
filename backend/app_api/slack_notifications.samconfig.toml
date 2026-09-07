@@ -1,0 +1,14 @@
+version = 0.1
+
+[prod.deploy.parameters]
+stack_name = "mixroom-slack-payment-notifications-prod"
+resolve_s3 = true
+s3_prefix = "mixroom-slack-payment-notifications-prod"
+region = "ap-northeast-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+role_arn = "arn:aws:iam::353144603233:role/MixroomCloudFormationDeployRole"
+parameter_overrides = "StageName=\"prod\" BillingSuccessTopicArn=\"arn:aws:sns:ap-northeast-2:353144603233:mixroom-billing-success-prod\" SlackPaymentWebhookParameterName=\"/mixroom/prod/slack/payment-webhook\""
+
+[prod.global.parameters]
+region = "ap-northeast-2"

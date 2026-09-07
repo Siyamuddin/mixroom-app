@@ -96,14 +96,14 @@ static double envelopeHoldLevel(
     double decaySec,
     double sustainLevel)
 {
-    attackSec = juce::jmax(0.001, attackSec);
-    decaySec = juce::jmax(0.001, decaySec);
-    sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
-    if (ageSec < attackSec)
+    attackSec = juce::jmax(0.0, attackSec);
+    decaySec = juce::jmax(0.0, decaySec);
+    sustainLevel = juce::jlimit(0.0, 1.0, sustainLevel);
+    if (attackSec > 0.0 && ageSec < attackSec)
         return juce::jlimit(0.0, 1.0, ageSec / attackSec);
 
     const double decayAge = ageSec - attackSec;
-    if (decayAge < decaySec)
+    if (decaySec > 0.0 && decayAge < decaySec)
     {
         const double t = decayAge / decaySec;
         return 1.0 + ((sustainLevel - 1.0) * t);
@@ -122,7 +122,9 @@ static double envelopeLevel(
     if (ageSec < holdSec)
         return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
 
-    releaseSec = juce::jmax(0.02, releaseSec);
+    releaseSec = juce::jmax(0.0, releaseSec);
+    if (releaseSec <= 0.0)
+        return 0.0;
     const double releaseAge = ageSec - holdSec;
     const double releaseStart =
         envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
@@ -865,9 +867,9 @@ static void applyParamOverrides(InstrumentPreset &preset, const juce::NamedValue
     if (readParam(params, "decayMs", rawValue))
         preset.decayMs = juce::jlimit(0.0, 2000.0, rawValue);
     if (readParam(params, "sustainLevel", rawValue))
-        preset.sustainLevel = juce::jlimit(0.05, 1.0, rawValue);
+        preset.sustainLevel = juce::jlimit(0.0, 1.0, rawValue);
     if (readParam(params, "releaseMs", rawValue))
-        preset.releaseMs = juce::jlimit(20.0, 2400.0, rawValue);
+        preset.releaseMs = juce::jlimit(0.0, 2400.0, rawValue);
     if (readParam(params, "drive", rawValue))
         preset.drive = juce::jlimit(0.0, 1.0, rawValue);
     if (readParam(params, "outputGain", rawValue))
@@ -940,9 +942,9 @@ juce::String renderInstrumentClipToWav(const InstrumentRenderRequest &request)
     {
         const int noteStart = (int)std::round(note.startBeat * msPerBeat * sampleRate / 1000.0);
         const int sustainSamples = juce::jmax(1, (int)std::round(note.lengthBeats * msPerBeat * sampleRate / 1000.0));
-        const int attackSamples = juce::jmax(1, (int)std::round(preset.attackMs * sampleRate / 1000.0));
-        const int decaySamples = juce::jmax(1, (int)std::round(preset.decayMs * sampleRate / 1000.0));
-        const int releaseSamples = juce::jmax(1, (int)std::round(preset.releaseMs * sampleRate / 1000.0));
+        const int attackSamples = juce::jmax(0, (int)std::round(preset.attackMs * sampleRate / 1000.0));
+        const int decaySamples = juce::jmax(0, (int)std::round(preset.decayMs * sampleRate / 1000.0));
+        const int releaseSamples = juce::jmax(0, (int)std::round(preset.releaseMs * sampleRate / 1000.0));
         const int totalNoteSamples = sustainSamples + releaseSamples;
         const double frequencyHz = 440.0 * std::pow(2.0, ((double)note.pitch - 69.0) / 12.0);
 

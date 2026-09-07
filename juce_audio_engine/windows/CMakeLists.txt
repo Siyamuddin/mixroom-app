@@ -70,7 +70,10 @@ target_include_directories(${PLUGIN_NAME}
 )
 
 if(MSVC)
-  target_compile_options(${PLUGIN_NAME} PRIVATE /bigobj /EHsc)
+  # Flutter's standard Windows settings enable /WX. The shared JUCE sources
+  # contain upstream deprecation and conversion warnings, so keep warnings
+  # visible without failing this plugin's Windows build.
+  target_compile_options(${PLUGIN_NAME} PRIVATE /bigobj /EHsc /WX-)
 endif()
 
 target_link_libraries(${PLUGIN_NAME} PRIVATE

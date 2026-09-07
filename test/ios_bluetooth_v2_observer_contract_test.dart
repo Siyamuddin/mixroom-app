@@ -132,7 +132,10 @@ void main() {
       ),
     );
     expect(helper, contains('prepareLiveClipProcessorsForCurrentDevice()'));
-    expect(helper, contains('addAudioCallback'));
+    expect(
+      helper,
+      contains('attachAudioCallbackIfAllowed(metronomeCallback.get())'),
+    );
     expect(helper, isNot(contains('applyPreferredAudioDeviceSetup')));
   });
 

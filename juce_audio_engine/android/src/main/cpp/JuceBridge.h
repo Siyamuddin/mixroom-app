@@ -13,8 +13,8 @@ extern "C"
 
     // Engine lifecycle
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_initialiseEngineJNI(JNIEnv *env, jclass);
-    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass);
-    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(JNIEnv *, jclass);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass, jint);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(JNIEnv *, jclass, jint);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareBluetoothDuplexV2JNI(JNIEnv *, jclass);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_waitForV2CallbackReadyJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jlong JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginBluetoothMediaRouteMigrationV2JNI(JNIEnv *, jclass);
@@ -55,7 +55,8 @@ extern "C"
 
     // Live MIDI clip playback
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_supportsLiveMidiClipPlaybackJNI(JNIEnv *, jclass);
-    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *, jclass, jint, jint, jstring, jstring, jobject, jobject, jdouble, jdouble, jdouble, jdouble);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *, jclass, jint, jint, jstring, jstring, jobject, jobject, jdouble, jdouble, jdouble, jdouble, jlong);
+    JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_cancelMidiClipLoadJNI(JNIEnv *, jclass, jint, jlong);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_updateMidiClipEventsJNI(JNIEnv *, jclass, jint, jstring, jstring, jobject, jobject, jdouble);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveMidiInputTargetClipJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_sendLiveMidiInputEventJNI(JNIEnv *, jclass, jboolean, jint, jint, jfloat);
@@ -66,6 +67,7 @@ extern "C"
     // Transport
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTransportSecondsJNI(JNIEnv *, jclass, jdouble);
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTransportSecondsJNI(JNIEnv *, jclass);
+    JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLoopRegionJNI(JNIEnv *, jclass, jboolean, jdouble, jdouble);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setAutomationTransportJNI(JNIEnv *, jclass, jdouble);
 
     // Legacy FX API (clip/track-indexed)
@@ -165,6 +167,7 @@ extern "C"
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentDeviceNameJNI(JNIEnv *, jclass);
     JNIEXPORT jstring JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getCurrentOutputDeviceNameJNI(JNIEnv *, jclass);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveInputMonitoringEnabledJNI(JNIEnv *, jclass, jboolean);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_activateLiveInputMonitoringV2JNI(JNIEnv *, jclass, jint, jint, jint);
     JNIEXPORT jboolean JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_startRecordingJNI(JNIEnv *, jclass, jstring, jint, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingJNI(JNIEnv *, jclass);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_stopRecordingWithoutPlaybackRestoreJNI(JNIEnv *, jclass);
@@ -183,6 +186,7 @@ extern "C"
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowCompressorMeterJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterCompressorMeterJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jdouble JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *, jclass);
+    JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecentMasterStereoWaveformJNI(JNIEnv *, jclass, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowEqWaveformJNI(JNIEnv *, jclass, jint, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEqWaveformJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jdoubleArray JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRowStereoScopeJNI(JNIEnv *, jclass, jint, jint, jint);

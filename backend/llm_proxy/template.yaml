@@ -59,6 +59,30 @@ Parameters:
     AllowedValues:
       - 'true'
       - 'false'
+  AiV3ServerContractEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AiV3ServerContractV1Enabled:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AiV3ServerContractV2Enabled:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+  AiV3LegacyClientContractEnabled:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
   AiChatDefaultTemperature:
     Type: String
     Default: '0.35'
@@ -161,6 +185,10 @@ Globals:
         AI_V3_MODEL: !Ref AiV3Model
         AI_V3_REASONING_EFFORT: !Ref AiV3ReasoningEffort
         AI_V3_ENABLED: !Ref AiV3Enabled
+        AI_V3_SERVER_CONTRACT_ENABLED: !Ref AiV3ServerContractEnabled
+        AI_V3_SERVER_CONTRACT_V1_ENABLED: !Ref AiV3ServerContractV1Enabled
+        AI_V3_SERVER_CONTRACT_V2_ENABLED: !Ref AiV3ServerContractV2Enabled
+        AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED: !Ref AiV3LegacyClientContractEnabled
         AI_CHAT_DEFAULT_TEMPERATURE: !Ref AiChatDefaultTemperature
         VIDEO_EDITOR_DEFAULT_TEMPERATURE: !Ref VideoEditorDefaultTemperature
         AI_CHAT_EXTENDED_PROMPT_CACHE_RETENTION_MODELS: !Ref AiChatExtendedPromptCacheRetentionModels

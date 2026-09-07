@@ -22,6 +22,7 @@ import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
+import 'package:mixroom/helpers/track_row_icons.dart';
 import 'package:mixroom/screens/audio_editor.dart';
 import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
@@ -53,10 +54,14 @@ class ProjectsScreen extends StatefulWidget {
     super.key,
     this.scrollToTopSignal = 0,
     this.onUpgradeRequested,
+    this.demoOnly = false,
+    this.hideDemoProjects = false,
   });
 
   final int scrollToTopSignal;
   final VoidCallback? onUpgradeRequested;
+  final bool demoOnly;
+  final bool hideDemoProjects;
 
   @override
   State<ProjectsScreen> createState() => _ProjectsScreenState();
@@ -162,6 +167,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   final CloudProjectService _cloudProjectService = CloudProjectService();
   StreamSubscription<String>? _importSub;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopDropSub;
+  Future<void>? _projectRefreshInFlight;
+  bool _projectRefreshQueued = false;
+  bool _queuedProjectRefreshIncludeCloud = false;
+  bool _queuedProjectRefreshShowBlockingLoader = false;
+  Set<String> _observedCloudProjectSyncs = const <String>{};
+  final Set<String> _settlingCloudProjectSyncs = <String>{};
   Future<void>? _cloudRefreshInFlight;
   String? _loadError;
   String? _cloudError;
@@ -180,6 +191,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   final Set<String> _cloudProjectsInFlight = <String>{};
   final ProjectVersionStore _projectVersionStore = const ProjectVersionStore();
   bool _selectionModePinned = false;
+  bool _demoTileView = true;
 
   String _projectActionKeyToken(String name) =>
       Uri.encodeComponent(name.trim());
@@ -222,6 +234,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   void initState() {
     super.initState();
+    if (widget.demoOnly) {
+      _libraryTab = _ProjectLibraryTab.demoProjects;
+    }
     _libraryPageController = PageController(initialPage: _libraryTab.index);
     _libraryScrollControllers = {
       for (final tab in _ProjectLibraryTab.values) tab: ScrollController(),
@@ -232,6 +247,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     });
     ProjectManager.projectLibraryRevision.addListener(
       _handleProjectLibraryChanged,
+    );
+    _observedCloudProjectSyncs = Set<String>.from(
+      ProjectManager.cloudProjectSyncInFlight.value,
+    );
+    ProjectManager.cloudProjectSyncInFlight.addListener(
+      _handleCloudProjectSyncActivityChanged,
     );
     final cachedProjects = _cachedProjects;
     final cachedBundledDemoProjects = _cachedBundledDemoProjects;
@@ -310,6 +331,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     ProjectManager.projectLibraryRevision.removeListener(
       _handleProjectLibraryChanged,
     );
+    ProjectManager.cloudProjectSyncInFlight.removeListener(
+      _handleCloudProjectSyncActivityChanged,
+    );
     _cloudProjectService.close();
     _libraryPageController.dispose();
     for (final controller in _libraryScrollControllers.values) {
@@ -337,6 +361,27 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     unawaited(_refresh());
   }
 
+  void _handleCloudProjectSyncActivityChanged() {
+    if (!mounted) return;
+    final current = Set<String>.from(
+      ProjectManager.cloudProjectSyncInFlight.value,
+    );
+    final completed = _observedCloudProjectSyncs.difference(current);
+    _observedCloudProjectSyncs = current;
+    _settlingCloudProjectSyncs.addAll(completed);
+    setState(() {});
+    if (completed.isNotEmpty) {
+      unawaited(_finishSettlingCloudProjectSyncs(completed));
+    }
+  }
+
+  Future<void> _finishSettlingCloudProjectSyncs(Set<String> projectIds) async {
+    await _refresh(includeCloud: true, showBlockingLoader: false);
+    if (!mounted) return;
+    _settlingCloudProjectSyncs.removeAll(projectIds);
+    setState(() {});
+  }
+
   Future<void> _handleDesktopFinderDrop(List<DesktopFileDropItem> items) async {
     if (!Platform.isMacOS || items.isEmpty) return;
     final mixroomItems = items.where((item) => item.isMixroom).toList();
@@ -350,6 +395,40 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _refresh({
     bool includeCloud = false,
     bool showBlockingLoader = true,
+  }) {
+    _projectRefreshQueued = true;
+    _queuedProjectRefreshIncludeCloud |= includeCloud;
+    _queuedProjectRefreshShowBlockingLoader |= showBlockingLoader;
+
+    final active = _projectRefreshInFlight;
+    if (active != null) return active;
+
+    final task = _drainProjectRefreshes();
+    _projectRefreshInFlight = task;
+    return task.whenComplete(() {
+      if (identical(_projectRefreshInFlight, task)) {
+        _projectRefreshInFlight = null;
+      }
+    });
+  }
+
+  Future<void> _drainProjectRefreshes() async {
+    while (mounted && _projectRefreshQueued) {
+      final includeCloud = _queuedProjectRefreshIncludeCloud;
+      final showBlockingLoader = _queuedProjectRefreshShowBlockingLoader;
+      _projectRefreshQueued = false;
+      _queuedProjectRefreshIncludeCloud = false;
+      _queuedProjectRefreshShowBlockingLoader = false;
+      await _refreshOnce(
+        includeCloud: includeCloud,
+        showBlockingLoader: showBlockingLoader,
+      );
+    }
+  }
+
+  Future<void> _refreshOnce({
+    required bool includeCloud,
+    required bool showBlockingLoader,
   }) async {
     final shouldShowBlockingLoader =
         showBlockingLoader && _projects.isEmpty && _bundledDemoProjects.isEmpty;
@@ -1378,9 +1457,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   _LocalCloudStatusPresentation _localCloudStatus(
     ProjectMeta meta,
-    CloudProjectAccessItem? cloud,
-  ) {
+    CloudProjectAccessItem? cloud, {
+    bool syncInProgress = false,
+  }) {
     final location = _localCloudLocationLabel(meta, cloud);
+    if (syncInProgress) {
+      final baseLabel = L10n.translate(context, 'Syncing to cloud…');
+      return _LocalCloudStatusPresentation(
+        label: location == null || location.isEmpty
+            ? baseLabel
+            : '$baseLabel • $location',
+        statusLabel: baseLabel,
+        icon: Icons.sync_rounded,
+        color: const Color(0xFFA4C2FF),
+      );
+    }
     final freshness = resolveProjectCloudFreshness(
       project: meta,
       cloudStatusAvailable: cloud != null,
@@ -1493,11 +1584,19 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   ) {
     final projectId = meta.projectId.trim();
     final cloudProjectId = (meta.cloudProjectId ?? '').trim();
+    final editorSyncs = ProjectManager.cloudProjectSyncInFlight.value;
     return (projectId.isNotEmpty &&
-            _cloudProjectsInFlight.contains(projectId)) ||
+            (_cloudProjectsInFlight.contains(projectId) ||
+                editorSyncs.contains(projectId) ||
+                _settlingCloudProjectSyncs.contains(projectId))) ||
         (cloudProjectId.isNotEmpty &&
-            _cloudProjectsInFlight.contains(cloudProjectId)) ||
-        (cloud != null && _cloudProjectsInFlight.contains(cloud.projectId));
+            (_cloudProjectsInFlight.contains(cloudProjectId) ||
+                editorSyncs.contains(cloudProjectId) ||
+                _settlingCloudProjectSyncs.contains(cloudProjectId))) ||
+        (cloud != null &&
+            (_cloudProjectsInFlight.contains(cloud.projectId) ||
+                editorSyncs.contains(cloud.projectId) ||
+                _settlingCloudProjectSyncs.contains(cloud.projectId)));
   }
 
   String? _syncQuotaErrorForBundle(
@@ -4261,9 +4360,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final auth = context.watch<AuthService>();
     final entitlement = context.watch<EntitlementService>();
     final cloudProjectsEnabled = entitlement.areCloudProjectsEnabled;
-    final visibleLibraryOptions = cloudProjectsEnabled
-        ? const [0, 1, 2]
-        : const [0, 2];
+    final visibleLibraryOptions = widget.hideDemoProjects
+        ? (cloudProjectsEnabled ? const [0, 1] : const [0])
+        : (cloudProjectsEnabled ? const [0, 1, 2] : const [0, 2]);
     final selectedLibraryTab =
         !cloudProjectsEnabled && _libraryTab == _ProjectLibraryTab.cloudProjects
         ? _ProjectLibraryTab.yourProjects
@@ -4298,6 +4397,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final searchBarBottom = searchFocused && keyboardInset > 0
         ? keyboardInset + 14
         : floatingControlsBottom;
+    final libraryPageCount = widget.hideDemoProjects ? 2 : 3;
     return Scaffold(
       key: _projectsScreenKey,
       resizeToAvoidBottomInset: false,
@@ -4319,52 +4419,123 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      MixroomShellRoundButton(
-                        key: _projectToolsButtonKey,
-                        size: 44,
-                        iconExtent: 17,
-                        assetPath: kMixroomShellFilterAsset,
-                        onTap: _showProjectTools,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: MixroomShellSegmentedControl<int>(
-                          value: selectedLibraryTab.index,
-                          options: visibleLibraryOptions,
-                          labelBuilder: (value) => L10n.translate(
-                            context,
-                            value == 0
-                                ? 'On Device'
-                                : value == 1
-                                ? 'Cloud'
-                                : 'Demo Projects',
-                          ),
-                          onChanged: (value) => _setLibraryTab(
-                            value == 0
-                                ? _ProjectLibraryTab.yourProjects
-                                : value == 1
-                                ? _ProjectLibraryTab.cloudProjects
-                                : _ProjectLibraryTab.demoProjects,
+                  if (widget.demoOnly)
+                    Row(
+                      children: [
+                        Semantics(
+                          button: true,
+                          label: _demoTileView
+                              ? 'Show demo projects as a list'
+                              : 'Show demo project thumbnails',
+                          child: MixroomShellRoundButton(
+                            key: const ValueKey('demo_view_toggle'),
+                            size: 44,
+                            icon: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              child: Icon(
+                                _demoTileView
+                                    ? Icons.view_list_rounded
+                                    : Icons.grid_view_rounded,
+                                key: ValueKey<bool>(_demoTileView),
+                                color: const Color(0xFFF4F4F4),
+                                size: 23,
+                              ),
+                            ),
+                            onTap: () {
+                              setState(() {
+                                _demoTileView = !_demoTileView;
+                                if (_demoTileView) {
+                                  _selectionModePinned = false;
+                                  _selectedBundledDemoAssetPaths.clear();
+                                }
+                              });
+                            },
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      MixroomShellRoundButton(
-                        size: 44,
-                        active: _selectionMode,
-                        icon: Icon(
-                          _selectionMode
-                              ? Icons.close_rounded
-                              : Icons.checklist_rounded,
-                          color: const Color(0xFFF4F4F4),
-                          size: _selectionMode ? 22 : 21,
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                L10n.translate(context, 'Demo Projects'),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFFF4F4F4),
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w700,
+                                  height: 25 / 21,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                L10n.translate(
+                                  context,
+                                  'Prepared by Mixroom for you',
+                                ),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.58),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        onTap: _toggleSelectionMode,
-                      ),
-                    ],
-                  ),
+                        const SizedBox(width: 10),
+                        const SizedBox(width: 44, height: 44),
+                      ],
+                    )
+                  else
+                    Row(
+                      children: [
+                        MixroomShellRoundButton(
+                          key: _projectToolsButtonKey,
+                          size: 44,
+                          iconExtent: 17,
+                          assetPath: kMixroomShellFilterAsset,
+                          onTap: _showProjectTools,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: MixroomShellSegmentedControl<int>(
+                            value: selectedLibraryTab.index,
+                            options: visibleLibraryOptions,
+                            labelBuilder: (value) => L10n.translate(
+                              context,
+                              value == 0
+                                  ? 'On Device'
+                                  : value == 1
+                                  ? 'Cloud'
+                                  : 'Demo Projects',
+                            ),
+                            onChanged: (value) => _setLibraryTab(
+                              value == 0
+                                  ? _ProjectLibraryTab.yourProjects
+                                  : value == 1
+                                  ? _ProjectLibraryTab.cloudProjects
+                                  : _ProjectLibraryTab.demoProjects,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        MixroomShellRoundButton(
+                          size: 44,
+                          active: _selectionMode,
+                          icon: Icon(
+                            _selectionMode
+                                ? Icons.close_rounded
+                                : Icons.checklist_rounded,
+                            color: const Color(0xFFF4F4F4),
+                            size: _selectionMode ? 22 : 21,
+                          ),
+                          onTap: _toggleSelectionMode,
+                        ),
+                      ],
+                    ),
                   if (_selectionMode) ...[
                     const SizedBox(height: 12),
                     MixroomShellSurface(
@@ -4407,10 +4578,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   Expanded(
                     child: PageView.builder(
                       controller: _libraryPageController,
-                      physics: cloudProjectsEnabled
+                      physics: widget.demoOnly || !cloudProjectsEnabled
+                          ? const NeverScrollableScrollPhysics()
+                          : cloudProjectsEnabled
                           ? const _ProjectLibraryPageScrollPhysics()
                           : const NeverScrollableScrollPhysics(),
-                      itemCount: _ProjectLibraryTab.values.length,
+                      itemCount: libraryPageCount,
                       onPageChanged: _handleLibraryPageChanged,
                       itemBuilder: (context, pageIndex) {
                         final tab = _ProjectLibraryTab.values[pageIndex];
@@ -4501,6 +4674,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final demo = entry.bundledDemo!;
                                           final selected =
                                               _isBundledDemoSelected(demo);
+                                          if (widget.demoOnly &&
+                                              _demoTileView) {
+                                            return _DemoProjectTile(
+                                              demo: demo,
+                                              onTap: () =>
+                                                  _importBundledDemoAndOpen(
+                                                    demo,
+                                                  ),
+                                            );
+                                          }
                                           return Semantics(
                                             button: true,
                                             enabled: true,
@@ -4715,13 +4898,31 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final local = _localProjectForCloud(
                                             cloud,
                                           );
+                                          final inFlight = local == null
+                                              ? _cloudProjectsInFlight.contains(
+                                                      cloud.projectId,
+                                                    ) ||
+                                                    ProjectManager
+                                                        .cloudProjectSyncInFlight
+                                                        .value
+                                                        .contains(
+                                                          cloud.projectId,
+                                                        ) ||
+                                                    _settlingCloudProjectSyncs
+                                                        .contains(
+                                                          cloud.projectId,
+                                                        )
+                                              : _localCloudSyncInFlight(
+                                                  local,
+                                                  cloud,
+                                                );
                                           final localCloudStatus = local == null
                                               ? null
-                                              : _localCloudStatus(local, cloud);
-                                          final inFlight =
-                                              _cloudProjectsInFlight.contains(
-                                                cloud.projectId,
-                                              );
+                                              : _localCloudStatus(
+                                                  local,
+                                                  cloud,
+                                                  syncInProgress: inFlight,
+                                                );
                                           final updated = cloud.updatedAt;
                                           final anchorKey = GlobalObjectKey(
                                             'cloud_project_actions_${cloud.projectId}',
@@ -5003,14 +5204,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                             (project.cloudProjectId ?? '')
                                                 .trim()
                                                 .isNotEmpty;
-                                        final cloudStatus = cloudLinked
-                                            ? _localCloudStatus(project, cloud)
-                                            : null;
                                         final cloudInFlight =
                                             _localCloudSyncInFlight(
                                               project,
                                               cloud,
                                             );
+                                        final cloudStatus = cloudLinked
+                                            ? _localCloudStatus(
+                                                project,
+                                                cloud,
+                                                syncInProgress: cloudInFlight,
+                                              )
+                                            : null;
                                         final localSubtitle =
                                             '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
                                         final keyToken = _projectActionKeyToken(
@@ -5294,172 +5499,425 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               ),
             ),
           ),
-          Positioned(
-            left: 27,
-            right: 85,
-            bottom: searchBarBottom,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 13,
-                ),
-                decoration: const BoxDecoration(
-                  color: Color.fromRGBO(244, 244, 244, 0.28),
-                  borderRadius: BorderRadius.all(Radius.circular(24)),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: Color.fromRGBO(0, 0, 0, 0.25),
-                      blurRadius: 15,
-                      spreadRadius: 8,
-                      offset: Offset.zero,
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 140),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, animation) {
-                        return FadeTransition(opacity: animation, child: child);
-                      },
-                      child: showSearchClear
-                          ? Padding(
-                              key: const ValueKey('search-clear-visible'),
-                              padding: const EdgeInsets.only(right: 8),
-                              child: Material(
-                                color: Colors.transparent,
-                                borderRadius: BorderRadius.circular(999),
-                                clipBehavior: Clip.antiAlias,
-                                child: InkWell(
-                                  onTap: () {
-                                    if (hasSearchQuery) {
-                                      _searchController.clear();
-                                      setState(() {});
-                                    } else {
-                                      _searchFocusNode.unfocus();
-                                    }
-                                  },
+          if (!widget.demoOnly)
+            Positioned(
+              left: 27,
+              right: 85,
+              bottom: searchBarBottom,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 13,
+                  ),
+                  decoration: const BoxDecoration(
+                    color: Color.fromRGBO(244, 244, 244, 0.28),
+                    borderRadius: BorderRadius.all(Radius.circular(24)),
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: Color.fromRGBO(0, 0, 0, 0.25),
+                        blurRadius: 15,
+                        spreadRadius: 8,
+                        offset: Offset.zero,
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 140),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: child,
+                          );
+                        },
+                        child: showSearchClear
+                            ? Padding(
+                                key: const ValueKey('search-clear-visible'),
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Material(
+                                  color: Colors.transparent,
                                   borderRadius: BorderRadius.circular(999),
-                                  splashFactory: InkRipple.splashFactory,
-                                  splashColor: Colors.white.withValues(
-                                    alpha: 0.12,
-                                  ),
-                                  overlayColor:
-                                      WidgetStateProperty.resolveWith<Color?>((
-                                        states,
-                                      ) {
-                                        if (states.contains(
-                                          WidgetState.pressed,
-                                        )) {
-                                          return Colors.white.withValues(
-                                            alpha: 0.14,
-                                          );
-                                        }
-                                        if (states.contains(
-                                          WidgetState.hovered,
-                                        )) {
-                                          return Colors.white.withValues(
-                                            alpha: 0.08,
-                                          );
-                                        }
-                                        if (states.contains(
-                                          WidgetState.focused,
-                                        )) {
-                                          return Colors.white.withValues(
-                                            alpha: 0.10,
-                                          );
-                                        }
-                                        return Colors.transparent;
-                                      }),
-                                  child: SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: Icon(
-                                      Icons.close_rounded,
-                                      size: 16,
-                                      color: Colors.white.withValues(
-                                        alpha: 0.86,
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InkWell(
+                                    onTap: () {
+                                      if (hasSearchQuery) {
+                                        _searchController.clear();
+                                        setState(() {});
+                                      } else {
+                                        _searchFocusNode.unfocus();
+                                      }
+                                    },
+                                    borderRadius: BorderRadius.circular(999),
+                                    splashFactory: InkRipple.splashFactory,
+                                    splashColor: Colors.white.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    overlayColor:
+                                        WidgetStateProperty.resolveWith<Color?>(
+                                          (states) {
+                                            if (states.contains(
+                                              WidgetState.pressed,
+                                            )) {
+                                              return Colors.white.withValues(
+                                                alpha: 0.14,
+                                              );
+                                            }
+                                            if (states.contains(
+                                              WidgetState.hovered,
+                                            )) {
+                                              return Colors.white.withValues(
+                                                alpha: 0.08,
+                                              );
+                                            }
+                                            if (states.contains(
+                                              WidgetState.focused,
+                                            )) {
+                                              return Colors.white.withValues(
+                                                alpha: 0.10,
+                                              );
+                                            }
+                                            return Colors.transparent;
+                                          },
+                                        ),
+                                    child: SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: Icon(
+                                        Icons.close_rounded,
+                                        size: 16,
+                                        color: Colors.white.withValues(
+                                          alpha: 0.86,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            )
-                          : Padding(
-                              key: const ValueKey('search-icon-visible'),
-                              padding: const EdgeInsets.only(right: 8),
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: Icon(
-                                  Icons.search_rounded,
-                                  size: 18,
-                                  color: Colors.white.withValues(alpha: 0.78),
+                              )
+                            : Padding(
+                                key: const ValueKey('search-icon-visible'),
+                                padding: const EdgeInsets.only(right: 8),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: Icon(
+                                    Icons.search_rounded,
+                                    size: 18,
+                                    color: Colors.white.withValues(alpha: 0.78),
+                                  ),
                                 ),
                               ),
-                            ),
-                    ),
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        focusNode: _searchFocusNode,
-                        onChanged: (_) => setState(() {}),
-                        scrollPadding: const EdgeInsets.only(bottom: 120),
-                        style: const TextStyle(
-                          fontFamily: 'Pretendard',
-                          color: Color(0xFFF4F4F4),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          isCollapsed: true,
-                          hintText: L10n.translate(context, 'Search'),
-                          hintStyle: TextStyle(
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          onChanged: (_) => setState(() {}),
+                          scrollPadding: const EdgeInsets.only(bottom: 120),
+                          style: const TextStyle(
                             fontFamily: 'Pretendard',
-                            color: Colors.white.withValues(alpha: 0.68),
+                            color: Color(0xFFF4F4F4),
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
                           ),
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            isCollapsed: true,
+                            hintText: L10n.translate(context, 'Search'),
+                            hintStyle: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.68),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          Positioned(
-            right: 27,
-            bottom: floatingControlsBottom,
-            child: MixroomShellRoundButton(
-              iconExtent: 17,
-              assetPath: kMixroomShellImportAsset,
-              fillColor: const Color.fromRGBO(244, 244, 244, 0.28),
-              onTap: () async {
-                if (!canCreate) {
-                  _showProjectLimitDialog();
-                  return;
-                }
-                final res = await _pickFilesSafely(
-                  type: FileType.custom,
-                  allowedExtensions: const <String>['mixroom'],
-                  withData: false,
-                );
-                if (res == null || res.files.isEmpty) return;
-                final path = res.files.single.path;
-                if (path == null) return;
-                _importProjectFromFile(path);
-              },
+          if (!widget.demoOnly)
+            Positioned(
+              right: 27,
+              bottom: floatingControlsBottom,
+              child: MixroomShellRoundButton(
+                iconExtent: 17,
+                assetPath: kMixroomShellImportAsset,
+                fillColor: const Color.fromRGBO(244, 244, 244, 0.28),
+                onTap: () async {
+                  if (!canCreate) {
+                    _showProjectLimitDialog();
+                    return;
+                  }
+                  final res = await _pickFilesSafely(
+                    type: FileType.custom,
+                    allowedExtensions: const <String>['mixroom'],
+                    withData: false,
+                  );
+                  if (res == null || res.files.isEmpty) return;
+                  final path = res.files.single.path;
+                  if (path == null) return;
+                  _importProjectFromFile(path);
+                },
+              ),
             ),
-          ),
         ],
       ),
     );
+  }
+}
+
+class _DemoProjectTile extends StatelessWidget {
+  const _DemoProjectTile({required this.demo, required this.onTap});
+
+  final BundledDemoProjectAsset demo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Open demo project ${demo.name}',
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(24),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          splashFactory: InkRipple.splashFactory,
+          splashColor: Colors.white.withValues(alpha: 0.12),
+          child: MixroomShellSurface(
+            radius: 24,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            color: const Color.fromRGBO(244, 244, 244, 0.30),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  demo.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    height: 22 / 16,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FutureBuilder<BundledDemoProjectPreview?>(
+                  future: ProjectManager.readBundledDemoProjectPreview(
+                    demo.assetPath,
+                  ),
+                  builder: (context, snapshot) {
+                    final preview = snapshot.data;
+                    if (preview == null) {
+                      return const SizedBox(
+                        height: 116,
+                        child: Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      );
+                    }
+                    return _DemoProjectTimelinePreview(preview: preview);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DemoProjectTimelinePreview extends StatelessWidget {
+  const _DemoProjectTimelinePreview({required this.preview});
+
+  final BundledDemoProjectPreview preview;
+
+  @override
+  Widget build(BuildContext context) {
+    final populatedRowIds = preview.clips.map((clip) => clip.rowId).toSet();
+    final rows = preview.rows
+        .where((row) => populatedRowIds.contains(row.rowId))
+        .take(4)
+        .toList(growable: false);
+    final visibleRows = rows.isEmpty
+        ? preview.rows.take(4).toList(growable: false)
+        : rows;
+    final maxSeconds = preview.clips.fold<double>(
+      1,
+      (value, clip) => (clip.offsetSeconds + clip.durationSeconds) > value
+          ? clip.offsetSeconds + clip.durationSeconds
+          : value,
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        height: (visibleRows.length * 29).clamp(87, 116).toDouble(),
+        color: const Color(0xFF73797D).withValues(alpha: 0.88),
+        child: Column(
+          children: [
+            for (var index = 0; index < visibleRows.length; index++)
+              Expanded(
+                child: Builder(
+                  builder: (context) {
+                    final row = visibleRows[index];
+                    final clips = preview.clips
+                        .where(
+                          (clip) =>
+                              clip.rowId == row.rowId ||
+                              (clip.rowId == 0 && clip.rowIndex == index),
+                        )
+                        .toList(growable: false);
+                    final hasProjectColor = row.color != 0;
+                    final projectColor = hasProjectColor
+                        ? Color(row.color).withValues(alpha: 1)
+                        : const Color(0xFF6A7A89);
+                    final headerColor = hasProjectColor
+                        ? Color.lerp(
+                            projectColor,
+                            const Color(0xFF0B365D),
+                            0.62,
+                          )!
+                        : row.kind == 'instrument'
+                        ? const Color(0xFF146B6C)
+                        : const Color(0xFF123F6A);
+                    return Row(
+                      children: [
+                        Tooltip(
+                          message: row.name,
+                          child: Container(
+                            width: 38,
+                            color: headerColor,
+                            alignment: Alignment.center,
+                            child: Transform.translate(
+                              offset: Offset(
+                                row.iconId == 28
+                                    ? 2.5
+                                    : trackRowEmojiForId(row.iconId) == null
+                                    ? 0
+                                    : 1,
+                                row.iconId == 28 ? 1.5 : 0,
+                              ),
+                              child: SizedBox.square(
+                                dimension: 22,
+                                child: Center(
+                                  child: buildTrackRowIcon(
+                                    row.iconId,
+                                    color: const Color(0xFFF4F4F4),
+                                    size: 17,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: CustomPaint(
+                            painter: _DemoTimelineRowPainter(
+                              clips: clips,
+                              maxSeconds: maxSeconds,
+                              color: projectColor,
+                            ),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DemoTimelineRowPainter extends CustomPainter {
+  const _DemoTimelineRowPainter({
+    required this.clips,
+    required this.maxSeconds,
+    required this.color,
+  });
+
+  final List<BundledDemoProjectPreviewClip> clips;
+  final double maxSeconds;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.17)
+      ..strokeWidth = 1;
+    for (var i = 1; i < 6; i++) {
+      final x = size.width * i / 6;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+    canvas.drawLine(
+      Offset(0, size.height - 0.5),
+      Offset(size.width, size.height - 0.5),
+      gridPaint,
+    );
+
+    for (final clip in clips) {
+      final left = (clip.offsetSeconds / maxSeconds * size.width).clamp(
+        0.0,
+        size.width - 2,
+      );
+      final width = (clip.durationSeconds / maxSeconds * size.width).clamp(
+        8.0,
+        size.width - left,
+      );
+      final rect = Rect.fromLTWH(left + 1, 2.5, width - 2, size.height - 5);
+      final radius = Radius.circular((size.height - 5) / 2);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, radius),
+        Paint()..color = color.withValues(alpha: 0.62),
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, radius),
+        Paint()
+          ..color = color
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4,
+      );
+      final waveform = Paint()
+        ..color = Colors.white.withValues(alpha: 0.90)
+        ..strokeWidth = 1;
+      final centerY = rect.center.dy;
+      final peaks = clip.waveformPeaks;
+      final sampleCount = (rect.width / 3).floor().clamp(4, 96);
+      for (var i = 0; i < sampleCount && peaks.isNotEmpty; i++) {
+        final x = rect.left + rect.width * (i + 0.5) / sampleCount;
+        final peakIndex = (i * peaks.length / sampleCount).floor().clamp(
+          0,
+          peaks.length - 1,
+        );
+        final height = 1.5 + peaks[peakIndex] * (rect.height * 0.70);
+        canvas.drawLine(
+          Offset(x, centerY - height / 2),
+          Offset(x, centerY + height / 2),
+          waveform,
+        );
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DemoTimelineRowPainter oldDelegate) {
+    return oldDelegate.clips != clips ||
+        oldDelegate.maxSeconds != maxSeconds ||
+        oldDelegate.color != color;
   }
 }
 

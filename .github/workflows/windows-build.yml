@@ -1,0 +1,76 @@
+name: Windows desktop build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "windows-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Windows x64 release
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.8
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Package portable build
+        shell: pwsh
+        run: |
+          $bundle = "build/windows/x64/runner/Release"
+          if (-not (Test-Path "$bundle/mixroom.exe")) {
+            throw "Expected Windows executable was not produced at $bundle/mixroom.exe"
+          }
+          Compress-Archive -Path "$bundle/*" -DestinationPath "mixroom-windows-x64.zip" -Force
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $version = ((Select-String -Path "pubspec.yaml" -Pattern '^version:\s*([^+]+)').Matches.Groups[1].Value)
+          if (-not $version) {
+            throw "Could not read the app version from pubspec.yaml"
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" "installer\mixroom.iss"
+          if (-not (Test-Path "dist/Mixroom-Setup.exe")) {
+            throw "The Windows installer was not produced"
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixroom-windows-installer
+          path: dist/Mixroom-Setup.exe
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: mixroom-windows-x64
+          path: mixroom-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

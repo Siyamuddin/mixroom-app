@@ -5,6 +5,8 @@
 #include "NativeEffects.h"
 #include "JuceLogBridge.h"
 #include "../../native/RealtimeWavCapture.h"
+#include "../../native/SampledPitchSemantics.h"
+#include "../../native/TimelineMidiBoundary.h"
 
 #include <array>
 #include <atomic>
@@ -27,6 +29,9 @@
 #include <vector>
 
 extern "C" void juceLogToFlutter(const char *msg);
+#if JUCE_MAC && !JUCE_IOS
+extern "C" void mixroomPluginScanProgress(const char *json);
+#endif
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int scopeKind,
                                                     int row,
@@ -1394,7 +1399,7 @@ public:
 
         // smoothing (slightly slower than your master, looks nicer in mini meters)
         constexpr float alpha = 0.18f;
-        auto smooth = [](float prev, float next)
+        auto smooth = [alpha](float prev, float next)
         { return prev + alpha * (next - prev); };
 
         if (peakL && peakR && rmsL && rmsR)
@@ -1689,6 +1694,273 @@ private:
     std::atomic<uint64_t> *audioRenderGenerationPtr = nullptr;
 };
 
+#if JUCE_MAC && !JUCE_IOS
+class MacIndependentMonitorBuffer
+{
+public:
+    static constexpr int maxBlockFrames = 8192;
+    static constexpr int storageFrames = maxBlockFrames * 8;
+
+    bool configure(int requestedRow,
+                   int requestedChannels,
+                   double inputSampleRate,
+                   double outputSampleRate,
+                   int inputBlockFrames,
+                   int outputBlockFrames) noexcept
+    {
+        if (active.load(std::memory_order_acquire) || requestedRow < 0 ||
+            requestedChannels < 1 || requestedChannels > 2 ||
+            inputSampleRate <= 1000.0 || outputSampleRate <= 1000.0 ||
+            std::abs(inputSampleRate - outputSampleRate) >= 1.0 ||
+            inputBlockFrames <= 0 || inputBlockFrames > maxBlockFrames ||
+            outputBlockFrames <= 0 || outputBlockFrames > maxBlockFrames)
+            return false;
+
+        generation.fetch_add(1, std::memory_order_acq_rel);
+        readPosition.store(0, std::memory_order_relaxed);
+        writePosition.store(0, std::memory_order_relaxed);
+        targetRow.store(requestedRow, std::memory_order_relaxed);
+        channelCount.store(requestedChannels, std::memory_order_relaxed);
+        inputBlockLimit.store(inputBlockFrames, std::memory_order_relaxed);
+        outputBlockLimit.store(outputBlockFrames, std::memory_order_relaxed);
+        capacity.store(
+            juce::jmin(storageFrames,
+                       8 * juce::jmax(inputBlockFrames, outputBlockFrames)),
+            std::memory_order_relaxed);
+        startThreshold.store(2 * outputBlockFrames, std::memory_order_relaxed);
+        consumerStarted.store(false, std::memory_order_relaxed);
+        publishedCallbacks.store(0, std::memory_order_relaxed);
+        underflows.store(0, std::memory_order_relaxed);
+        overflows.store(0, std::memory_order_relaxed);
+        invalidBlocks.store(0, std::memory_order_relaxed);
+        return true;
+    }
+
+    void activate() noexcept
+    {
+        active.store(true, std::memory_order_release);
+    }
+
+    void disableAndClear() noexcept
+    {
+        active.store(false, std::memory_order_release);
+        generation.fetch_add(1, std::memory_order_acq_rel);
+        consumerStarted.store(false, std::memory_order_release);
+        readPosition.store(0, std::memory_order_release);
+        writePosition.store(0, std::memory_order_release);
+    }
+
+    bool push(const float *const *inputs,
+              int numChannels,
+              int numFrames) noexcept
+    {
+        const auto operationGeneration =
+            generation.load(std::memory_order_acquire);
+        if (!active.load(std::memory_order_acquire))
+            return false;
+        if (inputs == nullptr ||
+            numChannels != channelCount.load(std::memory_order_relaxed) ||
+            numFrames <= 0 ||
+            numFrames > inputBlockLimit.load(std::memory_order_relaxed))
+        {
+            invalidBlocks.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            if (inputs[channel] == nullptr)
+            {
+                invalidBlocks.fetch_add(1, std::memory_order_relaxed);
+                return false;
+            }
+        }
+
+        const auto write = writePosition.load(std::memory_order_relaxed);
+        const auto read = readPosition.load(std::memory_order_acquire);
+        const auto configuredCapacity =
+            static_cast<std::uint64_t>(capacity.load(std::memory_order_relaxed));
+        if (write < read || write - read + static_cast<std::uint64_t>(numFrames) >
+                                configuredCapacity)
+        {
+            overflows.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        const int firstFrame = static_cast<int>(write % configuredCapacity);
+        const int firstCount = juce::jmin(
+            numFrames,
+            static_cast<int>(configuredCapacity) - firstFrame);
+        const int secondCount = numFrames - firstCount;
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            juce::FloatVectorOperations::copy(
+                samples[(size_t)channel].data() + firstFrame,
+                inputs[channel],
+                firstCount);
+            if (secondCount > 0)
+                juce::FloatVectorOperations::copy(
+                    samples[(size_t)channel].data(),
+                    inputs[channel] + firstCount,
+                    secondCount);
+        }
+        if (!active.load(std::memory_order_acquire) ||
+            operationGeneration != generation.load(std::memory_order_acquire))
+            return false;
+
+        writePosition.store(
+            write + static_cast<std::uint64_t>(numFrames),
+            std::memory_order_release);
+        publishedCallbacks.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+
+    void read(juce::AudioBuffer<float> &output) noexcept
+    {
+        output.clear();
+        const int numFrames = output.getNumSamples();
+        const int configuredChannels =
+            channelCount.load(std::memory_order_relaxed);
+        if (!active.load(std::memory_order_acquire))
+            return;
+        if (numFrames <= 0 ||
+            numFrames > outputBlockLimit.load(std::memory_order_relaxed) ||
+            output.getNumChannels() < configuredChannels)
+        {
+            invalidBlocks.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+
+        const auto read = readPosition.load(std::memory_order_relaxed);
+        const auto write = writePosition.load(std::memory_order_acquire);
+        const auto ready = write >= read ? write - read : 0;
+        if (!consumerStarted.load(std::memory_order_relaxed))
+        {
+            if (ready < static_cast<std::uint64_t>(
+                            startThreshold.load(std::memory_order_relaxed)))
+            {
+                underflows.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+            consumerStarted.store(true, std::memory_order_relaxed);
+        }
+        if (ready < static_cast<std::uint64_t>(numFrames))
+        {
+            consumerStarted.store(false, std::memory_order_relaxed);
+            underflows.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+
+        const auto configuredCapacity =
+            static_cast<std::uint64_t>(capacity.load(std::memory_order_relaxed));
+        const int firstFrame = static_cast<int>(read % configuredCapacity);
+        const int firstCount = juce::jmin(
+            numFrames,
+            static_cast<int>(configuredCapacity) - firstFrame);
+        const int secondCount = numFrames - firstCount;
+        for (int channel = 0; channel < configuredChannels; ++channel)
+        {
+            juce::FloatVectorOperations::copy(
+                output.getWritePointer(channel),
+                samples[(size_t)channel].data() + firstFrame,
+                firstCount);
+            if (secondCount > 0)
+                juce::FloatVectorOperations::copy(
+                    output.getWritePointer(channel) + firstCount,
+                    samples[(size_t)channel].data(),
+                    secondCount);
+        }
+        readPosition.store(
+            read + static_cast<std::uint64_t>(numFrames),
+            std::memory_order_release);
+    }
+
+    bool isActive() const noexcept
+    {
+        return active.load(std::memory_order_acquire);
+    }
+
+    juce::NamedValueSet getFacts() const
+    {
+        const auto read = readPosition.load(std::memory_order_acquire);
+        const auto write = writePosition.load(std::memory_order_acquire);
+        juce::NamedValueSet facts;
+        facts.set("active", isActive());
+        facts.set("targetRow", targetRow.load(std::memory_order_relaxed));
+        facts.set("channelCount", channelCount.load(std::memory_order_relaxed));
+        facts.set("capacityFrames", capacity.load(std::memory_order_relaxed));
+        facts.set("bufferedFrames", (juce::int64)(write >= read ? write - read : 0));
+        facts.set("callbackCount", (juce::int64)publishedCallbacks.load(std::memory_order_relaxed));
+        facts.set("underflowCount", (juce::int64)underflows.load(std::memory_order_relaxed));
+        facts.set("overflowCount", (juce::int64)overflows.load(std::memory_order_relaxed));
+        facts.set("invalidBlockCount", (juce::int64)invalidBlocks.load(std::memory_order_relaxed));
+        return facts;
+    }
+
+private:
+    std::array<std::array<float, storageFrames>, 2> samples{};
+    std::atomic<bool> active{false};
+    std::atomic<bool> consumerStarted{false};
+    std::atomic<std::uint64_t> generation{1};
+    std::atomic<std::uint64_t> readPosition{0};
+    std::atomic<std::uint64_t> writePosition{0};
+    std::atomic<int> channelCount{0};
+    std::atomic<int> targetRow{-1};
+    std::atomic<int> inputBlockLimit{0};
+    std::atomic<int> outputBlockLimit{0};
+    std::atomic<int> capacity{0};
+    std::atomic<int> startThreshold{0};
+    std::atomic<std::uint64_t> publishedCallbacks{0};
+    std::atomic<std::uint64_t> underflows{0};
+    std::atomic<std::uint64_t> overflows{0};
+    std::atomic<std::uint64_t> invalidBlocks{0};
+};
+
+class MacIndependentMonitorSourceProcessor final : public juce::AudioProcessor
+{
+public:
+    explicit MacIndependentMonitorSourceProcessor(
+        MacIndependentMonitorBuffer &sourceBuffer)
+        : juce::AudioProcessor(
+              BusesProperties().withOutput(
+                  "Output", juce::AudioChannelSet::stereo(), true)),
+          buffer(sourceBuffer)
+    {
+    }
+
+    const juce::String getName() const override
+    {
+        return "MacIndependentMonitorSourceProcessor";
+    }
+    void prepareToPlay(double, int) override {}
+    void releaseResources() override {}
+    void processBlock(juce::AudioBuffer<float> &audio,
+                      juce::MidiBuffer &) override
+    {
+        buffer.read(audio);
+    }
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override
+    {
+        return layouts.getMainInputChannelSet().isDisabled() &&
+            layouts.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
+    }
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    void getStateInformation(juce::MemoryBlock &) override {}
+    void setStateInformation(const void *, int) override {}
+
+private:
+    MacIndependentMonitorBuffer &buffer;
+};
+#endif
+
 // dummy node before a track/row (so it can easily switch next nodes)
 class TrackInputProcessor : public juce::AudioProcessor
 {
@@ -1961,6 +2233,12 @@ struct TimelineMidiNote
     double velocity = 0.8;
 };
 
+enum class LiveMidiPanicMode : std::uint8_t
+{
+    liveOnly = 1,
+    full = 3,
+};
+
 class TimelineClipProcessorBase
 {
 public:
@@ -1975,6 +2253,7 @@ public:
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
     virtual void primeForOfflineRender() = 0;
+    virtual void requestLiveMidiPanic(LiveMidiPanicMode) noexcept {}
 };
 
 inline float mixroomUiGainToLinear(float gainUi)
@@ -2848,13 +3127,10 @@ public:
         next->usesDrumKitSamplePitchMap =
             usesDrumKitSamplePitchMap(instrumentId);
         next->sourceTempoBpm = juce::jlimit(1.0, 400.0, sourceTempoBpm);
-        next->sampledDefinition =
-            resolveSampledDefinition(instrumentId, instrumentName);
-        if (next->sampledDefinition != nullptr)
-            preloadSampledRegionsForNotes(
-                *next->sampledDefinition,
-                next->notes,
-                next->usesDrumKitSamplePitchMap);
+        next->sampledDefinition = prepareSampledDefinitionForNotes(
+            resolveSampledDefinition(instrumentId, instrumentName),
+            next->notes,
+            next->usesDrumKitSamplePitchMap);
         next->sampledAttackOverride =
             params.contains(juce::Identifier("attackMs"));
         next->sampledReleaseOverride =
@@ -2933,6 +3209,13 @@ public:
         event.velocity = juce::jlimit(0.0f, 1.0f, velocity);
         event.preparedSample = preparedSample;
         return enqueueLiveMidiEventLockFree(event);
+    }
+
+    void requestLiveMidiPanic(LiveMidiPanicMode mode) noexcept override
+    {
+        liveMidiPanicRequest.fetch_or(
+            static_cast<std::uint8_t>(mode),
+            std::memory_order_release);
     }
 
     bool prepareLiveMidiSample(int pitch,
@@ -3016,6 +3299,7 @@ public:
         {
         }
 
+        liveMidiPanicRequest.store(0, std::memory_order_relaxed);
         activeLiveNotes.clear();
         activeTimelineNotes.reset();
         cachedStateRaw = nullptr;
@@ -3042,6 +3326,7 @@ public:
     {
         renderGeneration.fetch_add(1, std::memory_order_acq_rel);
         buffer.clear();
+        applyPendingLiveMidiPanic();
 
         if (muted.load(std::memory_order_relaxed))
             return;
@@ -3104,10 +3389,10 @@ public:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
-        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
-        const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
+        const double attackSec = juce::jmax(0.0, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.0, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.0, 1.0, cachedPreset.sustainLevel);
+        const double releaseSec = juce::jmax(0.0, cachedPreset.releaseMs / 1000.0);
         const float driveGain =
             sampledMode
                 ? 1.0f
@@ -3144,8 +3429,15 @@ public:
                     const double startTimelineSec = blockStart + ((double)writeStart / sr);
                     const double endTimelineSec =
                         startTimelineSec + ((double)framesToRender / sr);
-                    const double blockSourceStartSec =
+                    const double roundedBlockSourceStartSec =
                         ((startTimelineSec - cs) * safeRatio) + inFile;
+                    const double blockSourceStartSec =
+                        mixroom::timelineMidiAdmissionSourceStartSec(
+                            blockStart,
+                            blockEnd,
+                            cs,
+                            roundedBlockSourceStartSec,
+                            inFile);
                     const double blockSourceEndSec =
                         ((endTimelineSec - cs) * safeRatio) + inFile;
                     const double pitchOffsetSemitones =
@@ -3210,7 +3502,7 @@ public:
                             !cachedSampledReleaseOverride)
                         {
                             noteReleaseSec =
-                                juce::jmax(0.02, effectiveRegion.releaseSec);
+                                juce::jmax(0.0, effectiveRegion.releaseSec);
                         }
 
                         const double noteStartSourceSec =
@@ -3285,10 +3577,10 @@ public:
                             {
                                 if (!cachedSampledAttackOverride)
                                     noteAttackSec =
-                                        juce::jmax(0.001, sampledRegion->attackSec);
+                                        juce::jmax(0.0, sampledRegion->attackSec);
                                 if (!cachedSampledReleaseOverride)
                                     noteReleaseSec =
-                                        juce::jmax(0.02, sampledRegion->releaseSec);
+                                        juce::jmax(0.0, sampledRegion->releaseSec);
                             }
                             const double releaseSourceSec = noteReleaseSec * safeRatio;
                             double notePitch =
@@ -3447,11 +3739,11 @@ public:
                     sampledMode && voice.sampledSource != nullptr;
                 const double voiceAttackSec =
                     (voiceSampled && !cachedSampledAttackOverride)
-                        ? juce::jmax(0.001, voice.sampledAttackSec)
+                        ? juce::jmax(0.0, voice.sampledAttackSec)
                         : attackSec;
                 const double voiceReleaseSec =
                     (voiceSampled && !cachedSampledReleaseOverride)
-                        ? juce::jmax(0.02, voice.sampledReleaseSec)
+                        ? juce::jmax(0.0, voice.sampledReleaseSec)
                         : releaseSec;
 
                 double env = 0.0;
@@ -3465,8 +3757,11 @@ public:
                 }
                 else
                 {
-                    const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
-                    env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                    if (voiceReleaseSec > 0.0)
+                    {
+                        const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
+                        env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                    }
                 }
 
                 if (env <= 0.0)
@@ -3592,7 +3887,7 @@ public:
                     const double voiceReleaseSec =
                         (sampledMode && voice.sampledSource != nullptr &&
                          !cachedSampledReleaseOverride)
-                            ? juce::jmax(0.02, voice.sampledReleaseSec)
+                            ? juce::jmax(0.0, voice.sampledReleaseSec)
                             : releaseSec;
                     return voice.releasing && voice.releaseAgeSec >= voiceReleaseSec;
                 }),
@@ -3683,7 +3978,7 @@ private:
 
     struct SampledRegion
     {
-        mutable std::shared_ptr<const DecodedSamplePcm> sample;
+        std::shared_ptr<const DecodedSamplePcm> sample;
         juce::String sampleAssetPath;
         int loKey = 0;
         int hiKey = 127;
@@ -3788,14 +4083,14 @@ private:
         double decaySec,
         double sustainLevel)
     {
-        attackSec = juce::jmax(0.001, attackSec);
-        decaySec = juce::jmax(0.001, decaySec);
-        sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
-        if (ageSec < attackSec)
+        attackSec = juce::jmax(0.0, attackSec);
+        decaySec = juce::jmax(0.0, decaySec);
+        sustainLevel = juce::jlimit(0.0, 1.0, sustainLevel);
+        if (attackSec > 0.0 && ageSec < attackSec)
             return juce::jlimit(0.0, 1.0, ageSec / attackSec);
 
         const double decayAge = ageSec - attackSec;
-        if (decayAge < decaySec)
+        if (decaySec > 0.0 && decayAge < decaySec)
         {
             const double t = decayAge / decaySec;
             return 1.0 + ((sustainLevel - 1.0) * t);
@@ -3814,7 +4109,9 @@ private:
         if (ageSec < holdSec)
             return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
 
-        releaseSec = juce::jmax(0.02, releaseSec);
+        releaseSec = juce::jmax(0.0, releaseSec);
+        if (releaseSec <= 0.0)
+            return 0.0;
         const double releaseAge = ageSec - holdSec;
         const double releaseStart =
             envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
@@ -4450,7 +4747,7 @@ private:
         definition->sfzAssetPath = sfzAssetPath;
         definition->defaultAttackSec = juce::jlimit(0.0, 4.0, globalAttackSec);
         definition->defaultReleaseSec =
-            juce::jlimit(0.02, 12.0, globalReleaseSec);
+            juce::jlimit(0.0, 12.0, globalReleaseSec);
         definition->regions.reserve(rawRegions.size());
 
         for (const auto &r : rawRegions)
@@ -4467,18 +4764,26 @@ private:
                 sampleRaw);
             SampledRegion regionDef;
             regionDef.sampleAssetPath = sampleAssetPath;
-            regionDef.loKey =
-                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lokey", 0.0)));
-            regionDef.hiKey =
-                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "hikey", 127.0)));
+            const double key = readSfzNumeric(
+                r, "key", std::numeric_limits<double>::quiet_NaN());
+            const double defaultLoKey = std::isfinite(key) ? key : 0.0;
+            const double defaultHiKey = std::isfinite(key) ? key : 127.0;
+            regionDef.loKey = juce::jlimit(
+                0,
+                127,
+                (int)std::lround(readSfzNumeric(r, "lokey", defaultLoKey)));
+            regionDef.hiKey = juce::jlimit(
+                regionDef.loKey,
+                127,
+                (int)std::lround(readSfzNumeric(r, "hikey", defaultHiKey)));
 
             double keyCenter = readSfzNumeric(r, "pitch_keycenter", std::numeric_limits<double>::quiet_NaN());
             if (!std::isfinite(keyCenter))
             {
-                keyCenter = readSfzNumeric(
-                    r,
-                    "key",
-                    (double)std::lround((regionDef.loKey + regionDef.hiKey) * 0.5));
+                keyCenter = std::isfinite(key)
+                                ? key
+                                : (double)std::lround(
+                                      (regionDef.loKey + regionDef.hiKey) * 0.5);
             }
             regionDef.keyCenter =
                 juce::jlimit(0, 127, (int)std::lround(keyCenter));
@@ -4497,7 +4802,7 @@ private:
                 4.0,
                 readSfzNumeric(r, "ampeg_attack", globalAttackSec));
             regionDef.releaseSec = juce::jlimit(
-                0.02,
+                0.0,
                 12.0,
                 readSfzNumeric(r, "ampeg_release", globalReleaseSec));
             regionDef.pitchKeytrack = juce::jlimit(
@@ -4608,21 +4913,6 @@ private:
         return sampledDefinitionForAsset(assetPath);
     }
 
-    static bool ensureSampledRegionLoaded(const SampledRegion &region)
-    {
-        if (region.sample != nullptr && region.sample->frameCount() >= 2)
-            return true;
-        if (region.sampleAssetPath.trim().isEmpty())
-            return false;
-
-        auto sample = decodedSampleForAsset(region.sampleAssetPath);
-        if (sample == nullptr || sample->frameCount() < 2)
-            return false;
-
-        region.sample = sample;
-        return true;
-    }
-
     static bool isSampledRegionReady(const SampledRegion &region) noexcept
     {
         return region.sample != nullptr && region.sample->frameCount() >= 2;
@@ -4697,12 +4987,13 @@ private:
         return pickBest(false, false);
     }
 
-    static void preloadSampledRegionsForNotes(const SampledDefinition &definition,
-                                              const juce::Array<TimelineMidiNote> &notes,
-                                              bool usesDrumKitPitchMap)
+    static std::unordered_set<size_t> sampledRegionIndicesForNotes(
+        const SampledDefinition &definition,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
     {
-        std::unordered_set<const SampledRegion *> regionsToLoad;
-        regionsToLoad.reserve((size_t)juce::jmax(1, notes.size()));
+        std::unordered_set<size_t> regionIndices;
+        regionIndices.reserve((size_t)juce::jmax(1, notes.size()));
 
         for (int i = 0; i < notes.size(); ++i)
         {
@@ -4720,13 +5011,61 @@ private:
                     midiVelocity,
                     i))
             {
-                regionsToLoad.insert(region);
+                regionIndices.insert(
+                    (size_t)(region - definition.regions.data()));
             }
         }
 
-        for (const auto *region : regionsToLoad)
-            if (region != nullptr)
-                ensureSampledRegionLoaded(*region);
+        return regionIndices;
+    }
+
+    static void preloadSampledRegionsForNotes(
+        const SampledDefinition &definition,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
+    {
+        const auto regionIndices = sampledRegionIndicesForNotes(
+            definition, notes, usesDrumKitPitchMap);
+
+        for (const auto index : regionIndices)
+        {
+            if (index >= definition.regions.size())
+                continue;
+            const auto &region = definition.regions[index];
+            if (region.sampleAssetPath.trim().isNotEmpty())
+                juce::ignoreUnused(
+                    decodedSampleForAsset(region.sampleAssetPath));
+        }
+    }
+
+    static std::shared_ptr<const SampledDefinition>
+    prepareSampledDefinitionForNotes(
+        const std::shared_ptr<const SampledDefinition> &metadata,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
+    {
+        if (metadata == nullptr)
+            return nullptr;
+
+        auto prepared = std::make_shared<SampledDefinition>(*metadata);
+        const auto regionIndices = sampledRegionIndicesForNotes(
+            *metadata, notes, usesDrumKitPitchMap);
+
+        for (const auto index : regionIndices)
+        {
+            if (index >= prepared->regions.size())
+                continue;
+            auto &region = prepared->regions[index];
+            if (region.sampleAssetPath.trim().isEmpty())
+                continue;
+            auto sample = decodedSampleForAsset(region.sampleAssetPath);
+            if (sample != nullptr && sample->frameCount() >= 2)
+                region.sample = std::move(sample);
+        }
+
+        std::shared_ptr<const SampledDefinition> immutable =
+            std::move(prepared);
+        return immutable;
     }
 
     static int sampledRegionFrameLimit(const SampledRegion &region,
@@ -4794,7 +5133,8 @@ private:
 
         region.sampleStartFrame = startFrame;
         region.sampleEndFrameExclusive = endFrame;
-        region.keyCenter = juce::jlimit(0, 127, (int)std::round(preset.rootNote));
+        region.keyCenter = mixroom::effectiveSampleKeyCenter(
+            source.keyCenter, preset.rootNote);
         if (preset.timeStretchMode >= 0.5)
             region.pitchKeytrack = 0.0;
         region.oneShot = preset.samplePlayMode >= 0.5;
@@ -5160,9 +5500,9 @@ private:
         if (params.contains(juce::Identifier("decayMs")))
             preset.decayMs = juce::jlimit(0.0, 2000.0, readParam(params, "decayMs", preset.decayMs));
         if (params.contains(juce::Identifier("sustainLevel")))
-            preset.sustainLevel = juce::jlimit(0.05, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
+            preset.sustainLevel = juce::jlimit(0.0, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
         if (params.contains(juce::Identifier("releaseMs")))
-            preset.releaseMs = juce::jlimit(20.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
+            preset.releaseMs = juce::jlimit(0.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
         if (params.contains(juce::Identifier("sampleStartNorm")))
             preset.sampleStartNorm = juce::jlimit(0.0, 0.98, readParam(params, "sampleStartNorm", preset.sampleStartNorm));
         if (params.contains(juce::Identifier("sampleEndNorm")))
@@ -5573,6 +5913,25 @@ private:
                             tempoPlaybackRatio.load(std::memory_order_relaxed));
     }
 
+    void applyPendingLiveMidiPanic() noexcept
+    {
+        const auto request = liveMidiPanicRequest.exchange(
+            0, std::memory_order_acq_rel);
+        if (request == 0)
+            return;
+
+        LiveMidiEvent dropped;
+        while (dequeueLiveMidiEventLockFree(dropped))
+        {
+        }
+        activeLiveNotes.clear();
+
+        const auto fullMask =
+            static_cast<std::uint8_t>(LiveMidiPanicMode::full);
+        if ((request & fullMask) == fullMask)
+            activeTimelineNotes.reset();
+    }
+
     void applyPendingLiveMidiEvents()
     {
         std::size_t pendingCount = 0;
@@ -5589,9 +5948,9 @@ private:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
-        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
+        const double attackSec = juce::jmax(0.0, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.0, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.0, 1.0, cachedPreset.sustainLevel);
 
         for (std::size_t eventIndex = 0; eventIndex < pendingCount; ++eventIndex)
         {
@@ -5652,7 +6011,7 @@ private:
                 const double voiceAttackSec =
                     (sampledMode && it->sampledSource != nullptr &&
                      !cachedSampledAttackOverride)
-                        ? juce::jmax(0.001, it->sampledAttackSec)
+                        ? juce::jmax(0.0, it->sampledAttackSec)
                         : attackSec;
                 it->releaseStartLevel = envelopeHoldLevel(
                     it->ageSec,
@@ -5829,6 +6188,7 @@ private:
     std::atomic<std::size_t> liveMidiEnqueuePosition{0};
     std::atomic<std::size_t> liveMidiDequeuePosition{0};
     std::vector<ActiveLiveNote> activeLiveNotes;
+    std::atomic<std::uint8_t> liveMidiPanicRequest{0};
     std::atomic<int> liveSamplePrepareSequenceCounter{0};
     std::bitset<kMaxTimelineMidiNotes> activeTimelineNotes;
     std::vector<size_t> blockNoteIndices;
@@ -5897,6 +6257,10 @@ public:
     };
 
     static JuceEngine &get();
+    static bool isBuiltInMidiInstrumentIdentifier(const juce::String &instrumentId);
+
+    struct PreparedMidiClipLoad;
+    using PreparedMidiClipLoadPtr = std::shared_ptr<PreparedMidiClipLoad>;
 
     void initialiseEngine(const juce::String &v2OutputDeviceName = {},
                           double v2OutputSampleRate = 0.0,
@@ -5926,7 +6290,8 @@ public:
     bool openPreparedBluetoothDuplexRouteV2(int timeoutMilliseconds);
     bool prepareSystemSelectedDuplexSessionV2();
     bool openPreparedSystemSelectedDuplexRouteV2(int timeoutMilliseconds,
-                                                  int outputChannels);
+                                                 int outputChannels,
+                                                 int inputChannels);
     bool reconfigureBluetoothDuplexRouteV2();
     bool validateRecordingRouteV2() const;
     bool isBluetoothDuplexProjectCallbackReadyV2() const noexcept;
@@ -5937,6 +6302,7 @@ public:
     bool isIOSIntentRouteInvalidatedV2() const noexcept;
     juce::String getAudioRouteImplementationName() const;
     bool isV2PlaybackSession() const noexcept;
+    bool isApplicationTerminating() const noexcept;
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
     void removeTrack(int clipIndex);                 // removes clip
     juce::StringArray getTrackEffects(int trackIndex);
@@ -5974,6 +6340,8 @@ public:
                                                       double sampleRate);
     void insertPluginEffect(int trackIdx, const juce::String &pluginPath, std::function<void(bool)> callback);
     void shutdownEngine();
+    void shutdownForApplicationTermination();
+    void panicLiveMidiNotesForApplicationDeactivation();
 
     // Rows
     int addRow(const juce::String &name, int iconId, int preferredRowId = -1);
@@ -6001,7 +6369,23 @@ public:
                       double sourceTempoBpm,
                       double startSec,
                       double lengthSec,
-                      double inFileOffsetSec = 0.0);
+                      double inFileOffsetSec = 0.0,
+                      std::int64_t loadRequestId = 0);
+    PreparedMidiClipLoadPtr prepareBuiltInMidiClipLoad(
+        int clipId,
+        int rowId,
+        const juce::String &instrumentId,
+        const juce::String &instrumentName,
+        const juce::Array<TimelineMidiNote> &notes,
+        const juce::NamedValueSet &params,
+        double sourceTempoBpm,
+        double startSec,
+        double lengthSec,
+        double inFileOffsetSec,
+        std::int64_t loadRequestId);
+    bool installPreparedMidiClipLoad(
+        const PreparedMidiClipLoadPtr &preparedLoad);
+    bool cancelMidiClipLoad(int clipId, std::int64_t loadRequestId);
     bool prepareMidiClipSampleAssets(const juce::String &instrumentId,
                                      const juce::String &instrumentName,
                                      const juce::Array<TimelineMidiNote> &notes);
@@ -6074,6 +6458,68 @@ public:
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
+    void setLoopRegion(bool enabled, double startSec, double endSec)
+    {
+        const double safeStart = juce::jmax(0.0, startSec);
+        const double safeEnd = juce::jmax(safeStart, endSec);
+        const bool active = enabled && safeEnd > safeStart + 1.0e-6;
+        if (!active)
+        {
+            loopEnabledAtomic.store(false, std::memory_order_release);
+            return;
+        }
+        loopStartSecAtomic.store(safeStart, std::memory_order_relaxed);
+        loopEndSecAtomic.store(safeEnd, std::memory_order_relaxed);
+        loopEnabledAtomic.store(true, std::memory_order_release);
+    }
+    bool isLoopRegionActive() const
+    {
+        return loopEnabledAtomic.load(std::memory_order_relaxed) &&
+               loopEndSecAtomic.load(std::memory_order_relaxed) >
+                   loopStartSecAtomic.load(std::memory_order_relaxed) + 1.0e-6;
+    }
+    double wrapTransportSecondsToLoop(double t) const
+    {
+        if (!isLoopRegionActive())
+            return t;
+        const double start = loopStartSecAtomic.load(std::memory_order_relaxed);
+        const double end = loopEndSecAtomic.load(std::memory_order_relaxed);
+        if (t < end)
+            return t;
+        const double length = end - start;
+        if (length <= 1.0e-9)
+            return start;
+        double pos = std::fmod(t - start, length);
+        if (pos < 0.0)
+            pos += length;
+        return start + pos;
+    }
+    void wrapPlayingTransportToLoopIfNeeded()
+    {
+        if (!blockIsPlayingAtomic.load(std::memory_order_relaxed) &&
+            !isPlayingAtomic.load(std::memory_order_relaxed))
+            return;
+        const double current = transportSec.load(std::memory_order_relaxed);
+        const double wrapped = wrapTransportSecondsToLoop(current);
+        if (wrapped == current)
+            return;
+        transportSec.store(wrapped, std::memory_order_relaxed);
+        mixroom::fx::setGlobalTransportSeconds(wrapped);
+    }
+    int samplesUntilLoopWrap(double sampleRate) const
+    {
+        if (sampleRate <= 0.0 || !isLoopRegionActive())
+            return std::numeric_limits<int>::max();
+        const double current = transportSec.load(std::memory_order_relaxed);
+        const double end = loopEndSecAtomic.load(std::memory_order_relaxed);
+        const double remainingSec = end - current;
+        if (remainingSec <= 0.0)
+            return 0;
+        const double samples = remainingSec * sampleRate;
+        if (samples >= (double)std::numeric_limits<int>::max())
+            return std::numeric_limits<int>::max();
+        return juce::jmax(1, (int)std::ceil(samples));
+    }
     bool isTransportPlaying() const
     {
         return isPlayingAtomic.load(std::memory_order_relaxed);
@@ -6100,8 +6546,8 @@ public:
             return;
 
         const double delta = (double)numSamples / sr;
-        const double next =
-            transportSec.load(std::memory_order_relaxed) + delta;
+        const double next = wrapTransportSecondsToLoop(
+            transportSec.load(std::memory_order_relaxed) + delta);
         transportSec.store(next, std::memory_order_relaxed);
         mixroom::fx::setGlobalTransportSeconds(next);
     }
@@ -6256,6 +6702,11 @@ public:
     int getNumInputChannels() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
+    bool setLiveInputMonitorTargetV2(int row,
+                                     int channelStart,
+                                     int channelCount);
+    void disableLiveInputMonitoringV2();
+    bool shouldRouteLiveInputToGraphV2() const noexcept;
     bool configureAudioDevice(double sampleRate,
                               int bufferSize,
                               int desiredInputChannels,
@@ -6278,11 +6729,27 @@ public:
                              int channelCount);
 #if JUCE_MAC && !JUCE_IOS
     bool startIndependentInputRecordingToWav(const juce::File &file,
-                                             double inputSampleRate);
-    void captureIndependentInput(const float *input, int numSamples) noexcept;
+                                             double inputSampleRate,
+                                             int channelCount);
+    void captureIndependentInput(const float *const *inputs,
+                                 int numChannels,
+                                 int numSamples) noexcept;
     juce::NamedValueSet getIndependentInputCaptureFacts() const;
+    bool prepareMacIndependentInputMonitoringV2(int row,
+                                                int channelCount,
+                                                double inputSampleRate,
+                                                double outputSampleRate,
+                                                int inputBlockFrames,
+                                                int outputBlockFrames);
+    bool publishMacIndependentInputMonitoringV2(
+        const float *const *inputs,
+        int numChannels,
+        int numSamples) noexcept;
+    void disableMacIndependentInputMonitoringV2();
+    juce::NamedValueSet getMacIndependentInputMonitoringFactsV2() const;
 #endif
     RealtimeWavCapture::StopResult stopRecording();
+    RealtimeWavCapture::StopResult finalizeRecordingCaptureV2();
     void discardRecordingCapture();
     bool isRecording() const;
     void captureInput(const float *const *input,
@@ -6312,6 +6779,8 @@ public:
     // Gets master + all row meters
     std::vector<float> getAllMeterValues() const;
     std::vector<float> getRecentMasterWaveform(int sampleCount) const;
+    // Interleaved post-master samples: [L0, R0, L1, R1, ...].
+    std::vector<float> getRecentMasterStereoWaveform(int sampleCount) const;
 
     // Compressor meter strip (white-box only)
     const std::array<float, 5> getClipCompressorMeter(int clipIndex, int effectIndex);
@@ -6352,6 +6821,11 @@ private:
     void reapplyClipProcessorStateLocked();
     void primeClipProcessorsForOfflineRenderLocked();
     std::shared_ptr<DecodedClipAudioAsset> getOrDecodeClipAudioAsset(const juce::File &file);
+    bool isMidiClipLoadRequestCancelled(int clipId,
+                                        std::int64_t loadRequestId);
+    void requestLiveMidiPanicForClip(int clipId,
+                                     LiveMidiPanicMode mode) noexcept;
+    void requestLiveMidiPanicForAll(LiveMidiPanicMode mode) noexcept;
     void armOutputSafetyForCurrentRoute() noexcept;
     void armOutputSafetyForCurrentRouteLocked() noexcept;
     void ensureBusGraphInitialised(bool commitImmediately = true); // rows + master
@@ -6375,6 +6849,7 @@ private:
     bool dequeueLiveMidiInputAudioEvent(LiveMidiInputEvent &event) noexcept;
     bool prepareLiveMidiInputEventForAudioQueue(LiveMidiInputEvent &event);
     void clearLiveMidiInputAudioQueue() noexcept;
+    bool attachAudioCallbackIfAllowed(juce::AudioIODeviceCallback *callback);
     float panUIToNormalized(float uiPan)         // OLD: uiPan ∈ [-1, 1] NEW: uiPan ∈ [0, 1]
     {
         // return juce::jmap(uiPan, -1.0f, 1.0f, 0.0f, 1.0f); // map to [0, 1]
@@ -6384,6 +6859,9 @@ private:
     static const juce::StringArray mixroomPlugins;
 
     bool engineInitialized = false;
+    std::atomic<bool> applicationTerminationStarted{false};
+    std::mutex engineLifecycleMutex;
+    std::atomic<std::uint64_t> engineLifecycleGeneration{1};
     bool formatsRegistered = false; // will only be flipped once to true
     AudioRouteImplementation audioRouteImplementation =
         AudioRouteImplementation::none;
@@ -6433,6 +6911,9 @@ private:
     bool hasVideoAudio{false};
 
     std::atomic<double> transportSec{0.0};           // source of truth
+    std::atomic<bool> loopEnabledAtomic{false};
+    std::atomic<double> loopStartSecAtomic{0.0};
+    std::atomic<double> loopEndSecAtomic{0.0};
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
     std::atomic<double> graphSampleRateAtomic{0.0};
@@ -6523,6 +7004,7 @@ private:
         juce::Array<TimelineMidiNote> midiNotes;
         juce::NamedValueSet midiParams;
         double midiSourceTempoBpm = 120.0;
+        std::int64_t midiLoadRequestId = 0;
         juce::MemoryBlock midiPluginState;
 
         // nodes/processors
@@ -6608,6 +7090,8 @@ private:
 
     // fixed slots so ids never shift
     std::vector<ClipState> clips;
+    std::mutex midiLoadRequestMutex;
+    std::unordered_map<int, std::int64_t> cancelledMidiLoadRequestThrough;
     MutableRoutedClipSchedules rowRoutedClipSchedules;
     std::unordered_set<int> dirtyRoutedClipScheduleRows;
     RoutedClipItemsById routedClipItemsById;
@@ -6675,7 +7159,8 @@ private:
     std::atomic<bool> masterMeterEnabled{true};
     std::atomic<bool> masterClipLatched{false};
     static constexpr int kMasterWaveformRingSize = 8192;
-    std::array<float, kMasterWaveformRingSize> masterWaveformRing{};
+    std::array<float, kMasterWaveformRingSize> masterWaveformRingL{};
+    std::array<float, kMasterWaveformRingSize> masterWaveformRingR{};
     std::atomic<int> masterWaveformWritePos{0};
     std::array<float, 2> outputSafetyLastSample{0.0f, 0.0f};
     int outputSafetyMuteSamplesRemaining = 0;
@@ -6932,10 +7417,17 @@ private:
     std::atomic<bool> audioRouteRefreshPending{false};
     std::atomic<int> ignoredDeviceChangeCallbacks{0};
     bool liveInputMonitoringEnabled = true;
+    std::atomic<bool> liveInputMonitoringActiveV2{false};
     int liveMonitorTargetRow = 0;
     int liveMonitorChannelCount = 0;
     int liveMonitorChannelStart = 0;
     juce::Array<juce::AudioProcessorGraph::Connection> liveMonitorConnections;
+#if JUCE_MAC && !JUCE_IOS
+    MacIndependentMonitorBuffer macIndependentMonitorBuffer;
+    juce::AudioProcessorGraph::Node::Ptr macIndependentMonitorSourceNode;
+    juce::Array<juce::AudioProcessorGraph::Connection>
+        macIndependentMonitorConnections;
+#endif
 
     void pushMasterWaveformSamples(const float *const *out,
                                    int numOutCh,
@@ -7276,25 +7768,82 @@ public:
 
         const bool blockWasPlaying = engine.isTransportPlaying();
         engine.setBlockPlayingState(blockWasPlaying);
-
-        // set block transport start time for all processors (clips, automation)
-        engine.setBlockTransportStartFromCurrent();
-        engine.beginRealtimeAudioRenderBlock();
-        engine.applyTrackEffectAutomationAtCurrentBlockStart();
+        engine.wrapPlayingTransportToLoopIfNeeded();
+        transportMs = engine.getTransportSeconds() * 1000.0;
+        alignToTransport();
         engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
         // ===============================
-        // 3️⃣ RENDER GRAPH (OUTPUT ONLY)
+        // 3️⃣ RENDER GRAPH
         // ===============================
-        player.audioDeviceIOCallbackWithContext(
-            nullptr,
-            0,
-            outputChannelData,
-            numOutputChannels,
-            numSamples,
-            context);
-
-        engine.advanceTransportBySamples(numSamples);
+#if JUCE_IOS
+        const bool routeVerifiedInput =
+            engine.shouldRouteLiveInputToGraphV2();
+#else
+        constexpr bool routeVerifiedInput = false;
+#endif
+        auto renderGraphChunk = [&](int startSample, int count)
+        {
+            if (count <= 0)
+                return;
+            const float *inputPtrs[32];
+            float *outputPtrs[32];
+            const float *const *inputData = nullptr;
+            int inputCount = 0;
+            if (routeVerifiedInput && inputChannelData != nullptr)
+            {
+                inputCount = juce::jmin(numInputChannels, 32);
+                for (int ch = 0; ch < inputCount; ++ch)
+                    inputPtrs[ch] = inputChannelData[ch] != nullptr
+                                        ? inputChannelData[ch] + startSample
+                                        : nullptr;
+                inputData = inputPtrs;
+            }
+            const int outputCount = juce::jmin(numOutputChannels, 32);
+            for (int ch = 0; ch < outputCount; ++ch)
+                outputPtrs[ch] = outputChannelData[ch] != nullptr
+                                     ? outputChannelData[ch] + startSample
+                                     : nullptr;
+            engine.setBlockTransportStartFromCurrent();
+            engine.beginRealtimeAudioRenderBlock();
+            engine.applyTrackEffectAutomationAtCurrentBlockStart();
+            player.audioDeviceIOCallbackWithContext(
+                inputData,
+                inputCount,
+                outputPtrs,
+                outputCount,
+                count,
+                context);
+            engine.advanceTransportBySamples(count);
+        };
+        if (blockWasPlaying && engine.isLoopRegionActive() && numSamples > 0)
+        {
+            int offset = 0;
+            while (offset < numSamples)
+            {
+                engine.wrapPlayingTransportToLoopIfNeeded();
+                int chunk = numSamples - offset;
+                const int untilWrap = engine.samplesUntilLoopWrap(sampleRate);
+                if (untilWrap > 0)
+                    chunk = juce::jmin(chunk, untilWrap);
+                renderGraphChunk(offset, chunk);
+                offset += chunk;
+            }
+        }
+        else
+        {
+            engine.setBlockTransportStartFromCurrent();
+            engine.beginRealtimeAudioRenderBlock();
+            engine.applyTrackEffectAutomationAtCurrentBlockStart();
+            player.audioDeviceIOCallbackWithContext(
+                routeVerifiedInput ? inputChannelData : nullptr,
+                routeVerifiedInput ? numInputChannels : 0,
+                outputChannelData,
+                numOutputChannels,
+                numSamples,
+                context);
+            engine.advanceTransportBySamples(numSamples);
+        }
 
         if (!enabled || !isPlaying)
         {
@@ -7312,6 +7861,17 @@ public:
         for (int i = 0; i < numSamples; ++i)
         {
             transportMs += msPerSample;
+            if (engine.isLoopRegionActive())
+            {
+                const double wrappedMs =
+                    engine.wrapTransportSecondsToLoop(transportMs * 0.001) *
+                    1000.0;
+                if (wrappedMs + 1.0e-6 < transportMs)
+                {
+                    transportMs = wrappedMs;
+                    alignToTransport();
+                }
+            }
 
             if (transportMs >= nextBeatMs)
             {

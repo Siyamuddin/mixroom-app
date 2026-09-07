@@ -76,6 +76,16 @@
 	<string>Mixroom needs microphone access for recording and input device monitoring.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUAutomaticallyUpdate</key>
+	<false/>
+	<key>SUFeedURL</key>
+	<string>https://www.mixroom.ai/downloads/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>g2axIcAGsQsAaisYSYuy6j40jyNFe/wnp612Hk8BBZQ=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>21600</integer>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

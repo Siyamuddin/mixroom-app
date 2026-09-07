@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../helpers/effect_parameter_exposure.dart';
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import '../models/models.dart';
@@ -98,6 +99,54 @@ class _MixExecutionPolicy {
       intensityMultiplier: profileMultiplier * audibilityMultiplier,
       maxIntensity: maxIntensity,
       ceilingMultiplier: ceilingMultiplier,
+    );
+  }
+}
+
+/// Deterministic row/master scope supplied by the V3 materializer. Generated
+/// output is still validated independently before execution.
+class MixGenerationScope {
+  MixGenerationScope.rows(
+    Set<int> allowedRowIndexes, {
+    Map<int, Set<String>> unavailableEffectIdsByRow = const {},
+  })  : allowedRowIndexes = Set<int>.unmodifiable(allowedRowIndexes),
+        unavailableEffectIdsByRow = Map<int, Set<String>>.unmodifiable(
+          unavailableEffectIdsByRow.map(
+            (row, effects) => MapEntry(row, Set<String>.unmodifiable(effects)),
+          ),
+        ),
+        masterOnly = false;
+
+  const MixGenerationScope.master()
+      : allowedRowIndexes = const <int>{},
+        unavailableEffectIdsByRow = const <int, Set<String>>{},
+        masterOnly = true;
+
+  final Set<int> allowedRowIndexes;
+  final Map<int, Set<String>> unavailableEffectIdsByRow;
+  final bool masterOnly;
+
+  bool permitsRow(RowState row) =>
+      !masterOnly && allowedRowIndexes.contains(row.rowIndex);
+
+  bool permitsGeneratedEffectConstraint(MixAction action) {
+    if (action.type != 'ensure_effect' &&
+        action.type != 'adjust_effect_param_by_name') {
+      return true;
+    }
+    final rawRow = action.data['row'] ?? action.data['row_index'];
+    final row = rawRow is int
+        ? rawRow
+        : rawRow is num
+            ? rawRow.toInt()
+            : -1;
+    if (row < 0 || !allowedRowIndexes.contains(row)) return true;
+    final effectId = canonicalMixroomBuiltInEffectId(
+      action.data['effect_name_contains']?.toString() ?? '',
+    );
+    if (effectId == null) return true;
+    return !(unavailableEffectIdsByRow[row] ?? const <String>{}).contains(
+      effectId,
     );
   }
 }
@@ -293,6 +342,7 @@ class LocalMixingModel {
     required bool strict,
     Map<int, String> roleOverrides = const {},
     bool requirePermissionForBigMoves = false,
+    MixGenerationScope? generationScope,
   }) {
     // Normalize intents (LLM → stable)
     var normGoal = normalizeGoal(goal);
@@ -354,7 +404,11 @@ class LocalMixingModel {
     final targets = _resolveTargets(project, normGoal.target, roleOverrides);
     final referenceRow =
         _resolveReferenceRow(project, normGoal.referenceTarget);
-    final effectiveTargets = _excludeReferenceRow(targets, referenceRow);
+    final effectiveTargets = _excludeReferenceRow(targets, referenceRow)
+        .where(
+          (row) => generationScope == null || generationScope.permitsRow(row),
+        )
+        .toList(growable: false);
 
     if (normGoal.referenceTarget != null && referenceRow == null) {
       return const MixingResult(
@@ -492,9 +546,14 @@ class LocalMixingModel {
       }
     }
     // 0) Headroom safety (always ok)
+    final scopedRows = project.rows
+        .where(
+          (row) => generationScope == null || generationScope.permitsRow(row),
+        )
+        .toList(growable: false);
     final safetyPool = referenceRow == null
-        ? project.rows
-        : project.rows
+        ? scopedRows
+        : scopedRows
             .where((r) => r.rowIndex != referenceRow.rowIndex)
             .toList(growable: false);
     final safetyRows = strict
@@ -559,8 +618,12 @@ class LocalMixingModel {
         resolvedTargets: effectiveTargets,
         target: normGoal.target,
       )
-          .where((row) =>
-              referenceRow == null || row.rowIndex != referenceRow.rowIndex)
+          .where(
+            (row) =>
+                (referenceRow == null ||
+                    row.rowIndex != referenceRow.rowIndex) &&
+                (generationScope == null || generationScope.permitsRow(row)),
+          )
           .toList(growable: false);
 
       if (kind == 'gain') {
@@ -831,14 +894,21 @@ class LocalMixingModel {
     //     notes: notes,
     //   );
     // }
+    final generatedActions = generationScope == null
+        ? actions
+        : actions
+            .where(generationScope.permitsGeneratedEffectConstraint)
+            .toList(growable: false);
     final isGlobal = _isGlobalTarget(normGoal.target);
 
-    final summary = isGlobal ? _summarizeGlobal(actions) : _summarize(actions);
+    final summary = isGlobal
+        ? _summarizeGlobal(generatedActions)
+        : _summarize(generatedActions);
 
     return MixingResult(
-        actions: actions,
+        actions: generatedActions,
         summary: summary,
-        isNoOp: actions.isEmpty,
+        isNoOp: generatedActions.isEmpty,
         notes: notes);
   }
 

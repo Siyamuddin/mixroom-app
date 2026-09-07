@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart' as crypto;
 
 import '../ai_gain_units.dart';
 import '../../helpers/effect_parameter_exposure.dart';
+import '../../helpers/midi_pitch_ranges.dart';
 import '../../models/models.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_audio_facts.dart';
@@ -416,8 +417,6 @@ class AiV3CoreContextBuilder {
           'prototype_context_row_capacity_missing');
     }
     final effectiveMaxRows = math.min(maxRows, configuredMaxRows);
-    final rowCreationPolicy =
-        clientContext['row_creation_policy']?.toString().trim() ?? '';
     final rowIdByIndex = <int, int>{
       for (final row in rows)
         if (row['display_index'] is int && row['row_id'] is int)
@@ -510,7 +509,6 @@ class AiV3CoreContextBuilder {
           'current_rows': rows.length,
           'max_rows': effectiveMaxRows,
           'can_create': rows.length < effectiveMaxRows,
-          if (rowCreationPolicy.isNotEmpty) 'policy': rowCreationPolicy,
         },
         'tempo_stretch_enabled': tempoStretchEnabled,
       },
@@ -526,7 +524,14 @@ class AiV3CoreContextBuilder {
       'clips': clips,
       'instruments':
           _sortedUniqueStrings(clientContext['allowed_instrument_ids']),
-      'instrument_catalog': _instrumentCatalogFacts(clientContext),
+      'instrument_catalog': _instrumentCatalogFacts(
+        clientContext,
+        existingInstrumentIds: rows
+            .where((row) => row['lane_kind'] == 'instrument')
+            .map((row) => row['instrument_id']?.toString().trim() ?? '')
+            .where((instrumentId) => instrumentId.isNotEmpty)
+            .toSet(),
+      ),
       'effects': _effectCatalog(clientContext, profile),
       'library_assets': libraryAssets.map((asset) {
         if (profile == AiV3ContextProfile.essential) {
@@ -622,10 +627,12 @@ List<String> _sortedUniqueStrings(Object? raw) {
 }
 
 List<Map<String, dynamic>> _instrumentCatalogFacts(
-  Map<String, dynamic> context,
-) {
+  Map<String, dynamic> context, {
+  required Set<String> existingInstrumentIds,
+}) {
   final allowedIds =
       _sortedUniqueStrings(context['allowed_instrument_ids']).toSet();
+  final describableIds = allowedIds.union(existingInstrumentIds);
   final raw = context['ai_v3_instrument_catalog'];
   if (raw == null) return const <Map<String, dynamic>>[];
   if (raw is! List || raw.any((value) => value is! Map)) {
@@ -637,13 +644,23 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
     final name = value['name']?.toString().trim() ?? '';
     if (instrumentId.isEmpty ||
         name.isEmpty ||
-        !allowedIds.contains(instrumentId) ||
+        !describableIds.contains(instrumentId) ||
         byId.containsKey(instrumentId)) {
+      throw const AiV3ContextException('prototype_instrument_catalog_invalid');
+    }
+    late final List<Map<String, int>> playablePitchRanges;
+    try {
+      playablePitchRanges = normalizeMidiPitchRanges(
+        value['playable_pitch_ranges'],
+      );
+    } on FormatException {
       throw const AiV3ContextException('prototype_instrument_catalog_invalid');
     }
     byId[instrumentId] = <String, dynamic>{
       'instrument_id': instrumentId,
       'name': name,
+      if (playablePitchRanges.isNotEmpty)
+        'playable_pitch_ranges': playablePitchRanges,
     };
   }
   final result = byId.values.toList(growable: false)

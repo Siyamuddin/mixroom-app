@@ -1356,27 +1356,27 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_reconfigurePlaybackV2JNI(JNIEnv 
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareRecordingV2JNI(JNIEnv *, jclass, jint inputChannels)
 {
     bool success = false;
     if (auto *mm = juce::MessageManager::getInstance())
-        mm->callSync([&success]
-                     { success = JuceEngine::get().prepareRecordingV2Android(); });
+        mm->callSync([&success, inputChannels]
+                     { success = JuceEngine::get().prepareRecordingV2Android((int)inputChannels); });
     else
-        success = JuceEngine::get().prepareRecordingV2Android();
+        success = JuceEngine::get().prepareRecordingV2Android((int)inputChannels);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_prepareSystemSelectedMediaDuplexV2JNI(
-    JNIEnv *, jclass)
+    JNIEnv *, jclass, jint inputChannels)
 {
     bool success = false;
     if (auto *mm = juce::MessageManager::getInstance())
-        mm->callSync([&success]
-                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android(); });
+        mm->callSync([&success, inputChannels]
+                     { success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android((int)inputChannels); });
     else
-        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android();
+        success = JuceEngine::get().prepareSystemSelectedMediaDuplexV2Android((int)inputChannels);
     return success ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -1914,30 +1914,33 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
                                                                  jdouble sourceTempoBpm,
                                                                  jdouble startSec,
                                                                  jdouble lengthSec,
-                                                                 jdouble inFileOffsetSec)
+                                                                 jdouble inFileOffsetSec,
+                                                                 jlong loadRequestId)
 {
     const juce::String id = juceStringFromJString(env, instrumentId);
     const juce::String name = juceStringFromJString(env, instrumentName);
     const auto notes = parseTimelineMidiNotes(env, notesList);
     const auto params = parseNamedValueSet(env, paramsMap);
 
-    if (!JuceEngine::get().prepareMidiClipSampleAssets(id, name, notes))
+    const auto prepared = JuceEngine::get().prepareBuiltInMidiClipLoad(
+        (int)clipIndex,
+        (int)rowId,
+        id,
+        name,
+        notes,
+        params,
+        (double)sourceTempoBpm,
+        (double)startSec,
+        (double)lengthSec,
+        (double)inFileOffsetSec,
+        (std::int64_t)loadRequestId);
+    if (prepared == nullptr)
         return JNI_FALSE;
 
     bool ok = false;
     auto installMidiClip = [&]
     {
-        ok = JuceEngine::get().loadMidiClip(
-            (int)clipIndex,
-            (int)rowId,
-            id,
-            name,
-            notes,
-            params,
-            (double)sourceTempoBpm,
-            (double)startSec,
-            (double)lengthSec,
-            (double)inFileOffsetSec);
+        ok = JuceEngine::get().installPreparedMidiClipLoad(prepared);
     };
 
     if (auto *mm = juce::MessageManager::getInstance())
@@ -1953,6 +1956,30 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadMidiClipJNI(JNIEnv *env,
     }
 
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_cancelMidiClipLoadJNI(
+    JNIEnv *, jclass, jint clipIndex, jlong loadRequestId)
+{
+    std::atomic<bool> ok{false};
+    auto cancelLoad = [&]
+    {
+        ok = JuceEngine::get().cancelMidiClipLoad(
+            (int)clipIndex, (std::int64_t)loadRequestId);
+    };
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            cancelLoad();
+        else
+            mm->callSync(cancelLoad);
+    }
+    else
+    {
+        cancelLoad();
+    }
+    return ok.load() ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -2168,6 +2195,18 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getHostSampleRateJNI(JNIEnv *env
     juce::MessageManager::getInstance()->callSync([&result]
                                                   { result = JuceEngine::get().getHostSampleRate(); });
     return result.load();
+}
+
+extern "C" JNIEXPORT jdoubleArray JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getRecentMasterStereoWaveformJNI(JNIEnv *env, jclass, jint sampleCount)
+{
+    if (!ensureJuceAndroidRuntimeInitialised(env))
+        return env->NewDoubleArray(0);
+
+    std::vector<float> waveform;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { waveform = JuceEngine::get().getRecentMasterStereoWaveform((int)sampleCount); });
+    return floatVectorToJDoubleArray(env, waveform);
 }
 
 extern "C" JNIEXPORT jdoubleArray JNICALL
@@ -2677,6 +2716,22 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTransportSecondsJNI(JNIEnv *,
     juce::MessageManager::getInstance()->callSync([&]
                                                   { value = JuceEngine::get().getTransportSeconds(); });
     return value.load();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLoopRegionJNI(
+    JNIEnv *, jclass, jboolean enabled, jdouble startSeconds, jdouble endSeconds)
+{
+    const bool loopEnabled = enabled != JNI_FALSE;
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        mm->callSync([loopEnabled, startSeconds, endSeconds]
+                     { JuceEngine::get().setLoopRegion(
+                           loopEnabled, (double)startSeconds, (double)endSeconds); });
+        return;
+    }
+    JuceEngine::get().setLoopRegion(
+        loopEnabled, (double)startSeconds, (double)endSeconds);
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -3399,6 +3454,19 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_setLiveInputMonitoringEnabledJNI
 {
     juce::MessageManager::getInstance()->callSync([&]
                                                   { JuceEngine::get().setLiveInputMonitoringEnabled(enabled == JNI_TRUE); });
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_activateLiveInputMonitoringV2JNI(
+    JNIEnv *env, jclass, jint row, jint channelStart, jint channelCount)
+{
+    juce::NamedValueSet facts;
+    juce::MessageManager::getInstance()->callSync([&]
+    {
+        facts = JuceEngine::get().activateLiveInputMonitoringV2(
+            (int)row, (int)channelStart, (int)channelCount);
+    });
+    return namedValueStatsToJavaMap(env, facts);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

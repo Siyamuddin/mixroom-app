@@ -428,7 +428,7 @@ Resources:
           ThrottlingRateLimit: !Ref ApiThrottleRateLimit
       Cors:
         AllowMethods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization,X-Signature'"
+        AllowHeaders: "'Content-Type,Authorization,X-Signature,X-Company-Dashboard-Key'"
         AllowOrigin: "'*'"
 
   BillingApiWebAclAssociation:
@@ -1866,6 +1866,7 @@ Resources:
           POSTHOG_PERSONAL_API_KEY_PARAMETER_NAME: !Ref PostHogPersonalApiKeyParameterName
           POSTHOG_PERSONAL_API_KEY_SECRET_ARN: !Ref PostHogPersonalApiKeySecretArn
           POSTHOG_METRICS_CACHE_TTL_SECONDS: !Ref PostHogMetricsCacheTtlSeconds
+          COMPANY_DASHBOARD_API_KEY_PARAMETER_NAME: !Sub /mixroom/${StageName}/company-dashboard/api-key
       Policies:
         - Statement:
             - Effect: Allow
@@ -1873,6 +1874,7 @@ Resources:
                 - ssm:GetParameter
               Resource:
                 - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*/posthog/personal-api-key
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/${StageName}/company-dashboard/api-key
             - Effect: Allow
               Action:
                 - kms:Decrypt
@@ -1922,6 +1924,12 @@ Resources:
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/internal/admin/live-presence
+            Method: get
+        CompanyDashboardSummary:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/company-dashboard/summary
             Method: get
 
   AdminUsersApiFunction:

@@ -744,6 +744,17 @@ def _is_retryable_transport_error(error: BaseException) -> bool:
     return isinstance(error, (ConnectionError, ConnectionRefusedError, ConnectionResetError))
 
 
+def is_upstream_timeout_error(error: BaseException) -> bool:
+    if isinstance(error, (TimeoutError, socket.timeout)):
+        return True
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        if isinstance(reason, (TimeoutError, socket.timeout)):
+            return True
+        return "timed out" in str(reason or "").lower()
+    return False
+
+
 def _post_json_request(
     *,
     url: str,
@@ -761,9 +772,17 @@ def _post_json_request(
     )
 
     attempts = _network_retry_attempts()
+    timeout_budget_seconds = max(float(timeout_seconds), 0.001)
+    deadline = time.monotonic() + timeout_budget_seconds
     for attempt_index in range(attempts):
+        remaining_seconds = deadline - time.monotonic()
+        if remaining_seconds <= 0:
+            raise TimeoutError("LLM upstream request deadline exceeded.")
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            with urllib.request.urlopen(
+                request,
+                timeout=max(min(timeout_budget_seconds, remaining_seconds), 0.001),
+            ) as response:
                 return response.status, response.read().decode("utf-8")
         except urllib.error.HTTPError as error:
             body_text = error.read().decode("utf-8") if error.fp else ""
@@ -774,7 +793,14 @@ def _post_json_request(
             is_last_attempt = attempt_index >= attempts - 1
             if is_last_attempt or not _is_retryable_transport_error(error):
                 raise
-            time.sleep(_retry_backoff_seconds(attempt_index))
+            retry_backoff = _retry_backoff_seconds(attempt_index)
+            if deadline - time.monotonic() <= retry_backoff:
+                if is_upstream_timeout_error(error):
+                    raise TimeoutError(
+                        "LLM upstream request deadline exceeded."
+                    ) from error
+                raise
+            time.sleep(retry_backoff)
 
     raise RuntimeError("LLM upstream transport retry loop exhausted unexpectedly.")
 

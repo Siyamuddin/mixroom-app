@@ -107,6 +107,8 @@ void main() {
           ];
         case 'getTransportSeconds':
           return 12.5;
+        case 'getRecentMasterStereoWaveform':
+          return <double>[0.25, -0.25, 0.5, -0.5];
         case 'getOutputDevices':
           return <String>['MacBook Pro Speakers', 'WH-1000XM4'];
         case 'selectOutputDevice':
@@ -200,6 +202,7 @@ void main() {
         case 'getInputDeviceInfos':
           return <Map<String, dynamic>>[
             <String, dynamic>{
+              'uid': 'macbook-microphone-uid',
               'name': 'MacBook Pro Microphone',
               'isBluetoothInput': false,
               'isBuiltIn': true,
@@ -219,6 +222,7 @@ void main() {
         case 'supportsLiveMidiClipPlayback':
           return true;
         case 'loadMidiClip':
+        case 'cancelMidiClipLoad':
         case 'updateMidiClipEvents':
           return true;
         default:
@@ -611,6 +615,22 @@ void main() {
     expect(arguments['desiredInputChannels'], 0);
   });
 
+  test('macOS V2 input UID is authoritative without requiring a name',
+      () async {
+    final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
+      17,
+      inputDeviceUID: 'coreaudio-input-42',
+      updateInputPreference: true,
+      platformOverride: TargetPlatform.macOS,
+    );
+
+    expect(result.succeeded, isTrue);
+    final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
+    expect(arguments, isNot(contains('inputDeviceName')));
+    expect(arguments['inputDeviceUID'], 'coreaudio-input-42');
+    expect(arguments['followSystemInput'], isFalse);
+  });
+
   test('macOS V2 system-default input clears the explicit preference',
       () async {
     final result = await JuceAudioEngine.applyAudioRouteConfigurationV2(
@@ -622,6 +642,7 @@ void main() {
     expect(result.succeeded, isTrue);
     final arguments = Map<String, dynamic>.from(calls.single.arguments as Map);
     expect(arguments, isNot(contains('inputDeviceName')));
+    expect(arguments, isNot(contains('inputDeviceUID')));
     expect(arguments['updateInputPreference'], isTrue);
     expect(arguments['followSystemInput'], isTrue);
   });
@@ -676,6 +697,8 @@ void main() {
       AudioRouteIntentV2.preparingRecording,
       generation: 10,
       operation: AudioRouteIntentOperationV2.systemSelectedRecording,
+      recordingChannelStart: 2,
+      recordingChannelCount: 2,
       platformOverride: TargetPlatform.iOS,
     );
 
@@ -686,6 +709,33 @@ void main() {
         'generation': 10,
         'intent': 'preparingRecording',
         'intentOperation': 'systemSelectedRecording',
+        'recordingChannelStart': 2,
+        'recordingChannelCount': 2,
+      },
+    );
+  });
+
+  test('Android monitoring carries its target through the V2 intent contract',
+      () async {
+    await JuceAudioEngine.setAudioRouteIntentV2(
+      AudioRouteIntentV2.monitoring,
+      generation: 11,
+      operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+      recordingChannelStart: 1,
+      recordingChannelCount: 2,
+      monitoringTargetRow: 3,
+      platformOverride: TargetPlatform.android,
+    );
+
+    expect(
+      Map<String, dynamic>.from(calls.single.arguments as Map),
+      <String, dynamic>{
+        'generation': 11,
+        'intent': 'monitoring',
+        'intentOperation': 'systemSelectedMonitoring',
+        'recordingChannelStart': 1,
+        'recordingChannelCount': 2,
+        'monitoringTargetRow': 3,
       },
     );
   });
@@ -744,6 +794,51 @@ void main() {
 
     expect(ready, isTrue);
     expect(calls.single.method, 'getAudioRouteSnapshotV2');
+  });
+
+  test('iOS V2 readiness accepts its verified stereo recording route',
+      () async {
+    final stereo = _v2Snapshot(sessionInputChannels: 2);
+    stereo['intent'] = 'recording';
+    stereo['inputs'] = <Map<String, dynamic>>[
+      <String, dynamic>{
+        'direction': 'input',
+        'nativePortType': 'USBAudio',
+        'normalizedKind': 'external',
+        'uid': 'usb-input',
+        'name': 'USB Input',
+        'channelCount': 2,
+      },
+    ];
+    final session = stereo['session']! as Map<String, dynamic>;
+    session['category'] = 'AVAudioSessionCategoryPlayAndRecord';
+    final juce = stereo['juce']! as Map<String, dynamic>;
+    juce['activeInputChannels'] = 2;
+
+    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(
+      AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
+        'status': 'success',
+        'generation': 0,
+        'transitionId': 2,
+        'diagnosticCode': 'ok',
+        'elapsedMs': 1,
+        'transportWasPlaying': false,
+        'snapshot': stereo,
+      }),
+    );
+    calls.clear();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      return stereo;
+    });
+
+    expect(
+      await JuceAudioEngine.validatePlaybackV2(
+        platformOverride: TargetPlatform.iOS,
+      ),
+      isTrue,
+    );
   });
 
   test('iOS V2 readiness accepts only its exact verified HFP recording route',
@@ -1037,6 +1132,21 @@ void main() {
     expect(calls[2].arguments, <String, dynamic>{'timeSeconds': 11.0});
   });
 
+  test('setLoopRegion forwards enabled bounds', () async {
+    await JuceAudioEngine.setLoopRegion(
+      enabled: true,
+      startSeconds: 1.25,
+      endSeconds: 1.45,
+    );
+
+    expect(calls.single.method, 'setLoopRegion');
+    expect(calls.single.arguments, <String, dynamic>{
+      'enabled': true,
+      'startSeconds': 1.25,
+      'endSeconds': 1.45,
+    });
+  });
+
   test('preparePlaybackRoute routes reason payload', () async {
     await JuceAudioEngine.preparePlaybackRoute(reason: 'projectLoad');
 
@@ -1081,11 +1191,13 @@ void main() {
 
     expect(infos, hasLength(2));
     expect(infos.first.name, 'MacBook Pro Microphone');
+    expect(infos.first.uid, 'macbook-microphone-uid');
     expect(infos.first.isBluetoothInput, isFalse);
     expect(infos.first.isBuiltIn, isTrue);
     expect(infos.first.isDefault, isTrue);
     expect(infos.first.transport, 'builtIn');
     expect(infos.last.name, 'AirPods Pro');
+    expect(infos.last.uid, isEmpty);
     expect(infos.last.isBluetoothInput, isTrue);
     expect(infos.last.transport, 'bluetooth');
     expect(calls.single.method, 'getInputDeviceInfos');
@@ -1114,6 +1226,16 @@ void main() {
     expect(selected, isTrue);
     expect(calls.single.method, 'selectOutputDevice');
     expect(calls.single.arguments, <String, dynamic>{'name': 'WH-1000XM4'});
+  });
+
+  test('gets interleaved post-master stereo analyzer samples', () async {
+    final samples = await JuceAudioEngine.getRecentMasterStereoWaveform(
+      sampleCount: 2,
+    );
+
+    expect(samples, <double>[0.25, -0.25, 0.5, -0.5]);
+    expect(calls.single.method, 'getRecentMasterStereoWaveform');
+    expect(calls.single.arguments, <String, dynamic>{'sampleCount': 2});
   });
 
   test('capabilities + plugin scan normalization', () async {
@@ -1169,6 +1291,11 @@ void main() {
       startSec: 1.0,
       lengthSec: 2.0,
       inFileOffsetSec: 0.25,
+      loadRequestId: 91,
+    );
+    final cancelled = await JuceAudioEngine.cancelMidiClipLoad(
+      clipIndex: 3,
+      loadRequestId: 91,
     );
     final updated = await JuceAudioEngine.updateMidiClipEvents(
       3,
@@ -1189,9 +1316,16 @@ void main() {
 
     expect(supports, isTrue);
     expect(loaded, isTrue);
+    expect(cancelled, isTrue);
     expect(updated, isTrue);
     expect(calls[0].method, 'supportsLiveMidiClipPlayback');
     expect(calls[1].method, 'loadMidiClip');
-    expect(calls[2].method, 'updateMidiClipEvents');
+    expect((calls[1].arguments as Map)['loadRequestId'], 91);
+    expect(calls[2].method, 'cancelMidiClipLoad');
+    expect(calls[2].arguments, <String, dynamic>{
+      'clip': 3,
+      'loadRequestId': 91,
+    });
+    expect(calls[3].method, 'updateMidiClipEvents');
   });
 }

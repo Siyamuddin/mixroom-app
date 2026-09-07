@@ -21,9 +21,34 @@ This package is the minimal beta-safe backend for Mixroom chat. Its job is to:
 
 This is the beta target architecture. The app should send context only; Lambda owns the server prompt, tools, and default model.
 
-The dedicated V3 route accepts the strict one-shot `submit_plan_v3` request,
-pins the configured V3 model and reasoning effort server-side, and can be
-disabled with `AI_V3_ENABLED=false`. Existing clients remain on the V1 route.
+The dedicated V3 route has three independently gated client contracts:
+
+- `request_contract: "mixroom_v3_context_v1"` preserves the frozen server
+  contract 3 prompt, tool schema, validation, and response envelope for already
+  released applications.
+- `request_contract: "mixroom_v3_context_v2"` selects the current server
+  contract for updated applications, including the request-specific capability
+  intersection.
+- The legacy client-authored one-shot request remains temporarily available for
+  released applications.
+
+`AI_V3_ENABLED=false` disables the whole V3 route.
+`AI_V3_SERVER_CONTRACT_ENABLED=false` disables both context-only versions.
+When it is enabled, `AI_V3_SERVER_CONTRACT_V1_ENABLED` and
+`AI_V3_SERVER_CONTRACT_V2_ENABLED` gate the two versions independently.
+`AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED=false` disables the transitional legacy
+mode after released clients have migrated.
+
+Safe rollout order:
+
+1. Deploy the backend with the umbrella, V1, V2, and legacy flags enabled.
+2. Verify a released V1 request and an updated V2 request against that backend.
+3. Release the updated application that sends V2.
+4. Keep V1 and legacy enabled until their installed client populations are
+   intentionally retired.
+
+The updated app does not fall back from V2 to V1. A fallback would hide rollout
+mistakes and reintroduce the older contract behavior for new clients.
 
 ## AWS services
 
@@ -82,8 +107,28 @@ sam deploy --guided
 - `LLM_MAX_OUTPUT_TOKENS`
 - `LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS`
 - `AI_V3_ENABLED`
+- `AI_V3_SERVER_CONTRACT_ENABLED`
+- `AI_V3_SERVER_CONTRACT_V1_ENABLED`
+- `AI_V3_SERVER_CONTRACT_V2_ENABLED`
+- `AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED`
 - `AI_V3_MODEL`
 - `AI_V3_REASONING_EFFORT`
+
+### V3 context-only request
+
+The accepted top-level fields are deliberately closed: `request_contract`,
+`original_request`, `conversation`, `core_context`, `plan_schema_version`,
+`supported_command_types`, `resource_refs_enabled`, and optional `project_id`,
+`prompt_trace_id`, and `analytics_context`. Unknown fields and client-provided
+prompts, tools, provider input, model/reasoning controls, token limits, cache,
+and storage controls are rejected before quota reservation.
+
+The backend intersects `supported_command_types` with its canonical allowlist.
+A client can reduce its executable surface but cannot add commands. Prompt and
+tool snapshots for V2 live under `src/common/v3_contract_assets`; their approved
+hashes are pinned in `tests/test_v3_server_contract.py`. Frozen V1 snapshots live
+under `src/common/v3_contract_assets_v1` and are pinned separately by the
+compatibility tests.
 
 ## Secrets
 

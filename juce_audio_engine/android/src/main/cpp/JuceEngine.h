@@ -5,6 +5,8 @@
 #include "NativeEffects.h"
 #include "JuceLogBridge.h"
 #include "../../../../native/RealtimeWavCapture.h"
+#include "../../../../native/SampledPitchSemantics.h"
+#include "../../../../native/TimelineMidiBoundary.h"
 
 #include <array>
 #include <atomic>
@@ -780,6 +782,12 @@ struct TimelineMidiNote
     double velocity = 0.8;
 };
 
+enum class LiveMidiPanicMode : std::uint8_t
+{
+    liveOnly = 1,
+    full = 3,
+};
+
 class TimelineClipProcessorBase
 {
 public:
@@ -794,6 +802,7 @@ public:
     virtual void setReversed(bool shouldReverse) = 0;
     virtual void setStretchOptions(double tempoRatio, bool preservePitch) = 0;
     virtual void primeForOfflineRender() = 0;
+    virtual void requestLiveMidiPanic(LiveMidiPanicMode) noexcept {}
 };
 
 inline float mixroomUiGainToLinear(float gainUi)
@@ -1667,13 +1676,10 @@ public:
         next->usesDrumKitSamplePitchMap =
             usesDrumKitSamplePitchMap(instrumentId);
         next->sourceTempoBpm = juce::jlimit(1.0, 400.0, sourceTempoBpm);
-        next->sampledDefinition =
-            resolveSampledDefinition(instrumentId, instrumentName);
-        if (next->sampledDefinition != nullptr)
-            preloadSampledRegionsForNotes(
-                *next->sampledDefinition,
-                next->notes,
-                next->usesDrumKitSamplePitchMap);
+        next->sampledDefinition = prepareSampledDefinitionForNotes(
+            resolveSampledDefinition(instrumentId, instrumentName),
+            next->notes,
+            next->usesDrumKitSamplePitchMap);
         next->sampledAttackOverride =
             params.contains(juce::Identifier("attackMs"));
         next->sampledReleaseOverride =
@@ -1752,6 +1758,13 @@ public:
         event.velocity = juce::jlimit(0.0f, 1.0f, velocity);
         event.preparedSample = preparedSample;
         return enqueueLiveMidiEventLockFree(event);
+    }
+
+    void requestLiveMidiPanic(LiveMidiPanicMode mode) noexcept override
+    {
+        liveMidiPanicRequest.fetch_or(
+            static_cast<std::uint8_t>(mode),
+            std::memory_order_release);
     }
 
     bool prepareLiveMidiSample(int pitch,
@@ -1835,6 +1848,7 @@ public:
         {
         }
 
+        liveMidiPanicRequest.store(0, std::memory_order_relaxed);
         activeLiveNotes.clear();
         activeTimelineNotes.reset();
         cachedStateRaw = nullptr;
@@ -1858,6 +1872,7 @@ public:
     {
         renderGeneration.fetch_add(1, std::memory_order_acq_rel);
         buffer.clear();
+        applyPendingLiveMidiPanic();
 
         if (muted.load(std::memory_order_relaxed))
             return;
@@ -1901,10 +1916,10 @@ public:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
-        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
-        const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
+        const double attackSec = juce::jmax(0.0, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.0, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.0, 1.0, cachedPreset.sustainLevel);
+        const double releaseSec = juce::jmax(0.0, cachedPreset.releaseMs / 1000.0);
         const float driveGain =
             sampledMode
                 ? 1.0f
@@ -1941,8 +1956,15 @@ public:
                     const double startTimelineSec = blockStart + ((double)writeStart / sr);
                     const double endTimelineSec =
                         startTimelineSec + ((double)framesToRender / sr);
-                    const double blockSourceStartSec =
+                    const double roundedBlockSourceStartSec =
                         ((startTimelineSec - cs) * safeRatio) + inFile;
+                    const double blockSourceStartSec =
+                        mixroom::timelineMidiAdmissionSourceStartSec(
+                            blockStart,
+                            blockEnd,
+                            cs,
+                            roundedBlockSourceStartSec,
+                            inFile);
                     const double blockSourceEndSec =
                         ((endTimelineSec - cs) * safeRatio) + inFile;
                     const double pitchOffsetSemitones =
@@ -2007,7 +2029,7 @@ public:
                             !cachedSampledReleaseOverride)
                         {
                             noteReleaseSec =
-                                juce::jmax(0.02, effectiveRegion.releaseSec);
+                                juce::jmax(0.0, effectiveRegion.releaseSec);
                         }
 
                         const double noteStartSourceSec =
@@ -2082,10 +2104,10 @@ public:
                             {
                                 if (!cachedSampledAttackOverride)
                                     noteAttackSec =
-                                        juce::jmax(0.001, sampledRegion->attackSec);
+                                        juce::jmax(0.0, sampledRegion->attackSec);
                                 if (!cachedSampledReleaseOverride)
                                     noteReleaseSec =
-                                        juce::jmax(0.02, sampledRegion->releaseSec);
+                                        juce::jmax(0.0, sampledRegion->releaseSec);
                             }
                             const double releaseSourceSec = noteReleaseSec * safeRatio;
                             double notePitch =
@@ -2242,11 +2264,11 @@ public:
                     sampledMode && voice.sampledSource != nullptr;
                 const double voiceAttackSec =
                     (voiceSampled && !cachedSampledAttackOverride)
-                        ? juce::jmax(0.001, voice.sampledAttackSec)
+                        ? juce::jmax(0.0, voice.sampledAttackSec)
                         : attackSec;
                 const double voiceReleaseSec =
                     (voiceSampled && !cachedSampledReleaseOverride)
-                        ? juce::jmax(0.02, voice.sampledReleaseSec)
+                        ? juce::jmax(0.0, voice.sampledReleaseSec)
                         : releaseSec;
 
                 double env = 0.0;
@@ -2260,8 +2282,11 @@ public:
                 }
                 else
                 {
-                    const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
-                    env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                    if (voiceReleaseSec > 0.0)
+                    {
+                        const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
+                        env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                    }
                 }
 
                 if (env <= 0.0)
@@ -2385,7 +2410,7 @@ public:
                     const double voiceReleaseSec =
                         (sampledMode && voice.sampledSource != nullptr &&
                          !cachedSampledReleaseOverride)
-                            ? juce::jmax(0.02, voice.sampledReleaseSec)
+                            ? juce::jmax(0.0, voice.sampledReleaseSec)
                             : releaseSec;
                     return voice.releasing && voice.releaseAgeSec >= voiceReleaseSec;
                 }),
@@ -2476,7 +2501,7 @@ private:
 
     struct SampledRegion
     {
-        mutable std::shared_ptr<const DecodedSamplePcm> sample;
+        std::shared_ptr<const DecodedSamplePcm> sample;
         juce::String sampleAssetPath;
         int loKey = 0;
         int hiKey = 127;
@@ -2581,14 +2606,14 @@ private:
         double decaySec,
         double sustainLevel)
     {
-        attackSec = juce::jmax(0.001, attackSec);
-        decaySec = juce::jmax(0.001, decaySec);
-        sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
-        if (ageSec < attackSec)
+        attackSec = juce::jmax(0.0, attackSec);
+        decaySec = juce::jmax(0.0, decaySec);
+        sustainLevel = juce::jlimit(0.0, 1.0, sustainLevel);
+        if (attackSec > 0.0 && ageSec < attackSec)
             return juce::jlimit(0.0, 1.0, ageSec / attackSec);
 
         const double decayAge = ageSec - attackSec;
-        if (decayAge < decaySec)
+        if (decaySec > 0.0 && decayAge < decaySec)
         {
             const double t = decayAge / decaySec;
             return 1.0 + ((sustainLevel - 1.0) * t);
@@ -2607,7 +2632,9 @@ private:
         if (ageSec < holdSec)
             return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
 
-        releaseSec = juce::jmax(0.02, releaseSec);
+        releaseSec = juce::jmax(0.0, releaseSec);
+        if (releaseSec <= 0.0)
+            return 0.0;
         const double releaseAge = ageSec - holdSec;
         const double releaseStart =
             envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
@@ -3228,7 +3255,7 @@ private:
         definition->sfzAssetPath = sfzAssetPath;
         definition->defaultAttackSec = juce::jlimit(0.0, 4.0, globalAttackSec);
         definition->defaultReleaseSec =
-            juce::jlimit(0.02, 12.0, globalReleaseSec);
+            juce::jlimit(0.0, 12.0, globalReleaseSec);
         definition->regions.reserve(rawRegions.size());
 
         for (const auto &r : rawRegions)
@@ -3245,18 +3272,26 @@ private:
                 sampleRaw);
             SampledRegion regionDef;
             regionDef.sampleAssetPath = sampleAssetPath;
-            regionDef.loKey =
-                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "lokey", 0.0)));
-            regionDef.hiKey =
-                juce::jlimit(0, 127, (int)std::lround(readSfzNumeric(r, "hikey", 127.0)));
+            const double key = readSfzNumeric(
+                r, "key", std::numeric_limits<double>::quiet_NaN());
+            const double defaultLoKey = std::isfinite(key) ? key : 0.0;
+            const double defaultHiKey = std::isfinite(key) ? key : 127.0;
+            regionDef.loKey = juce::jlimit(
+                0,
+                127,
+                (int)std::lround(readSfzNumeric(r, "lokey", defaultLoKey)));
+            regionDef.hiKey = juce::jlimit(
+                regionDef.loKey,
+                127,
+                (int)std::lround(readSfzNumeric(r, "hikey", defaultHiKey)));
 
             double keyCenter = readSfzNumeric(r, "pitch_keycenter", std::numeric_limits<double>::quiet_NaN());
             if (!std::isfinite(keyCenter))
             {
-                keyCenter = readSfzNumeric(
-                    r,
-                    "key",
-                    (double)std::lround((regionDef.loKey + regionDef.hiKey) * 0.5));
+                keyCenter = std::isfinite(key)
+                                ? key
+                                : (double)std::lround(
+                                      (regionDef.loKey + regionDef.hiKey) * 0.5);
             }
             regionDef.keyCenter =
                 juce::jlimit(0, 127, (int)std::lround(keyCenter));
@@ -3275,7 +3310,7 @@ private:
                 4.0,
                 readSfzNumeric(r, "ampeg_attack", globalAttackSec));
             regionDef.releaseSec = juce::jlimit(
-                0.02,
+                0.0,
                 12.0,
                 readSfzNumeric(r, "ampeg_release", globalReleaseSec));
             regionDef.pitchKeytrack = juce::jlimit(
@@ -3346,21 +3381,6 @@ private:
         if (assetPath.isEmpty())
             return nullptr;
         return sampledDefinitionForAsset(assetPath);
-    }
-
-    static bool ensureSampledRegionLoaded(const SampledRegion &region)
-    {
-        if (region.sample != nullptr && region.sample->frameCount() >= 2)
-            return true;
-        if (region.sampleAssetPath.trim().isEmpty())
-            return false;
-
-        auto sample = decodedSampleForAsset(region.sampleAssetPath);
-        if (sample == nullptr || sample->frameCount() < 2)
-            return false;
-
-        region.sample = sample;
-        return true;
     }
 
     static bool isSampledRegionReady(const SampledRegion &region) noexcept
@@ -3437,12 +3457,13 @@ private:
         return pickBest(false, false);
     }
 
-    static void preloadSampledRegionsForNotes(const SampledDefinition &definition,
-                                              const juce::Array<TimelineMidiNote> &notes,
-                                              bool usesDrumKitPitchMap)
+    static std::unordered_set<size_t> sampledRegionIndicesForNotes(
+        const SampledDefinition &definition,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
     {
-        std::unordered_set<const SampledRegion *> regionsToLoad;
-        regionsToLoad.reserve((size_t)juce::jmax(1, notes.size()));
+        std::unordered_set<size_t> regionIndices;
+        regionIndices.reserve((size_t)juce::jmax(1, notes.size()));
 
         for (int i = 0; i < notes.size(); ++i)
         {
@@ -3460,13 +3481,61 @@ private:
                     midiVelocity,
                     i))
             {
-                regionsToLoad.insert(region);
+                regionIndices.insert(
+                    (size_t)(region - definition.regions.data()));
             }
         }
 
-        for (const auto *region : regionsToLoad)
-            if (region != nullptr)
-                ensureSampledRegionLoaded(*region);
+        return regionIndices;
+    }
+
+    static void preloadSampledRegionsForNotes(
+        const SampledDefinition &definition,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
+    {
+        const auto regionIndices = sampledRegionIndicesForNotes(
+            definition, notes, usesDrumKitPitchMap);
+
+        for (const auto index : regionIndices)
+        {
+            if (index >= definition.regions.size())
+                continue;
+            const auto &region = definition.regions[index];
+            if (region.sampleAssetPath.trim().isNotEmpty())
+                juce::ignoreUnused(
+                    decodedSampleForAsset(region.sampleAssetPath));
+        }
+    }
+
+    static std::shared_ptr<const SampledDefinition>
+    prepareSampledDefinitionForNotes(
+        const std::shared_ptr<const SampledDefinition> &metadata,
+        const juce::Array<TimelineMidiNote> &notes,
+        bool usesDrumKitPitchMap)
+    {
+        if (metadata == nullptr)
+            return nullptr;
+
+        auto prepared = std::make_shared<SampledDefinition>(*metadata);
+        const auto regionIndices = sampledRegionIndicesForNotes(
+            *metadata, notes, usesDrumKitPitchMap);
+
+        for (const auto index : regionIndices)
+        {
+            if (index >= prepared->regions.size())
+                continue;
+            auto &region = prepared->regions[index];
+            if (region.sampleAssetPath.trim().isEmpty())
+                continue;
+            auto sample = decodedSampleForAsset(region.sampleAssetPath);
+            if (sample != nullptr && sample->frameCount() >= 2)
+                region.sample = std::move(sample);
+        }
+
+        std::shared_ptr<const SampledDefinition> immutable =
+            std::move(prepared);
+        return immutable;
     }
 
     static int sampledRegionFrameLimit(const SampledRegion &region,
@@ -3534,7 +3603,8 @@ private:
 
         region.sampleStartFrame = startFrame;
         region.sampleEndFrameExclusive = endFrame;
-        region.keyCenter = juce::jlimit(0, 127, (int)std::round(preset.rootNote));
+        region.keyCenter = mixroom::effectiveSampleKeyCenter(
+            source.keyCenter, preset.rootNote);
         if (preset.timeStretchMode >= 0.5)
             region.pitchKeytrack = 0.0;
         region.oneShot = preset.samplePlayMode >= 0.5;
@@ -3900,9 +3970,9 @@ private:
         if (params.contains(juce::Identifier("decayMs")))
             preset.decayMs = juce::jlimit(0.0, 2000.0, readParam(params, "decayMs", preset.decayMs));
         if (params.contains(juce::Identifier("sustainLevel")))
-            preset.sustainLevel = juce::jlimit(0.05, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
+            preset.sustainLevel = juce::jlimit(0.0, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
         if (params.contains(juce::Identifier("releaseMs")))
-            preset.releaseMs = juce::jlimit(20.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
+            preset.releaseMs = juce::jlimit(0.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
         if (params.contains(juce::Identifier("sampleStartNorm")))
             preset.sampleStartNorm = juce::jlimit(0.0, 0.98, readParam(params, "sampleStartNorm", preset.sampleStartNorm));
         if (params.contains(juce::Identifier("sampleEndNorm")))
@@ -4301,6 +4371,25 @@ private:
                             tempoPlaybackRatio.load(std::memory_order_relaxed));
     }
 
+    void applyPendingLiveMidiPanic() noexcept
+    {
+        const auto request = liveMidiPanicRequest.exchange(
+            0, std::memory_order_acq_rel);
+        if (request == 0)
+            return;
+
+        LiveMidiEvent dropped;
+        while (dequeueLiveMidiEventLockFree(dropped))
+        {
+        }
+        activeLiveNotes.clear();
+
+        const auto fullMask =
+            static_cast<std::uint8_t>(LiveMidiPanicMode::full);
+        if ((request & fullMask) == fullMask)
+            activeTimelineNotes.reset();
+    }
+
     void applyPendingLiveMidiEvents()
     {
         std::size_t pendingCount = 0;
@@ -4317,9 +4406,9 @@ private:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
-        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
+        const double attackSec = juce::jmax(0.0, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.0, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.0, 1.0, cachedPreset.sustainLevel);
 
         for (std::size_t eventIndex = 0; eventIndex < pendingCount; ++eventIndex)
         {
@@ -4380,7 +4469,7 @@ private:
                 const double voiceAttackSec =
                     (sampledMode && it->sampledSource != nullptr &&
                      !cachedSampledAttackOverride)
-                        ? juce::jmax(0.001, it->sampledAttackSec)
+                        ? juce::jmax(0.0, it->sampledAttackSec)
                         : attackSec;
                 it->releaseStartLevel = envelopeHoldLevel(
                     it->ageSec,
@@ -4557,6 +4646,7 @@ private:
     std::atomic<std::size_t> liveMidiEnqueuePosition{0};
     std::atomic<std::size_t> liveMidiDequeuePosition{0};
     std::vector<ActiveLiveNote> activeLiveNotes;
+    std::atomic<std::uint8_t> liveMidiPanicRequest{0};
     std::atomic<int> liveSamplePrepareSequenceCounter{0};
     std::bitset<kMaxTimelineMidiNotes> activeTimelineNotes;
     std::vector<size_t> blockNoteIndices;
@@ -4598,13 +4688,17 @@ public:
     };
 
     static JuceEngine &get();
+    static bool isBuiltInMidiInstrumentIdentifier(const juce::String &instrumentId);
+
+    struct PreparedMidiClipLoad;
+    using PreparedMidiClipLoadPtr = std::shared_ptr<PreparedMidiClipLoad>;
 
     void initialiseEngine();
     bool initialisePlaybackV2Android();
     bool quiescePlaybackV2Android(bool closeDevice);
     bool reconfigurePlaybackV2Android();
-    bool prepareRecordingV2Android();
-    bool prepareSystemSelectedMediaDuplexV2Android();
+    bool prepareRecordingV2Android(int inputChannels);
+    bool prepareSystemSelectedMediaDuplexV2Android(int inputChannels);
     bool prepareBluetoothDuplexV2Android();
     bool waitForV2CallbackReady(int timeoutMs);
     void loadTrack(int idx, const juce::File &file); // deprecated name (clip)
@@ -4659,7 +4753,23 @@ public:
                       double sourceTempoBpm,
                       double startSec,
                       double lengthSec,
-                      double inFileOffsetSec = 0.0);
+                      double inFileOffsetSec = 0.0,
+                      std::int64_t loadRequestId = 0);
+    PreparedMidiClipLoadPtr prepareBuiltInMidiClipLoad(
+        int clipId,
+        int rowId,
+        const juce::String &instrumentId,
+        const juce::String &instrumentName,
+        const juce::Array<TimelineMidiNote> &notes,
+        const juce::NamedValueSet &params,
+        double sourceTempoBpm,
+        double startSec,
+        double lengthSec,
+        double inFileOffsetSec,
+        std::int64_t loadRequestId);
+    bool installPreparedMidiClipLoad(
+        const PreparedMidiClipLoadPtr &preparedLoad);
+    bool cancelMidiClipLoad(int clipId, std::int64_t loadRequestId);
     bool prepareMidiClipSampleAssets(const juce::String &instrumentId,
                                      const juce::String &instrumentName,
                                      const juce::Array<TimelineMidiNote> &notes);
@@ -4717,6 +4827,68 @@ public:
     void pause();
     void setTransportSeconds(double t);
     double getTransportSeconds() const;
+    void setLoopRegion(bool enabled, double startSec, double endSec)
+    {
+        const double safeStart = juce::jmax(0.0, startSec);
+        const double safeEnd = juce::jmax(safeStart, endSec);
+        const bool active = enabled && safeEnd > safeStart + 1.0e-6;
+        if (!active)
+        {
+            loopEnabledAtomic.store(false, std::memory_order_release);
+            return;
+        }
+        loopStartSecAtomic.store(safeStart, std::memory_order_relaxed);
+        loopEndSecAtomic.store(safeEnd, std::memory_order_relaxed);
+        loopEnabledAtomic.store(true, std::memory_order_release);
+    }
+    bool isLoopRegionActive() const
+    {
+        return loopEnabledAtomic.load(std::memory_order_relaxed) &&
+               loopEndSecAtomic.load(std::memory_order_relaxed) >
+                   loopStartSecAtomic.load(std::memory_order_relaxed) + 1.0e-6;
+    }
+    double wrapTransportSecondsToLoop(double t) const
+    {
+        if (!isLoopRegionActive())
+            return t;
+        const double start = loopStartSecAtomic.load(std::memory_order_relaxed);
+        const double end = loopEndSecAtomic.load(std::memory_order_relaxed);
+        if (t < end)
+            return t;
+        const double length = end - start;
+        if (length <= 1.0e-9)
+            return start;
+        double pos = std::fmod(t - start, length);
+        if (pos < 0.0)
+            pos += length;
+        return start + pos;
+    }
+    void wrapPlayingTransportToLoopIfNeeded()
+    {
+        if (!blockIsPlayingAtomic.load(std::memory_order_relaxed) &&
+            !isPlayingAtomic.load(std::memory_order_relaxed))
+            return;
+        const double current = transportSec.load(std::memory_order_relaxed);
+        const double wrapped = wrapTransportSecondsToLoop(current);
+        if (wrapped == current)
+            return;
+        transportSec.store(wrapped, std::memory_order_relaxed);
+        mixroom::fx::setGlobalTransportSeconds(wrapped);
+    }
+    int samplesUntilLoopWrap(double sampleRate) const
+    {
+        if (sampleRate <= 0.0 || !isLoopRegionActive())
+            return std::numeric_limits<int>::max();
+        const double current = transportSec.load(std::memory_order_relaxed);
+        const double end = loopEndSecAtomic.load(std::memory_order_relaxed);
+        const double remainingSec = end - current;
+        if (remainingSec <= 0.0)
+            return 0;
+        const double samples = remainingSec * sampleRate;
+        if (samples >= (double)std::numeric_limits<int>::max())
+            return std::numeric_limits<int>::max();
+        return juce::jmax(1, (int)std::ceil(samples));
+    }
     bool isTransportPlaying() const
     {
         return isPlayingAtomic.load(std::memory_order_relaxed);
@@ -4743,8 +4915,8 @@ public:
             return;
 
         const double delta = (double)numSamples / sr;
-        const double next =
-            transportSec.load(std::memory_order_relaxed) + delta;
+        const double next = wrapTransportSecondsToLoop(
+            transportSec.load(std::memory_order_relaxed) + delta);
         transportSec.store(next, std::memory_order_relaxed);
         mixroom::fx::setGlobalTransportSeconds(next);
     }
@@ -4876,6 +5048,10 @@ public:
     int getActiveOutputChannelCount() const;
     void setLiveInputMonitoringEnabled(bool enabled);
     bool isLiveInputMonitoringEnabled() const noexcept;
+    juce::NamedValueSet activateLiveInputMonitoringV2(int row,
+                                                      int channelStart,
+                                                      int channelCount);
+    bool shouldRouteLiveInputToGraphV2() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
                                 const juce::String &reason);
@@ -4919,6 +5095,9 @@ public:
     void updateMasterMeterFromOutput(const float *const *out,
                                      int numOutCh,
                                      int numSamples) noexcept;
+    void pushMasterWaveformSamples(const float *const *out,
+                                   int numOutCh,
+                                   int numSamples) noexcept;
     // Master clip indicator (latched)
     bool getMasterClipLatched() const noexcept;
     void clearMasterClipLatched() noexcept;
@@ -4927,6 +5106,8 @@ public:
 
     // Gets master + all row meters
     std::vector<float> getAllMeterValues() const;
+    // Interleaved post-master samples: [L0, R0, L1, R1, ...].
+    std::vector<float> getRecentMasterStereoWaveform(int sampleCount) const;
 
     // Compressor meter strip (white-box only)
     const std::array<float, 5> getClipCompressorMeter(int clipIndex, int effectIndex);
@@ -4954,7 +5135,7 @@ public:
                                   juce::MidiBuffer &scratchMidi) override;
 
 private:
-    bool prepareDefaultDuplexV2Android();
+    bool prepareDefaultDuplexV2Android(int inputChannels);
     JuceEngine();
     ~JuceEngine();
 
@@ -4967,6 +5148,11 @@ private:
     void reapplyClipProcessorStateLocked();
     void primeClipProcessorsForOfflineRenderLocked();
     std::shared_ptr<DecodedClipAudioAsset> getOrDecodeClipAudioAsset(const juce::File &file);
+    bool isMidiClipLoadRequestCancelled(int clipId,
+                                        std::int64_t loadRequestId);
+    void requestLiveMidiPanicForClip(int clipId,
+                                     LiveMidiPanicMode mode) noexcept;
+    void requestLiveMidiPanicForAll(LiveMidiPanicMode mode) noexcept;
     void armOutputSafetyForCurrentRoute(bool fadeIn = false) noexcept;
     void ensureBusGraphInitialised(bool commitImmediately = true); // rows + master
     void rewireTrackBusFxChain(
@@ -4995,10 +5181,15 @@ private:
     static const juce::StringArray mixroomPlugins;
 
     bool engineInitialized = false;
+    std::mutex engineLifecycleMutex;
+    std::atomic<std::uint64_t> engineLifecycleGeneration{1};
+    std::mutex midiLoadRequestMutex;
+    std::unordered_map<int, std::int64_t> cancelledMidiLoadRequestThrough;
     bool formatsRegistered = false; // will only be flipped once to true
     bool audioCallbackAttached = false;
     bool v2PlaybackCallbackDetached = false;
     bool androidV2RecordingPrepared = false;
+    std::atomic<bool> liveInputMonitoringActiveV2{false};
     juce::WaitableEvent androidV2CallbackReady;
     std::atomic<bool> androidV2CallbackProofPending{false};
     juce::AudioFormatManager formatManager;
@@ -5028,6 +5219,9 @@ private:
     bool hasVideoAudio{false};
 
     std::atomic<double> transportSec{0.0};           // source of truth
+    std::atomic<bool> loopEnabledAtomic{false};
+    std::atomic<double> loopStartSecAtomic{0.0};
+    std::atomic<double> loopEndSecAtomic{0.0};
     std::atomic<double> blockTransportStartSec{0.0}; // set each audio callback block
     std::atomic<double> hostSampleRateAtomic{44100.0};
     std::atomic<bool> isPlayingAtomic{false};
@@ -5113,6 +5307,7 @@ private:
         juce::Array<TimelineMidiNote> midiNotes;
         juce::NamedValueSet midiParams;
         double midiSourceTempoBpm = 120.0;
+        std::int64_t midiLoadRequestId = 0;
 
         // nodes/processors
         std::shared_ptr<juce::AudioProcessor> playerProcessor; // live timeline processor, mixed by row input
@@ -5263,6 +5458,10 @@ private:
     StereoMeterState masterMeter;
     std::atomic<bool> masterMeterEnabled{true};
     std::atomic<bool> masterClipLatched{false};
+    static constexpr int kMasterWaveformRingSize = 8192;
+    std::array<float, kMasterWaveformRingSize> masterWaveformRingL{};
+    std::array<float, kMasterWaveformRingSize> masterWaveformRingR{};
+    std::atomic<int> masterWaveformWritePos{0};
     std::array<float, 2> outputSafetyLastSample{0.0f, 0.0f};
     int outputSafetyMuteSamplesRemaining = 0;
     int outputSafetyFadeSamplesRemaining = 0;
@@ -5764,20 +5963,34 @@ public:
 
         const bool blockWasPlaying = engine.isTransportPlaying();
         engine.setBlockPlayingState(blockWasPlaying);
+        engine.wrapPlayingTransportToLoopIfNeeded();
+        transportMs = engine.getTransportSeconds() * 1000.0;
+        alignToTransport();
 
         engine.dispatchQueuedLiveMidiInputEventsForAudioThread();
 
         // ===============================
-        // 3️⃣ RENDER GRAPH (OUTPUT ONLY)
+        // 3️⃣ RENDER GRAPH
         // ===============================
         const int renderBlockSize = juce::jmax(1, graphRenderBlockSize);
+        const bool routeVerifiedInput = engine.shouldRouteLiveInputToGraphV2();
+        const int playerInputChannels = routeVerifiedInput
+            ? juce::jmin(numInputChannels, (int)chunkInputPointers.size())
+            : 0;
         const int playerOutputChannels = juce::jmin(numOutputChannels, (int)chunkOutputPointers.size());
+        jassert(playerInputChannels == 0 || playerInputChannels == numInputChannels);
         jassert(playerOutputChannels == numOutputChannels);
 
         for (int offset = 0; offset < numSamples;)
         {
-            const int chunkSamples = juce::jmin(renderBlockSize, numSamples - offset);
+            engine.wrapPlayingTransportToLoopIfNeeded();
+            int chunkSamples = juce::jmin(renderBlockSize, numSamples - offset);
+            const int untilWrap = engine.samplesUntilLoopWrap(sampleRate);
+            if (untilWrap > 0)
+                chunkSamples = juce::jmin(chunkSamples, untilWrap);
 
+            for (int ch = 0; ch < playerInputChannels; ++ch)
+                chunkInputPointers[(size_t)ch] = inputChannelData[ch] + offset;
             for (int ch = 0; ch < playerOutputChannels; ++ch)
                 chunkOutputPointers[(size_t)ch] = outputChannelData[ch] != nullptr
                                                       ? outputChannelData[ch] + offset
@@ -5788,8 +6001,8 @@ public:
             engine.applyTrackEffectAutomationAtCurrentBlockStart();
 
             player.audioDeviceIOCallbackWithContext(
-                nullptr,
-                0,
+                playerInputChannels > 0 ? chunkInputPointers.data() : nullptr,
+                playerInputChannels,
                 chunkOutputPointers.data(),
                 playerOutputChannels,
                 chunkSamples,
@@ -5815,6 +6028,17 @@ public:
         for (int i = 0; i < numSamples; ++i)
         {
             transportMs += msPerSample;
+            if (engine.isLoopRegionActive())
+            {
+                const double wrappedMs =
+                    engine.wrapTransportSecondsToLoop(transportMs * 0.001) *
+                    1000.0;
+                if (wrappedMs + 1.0e-6 < transportMs)
+                {
+                    transportMs = wrappedMs;
+                    alignToTransport();
+                }
+            }
 
             if (transportMs >= nextBeatMs)
             {
@@ -5926,6 +6150,7 @@ private:
     bool enabled = false;
     bool isPlaying = false;
     int graphRenderBlockSize = 0;
+    std::array<const float *, 64> chunkInputPointers{};
     std::array<float *, 64> chunkOutputPointers{};
 
     float volume = 0.5f;

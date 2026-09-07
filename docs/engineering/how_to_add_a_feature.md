@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-08-29
 Update trigger: Update this when feature development workflow, review
 expectations, test strategy, release gates, or code ownership changes.
 
@@ -60,6 +60,11 @@ feature.
    If the feature touches auth, billing, analytics, permissions, user data, AI,
    export, bundled assets, native audio, or store-facing behavior, update the
    release and compliance docs.
+
+   AI planning semantics, prompts, tool descriptions, and provider policy must
+   live on the backend. Flutter may retain only factual context collection,
+   the executable wire contract, and deterministic safety validation. Run the
+   AI IP boundary scanner against source and every release-equivalent artifact.
 
 ## Done Means
 

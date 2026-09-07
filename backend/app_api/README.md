@@ -51,6 +51,7 @@ It still contains the in-house subscription core that normalizes Apple IAP, Goog
 - Projection worker to update `subscriptions` + `entitlements_current`.
 - Scheduled reconciliation worker.
 - SAM infrastructure template with DynamoDB/SQS/Lambda/API/EventBridge.
+- Slack notifications for verified Apple, Google Play, Paddle, and Toss subscription payments.
 
 ## Repo layout
 
@@ -155,6 +156,36 @@ legacy fallback inputs only during migration:
 - Google Play developer service account keys
 - Paddle webhook secret/API key
 - Toss webhook secret/API key
+
+### Slack payment notifications
+
+Create a Slack incoming webhook for `#product-pulse`, then store its URL without
+putting it in source control:
+
+```bash
+aws ssm put-parameter \
+  --region ap-northeast-2 \
+  --name /mixroom/prod/slack/payment-webhook \
+  --type SecureString \
+  --value 'https://hooks.slack.com/services/...' \
+  --overwrite
+```
+
+Deploy the isolated notification stack with `slack_notifications.template.yaml`.
+It subscribes to the existing billing-success SNS topic without changing the
+main application stack. Notifications run asynchronously after the verified
+billing event has updated subscription state. Slack delivery failures therefore
+retry independently and never fail or delay a customer's payment.
+
+```bash
+sam build \
+  --template-file slack_notifications.template.yaml \
+  --build-dir .aws-sam/slack-build
+sam deploy \
+  --template-file .aws-sam/slack-build/template.yaml \
+  --config-file slack_notifications.samconfig.toml \
+  --config-env prod
+```
 
 Apple signed-data root certificates are public trust material, so store them as
 a plain SSM `String` parameter or another non-secret config asset, not as a

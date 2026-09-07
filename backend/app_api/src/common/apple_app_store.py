@@ -161,7 +161,12 @@ def verify_apple_notification(
     return {
         "provider_event_id": notification_uuid or f"apple:{original_transaction_id}:{notification_type}",
         "user_id": user_id,
-        "provider_payload": _to_plain_dict(notification),
+        "provider_payload": {
+            "notificationType": notification_type,
+            "subtype": subtype,
+            "notificationUUID": notification_uuid,
+            "transaction": _to_plain_dict(transaction),
+        },
         "normalized": {
             "provider": "apple",
             "subscription_id": original_transaction_id or transaction_id,

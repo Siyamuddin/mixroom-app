@@ -785,12 +785,36 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             requested_project_id = str(
                 body.get("project_id") or body.get("local_project_id") or ""
             ).strip()
+            requested_workspace_id = str(body.get("workspace_id") or "").strip()
+            if requested_project_id and not requested_workspace_id:
+                # Older downloads could retain the cloud project ID without
+                # its workspace scope. Resolve an accessible existing project
+                # before quota enforcement so an update uses its workspace
+                # allowance instead of being misclassified as a new personal
+                # cloud project.
+                try:
+                    existing_project = repo.get_user_cloud_project(
+                        user_id,
+                        requested_project_id,
+                    )
+                except (FileNotFoundError, PermissionError):
+                    existing_project = {}
+                requested_workspace_id = str(
+                    existing_project.get("workspace_id") or ""
+                ).strip()
+                if requested_workspace_id:
+                    body["workspace_id"] = requested_workspace_id
+                    existing_organization_id = str(
+                        existing_project.get("organization_id") or ""
+                    ).strip()
+                    if existing_organization_id:
+                        body["organization_id"] = existing_organization_id
             size_bytes = int(body.get("size_bytes") or 0)
             entitlement = _enforce_cloud_project_quota(
                 user_id=user_id,
                 project_id=requested_project_id,
                 size_bytes=size_bytes,
-                workspace_id=str(body.get("workspace_id") or "").strip(),
+                workspace_id=requested_workspace_id,
             )
             return _finalize(
                 json_response(

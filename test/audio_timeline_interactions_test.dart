@@ -3,9 +3,15 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/ai/ai_gain_units.dart';
 import 'package:mixroom/helpers/platform_capabilities.dart';
+import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
+import 'package:mixroom/helpers/timeline_grid_policy.dart';
+import 'package:mixroom/helpers/trackpad_touch_count.dart';
+import 'package:mixroom/helpers/waveform_detail.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
@@ -128,6 +134,23 @@ Offset _clipCenter(
       );
 }
 
+Offset _visibleClipCenter(
+  WidgetTester tester, {
+  double additionalDx = 0.0,
+  double clipDurationMs = _kClipDurationMs,
+  int row = 0,
+  double rowHeight = 80.0,
+}) {
+  return _clipCenter(
+        tester,
+        additionalDx: additionalDx,
+        clipDurationMs: clipDurationMs,
+        row: row,
+        rowHeight: rowHeight,
+      ) -
+      Offset(0, _timelineVerticalScrollController(tester).offset);
+}
+
 Offset _clipLeftHandle(WidgetTester tester, {double additionalDx = 0.0}) {
   final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
   final playheadPx = (_kTestTimelineWidth / 2.0) - _kHeaderWidth;
@@ -179,6 +202,46 @@ Future<void> _openRowHeaderMenu(WidgetTester tester, int row) async {
     find.byKey(ValueKey('timeline_row_header_$row')),
   );
   await tester.longPressAt(headerRect.centerLeft + const Offset(22, 0));
+  await tester.pumpAndSettle();
+}
+
+List<TimelineRow> _namedTrackRows(int count) {
+  return List<TimelineRow>.generate(
+    count,
+    (index) => TimelineRow(
+      rowId: index + 1,
+      name: 'Track ${index + 1}',
+      iconId: 0,
+    ),
+  );
+}
+
+/// Resolves the row header key for whichever header layout is mounted.
+Finder _rowHeaderFinder(int row) {
+  final tablet = find.byKey(ValueKey('timeline_tablet_row_header_$row'));
+  if (tablet.evaluate().isNotEmpty) return tablet;
+  return find.byKey(ValueKey('timeline_row_header_$row'));
+}
+
+bool _rowHeaderIsSelected(WidgetTester tester, int row) {
+  final semantics = tester.getSemantics(_rowHeaderFinder(row));
+  return semantics.hasFlag(SemanticsFlag.isSelected);
+}
+
+Future<void> _tapRowHeader(WidgetTester tester, int row) async {
+  await tester.tap(_rowHeaderFinder(row));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _tapRowHeaderWithModifier(
+  WidgetTester tester, {
+  required int row,
+  required LogicalKeyboardKey modifier,
+}) async {
+  await tester.sendKeyDownEvent(modifier);
+  await tester.tap(_rowHeaderFinder(row));
+  await tester.pump();
+  await tester.sendKeyUpEvent(modifier);
   await tester.pumpAndSettle();
 }
 
@@ -249,11 +312,82 @@ ScrollController _timelineVerticalScrollController(WidgetTester tester) {
   return candidates.first;
 }
 
+double _instrumentLanePopupOpacity(WidgetTester tester) {
+  return tester
+      .widget<AnimatedOpacity>(
+        find.byKey(const ValueKey('instrument_lane_region_popup')),
+      )
+      .opacity;
+}
+
+Future<void> _openInstrumentLaneMenu(
+  WidgetTester tester,
+  Offset position,
+) async {
+  final gesture = await tester.createGesture(
+    kind: PointerDeviceKind.mouse,
+    buttons: kSecondaryMouseButton,
+  );
+  await gesture.down(position);
+  await tester.pump();
+  await gesture.up();
+  await tester.pumpAndSettle();
+}
+
+Future<void> _desktopDoubleTapAt(WidgetTester tester, Offset position) async {
+  await tester.tapAt(position);
+  await tester.pump(kDoubleTapMinTime);
+  await tester.tapAt(position);
+  await tester.pumpAndSettle();
+}
+
+Offset _desktopClipCenter(WidgetTester tester) {
+  final timelineFinder = find.byType(AudioCanvasTimeline);
+  final topLeft = tester.getTopLeft(timelineFinder);
+  final timeline = tester.widget<AudioCanvasTimeline>(timelineFinder);
+  final headerWidth = timeline.useTabletDawLayout
+      ? (timeline.tabletSidePanelWidth ??
+          TabletDawPanelLayout.leftExpandedWidth)
+      : _kHeaderWidth;
+  final clipWidthPx = _kClipDurationMs * _kInitialPixelsPerMs;
+  return topLeft +
+      Offset(
+        headerWidth + (clipWidthPx / 2.0),
+        _kRulerHeight + 40.0,
+      );
+}
+
 Offset _tabletHeaderGainPoint(WidgetTester tester, int row) {
   final rect = tester.getRect(
     find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
   );
   return rect.centerRight - const Offset(6, 0);
+}
+
+/// Drags a tablet header gain slider from its centre to [fraction] of the
+/// slider's usable track width.
+Future<void> _dragTabletHeaderGainTo(
+  WidgetTester tester, {
+  required int row,
+  required double fraction,
+}) async {
+  final rect = tester.getRect(
+    find.byKey(ValueKey('timeline_tablet_row_gain_$row')),
+  );
+  // Matches the knob inset the slider reserves at both ends.
+  const inset = 11.0;
+  final usable = (rect.width - (inset * 2)).clamp(1.0, double.infinity);
+  final target = Offset(rect.left + inset + (usable * fraction), rect.center.dy);
+  final gesture = await tester.startGesture(rect.center);
+  await tester.pump(const Duration(milliseconds: 30));
+  // The first move only wins the gesture arena; a second one is needed before
+  // the recognizer reports a drag update.
+  await gesture.moveTo(target);
+  await tester.pump(const Duration(milliseconds: 30));
+  await gesture.moveTo(target);
+  await tester.pump(const Duration(milliseconds: 30));
+  await gesture.up();
+  await tester.pumpAndSettle();
 }
 
 Widget _buildHarness({
@@ -273,8 +407,12 @@ Widget _buildHarness({
     double? newStartMs,
   })? onTrimClipCommit,
   void Function(int row)? onSelectRow,
-  void Function(List<int> selectedClipIndices, int primaryClipIndex)?
-      onSelectionChanged,
+  void Function(
+    List<int> selectedClipIndices,
+    int primaryClipIndex,
+    TimelineSelectionChangeOrigin origin,
+  )?
+  onSelectionChanged,
   List<String> rowEffects = const <String>[],
   List<Map<String, dynamic>> automationTargets = const <Map<String, dynamic>>[],
   Map<String, List<AutomationClipSnapshot>> initialAutomationClipsByTarget =
@@ -295,7 +433,10 @@ Widget _buildHarness({
   Future<void> Function(int row)? onChangeInstrumentLane,
   Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane,
+  Future<void> Function(int row)? onOpenInstrumentUi,
+  bool Function(int row)? canOpenInstrumentUi,
   void Function(int clipIndex)? onOpenMidiClip,
+  void Function(int clipIndex)? onOpenAudioClipOptionsPanel,
   void Function(int clipIndex)? onCopyClip,
   void Function(List<int> clipIndices)? onCopyClips,
   Future<bool> Function(int row, double timeMs)? onPasteClipAt,
@@ -308,6 +449,10 @@ Widget _buildHarness({
   List<bool>? rowSoloedOverride,
   Future<void> Function(int row, double gain)? onSetRowGain,
   void Function(int row, double oldGain, double newGain)? onRowGainCommit,
+  List<double>? rowGainOverride,
+  Future<void> Function(int fromIndex, int toIndex)? onMoveRow,
+  Future<void> Function(List<int> rows, int delta)? onMoveRows,
+  Future<void> Function(List<int> rows)? onDuplicateRows,
   Future<void> Function(int row, double pan)? onSetRowPan,
   void Function(int row, double oldPan, double newPan)? onRowPanCommit,
   Future<void> Function(int row, int color)? onSetRowColor,
@@ -345,6 +490,7 @@ Widget _buildHarness({
   bool useTabletDawLayout = false,
   bool allowMultipleExpandedRows = true,
   bool expandRowsOnTrackSelect = true,
+  int clipTopologyRevision = -1,
   int selectedClipIndex = -1,
   List<int> selectedClipIndices = const <int>[],
   bool Function(int clipIndex)? canReplaceSamplerSource,
@@ -352,8 +498,11 @@ Widget _buildHarness({
   bool hasCopiedClip = false,
   bool Function(int row)? canPasteClipAtRow,
   bool hasCopiedRowEffects = false,
-  void Function(bool magnetEnabled, int quantizeDivisionsPerBar)?
-      onSnapSettingsChanged,
+  void Function(
+    bool magnetEnabled,
+    TimelineGridMode gridMode,
+    int fixedQuantizeDivisionsPerBar,
+  )? onSnapSettingsChanged,
   ValueNotifier<Duration>? transportClockListenable,
   void Function(double ms)? onScrubRequested,
   bool isPlaying = false,
@@ -362,12 +511,14 @@ Widget _buildHarness({
   int loopEndMs = 0,
   VoidCallback? onTutorialTimelineScrolled,
   VoidCallback? onTutorialTimelineZoomed,
+  ValueChanged<WaveformDetailViewport>? onWaveformDetailViewportSettled,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
         TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
       ];
-  final rowGain = List<double>.filled(rows.length, 1.0);
+  final rowGain =
+      rowGainOverride ?? List<double>.filled(rows.length, 1.0);
   final rowPan = List<double>.filled(rows.length, 0.5);
   final rowMuted = rowMutedOverride ?? List<bool>.filled(rows.length, false);
   final rowSoloed = rowSoloedOverride ?? List<bool>.filled(rows.length, false);
@@ -398,6 +549,7 @@ Widget _buildHarness({
           rows: rows,
           trackGroups: trackGroupsOverride ?? const <TrackGroup>[],
           clips: clips,
+          clipTopologyRevision: clipTopologyRevision,
           clipOverlapMode: 'off',
           rowGain: rowGain,
           rowPan: rowPan,
@@ -437,6 +589,7 @@ Widget _buildHarness({
           getFullDurationMs: (clip) =>
               clip.audioDuration.inMilliseconds.toDouble(),
           getPeaks: (_) => List<double>.filled(32, 0.35, growable: false),
+          onWaveformDetailViewportSettled: onWaveformDetailViewportSettled,
           getY: (clip) => clip.y,
           onSelectRow: onSelectRow ?? (_) {},
           recordingInProgress: false,
@@ -449,7 +602,9 @@ Widget _buildHarness({
           onInsertRowBelow: (_) async {},
           onChangeInstrumentLane: onChangeInstrumentLane,
           onDeleteRow: onDeleteRow ?? (_) async {},
-          onMoveRow: (_, __) async {},
+          onMoveRow: onMoveRow ?? (_, __) async {},
+          onMoveRows: onMoveRows,
+          onDuplicateRows: onDuplicateRows,
           onRenameRow: (_, __) async {},
           onRenameRowGroup: onRenameRowGroup,
           onSetRowIcon: (_, __) async {},
@@ -527,6 +682,9 @@ Widget _buildHarness({
           onDeleteClips: null,
           onCutClipAt: null,
           onOpenMidiClip: onOpenMidiClip,
+          onOpenInstrumentUi: onOpenInstrumentUi,
+          canOpenInstrumentUi: canOpenInstrumentUi,
+          onOpenAudioClipOptionsPanel: onOpenAudioClipOptionsPanel,
           onCreateMidiClipInInstrumentLane: onCreateMidiClipInInstrumentLane,
           onStemSeparation: null,
           onSelectionChanged: onSelectionChanged,
@@ -618,7 +776,7 @@ void main() {
           onMoveClipCommit: (clipIndex, _, __) async {
             moveCommits.add(clipIndex);
           },
-          onSelectionChanged: (selectedClipIndices, _) {
+          onSelectionChanged: (selectedClipIndices, _, __) {
             selectionSnapshots.add(
               selectedClipIndices.toList(growable: false),
             );
@@ -665,7 +823,7 @@ void main() {
           ],
           useTabletDawLayout: true,
           onMoveClipCommit: (_, __, ___) async {},
-          onSelectionChanged: (selectedClipIndices, _) {
+          onSelectionChanged: (selectedClipIndices, _, __) {
             selectionSnapshots.add(
               selectedClipIndices.toList(growable: false),
             );
@@ -716,6 +874,193 @@ void main() {
     }
   });
 
+  testWidgets(
+      'mobile long-press ring and box stay on the finger after vertical scroll',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      const rowCount = 8;
+      const rowHeight = 80.0;
+      const scrollOffset = 120.0;
+      final rows = List<TimelineRow>.generate(
+        rowCount,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final bottom = await _buildClip(row: 4, rowId: 5, engineClipId: 5);
+      final selectionSnapshots = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[bottom],
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (selectedClipIndices, _, __) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final verticalController = _timelineVerticalScrollController(tester);
+      expect(verticalController.position.maxScrollExtent, greaterThan(scrollOffset));
+      verticalController.jumpTo(scrollOffset);
+      await tester.pumpAndSettle();
+
+      final press = _visibleClipCenter(
+        tester,
+        row: 4,
+        rowHeight: rowHeight,
+      );
+      final gesture = await tester.startGesture(press);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+
+      expect(
+        selectionSnapshots.where((snapshot) => snapshot.contains(0)),
+        isNotEmpty,
+        reason: 'starting clip must stay selected when the box begins',
+      );
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('timeline_selection_arm_ring'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+
+      await gesture.moveBy(const Offset(24.0, 24.0));
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('timeline_selection_box'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+      expect(selectionSnapshots.last, <int>[0]);
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'mobile long-press ring stays on the finger after closing an effects row',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.iOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      const rowCount = 8;
+      const rowHeight = 80.0;
+      final rows = List<TimelineRow>.generate(
+        rowCount,
+        (index) => TimelineRow(
+          rowId: index + 1,
+          name: 'Track ${index + 1}',
+          iconId: 0,
+        ),
+      );
+      final bottom = await _buildClip(row: 6, rowId: 7, engineClipId: 7);
+      final selectionSnapshots = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[bottom],
+          controller: controller,
+          rowsOverride: rows,
+          rowEffects: const <String>['EQ'],
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (selectedClipIndices, _, __) {
+            selectionSnapshots.add(
+              selectedClipIndices.toList(growable: false),
+            );
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller.ensureRowExpanded(0, tab: 1);
+      await tester.pumpAndSettle();
+      final effectsPanel = tester.widget<RowEffectsPanel>(
+        find.byType(RowEffectsPanel),
+      );
+      effectsPanel.onHeightChanged(800.0);
+      await tester.pumpAndSettle();
+      controller.collapseExpandedRows();
+      await tester.pumpAndSettle();
+
+      final press = _visibleClipCenter(
+        tester,
+        row: 6,
+        rowHeight: rowHeight,
+      );
+      final gesture = await tester.startGesture(press);
+      await tester.pump(kLongPressTimeout + kPressTimeout);
+      await tester.pump();
+
+      expect(
+        selectionSnapshots.where((snapshot) => snapshot.contains(0)),
+        isNotEmpty,
+        reason: 'starting clip must stay selected when the box begins',
+      );
+      expect(
+        tester.getCenter(find.byKey(const ValueKey('timeline_selection_arm_ring'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+
+      await gesture.moveBy(const Offset(24.0, 24.0));
+      await tester.pump();
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('timeline_selection_box'))).dy,
+        closeTo(press.dy, 2.0),
+      );
+      expect(selectionSnapshots.last, <int>[0]);
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop and tablet row scaling keeps its default and reaches 150%',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    final semantics = tester.ensureSemantics();
+    try {
+      final clip = await _buildClip();
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[clip],
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rowHeader =
+          find.byKey(const ValueKey('timeline_tablet_row_header_0'));
+      final heightControl = find.bySemanticsLabel('Rows scrollbar and height');
+      final semanticsHeightControl =
+          find.semantics.byLabel('Rows scrollbar and height');
+      expect(tester.getSize(rowHeader).height, 84.0);
+      expect(tester.getSemantics(heightControl).value, '100%');
+
+      for (var i = 0; i < 8; i++) {
+        tester.semantics.increase(semanticsHeightControl);
+        await tester.pumpAndSettle();
+      }
+
+      expect(tester.getSize(rowHeader).height, 126.0);
+      expect(tester.getSemantics(heightControl).value, '150%');
+    } finally {
+      semantics.dispose();
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('swiping an unselected clip does not select or move it',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -728,7 +1073,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -760,7 +1105,7 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -795,13 +1140,17 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
         },
       ),
     );
+    await tester.pumpAndSettle();
+
+    // This test covers free movement, independent of the default snap mode.
+    await tester.tapAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
     final center = _clipCenter(tester);
@@ -822,6 +1171,187 @@ void main() {
     expect(moveCommits.single, closeTo(800.0, 0.01));
   });
 
+  testWidgets(
+    'desktop three-finger trackpad drag starts a selection box on a clip',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      TrackpadTouchCount.debugTouchCount = 3;
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final moveCommits = <int>[];
+        final selectionSnapshots = <List<int>>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onSelectionChanged: (selectedClipIndices, _, __) {
+              selectionSnapshots.add(
+                selectedClipIndices.toList(growable: false),
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(PlatformCapabilities.current.isDesktop, isTrue);
+        expect(TrackpadTouchCount.current, 3);
+
+        final start = _clipCenter(tester);
+        final end = start + const Offset(-400.0, 0.0);
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: kPrimaryMouseButton,
+        );
+        await gesture.down(start);
+        await tester.pump();
+        await gesture.moveTo(end);
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        expect(moveCommits, isEmpty);
+        expect(
+          selectionSnapshots.where((snapshot) => snapshot.length >= 2),
+          isNotEmpty,
+          reason: 'three-finger drag should box-select, snapshots=$selectionSnapshots',
+        );
+        expect(selectionSnapshots.last.toSet(), <int>{0, 1});
+      } finally {
+        TrackpadTouchCount.debugReset();
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop cmd-click adds each clip instead of skipping earlier clips',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final moveCommits = <int>[];
+        final selectionSnapshots = <List<int>>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onSelectionChanged: (selectedClipIndices, _, __) {
+              selectionSnapshots.add(
+                selectedClipIndices.toList(growable: false),
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(PlatformCapabilities.current.isDesktop, isTrue);
+
+        final topLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+        final firstClipCenter = topLeft +
+            Offset(
+              _kHeaderWidth + (1000.0 * _kInitialPixelsPerMs),
+              _kRulerHeight + 46.0,
+            );
+        final secondClipCenter = topLeft +
+            Offset(
+              _kHeaderWidth + (3200.0 * _kInitialPixelsPerMs),
+              _kRulerHeight + 46.0,
+            );
+
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        for (final position in <Offset>[firstClipCenter, secondClipCenter]) {
+          final gesture = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+            buttons: kPrimaryMouseButton,
+          );
+          await gesture.down(position);
+          await tester.pump();
+          await gesture.up();
+          await tester.pump();
+        }
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+
+        expect(moveCommits, isEmpty);
+        expect(
+          selectionSnapshots.last.toSet(),
+          <int>{0, 1},
+          reason: 'cmd-click should keep both clips, snapshots=$selectionSnapshots',
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop cmd-drag on a clip still starts a selection box',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final moveCommits = <int>[];
+        final selectionSnapshots = <List<int>>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onSelectionChanged: (selectedClipIndices, _, __) {
+              selectionSnapshots.add(
+                selectedClipIndices.toList(growable: false),
+              );
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final start = _clipCenter(tester);
+        final end = start + const Offset(-400.0, 0.0);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        final gesture = await tester.createGesture(
+          kind: PointerDeviceKind.mouse,
+          buttons: kPrimaryMouseButton,
+        );
+        await gesture.down(start);
+        await tester.pump();
+        await gesture.moveTo(end);
+        await tester.pump();
+        await gesture.up();
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+
+        expect(moveCommits, isEmpty);
+        expect(
+          selectionSnapshots.where((snapshot) => snapshot.length >= 2),
+          isNotEmpty,
+          reason: 'cmd-drag should box-select, snapshots=$selectionSnapshots',
+        );
+        expect(selectionSnapshots.last.toSet(), <int>{0, 1});
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
   testWidgets('desktop clip drag snaps to grid when magnet is enabled',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -834,15 +1364,13 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSnapSettingsChanged: (enabled, _) {
+        onSnapSettingsChanged: (enabled, _, __) {
           snapStates.add(enabled);
         },
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tapAt(_magnetButtonCenter(tester));
-    await tester.pumpAndSettle();
     expect(snapStates.last, isTrue);
 
     final center = _clipCenter(tester);
@@ -864,6 +1392,176 @@ void main() {
     expect(moveCommits.single, closeTo(1500.0, 0.01));
   });
 
+  testWidgets('adaptive grid follows timeline zoom without parent churn',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+      final snapSettings = <(bool, TimelineGridMode, int)>[];
+      final moveCommits = <double>[];
+      final detailViewports = <WaveformDetailViewport>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, newStartMs, __) async {
+            moveCommits.add(newStartMs);
+          },
+          onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
+            snapSettings.add((enabled, mode, fixedDivisions));
+          },
+          onWaveformDetailViewportSettled: detailViewports.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+      expect(snapSettings, <(bool, TimelineGridMode, int)>[
+        (true, TimelineGridMode.adaptive, 4),
+      ]);
+
+      final center = _desktopClipCenter(tester);
+      await tester.tapAt(center);
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -2000),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 181));
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.adaptive);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+      expect(snapSettings, hasLength(1));
+      expect(detailViewports.last.pixelsPerMs, 8.0);
+
+      final gesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+        buttons: kPrimaryMouseButton,
+      );
+      await gesture.down(center);
+      await tester.pump();
+      await gesture.moveBy(const Offset(70, 0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(moveCommits, hasLength(1));
+      expect(moveCommits.single, closeTo(7.8125, 0.01));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('waveform detail viewport waits for settled final zoom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clip = await _buildClip();
+      final viewports = <WaveformDetailViewport>[];
+      Widget buildTimeline() => _buildHarness(
+        clips: <AudioTrack>[clip],
+        onMoveClipCommit: (_, __, ___) async {},
+        onWaveformDetailViewportSettled: viewports.add,
+      );
+      await tester.pumpWidget(buildTimeline());
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pumpWidget(buildTimeline());
+      await tester.pump(const Duration(milliseconds: 121));
+      expect(viewports, hasLength(1));
+      expect(viewports.single.pixelsPerMs, _kInitialPixelsPerMs);
+      expect(viewports.single.visibleClipIds, <String>[clip.clipId]);
+      viewports.clear();
+
+      final center = _desktopClipCenter(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -600),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -600),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+
+      await tester.pump(const Duration(milliseconds: 179));
+      expect(viewports, isEmpty);
+      await tester.pump(const Duration(milliseconds: 2));
+      expect(viewports, hasLength(1));
+      expect(
+        viewports.single.pixelsPerMs,
+        greaterThanOrEqualTo(kWaveformDetailMinimumPixelsPerMs),
+      );
+      expect(viewports.single.visibleClipIds, <String>[clip.clipId]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('fixed grid override stays fixed while timeline zooms',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+      final snapSettings = <(bool, TimelineGridMode, int)>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          controller: controller,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSnapSettingsChanged: (enabled, mode, fixedDivisions) {
+            snapSettings.add((enabled, mode, fixedDivisions));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.longPressAt(_magnetButtonCenter(tester));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(
+        const ValueKey('timeline_quantize_menu_4'),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+      expect(snapSettings.last, (true, TimelineGridMode.fixed, 4));
+
+      final center = _desktopClipCenter(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: center,
+          scrollDelta: const Offset(0, -1000),
+        ),
+      );
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+
+      expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('desktop alt clip drag overrides enabled snap grid',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -876,15 +1574,13 @@ void main() {
         onMoveClipCommit: (_, newStartMs, __) async {
           moveCommits.add(newStartMs);
         },
-        onSnapSettingsChanged: (enabled, _) {
+        onSnapSettingsChanged: (enabled, _, __) {
           snapStates.add(enabled);
         },
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tapAt(_magnetButtonCenter(tester));
-    await tester.pumpAndSettle();
     expect(snapStates.last, isTrue);
 
     final center = _clipCenter(tester);
@@ -1376,12 +2072,14 @@ void main() {
     try {
       final controller = AudioCanvasTimelineController();
       final clips = <AudioTrack>[await _buildClip()];
+      final detailViewports = <WaveformDetailViewport>[];
 
       await tester.pumpWidget(
         _buildHarness(
           clips: clips,
           controller: controller,
           onMoveClipCommit: (_, __, ___) async {},
+          onWaveformDetailViewportSettled: detailViewports.add,
         ),
       );
       await tester.pumpAndSettle();
@@ -1390,6 +2088,7 @@ void main() {
       var state = controller.horizontalScrollbarState;
       expect(state.visible, isTrue);
       expect(state.thumbWidth, greaterThanOrEqualTo(72.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
 
       controller.beginHorizontalScrollbarDrag(
         state.thumbLeft + state.thumbWidth - 2.0,
@@ -1401,6 +2100,22 @@ void main() {
       state = controller.horizontalScrollbarState;
       expect(state.thumbWidth, lessThan(72.0));
       expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
+
+      controller.beginHorizontalScrollbarDrag(
+        state.thumbLeft + state.thumbWidth - 2.0,
+      );
+      controller.dragHorizontalScrollbarBy(-2000.0);
+      controller.endHorizontalScrollbarDrag();
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 181));
+
+      state = controller.horizontalScrollbarState;
+      expect(state.thumbLeft.isFinite, isTrue);
+      expect(state.thumbWidth.isFinite, isTrue);
+      expect(state.thumbWidth, greaterThanOrEqualTo(36.0));
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+      expect(detailViewports.last.pixelsPerMs, 8.0);
     } finally {
       _setTestTargetPlatform(null);
     }
@@ -1555,6 +2270,59 @@ void main() {
     expect(createRequests, isEmpty);
   });
 
+  testWidgets('third-party instrument header alone exposes a UI button',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(
+        rowId: 1,
+        name: 'Keys',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'vst3:/Library/Audio/Plug-Ins/VST3/Vital.vst3',
+        instrumentName: 'Vital',
+      ),
+      TimelineRow(
+        rowId: 2,
+        name: 'Mixroom Keys',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'sfz.vsco.upright_piano',
+        instrumentName: 'Upright Piano',
+      ),
+      TimelineRow(rowId: 3, name: 'Audio', iconId: 0),
+    ];
+    final openedRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onMoveClipCommit: (_, __, ___) async {},
+        canOpenInstrumentUi: (row) => row == 0,
+        onOpenInstrumentUi: (row) async => openedRows.add(row),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final button = find.byKey(
+      const ValueKey('timeline_row_instrument_ui_0'),
+    );
+    expect(button, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('timeline_row_instrument_ui_1')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline_row_instrument_ui_2')),
+      findsNothing,
+    );
+
+    await tester.tap(button);
+    await tester.pump();
+
+    expect(openedRows, <int>[0]);
+  });
+
   testWidgets('empty instrument lane menu can create a MIDI clip',
       (tester) async {
     final rows = <TimelineRow>[
@@ -1604,6 +2372,96 @@ void main() {
     expect(createRequests, hasLength(1));
     expect(createRequests.single['row'], 0);
     expect(createRequests.single['timeMs'], isA<double>());
+  });
+
+  testWidgets('instrument lane menu stays anchored after vertical scrolling',
+      (tester) async {
+    final rows = List<TimelineRow>.generate(
+      10,
+      (index) => TimelineRow(
+        rowId: index + 1,
+        name: 'Keys ${index + 1}',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'piano',
+        instrumentName: 'Piano',
+      ),
+    );
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onMoveClipCommit: (_, __, ___) async {},
+        onCreateMidiClipInInstrumentLane: (_, __) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final verticalController = _timelineVerticalScrollController(tester);
+    const scrollOffset = 160.0;
+    verticalController.jumpTo(scrollOffset);
+    await tester.pumpAndSettle();
+
+    final timelineTopLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+    final tapPosition = timelineTopLeft +
+        const Offset(
+          _kHeaderWidth + 240.0,
+          _kRulerHeight + (4 * 80.0) + 40.0 - scrollOffset,
+        );
+    await _openInstrumentLaneMenu(tester, tapPosition);
+
+    final popupRect = tester.getRect(
+      find.byKey(const ValueKey('instrument_lane_region_popup')),
+    );
+    expect(popupRect.bottom, moreOrLessEquals(tapPosition.dy - 8.0));
+  });
+
+  testWidgets('instrument lane menu dismisses on cancel interactions',
+      (tester) async {
+    final rows = List<TimelineRow>.generate(
+      10,
+      (index) => TimelineRow(
+        rowId: index + 1,
+        name: 'Keys ${index + 1}',
+        iconId: 1,
+        kind: TimelineRowKind.instrument,
+        instrumentId: 'piano',
+        instrumentName: 'Piano',
+      ),
+    );
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        onMoveClipCommit: (_, __, ___) async {},
+        onCreateMidiClipInInstrumentLane: (_, __) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openInstrumentLaneMenu(tester, _laneCenter(tester));
+    expect(_instrumentLanePopupOpacity(tester), 1.0);
+
+    final timelineTopLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+    await tester.tapAt(timelineTopLeft + const Offset(400.0, 20.0));
+    await tester.pumpAndSettle();
+    expect(_instrumentLanePopupOpacity(tester), 0.0);
+
+    await _openInstrumentLaneMenu(tester, _laneCenter(tester));
+    expect(_instrumentLanePopupOpacity(tester), 1.0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(_instrumentLanePopupOpacity(tester), 0.0);
+
+    await _openInstrumentLaneMenu(tester, _laneCenter(tester));
+    expect(_instrumentLanePopupOpacity(tester), 1.0);
+
+    _timelineVerticalScrollController(tester).jumpTo(80.0);
+    await tester.pumpAndSettle();
+    expect(_instrumentLanePopupOpacity(tester), 0.0);
   });
 
   testWidgets('add row menu can create an instrument lane', (tester) async {
@@ -1891,6 +2749,824 @@ void main() {
     expect(find.text('Volume'), findsNothing);
   });
 
+  testWidgets('desktop command-click toggles individual track headers',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isFalse);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isFalse);
+      expect(_rowHeaderIsSelected(tester, 2), isFalse);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'desktop shift-click still ranges from the original header after command-clicks',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          expandRowsOnTrackSelect: false,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop shift-click selects a visible track header range',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('plain header click after a range keeps only that track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+      await _tapRowHeader(tester, 1);
+
+      expect(_rowHeaderIsSelected(tester, 0), isFalse);
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isFalse);
+      expect(_rowHeaderIsSelected(tester, 3), isFalse);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('command-click does not expand the added track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+      expect(_rowHeaderIsSelected(tester, 2), isTrue);
+      expect(find.byKey(const ValueKey('expanded_row_2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('expanded_row_3')), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'grouping mode still toggles grouping rows instead of range-select',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final toggledRows = <int>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          rowGroupingSelectionMode: true,
+          groupingSelectedRows: const <int>{1},
+          onToggleGroupingRowSelection: toggledRows.add,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      expect(toggledRows, <int>[2]);
+      expect(_rowHeaderIsSelected(tester, 0), isTrue);
+      expect(_rowHeaderIsSelected(tester, 1), isFalse);
+      expect(_rowHeaderIsSelected(tester, 2), isFalse);
+      expect(find.text('Volume'), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('mute on a range-selected header mutes every selected track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final muteRequests = <MapEntry<int, bool>>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+          onMuteRow: (row, muted) async {
+            muteRequests.add(MapEntry<int, bool>(row, muted));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      await tester.tap(find.text('M').first);
+      await tester.pumpAndSettle();
+
+      expect(
+        muteRequests.map((entry) => '${entry.key}:${entry.value}').toList(),
+        <String>['0:true', '1:true', '2:true'],
+      );
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'backspace deletes every range-selected track when no clips are selected',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rowDeleteRequests = <int>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveClipCommit: (_, __, ___) async {},
+          onDeleteRow: (row) async {
+            rowDeleteRequests.add(row);
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+      await tester.pumpAndSettle();
+
+      expect(rowDeleteRequests, <int>[2, 1, 0]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+      'header gain drag shifts every selected track by the same dB offset',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      // Deliberately unequal so a flattening bug is impossible to miss.
+      final startGains = <double>[1.5, 2.0, 1.8];
+      final liveUpdates = <({int row, double gain})>[];
+      final commits = <({int row, double oldGain, double newGain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: List<double>.of(startGains),
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (row, oldGain, newGain) {
+            commits.add((row: row, oldGain: oldGain, newGain: newGain));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Anchor on the bottom row: expanding it only pushes rows below it, so
+      // the rows we still need to reach keep their positions.
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 0,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+      expect(_rowHeaderIsSelected(tester, 1), isTrue);
+
+      // Drag down so no row can hit the +6 dB ceiling.
+      await _dragTabletHeaderGainTo(tester, row: 0, fraction: 0.3);
+
+      expect(liveUpdates.map((entry) => entry.row).toSet(), <int>{0, 1, 2});
+
+      final finalGainByRow = <int, double>{};
+      for (final commit in commits) {
+        finalGainByRow[commit.row] = commit.newGain;
+      }
+      expect(finalGainByRow.keys.toSet(), <int>{0, 1, 2});
+
+      final anchorDeltaDb =
+          rowGainUiToDb(finalGainByRow[0]!) - rowGainUiToDb(startGains[0]);
+      expect(anchorDeltaDb.abs(), greaterThan(1.0));
+
+      for (final row in <int>[1, 2]) {
+        expect(
+          rowGainUiToDb(finalGainByRow[row]!) - rowGainUiToDb(startGains[row]),
+          closeTo(anchorDeltaDb, 0.05),
+        );
+      }
+
+      // Relative balance survives: the rows did not collapse onto one value.
+      expect(finalGainByRow[1], isNot(closeTo(finalGainByRow[0]!, 0.01)));
+      expect(finalGainByRow[2], isNot(closeTo(finalGainByRow[0]!, 0.01)));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('header gain drag on a single selection touches only that track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final liveUpdates = <({int row, double gain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: <double>[1.5, 2.0, 1.8],
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (_, __, ___) {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _dragTabletHeaderGainTo(tester, row: 1, fraction: 0.3);
+
+      expect(liveUpdates, isNotEmpty);
+      expect(liveUpdates.map((entry) => entry.row).toSet(), <int>{1});
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu labels count the range-selected tracks',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onDuplicateRows: (_) async {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 1);
+
+      expect(find.text('Move 3 Rows Up'), findsOneWidget);
+      expect(find.text('Move 3 Rows Down'), findsOneWidget);
+      expect(find.text('Duplicate 3 Rows'), findsOneWidget);
+      expect(find.text('Delete 3 Rows'), findsOneWidget);
+      expect(find.text('Move Up'), findsNothing);
+      expect(find.text('Delete Row'), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu keeps singular labels for one selected track',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: _namedTrackRows(3),
+        onDuplicateRows: (_) async {},
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 1);
+
+    expect(find.text('Move Up'), findsOneWidget);
+    expect(find.text('Move Down'), findsOneWidget);
+    expect(find.text('Duplicate Row'), findsOneWidget);
+    expect(find.text('Delete Row'), findsOneWidget);
+  });
+
+  testWidgets('row menu moves the range-selected tracks as one block',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 1);
+      await tester.tap(find.text('Move 2 Rows Up'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves.length, 1);
+      expect(blockMoves.single.rows, <int>[1, 2]);
+      expect(blockMoves.single.delta, -1);
+      // The block path replaces the per-row path rather than doubling it up.
+      expect(singleMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu refuses a block move that would fall off the top',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 1,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 0);
+      await tester.tap(find.text('Move 2 Rows Up'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves, isEmpty);
+      expect(singleMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu duplicates every range-selected track',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final duplicateRequests = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onDuplicateRows: (rows) async {
+            duplicateRequests.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 1);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 2);
+      await tester.tap(find.text('Duplicate 2 Rows'));
+      await tester.pumpAndSettle();
+
+      expect(duplicateRequests, <List<int>>[
+        <int>[1, 2],
+      ]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu hides duplicate when the host provides no handler',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: _namedTrackRows(3),
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 1);
+
+    expect(find.text('Duplicate Row'), findsNothing);
+  });
+
+  testWidgets('row menu refuses a block move that would fall off the bottom',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Anchor on the lower row so expanding it cannot push the row we still
+      // need to click out of reach.
+      await _tapRowHeader(tester, 3);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 2);
+      await tester.tap(find.text('Move 2 Rows Down'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves, isEmpty);
+      expect(singleMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu moves a three-row selection down as a block',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+      await _openRowHeaderMenu(tester, 2);
+      await tester.tap(find.text('Move 3 Rows Down'));
+      await tester.pumpAndSettle();
+
+      expect(blockMoves.length, 1);
+      expect(blockMoves.single.rows, <int>[0, 1, 2]);
+      expect(blockMoves.single.delta, 1);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('row menu on an unselected header acts on that row alone',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final blockMoves = <({List<int> rows, int delta})>[];
+      final singleMoves = <({int from, int to})>[];
+      final duplicateRequests = <List<int>>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onMoveRow: (from, to) async {
+            singleMoves.add((from: from, to: to));
+          },
+          onMoveRows: (rows, delta) async {
+            blockMoves.add((rows: rows.toList(growable: false), delta: delta));
+          },
+          onDuplicateRows: (rows) async {
+            duplicateRequests.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Select rows 1 and 2, anchoring low so row 0 keeps its position.
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 1,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      // Row 0 is outside the selection, so the menu must ignore the selection.
+      await _openRowHeaderMenu(tester, 0);
+      expect(find.text('Move Down'), findsOneWidget);
+      expect(find.text('Duplicate Row'), findsOneWidget);
+      expect(find.text('Move 2 Rows Down'), findsNothing);
+
+      await tester.tap(find.text('Duplicate Row'));
+      await tester.pumpAndSettle();
+
+      expect(duplicateRequests, <List<int>>[
+        <int>[0],
+      ]);
+
+      await _openRowHeaderMenu(tester, 0);
+      await tester.tap(find.text('Move Down'));
+      await tester.pumpAndSettle();
+
+      // A single row keeps using the per-row path, not the block path.
+      expect(singleMoves, <({int from, int to})>[(from: 0, to: 1)]);
+      expect(blockMoves, isEmpty);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('a plain header click collapses the menu back to one row',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(4),
+          onDuplicateRows: (_) async {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 2,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+      await _tapRowHeader(tester, 1);
+
+      await _openRowHeaderMenu(tester, 1);
+
+      expect(find.text('Delete Row'), findsOneWidget);
+      expect(find.text('Delete 3 Rows'), findsNothing);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('double tapping a selected header gain resets the whole set',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final liveUpdates = <({int row, double gain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: <double>[1.5, 2.6, 0.8],
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (_, __, ___) {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 0,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      final gainRect = tester.getRect(
+        find.byKey(const ValueKey('timeline_tablet_row_gain_0')),
+      );
+      await tester.tapAt(gainRect.center);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tapAt(gainRect.center);
+      await tester.pumpAndSettle();
+
+      // Reset is absolute: every selected row lands on unity together.
+      final lastByRow = <int, double>{};
+      for (final update in liveUpdates) {
+        lastByRow[update.row] = update.gain;
+      }
+      expect(lastByRow.keys.toSet(), <int>{0, 1, 2});
+      for (final row in <int>[0, 1, 2]) {
+        expect(lastByRow[row], closeTo(2.0, 0.0001));
+      }
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('gain drag clamps at the floor without desyncing the selection',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final liveUpdates = <({int row, double gain})>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          useTabletDawLayout: true,
+          rowGainOverride: <double>[2.4, 0.2, 1.0],
+          onSetRowGain: (row, gain) async {
+            liveUpdates.add((row: row, gain: gain));
+          },
+          onRowGainCommit: (_, __, ___) {},
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 2);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 0,
+        modifier: LogicalKeyboardKey.shiftLeft,
+      );
+
+      // Slam the anchor to the far left; row 1 starts near silence already.
+      await _dragTabletHeaderGainTo(tester, row: 0, fraction: 0.0);
+
+      final lastByRow = <int, double>{};
+      for (final update in liveUpdates) {
+        lastByRow[update.row] = update.gain;
+      }
+      expect(lastByRow.keys.toSet(), <int>{0, 1, 2});
+      for (final row in <int>[0, 1, 2]) {
+        expect(lastByRow[row], greaterThanOrEqualTo(0.0));
+        expect(lastByRow[row], lessThanOrEqualTo(3.0));
+      }
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('tablet row grouping mode toggles tablet row headers',
       (tester) async {
     final rows = <TimelineRow>[
@@ -2166,6 +3842,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tapAt(_tabletHeaderGainPoint(tester, 1));
+    // The slider also listens for a double tap, so the single-tap callbacks
+    // stay deferred until that window closes.
+    await tester.pump(kDoubleTapTimeout + const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
 
     expect(liveUpdates.map((entry) => entry.row), contains(1));
@@ -2401,6 +4080,45 @@ void main() {
     expect(groupRequests, <List<int>>[
       <int>[0, 1],
     ]);
+  });
+
+  testWidgets('row menu groups command-selected tracks without clip selection',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final groupRequests = <List<int>>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(3),
+          onCreateRowGroup: (rows) async {
+            groupRequests.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 1,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+
+      await _openRowHeaderMenu(tester, 0);
+
+      expect(find.text('Group Selected Rows'), findsOneWidget);
+
+      await tester.tap(find.text('Group Selected Rows'));
+      await tester.pumpAndSettle();
+
+      expect(groupRequests, <List<int>>[
+        <int>[0, 1],
+      ]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
   });
 
   testWidgets('row menu hides create group action for a single row',
@@ -2710,6 +4428,356 @@ void main() {
     expect(openRequests, <int>[0]);
   });
 
+  testWidgets('desktop double-click MIDI clip opens piano roll', (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final clips = <AudioTrack>[await _buildMidiClip()];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 1,
+          name: 'Keys',
+          iconId: 1,
+          kind: TimelineRowKind.instrument,
+          instrumentId: 'sfz.vsco.upright_piano',
+          instrumentName: 'Upright Piano',
+        ),
+      ];
+      final openRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenMidiClip: openRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _desktopDoubleTapAt(tester, _desktopClipCenter(tester));
+
+      expect(openRequests, <int>[0]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+    'desktop double-click audio clip opens clip options panel',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[await _buildClip()];
+        final panelRequests = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            useTabletDawLayout: true,
+            onMoveClipCommit: (_, __, ___) async {},
+            onOpenAudioClipOptionsPanel: panelRequests.add,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await _desktopDoubleTapAt(tester, _desktopClipCenter(tester));
+
+        expect(panelRequests, <int>[0]);
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'desktop single click MIDI clip does not open piano roll',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[await _buildMidiClip()];
+        final rows = <TimelineRow>[
+          TimelineRow(
+            rowId: 1,
+            name: 'Keys',
+            iconId: 1,
+            kind: TimelineRowKind.instrument,
+            instrumentId: 'sfz.vsco.upright_piano',
+            instrumentName: 'Upright Piano',
+          ),
+        ];
+        final openRequests = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            rowsOverride: rows,
+            onMoveClipCommit: (_, __, ___) async {},
+            onOpenMidiClip: openRequests.add,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tapAt(_desktopClipCenter(tester));
+        await tester.pumpAndSettle();
+
+        expect(openRequests, isEmpty);
+        expect(
+          find.byKey(const ValueKey('selected_clip_popup_open_piano_roll')),
+          findsOneWidget,
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'phone second tap on selected MIDI clip still opens piano roll',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.android);
+      try {
+        final clips = <AudioTrack>[await _buildMidiClip()];
+        final rows = <TimelineRow>[
+          TimelineRow(
+            rowId: 1,
+            name: 'Keys',
+            iconId: 1,
+            kind: TimelineRowKind.instrument,
+            instrumentId: 'sfz.vsco.upright_piano',
+            instrumentName: 'Upright Piano',
+          ),
+        ];
+        final openRequests = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            rowsOverride: rows,
+            onMoveClipCommit: (_, __, ___) async {},
+            onOpenMidiClip: openRequests.add,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tapAt(_clipCenter(tester));
+        await tester.pump(kDoubleTapTimeout);
+        await tester.pumpAndSettle();
+        expect(openRequests, isEmpty);
+        expect(
+          find.byKey(const ValueKey('selected_clip_popup_open_piano_roll')),
+          findsOneWidget,
+        );
+
+        await tester.tapAt(_clipCenter(tester));
+        await tester.pump(kDoubleTapTimeout);
+        await tester.pumpAndSettle();
+
+        expect(openRequests, <int>[0]);
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'tablet MIDI clip settings opens the side panel instead of overlay',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildMidiClip()];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 1,
+          name: 'Keys',
+          iconId: 1,
+          kind: TimelineRowKind.instrument,
+          instrumentId: 'sfz.vsco.upright_piano',
+          instrumentName: 'Upright Piano',
+        ),
+      ];
+      final panelRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(panelRequests, <int>[0]);
+      expect(find.text('No extra tempo mode is needed here.'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'tablet audio clip settings still opens the side panel',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildClip()];
+      final panelRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(panelRequests, <int>[0]);
+    },
+  );
+
+  testWidgets(
+    'tablet selection reports a new primary after clip settings opens',
+    (tester) async {
+      final first = await _buildClip(engineClipId: 1);
+      final second = await _buildClip(engineClipId: 2);
+      second.offset = 2200.0;
+      final panelRequests = <int>[];
+      final selectionSnapshots = <
+        ({
+          List<int> selected,
+          int primary,
+          TimelineSelectionChangeOrigin origin,
+        })
+      >[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: <AudioTrack>[first, second],
+          selectedClipIndex: 0,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+          onSelectionChanged: (selected, primary, origin) {
+            selectionSnapshots.add((
+              selected: List<int>.from(selected),
+              primary: primary,
+              origin: origin,
+            ));
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+      expect(panelRequests, <int>[0]);
+      expect(selectionSnapshots.last.selected, isEmpty);
+      expect(selectionSnapshots.last.primary, -1);
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+
+      expect(selectionSnapshots.last.selected, <int>[1]);
+      expect(selectionSnapshots.last.primary, 1);
+      expect(
+        selectionSnapshots.last.origin,
+        TimelineSelectionChangeOrigin.interaction,
+      );
+    },
+  );
+
+  testWidgets(
+    'topology reconciliation is distinct from the next user selection',
+    (tester) async {
+      final first = await _buildClip(engineClipId: 1);
+      final second = await _buildClip(engineClipId: 2);
+      second.offset = 2200.0;
+      final origins = <TimelineSelectionChangeOrigin>[];
+
+      Widget harness(List<AudioTrack> clips, int topologyRevision) {
+        return _buildHarness(
+          clips: clips,
+          clipTopologyRevision: topologyRevision,
+          onMoveClipCommit: (_, __, ___) async {},
+          onSelectionChanged: (_, __, origin) => origins.add(origin),
+        );
+      }
+
+      await tester.pumpWidget(harness(<AudioTrack>[first], 0));
+      await tester.pumpAndSettle();
+      origins.clear();
+
+      await tester.pumpWidget(harness(<AudioTrack>[first, second], 1));
+      await tester.pumpAndSettle();
+      expect(origins, contains(TimelineSelectionChangeOrigin.reconciliation));
+      origins.clear();
+
+      await tester.tapAt(_clipCenter(tester, additionalDx: 220.0));
+      await tester.pumpAndSettle();
+      expect(origins.last, TimelineSelectionChangeOrigin.interaction);
+
+      origins.clear();
+      await tester.pumpWidget(harness(<AudioTrack>[first, second], 2));
+      await tester.pumpAndSettle();
+      expect(
+        origins,
+        contains(TimelineSelectionChangeOrigin.reconciliation),
+      );
+
+      origins.clear();
+      await tester.tapAt(_clipCenter(tester));
+      await tester.pumpAndSettle();
+      expect(origins.last, TimelineSelectionChangeOrigin.interaction);
+    },
+  );
+
+  testWidgets(
+    'phone MIDI clip settings keeps the timeline overlay',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildMidiClip()];
+      final rows = <TimelineRow>[
+        TimelineRow(
+          rowId: 1,
+          name: 'Keys',
+          iconId: 1,
+          kind: TimelineRowKind.instrument,
+          instrumentId: 'sfz.vsco.upright_piano',
+          instrumentName: 'Upright Piano',
+        ),
+      ];
+      final panelRequests = <int>[];
+
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: clips,
+          rowsOverride: rows,
+          selectedClipIndex: 0,
+          onMoveClipCommit: (_, __, ___) async {},
+          onOpenAudioClipOptionsPanel: panelRequests.add,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('selected_clip_popup_clip_settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(panelRequests, isEmpty);
+      expect(find.text('No extra tempo mode is needed here.'), findsOneWidget);
+    },
+  );
+
   testWidgets('selected sampler clip popup exposes replace source action',
       (tester) async {
     final clips = <AudioTrack>[await _buildSamplerClip()];
@@ -2913,6 +4981,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // Preserve the exact playhead position being exercised by this test.
+    await tester.tapAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -2940,6 +5012,10 @@ void main() {
         },
       ),
     );
+    await tester.pumpAndSettle();
+
+    // Preserve the exact empty-lane click position being exercised here.
+    await tester.tapAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
     final timelineTopLeft = tester.getTopLeft(find.byType(AudioCanvasTimeline));
@@ -3098,6 +5174,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // This test validates group spacing rather than snap quantization.
+    await tester.tapAt(_magnetButtonCenter(tester));
+    await tester.pumpAndSettle();
+
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
     await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
@@ -3184,7 +5264,7 @@ void main() {
             'newStartMs': newStartMs,
           });
         },
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -3215,6 +5295,64 @@ void main() {
 
     expect(trimCommits, hasLength(1));
   });
+
+  testWidgets(
+    'desktop group trim applies the same edge drag to every selected clip',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+        ];
+        clips[1].offset = 2200.0;
+        final trimCommits = <int>[];
+        final moveCommits = <int>[];
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            selectedClipIndex: 0,
+            selectedClipIndices: const <int>[0, 1],
+            onMoveClipCommit: (clipIndex, _, __) async {
+              moveCommits.add(clipIndex);
+            },
+            onTrimClipCommit: (
+              clipIndex,
+              newTrimStartMs,
+              newTrimEndMs,
+              oldTrimStartMs,
+              oldTrimEndMs,
+              originalStartMs, {
+              newStartMs,
+            }) {
+              trimCommits.add(clipIndex);
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final clipWidthPx = _kClipDurationMs * _kInitialPixelsPerMs;
+        final clip1LeftHandle = _clipCenter(tester) +
+            Offset(
+              -clipWidthPx -
+                  _kTrimHandleGapPx -
+                  (_kTrimHandleWidthPx / 2.0),
+              0,
+            );
+        await tester.dragFrom(clip1LeftHandle, const Offset(80, 0));
+        await tester.pumpAndSettle();
+
+        expect(
+          trimCommits.toSet(),
+          <int>{0, 1},
+          reason: 'trim=$trimCommits move=$moveCommits',
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
 
   testWidgets('tiny selected clips drag from the body instead of arming trim',
       (tester) async {
@@ -3300,6 +5438,39 @@ void main() {
     expect(moveCommits, isEmpty);
   });
 
+  testWidgets('scale gesture reaches the shared deep zoom ceiling',
+      (tester) async {
+    final clips = <AudioTrack>[await _buildClip()];
+    final controller = AudioCanvasTimelineController();
+    final detailViewports = <WaveformDetailViewport>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: clips,
+        controller: controller,
+        onMoveClipCommit: (_, __, ___) async {},
+        onWaveformDetailViewportSettled: detailViewports.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final center = _clipCenter(tester);
+    final gesture = await tester.createGesture(
+      pointer: 103,
+      kind: PointerDeviceKind.trackpad,
+    );
+    await gesture.panZoomStart(center);
+    await tester.pump();
+    await gesture.panZoomUpdate(center, scale: 100.0);
+    await tester.pump();
+    await gesture.panZoomEnd();
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 181));
+
+    expect(controller.topControlsState.quantizeDivisionsPerBar, 512);
+    expect(detailViewports.last.pixelsPerMs, 8.0);
+  });
+
   testWidgets('pinch zoom does not leave an unselected clip selected',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
@@ -3309,7 +5480,7 @@ void main() {
       _buildHarness(
         clips: clips,
         onMoveClipCommit: (_, __, ___) async {},
-        onSelectionChanged: (selectedClipIndices, _) {
+        onSelectionChanged: (selectedClipIndices, _, __) {
           selectionSnapshots.add(
             selectedClipIndices.toList(growable: false),
           );
@@ -3816,10 +5987,13 @@ void main() {
         findsOneWidget);
   });
 
-  testWidgets('quantize menu is constrained to trigger width', (tester) async {
+  testWidgets('quantize menu exposes fixed 1/32 within trigger width',
+      (tester) async {
+    final controller = AudioCanvasTimelineController();
     await tester.pumpWidget(
       _buildHarness(
         clips: const <AudioTrack>[],
+        controller: controller,
         onMoveClipCommit: (_, __, ___) async {},
       ),
     );
@@ -3829,9 +6003,16 @@ void main() {
     await tester.longPressAt(_magnetButtonCenter(tester));
     await tester.pumpAndSettle();
 
-    final itemRect =
-        tester.getRect(find.byKey(const ValueKey('timeline_quantize_menu_4')));
+    final fixedThirtySecond =
+        find.byKey(const ValueKey('timeline_quantize_menu_32'));
+    final itemRect = tester.getRect(fixedThirtySecond);
     expect(itemRect.width, closeTo(triggerWidth, 0.5));
+
+    await tester.tap(fixedThirtySecond);
+    await tester.pumpAndSettle();
+
+    expect(controller.topControlsState.gridMode, TimelineGridMode.fixed);
+    expect(controller.topControlsState.quantizeDivisionsPerBar, 32);
   });
 
   testWidgets('automation tab opens point-lane editor for selected target',
@@ -3876,5 +6057,71 @@ void main() {
       find.byKey(const ValueKey('automation_clip_hit_automation_fixture')),
       findsNothing,
     );
+  });
+
+  testWidgets('desktop panByMs scrolls the timeline view', (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final clips = <AudioTrack>[await _buildClip()];
+      var scrollEvents = 0;
+      await tester.pumpWidget(
+        _buildHarness(
+          controller: controller,
+          clips: clips,
+          onMoveClipCommit: (_, __, ___) async {},
+          onTutorialTimelineScrolled: () => scrollEvents++,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final thumbLeftBefore = controller.horizontalScrollbarState.thumbLeft;
+      controller.panByMs(2000);
+      await tester.pump();
+
+      expect(scrollEvents, greaterThan(0));
+      expect(
+        controller.horizontalScrollbarState.thumbLeft,
+        greaterThan(thumbLeftBefore),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('desktop panByMs clamps extreme negative scroll', (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final controller = AudioCanvasTimelineController();
+      final clips = <AudioTrack>[await _buildClip()];
+      await tester.pumpWidget(
+        _buildHarness(
+          controller: controller,
+          clips: clips,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      controller.panByMs(-1000000);
+      await tester.pump();
+      final thumbLeftAtMin = controller.horizontalScrollbarState.thumbLeft;
+      expect(thumbLeftAtMin.isFinite, isTrue);
+
+      controller.panByMs(-1000000);
+      await tester.pump();
+      expect(
+        controller.horizontalScrollbarState.thumbLeft,
+        closeTo(thumbLeftAtMin, 0.5),
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      controller.dispose();
+    } finally {
+      _setTestTargetPlatform(null);
+    }
   });
 }

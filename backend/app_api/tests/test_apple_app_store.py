@@ -101,6 +101,8 @@ class AppleAppStoreTests(unittest.TestCase):
             )
 
         self.assertEqual(result["provider_event_id"], "notif-1")
+        self.assertEqual(result["provider_payload"]["notificationType"], "DID_FAIL_TO_RENEW")
+        self.assertIn("transaction", result["provider_payload"])
         self.assertEqual(result["normalized"]["status"], "grace_period")
         self.assertEqual(
             self.repo.get_customer_link("apple", "subscription:orig-1")["user_id"],

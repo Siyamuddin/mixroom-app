@@ -1,0 +1,235 @@
+{
+  "context": {
+    "project": {
+      "bpm": 120.0,
+      "beats_per_bar": 4,
+      "playhead_beat": 0.0,
+      "tempo_stretch_enabled": false,
+      "row_capacity": {
+        "current_rows": 2,
+        "max_rows": 5,
+        "can_create": true
+      }
+    },
+    "transport": {
+      "playing": false,
+      "recording": false,
+      "metronome_enabled": false,
+      "loop_enabled": false,
+      "loop_start_ms": 0,
+      "loop_end_ms": 0
+    },
+    "selection": {
+      "selected_row_id": 2,
+      "selected_clip_ids": []
+    },
+    "rows": [
+      {
+        "row_id": 1,
+        "display_index": 0,
+        "name": "Audio",
+        "lane_kind": "audio",
+        "gain_db": 0.0,
+        "pan_signed": 0.0,
+        "muted": false,
+        "soloed": false,
+        "color": "none",
+        "mix_processing_supported": true,
+        "has_usable_signal": true,
+        "has_analyzable_audio": true,
+        "automation_targets": [],
+        "effects": []
+      },
+      {
+        "row_id": 2,
+        "display_index": 1,
+        "name": "Instrument",
+        "lane_kind": "instrument",
+        "instrument_id": "instrument.old",
+        "gain_db": 0.0,
+        "pan_signed": 0.0,
+        "muted": false,
+        "soloed": false,
+        "color": "none",
+        "mix_processing_supported": true,
+        "has_usable_signal": true,
+        "has_analyzable_audio": false,
+        "automation_targets": [],
+        "effects": []
+      }
+    ],
+    "clips": [
+      {
+        "clip_id": "audio-clip",
+        "row_id": 1,
+        "display_index": 0,
+        "kind": "audio",
+        "name": "Audio clip",
+        "start_beat": 0.0,
+        "length_beats": 8.0,
+        "source_available": true
+      },
+      {
+        "clip_id": "midi-clip",
+        "row_id": 2,
+        "display_index": 1,
+        "kind": "midi",
+        "name": "MIDI clip",
+        "start_beat": 0.0,
+        "length_beats": 8.0,
+        "instrument_id": "instrument.old",
+        "midi_notes": [
+          {
+            "pitch": 36,
+            "start_beat": 0.0,
+            "length_beats": 1.0,
+            "velocity": 0.8
+          }
+        ]
+      }
+    ],
+    "groups": [],
+    "master": {
+      "gain_db": 0.0,
+      "pan_signed": 0.0,
+      "effects": []
+    },
+    "instruments": ["instrument.old", "instrument.new"],
+    "instrument_catalog": [
+      {
+        "instrument_id": "instrument.old",
+        "name": "Old instrument",
+        "playable_pitch_ranges": [{"low": 36, "high": 36}]
+      },
+      {
+        "instrument_id": "instrument.new",
+        "name": "New instrument",
+        "playable_pitch_ranges": [{"low": 60, "high": 72}]
+      }
+    ],
+    "effects": [],
+    "library_assets": [],
+    "runtime_capabilities": []
+  },
+  "cases": [
+    {
+      "id": "instrument_swap_then_valid_rewrite",
+      "accepted": true,
+      "final_instrument_id": "instrument.new",
+      "commands": [
+        {
+          "command_id": "instrument",
+          "type": "row.set_instrument",
+          "arguments": {"row_id": 2, "instrument_id": "instrument.new"}
+        },
+        {
+          "command_id": "rewrite",
+          "type": "midi.replace_notes",
+          "arguments": {
+            "clip_id": "midi-clip",
+            "notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0.0,
+                "length_beats": 1.0,
+                "velocity": 0.8
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "instrument_swap_then_invalid_pitch",
+      "accepted": false,
+      "backend_error": "v3_plan_midi_pitch_unavailable",
+      "client_error": "v3_midi_instrument_pitch_unavailable",
+      "commands": [
+        {
+          "command_id": "instrument",
+          "type": "row.set_instrument",
+          "arguments": {"row_id": 2, "instrument_id": "instrument.new"}
+        },
+        {
+          "command_id": "rewrite",
+          "type": "midi.replace_notes",
+          "arguments": {
+            "clip_id": "midi-clip",
+            "notes": [
+              {
+                "pitch": 36,
+                "start_beat": 0.0,
+                "length_beats": 1.0,
+                "velocity": 0.8
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "midi_command_on_audio_clip",
+      "accepted": false,
+      "backend_error": "v3_plan_target_type_invalid",
+      "client_error": "v3_midi_clip_required",
+      "commands": [
+        {
+          "command_id": "rewrite",
+          "type": "midi.replace_notes",
+          "arguments": {
+            "clip_id": "audio-clip",
+            "notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0.0,
+                "length_beats": 1.0,
+                "velocity": 0.8
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "instrument_command_on_audio_row",
+      "accepted": false,
+      "backend_error": "v3_plan_target_type_invalid",
+      "client_error": "v3_instrument_row_required",
+      "commands": [
+        {
+          "command_id": "instrument",
+          "type": "row.set_instrument",
+          "arguments": {"row_id": 1, "instrument_id": "instrument.new"}
+        }
+      ]
+    },
+    {
+      "id": "delete_row_then_reuse_clip",
+      "accepted": false,
+      "backend_error": "v3_plan_capability_invalid",
+      "client_error": "v3_clip_id_unknown",
+      "commands": [
+        {
+          "command_id": "delete",
+          "type": "row.delete",
+          "arguments": {"row_id": 2}
+        },
+        {
+          "command_id": "rewrite",
+          "type": "midi.replace_notes",
+          "arguments": {
+            "clip_id": "midi-clip",
+            "notes": [
+              {
+                "pitch": 36,
+                "start_beat": 0.0,
+                "length_beats": 1.0,
+                "velocity": 0.8
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -206,6 +206,14 @@ IconData _mixroomFxIconForName(String name) {
   return Icons.extension_rounded;
 }
 
+_MixroomFxCategorySpec? _mixroomFxCategoryForName(String name) {
+  final normalizedName = name.trim();
+  for (final category in _kMixroomFxCategories) {
+    if (category.effects.contains(normalizedName)) return category;
+  }
+  return null;
+}
+
 class _MixroomFxPicker extends StatefulWidget {
   const _MixroomFxPicker({
     required this.isBasicTier,
@@ -4847,11 +4855,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                             );
                             return Transform.scale(
                               scale: 1.0 + (0.025 * t),
-                              child: DecoratedBox(
-                                decoration:
-                                    _mixroomFxDragPickupDecoration(radius: 14),
-                                child: child,
-                              ),
+                              child: child,
                             );
                           },
                         );
@@ -5174,6 +5178,15 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
         widget.selectedEffectIndex == idx && widget.onEffectSelected != null;
     final isActive = idx < _bypassed.length ? !_bypassed[idx] : true;
     final effectName = idx < _effects.length ? _effects[idx] : 'Effect';
+    final mixroomCategory = _isLikelyExternalEffectSlot(idx)
+        ? null
+        : _mixroomFxCategoryForName(effectName);
+    final tileColor = mixroomCategory == null
+        ? Color.fromRGBO(244, 244, 244, isActive ? 0.80 : 0.46)
+        : Color.alphaBlend(
+            mixroomCategory.color.withValues(alpha: isActive ? 0.38 : 0.19),
+            Color.fromRGBO(244, 244, 244, isActive ? 0.80 : 0.46),
+          );
     final showSequenceArrow = _effects.length > 1 && idx < _effects.length - 1;
     final borderColor = isDragging
         ? _kFxWarmAccentBorder
@@ -5199,7 +5212,7 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                 width: _kRowDeviceEffectTileWidth,
                 height: _kRowDeviceEffectTileHeight,
                 decoration: BoxDecoration(
-                  color: Color.fromRGBO(244, 244, 244, isActive ? 0.80 : 0.46),
+                  color: tileColor,
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(
                     color: borderColor,
@@ -5276,18 +5289,35 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
                             ],
                           ),
                           const Spacer(),
-                          Text(
-                            L10n.translate(context, effectName),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontFamily: 'Pretendard',
-                              color: Color(0xFF090909),
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              height: 1.15,
-                            ),
+                          Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (mixroomCategory != null) ...[
+                                Icon(
+                                  _mixroomFxIconForName(effectName),
+                                  size: 18,
+                                  color: Color.lerp(
+                                    const Color(0xFF090909),
+                                    mixroomCategory.color,
+                                    0.58,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                              ],
+                              Text(
+                                L10n.translate(context, effectName),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Color(0xFF090909),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.15,
+                                ),
+                              ),
+                            ],
                           ),
                           const Spacer(),
                           GestureDetector(
@@ -5700,6 +5730,11 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
     final isSelected = _selectedEffectIndex == idx ||
         widget.selectedEffectIndex == idx && widget.onEffectSelected != null;
     final showReturnHighlight = _returnHighlightedEffectIndex == idx;
+    final effectName = idx < _effects.length ? _effects[idx] : 'Effect';
+    final mixroomCategory = _isLikelyExternalEffectSlot(idx)
+        ? null
+        : _mixroomFxCategoryForName(effectName);
+    final isActive = idx < _bypassed.length ? !_bypassed[idx] : true;
     final tile = AnimatedContainer(
       key: ValueKey("effect_${_effectKeys[idx]}"),
       duration: const Duration(milliseconds: 170),
@@ -5714,7 +5749,10 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
       child: SizedBox(
         height: _kCompactFxTileHeight,
         child: Material(
-          color: Colors.transparent,
+          color: mixroomCategory?.color.withValues(
+                alpha: isActive ? 0.20 : 0.10,
+              ) ??
+              Colors.transparent,
           borderRadius: BorderRadius.circular(14),
           clipBehavior: Clip.antiAlias,
           child: ListTile(
@@ -5741,16 +5779,30 @@ class _RowEffectsPanelState extends State<RowEffectsPanel> {
               ),
             ),
 
-            title: Text(
-              L10n.translate(context, _effects[idx]),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: _kFxPanelText,
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
+            title: Row(
+              children: [
+                if (mixroomCategory != null) ...[
+                  Icon(
+                    _mixroomFxIconForName(effectName),
+                    size: 17,
+                    color: mixroomCategory.color,
+                  ),
+                  const SizedBox(width: 7),
+                ],
+                Expanded(
+                  child: Text(
+                    L10n.translate(context, effectName),
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _kFxPanelText,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
             ),
 
             trailing: Row(

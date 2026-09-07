@@ -277,6 +277,9 @@ POSTHOG_PERSONAL_API_KEY_SECRET_ARN = os.environ.get(
 POSTHOG_METRICS_CACHE_TTL_SECONDS = int(
     os.environ.get("POSTHOG_METRICS_CACHE_TTL_SECONDS", "300") or "300"
 )
+COMPANY_DASHBOARD_API_KEY_PARAMETER_NAME = os.environ.get(
+    "COMPANY_DASHBOARD_API_KEY_PARAMETER_NAME", ""
+).strip()
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "").strip() or "dev"
 MINIMUM_SIGNUP_AGE_YEARS = int(

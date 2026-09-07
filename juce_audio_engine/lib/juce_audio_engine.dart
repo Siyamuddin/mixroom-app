@@ -70,6 +70,7 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -79,6 +80,7 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
       generation,
       outputDeviceName: outputDeviceName,
       inputDeviceName: inputDeviceName,
+      inputDeviceUID: inputDeviceUID,
       updateInputPreference: updateInputPreference,
       preferredSampleRateHz: preferredSampleRateHz,
       preferredBufferFrames: preferredBufferFrames,
@@ -91,11 +93,17 @@ class MethodChannelAudioRouteAdapterV2 implements AudioRouteAdapterV2 {
   Future<AudioRouteTransitionResultV2> applyIntent(
       AudioRouteIntentV2 intent, int generation,
       {AudioRouteIntentOperationV2 operation =
-          AudioRouteIntentOperationV2.standard}) {
+          AudioRouteIntentOperationV2.standard,
+      int? recordingChannelStart,
+      int? recordingChannelCount,
+      int? monitoringTargetRow}) {
     return JuceAudioEngine.setAudioRouteIntentV2(
       intent,
       generation: generation,
       operation: operation,
+      recordingChannelStart: recordingChannelStart,
+      recordingChannelCount: recordingChannelCount,
+      monitoringTargetRow: monitoringTargetRow,
       platformOverride: platformOverride,
     );
   }
@@ -327,6 +335,9 @@ class AudioRouteInfo {
 
 class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
+    this.uid = '',
+    this.channelCount = 0,
+    this.clockDomain,
     required this.name,
     required this.isBluetoothInput,
     required this.isBuiltIn,
@@ -334,6 +345,9 @@ class AudioInputDeviceInfo {
     required this.transport,
   });
 
+  final String uid;
+  final int channelCount;
+  final int? clockDomain;
   final String name;
   final bool isBluetoothInput;
   final bool isBuiltIn;
@@ -342,6 +356,9 @@ class AudioInputDeviceInfo {
 
   factory AudioInputDeviceInfo.fromMap(Map<String, dynamic> map) {
     return AudioInputDeviceInfo(
+      uid: map['uid']?.toString() ?? '',
+      channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+      clockDomain: (map['clockDomain'] as num?)?.toInt(),
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
       isBuiltIn: map['isBuiltIn'] == true,
@@ -370,6 +387,9 @@ class JuceAudioEngine {
       .asBroadcastStream();
 
   static Stream<Map<String, dynamic>> get eventsStream => _events;
+
+  static Stream<Map<String, dynamic>> get pluginScanProgressEvents =>
+      _events.where((event) => event['event'] == 'pluginScanProgress');
 
   static Stream<AudioRouteChangeEventV2> get audioRouteChangeEventsV2 => _events
       .where((event) => event['event'] == 'audioRouteChangedV2')
@@ -515,6 +535,7 @@ class JuceAudioEngine {
     int generation, {
     String? outputDeviceName,
     String? inputDeviceName,
+    String? inputDeviceUID,
     bool updateInputPreference = false,
     int? preferredSampleRateHz,
     int? preferredBufferFrames,
@@ -529,6 +550,10 @@ class JuceAudioEngine {
       return _unavailableRouteTransitionV2(generation);
     }
     try {
+      final normalizedInputName = inputDeviceName?.trim() ?? '';
+      final normalizedInputUID = inputDeviceUID?.trim() ?? '';
+      final followsSystemInput =
+          normalizedInputName.isEmpty && normalizedInputUID.isEmpty;
       final arguments = <String, Object>{
         'generation': generation,
         'intent': 'playbackOnly',
@@ -538,10 +563,11 @@ class JuceAudioEngine {
         if (outputDeviceName?.trim().isNotEmpty == true)
           'outputDeviceName': outputDeviceName!.trim(),
         if (updateInputPreference) 'updateInputPreference': true,
-        if (updateInputPreference)
-          'followSystemInput': inputDeviceName?.trim().isNotEmpty != true,
-        if (updateInputPreference && inputDeviceName?.trim().isNotEmpty == true)
-          'inputDeviceName': inputDeviceName!.trim(),
+        if (updateInputPreference) 'followSystemInput': followsSystemInput,
+        if (updateInputPreference && normalizedInputName.isNotEmpty)
+          'inputDeviceName': normalizedInputName,
+        if (updateInputPreference && normalizedInputUID.isNotEmpty)
+          'inputDeviceUID': normalizedInputUID,
         if (updateHardwarePreferences) 'updateHardwarePreferences': true,
         if (updateHardwarePreferences && preferredSampleRateHz != null)
           'preferredSampleRateHz': preferredSampleRateHz,
@@ -571,6 +597,9 @@ class JuceAudioEngine {
     required int generation,
     AudioRouteIntentOperationV2 operation =
         AudioRouteIntentOperationV2.standard,
+    int? recordingChannelStart,
+    int? recordingChannelCount,
+    int? monitoringTargetRow,
     TargetPlatform? platformOverride,
   }) async {
     final platform = platformOverride ?? defaultTargetPlatform;
@@ -591,6 +620,12 @@ class JuceAudioEngine {
           'intent': intent.name,
           if (operation != AudioRouteIntentOperationV2.standard)
             'intentOperation': operation.name,
+          if (recordingChannelStart != null)
+            'recordingChannelStart': recordingChannelStart,
+          if (recordingChannelCount != null)
+            'recordingChannelCount': recordingChannelCount,
+          if (monitoringTargetRow != null)
+            'monitoringTargetRow': monitoringTargetRow,
         },
       );
       if (raw == null) return _unavailableRouteTransitionV2(generation);
@@ -700,7 +735,9 @@ class JuceAudioEngine {
     if (startup == null || startup.outputs.length != 1) return false;
     final current = await getAudioRouteSnapshotV2();
     final expectedInputChannels =
-        startup.intent == AudioRouteIntentV2.playbackOnly ? 0 : 1;
+        startup.intent == AudioRouteIntentV2.playbackOnly
+            ? 0
+            : startup.juce.activeInputChannels ?? 0;
     if (current.implementation != BluetoothImplementationV2.v2 ||
         current.captureConsistency != AudioRouteCaptureConsistencyV2.stable ||
         current.juce.deviceOpen != true ||
@@ -722,7 +759,7 @@ class JuceAudioEngine {
       return false;
     }
     if ((platform == TargetPlatform.macOS || platform == TargetPlatform.iOS) &&
-        expectedInputChannels == 1) {
+        expectedInputChannels > 0) {
       if (startup.inputs.length != 1 ||
           current.intent == AudioRouteIntentV2.playbackOnly ||
           current.inputs.length != 1 ||
@@ -906,6 +943,22 @@ class JuceAudioEngine {
       await _ch.invokeMethod('seekTransport', {'timeSeconds': timeSeconds});
     } on PlatformException catch (e) {
       _logError('seekTransport', e);
+    }
+  }
+
+  static Future<void> setLoopRegion({
+    required bool enabled,
+    required double startSeconds,
+    required double endSeconds,
+  }) async {
+    try {
+      await _ch.invokeMethod('setLoopRegion', {
+        'enabled': enabled,
+        'startSeconds': startSeconds,
+        'endSeconds': endSeconds,
+      });
+    } on PlatformException catch (e) {
+      _logError('setLoopRegion', e);
     }
   }
 
@@ -1109,6 +1162,37 @@ class JuceAudioEngine {
   // -------------------------------
   // Plugin scanning & export
   // -------------------------------
+  static Map<String, dynamic>? _normalizeScannedPlugin(Map rawItem) {
+    final raw = Map<String, dynamic>.from(rawItem);
+    final rawId = raw['id']?.toString().trim() ?? '';
+    final rawPath = raw['path']?.toString().trim() ?? '';
+    final rawName = raw['name']?.toString().trim() ?? '';
+    final id =
+        rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
+    if (id.isEmpty) return null;
+
+    final out = <String, dynamic>{
+      'id': id,
+      'name': rawName.isNotEmpty ? rawName : id,
+    };
+    final format = raw['format']?.toString().trim() ?? '';
+    if (format.isNotEmpty) out['format'] = format;
+    final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
+    if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
+    final category = raw['category']?.toString().trim() ?? '';
+    if (category.isNotEmpty) out['category'] = category;
+    if (raw['isInstrument'] is bool) {
+      out['isInstrument'] = raw['isInstrument'] == true;
+    }
+    if (raw['quarantined'] is bool) {
+      out['quarantined'] = raw['quarantined'] == true;
+    }
+    return out;
+  }
+
+  static Map<String, dynamic>? normalizeScannedPlugin(Map rawItem) =>
+      _normalizeScannedPlugin(rawItem);
+
   static JuceEngineCapabilities _fallbackEngineCapabilities() {
     if (kIsWeb) return JuceEngineCapabilities.none;
     switch (defaultTargetPlatform) {
@@ -1162,34 +1246,8 @@ class JuceAudioEngine {
       if (result == null) return normalized;
       for (final item in result) {
         if (item is! Map) continue;
-        final raw = Map<String, dynamic>.from(item);
-        final rawId = raw['id']?.toString().trim() ?? '';
-        final rawPath = raw['path']?.toString().trim() ?? '';
-        final rawName = raw['name']?.toString().trim() ?? '';
-
-        final id =
-            rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
-        if (id.isEmpty) continue;
-
-        final out = <String, dynamic>{
-          'id': id,
-          'name': rawName.isNotEmpty ? rawName : id,
-        };
-
-        final format = raw['format']?.toString().trim() ?? '';
-        if (format.isNotEmpty) out['format'] = format;
-        final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
-        if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
-        final category = raw['category']?.toString().trim() ?? '';
-        if (category.isNotEmpty) out['category'] = category;
-        if (raw['isInstrument'] is bool) {
-          out['isInstrument'] = raw['isInstrument'] == true;
-        }
-        if (raw['quarantined'] is bool) {
-          out['quarantined'] = raw['quarantined'] == true;
-        }
-
-        normalized.add(out);
+        final plugin = _normalizeScannedPlugin(item);
+        if (plugin != null) normalized.add(plugin);
       }
       return normalized;
     } on MissingPluginException catch (e) {
@@ -1212,34 +1270,8 @@ class JuceAudioEngine {
       if (result == null) return normalized;
       for (final item in result) {
         if (item is! Map) continue;
-        final raw = Map<String, dynamic>.from(item);
-        final rawId = raw['id']?.toString().trim() ?? '';
-        final rawPath = raw['path']?.toString().trim() ?? '';
-        final rawName = raw['name']?.toString().trim() ?? '';
-
-        final id =
-            rawId.isNotEmpty ? rawId : (rawPath.isNotEmpty ? rawPath : rawName);
-        if (id.isEmpty) continue;
-
-        final out = <String, dynamic>{
-          'id': id,
-          'name': rawName.isNotEmpty ? rawName : id,
-        };
-
-        final format = raw['format']?.toString().trim() ?? '';
-        if (format.isNotEmpty) out['format'] = format;
-        final manufacturer = raw['manufacturer']?.toString().trim() ?? '';
-        if (manufacturer.isNotEmpty) out['manufacturer'] = manufacturer;
-        final category = raw['category']?.toString().trim() ?? '';
-        if (category.isNotEmpty) out['category'] = category;
-        if (raw['isInstrument'] is bool) {
-          out['isInstrument'] = raw['isInstrument'] == true;
-        }
-        if (raw['quarantined'] is bool) {
-          out['quarantined'] = raw['quarantined'] == true;
-        }
-
-        normalized.add(out);
+        final plugin = _normalizeScannedPlugin(item);
+        if (plugin != null) normalized.add(plugin);
       }
       return normalized;
     } on MissingPluginException catch (e) {
@@ -1581,6 +1613,7 @@ class JuceAudioEngine {
     double startSec = 0.0,
     double lengthSec = 0.0,
     double inFileOffsetSec = 0.0,
+    int loadRequestId = 0,
   }) async {
     try {
       final ok = await _ch.invokeMethod<bool>('loadMidiClip', {
@@ -1595,10 +1628,30 @@ class JuceAudioEngine {
         'startSec': startSec,
         'lengthSec': lengthSec,
         'inFileOffsetSec': inFileOffsetSec,
+        'loadRequestId': loadRequestId,
       });
       return ok ?? false;
     } on PlatformException catch (e) {
       _logError('loadMidiClip', e);
+      return false;
+    }
+  }
+
+  static Future<bool> cancelMidiClipLoad({
+    required int clipIndex,
+    required int loadRequestId,
+  }) async {
+    if (clipIndex < 0 || loadRequestId <= 0) return false;
+    try {
+      final ok = await _ch.invokeMethod<bool>('cancelMidiClipLoad', {
+        'clip': clipIndex,
+        'loadRequestId': loadRequestId,
+      });
+      return ok ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException catch (e) {
+      _logError('cancelMidiClipLoad', e);
       return false;
     }
   }
@@ -3634,6 +3687,23 @@ class JuceAudioEngine {
       return raw.map((e) => (e as num).toDouble()).toList(growable: false);
     } on PlatformException catch (e) {
       _logError('getRecentMasterWaveform', e);
+      return const <double>[];
+    }
+  }
+
+  /// Returns interleaved post-master samples: L0, R0, L1, R1, ...
+  static Future<List<double>> getRecentMasterStereoWaveform({
+    int sampleCount = 2048,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>(
+        'getRecentMasterStereoWaveform',
+        {'sampleCount': sampleCount},
+      );
+      if (raw == null) return const <double>[];
+      return raw.map((e) => (e as num).toDouble()).toList(growable: false);
+    } on PlatformException catch (e) {
+      _logError('getRecentMasterStereoWaveform', e);
       return const <double>[];
     }
   }

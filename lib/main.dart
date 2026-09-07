@@ -13,6 +13,7 @@ import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
+import 'package:mixroom/helpers/desktop_auto_update_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/open_mixroom_service.dart';
 import 'package:mixroom/helpers/orientation_policy.dart';
@@ -59,6 +60,29 @@ const List<_BundledLicenseNotice> _bundledLicenseNotices =
     ],
     licenseAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/LICENSE',
     noticeAssetPath: 'assets/instruments/VSCO-2-CE-1.1.0/NOTICE.md',
+  ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Acoustic Guitar',
+      'FreePats Spanish Classical Guitar',
+      'Roberto, FreePats',
+    ],
+    licenseAssetPath:
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/LICENSE',
+    noticeAssetPath:
+        'assets/instruments/FreePats-Spanish-Classical-Guitar-2019-06-18/NOTICE.md',
+  ),
+  _BundledLicenseNotice(
+    packages: <String>[
+      'Electric Guitar',
+      'Karoryfer Black And Green Guitars',
+      'Karoryfer Lecolds',
+      'Brian Wood',
+    ],
+    licenseAssetPath:
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/LICENSE',
+    noticeAssetPath:
+        'assets/instruments/Karoryfer-Black-And-Green-Guitars-1.000/NOTICE.md',
   ),
 ];
 
@@ -388,6 +412,7 @@ void main() async {
   // Never block first frame on startup method channels.
   unawaited(OpenMixroomService.init());
   unawaited(DesktopFileIngressService.init());
+  unawaited(DesktopAutoUpdateService.instance.initialize());
 }
 
 void listenForNativeLogs() {

@@ -251,6 +251,12 @@ def build_google_webhook_event(
             purchase_token=purchase_token,
             package_name=package_name,
         )
+        provider_payload = verified.get("provider_payload")
+        if isinstance(provider_payload, dict):
+            verified["provider_payload"] = {
+                **provider_payload,
+                "subscriptionNotification": subscription_notification,
+            }
         verified["provider_event_id"] = str(
             first_present(
                 payload.get("_pubsub_message_id"),

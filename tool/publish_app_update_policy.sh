@@ -95,7 +95,7 @@ with path.open("r", encoding="utf-8") as fh:
 if not isinstance(decoded, dict):
     raise SystemExit("Policy root must be an object")
 
-for platform in ("ios", "android"):
+for platform in ("ios", "android", "macos"):
     payload = decoded.get(platform)
     if payload is None:
         continue

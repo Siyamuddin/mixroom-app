@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
+import 'package:mixroom/ai/cloud_llm_service.dart';
+import 'package:mixroom/config/llm_config.dart';
 import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
@@ -26,6 +28,7 @@ import 'package:mixroom/widgets/app_responsive_body.dart';
 import 'package:mixroom/widgets/app_shell_figma.dart';
 import 'package:mixroom/widgets/auth_figma_shell.dart';
 import 'package:mixroom/widgets/account_subscription_surface.dart';
+import 'package:mixroom/widgets/account_glass_ui.dart';
 import 'package:mixroom/widgets/email_verification_sheet.dart';
 import 'package:mixroom/widgets/language_selector.dart';
 import 'package:mixroom/widgets/mixroom_glass_dropdown.dart';
@@ -417,7 +420,7 @@ class _AccountBodyState extends State<_AccountBody> {
     final authService = context.read<AuthService>();
     await showDialog<void>(
       context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.62),
+      barrierColor: Colors.black.withValues(alpha: 0.78),
       builder: (dialogContext) {
         return MediaQuery.removeViewInsets(
           context: dialogContext,
@@ -432,11 +435,23 @@ class _AccountBodyState extends State<_AccountBody> {
                 ),
                 child: Material(
                   color: Colors.transparent,
-                  child: MixroomShellSurface(
-                    radius: 32,
-                    strong: true,
-                    color: const Color.fromRGBO(24, 34, 48, 0.92),
+                  child: Container(
                     padding: const EdgeInsets.fromLTRB(18, 18, 18, 22),
+                    decoration: BoxDecoration(
+                      color: const Color.fromRGBO(29, 33, 36, 0.96),
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.30),
+                        width: 0.8,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.56),
+                          blurRadius: 36,
+                          offset: const Offset(0, 18),
+                        ),
+                      ],
+                    ),
                     child: Stack(
                       children: [
                         SingleChildScrollView(
@@ -481,20 +496,23 @@ class _AccountBodyState extends State<_AccountBody> {
     );
   }
 
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const _AccountSettingsScreen()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final appUserService = context.watch<AppUserService>();
-    final joinedAt = _formatReadableDate(
-      context,
-      widget.user.createdAt.toLocal(),
-    );
-    final birthdayValue = _formatStoredBirthdateForDisplay(
-      context,
-      widget.appUser?.birthdate,
-    );
+    final joinedAt = widget.embeddedMode
+        ? _formatCompactDate(widget.user.createdAt.toLocal())
+        : _formatReadableDate(context, widget.user.createdAt.toLocal());
+    final birthdayValue = widget.embeddedMode
+        ? _formatStoredBirthdateCompact(context, widget.appUser?.birthdate)
+        : _formatStoredBirthdateForDisplay(context, widget.appUser?.birthdate);
     final usernameValue = (widget.appUser?.username ?? '').trim();
-    final bioValue = (widget.appUser?.bio ?? '').trim();
     final musicProfileLabelText = musicProfileLabel(
       widget.appUser?.musicProfile,
     );
@@ -505,15 +523,17 @@ class _AccountBodyState extends State<_AccountBody> {
         widget.user.provider == AuthProviderType.email &&
         !widget.user.emailVerified;
 
+    final horizontalPadding = widget.embeddedMode ? 27.0 : 16.0;
+
     return ListView(
       controller: _scrollController,
       physics: const BouncingScrollPhysics(
         parent: AlwaysScrollableScrollPhysics(),
       ),
       padding: EdgeInsets.fromLTRB(
-        16,
+        horizontalPadding,
         widget.embeddedMode ? 10 : 14,
-        16,
+        horizontalPadding,
         widget.embeddedMode ? mixroomShellBottomPadding(context) : 20,
       ),
       children: [
@@ -521,6 +541,7 @@ class _AccountBodyState extends State<_AccountBody> {
           _EmbeddedAccountChrome(
             isEditing: _isEditing,
             onEditToggle: _handleEditToggle,
+            onOpenSettings: _openSettings,
           )
         else
           _ProfileHero(
@@ -564,175 +585,64 @@ class _AccountBodyState extends State<_AccountBody> {
             },
           ),
         ],
-        const SizedBox(height: 12),
-        MixroomShellSurface(
-          radius: 24,
-          padding: EdgeInsets.zero,
-          color: widget.embeddedMode
-              ? (_isEditing
-                    ? const Color.fromRGBO(244, 244, 244, 0.28)
-                    : const Color.fromRGBO(244, 244, 244, 0.16))
-              : const Color.fromRGBO(244, 244, 244, 0.08),
-          child: Column(
-            children: [
-              _ReadonlyRow(label: 'Email', value: widget.user.email),
-              _DividerLine(),
-              _EditableNameRow(
-                isEditing: _isEditing,
-                controller: _nameController,
-              ),
-              _DividerLine(),
-              _EditableUsernameRow(
-                isEditing: _isEditing,
-                controller: _usernameController,
-                enabled: widget.canEditAppProfile,
-                value: usernameValue.isEmpty
-                    ? L10n.translate(context, 'Not set')
-                    : usernameValue,
-              ),
-              _DividerLine(),
-              _EditableBirthdayRow(
-                isEditing: _isEditing,
-                enabled: widget.canEditAppProfile,
-                controller: _birthdateController,
-                value: birthdayValue,
-                onPick: _pickBirthdate,
-                onClear: _clearBirthdate,
-              ),
-              _DividerLine(),
-              _EditableMusicProfileRow(
-                isEditing: _isEditing,
-                enabled: widget.canEditAppProfile,
-                value: musicProfileValue.isEmpty
-                    ? L10n.translate(context, 'Not set')
-                    : musicProfileValue,
-                selectedValue: _musicProfileValue,
-                onChanged: (next) {
-                  setState(() {
-                    _musicProfileValue = next;
-                  });
-                },
-              ),
-              _DividerLine(),
-              _EditableBioRow(
-                isEditing: _isEditing,
-                controller: _bioController,
-                enabled: widget.canEditAppProfile,
-                value: bioValue.isEmpty
-                    ? L10n.translate(context, 'No bio yet')
-                    : bioValue,
-              ),
-              if (!widget.embeddedMode) ...[
-                _DividerLine(),
-                const _LanguagePreferenceRow(),
-              ],
-              _DividerLine(),
-              _ReadonlyRow(
-                label: 'Provider',
-                value: L10n.translate(context, widget.user.provider.label),
-              ),
-              _DividerLine(),
-              _ReadonlyRow(label: 'Joined', value: joinedAt),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 220),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                child: !_isEditing
-                    ? const SizedBox.shrink()
-                    : Column(
-                        key: const ValueKey<String>('editing-actions'),
-                        children: [
-                          _DividerLine(),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: OutlinedButton(
-                                    onPressed: _isSaving
-                                        ? null
-                                        : () {
-                                            HapticFeedback.selectionClick();
-                                            setState(() {
-                                              _syncFromUser();
-                                              _isEditing = false;
-                                            });
-                                          },
-                                    style: OutlinedButton.styleFrom(
-                                      side: BorderSide(
-                                        color: Colors.white.withOpacity(0.2),
-                                      ),
-                                      foregroundColor: Colors.white70,
-                                    ),
-                                    child: Text(
-                                      L10n.translate(context, 'Cancel'),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: ElevatedButton(
-                                    onPressed:
-                                        (_isSaving ||
-                                            auth.isBusy ||
-                                            appUserService.isLoading)
-                                        ? null
-                                        : () {
-                                            HapticFeedback.mediumImpact();
-                                            _save();
-                                          },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF3E82FF),
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    child: Text(
-                                      L10n.translate(
-                                        context,
-                                        _isSaving
-                                            ? 'Saving...'
-                                            : 'Save Changes',
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (!widget.canEditAppProfile)
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                              child: Text(
-                                L10n.translate(
-                                  context,
-                                  'Username, birthday, and bio save after the account backend is deployed.',
-                                ),
-                                style: const TextStyle(
-                                  color: Colors.white60,
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-              ),
-            ],
+        const SizedBox(height: 10),
+        Align(
+          alignment: Alignment.center,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: _ReferenceProfileDetails(
+              email: widget.user.email,
+              username: usernameValue,
+              nameController: _nameController,
+              usernameController: _usernameController,
+              bioController: _bioController,
+              birthdayValue: birthdayValue,
+              musicProfileValue: musicProfileValue,
+              selectedMusicProfile: _musicProfileValue,
+              joinedAt: joinedAt,
+              isEditing: _isEditing,
+              canEditAppProfile: widget.canEditAppProfile,
+              onPickBirthdate: _pickBirthdate,
+              onMusicProfileChanged: (next) {
+                setState(() => _musicProfileValue = next);
+              },
+            ),
           ),
         ),
-        const SizedBox(height: 12),
+        if (widget.embeddedMode && _isEditing) ...[
+          const SizedBox(height: 12),
+          _ReferenceProfileDoneButton(
+            isBusy: _isSaving || auth.isBusy || appUserService.isLoading,
+            onPressed: _handleEditToggle,
+          ),
+        ],
+        if (widget.embeddedMode) ...[
+          SizedBox(height: _isEditing ? 32 : 64),
+          const _AccountDetailsHeading(),
+          const SizedBox(height: 14),
+        ] else
+          const SizedBox(height: 12),
         const _SubscriptionEntitlementCard(),
-        const SizedBox(height: 12),
-        _AccountSettingsEntryCard(
-          onOpen: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const _AccountSettingsScreen()),
-            );
-          },
+        const SizedBox(height: 28),
+        AccountSectionHeading(
+          title: L10n.translate(context, 'Sign-In | Password'),
+          subtitle: L10n.translate(
+            context,
+            'Authentication methods and account security',
+          ),
         ),
         const SizedBox(height: 12),
         _SignInMethodsCard(user: widget.user),
         const SizedBox(height: 12),
         _SecurityAccessCard(user: widget.user, auth: auth),
+        const SizedBox(height: 28),
+        AccountSectionHeading(
+          title: L10n.translate(context, 'Help & Privacy'),
+          subtitle: L10n.translate(
+            context,
+            'Feedback, documents, privacy controls, and data rights',
+          ),
+        ),
         const SizedBox(height: 12),
         _FeedbackEntryCard(onOpen: _openFeedbackComposer),
         const SizedBox(height: 12),
@@ -835,72 +745,535 @@ class _EmbeddedAccountChrome extends StatelessWidget {
   const _EmbeddedAccountChrome({
     required this.isEditing,
     required this.onEditToggle,
+    required this.onOpenSettings,
   });
 
   final bool isEditing;
   final VoidCallback onEditToggle;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Row(
-          children: [
-            MixroomShellRoundButton(
-              assetPath: isEditing
-                  ? kMixroomShellAccountEditCheckAsset
-                  : kMixroomShellAccountEditPencilAsset,
-              iconExtent: isEditing ? 20 : 17,
-              onTap: onEditToggle,
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: onEditToggle,
-              child: Text(
-                L10n.translate(context, isEditing ? 'Finish' : 'Edit'),
+        SizedBox(
+          height: 56,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: _AccountLocaleButton(),
+              ),
+              Text(
+                L10n.translate(context, 'My Profile'),
                 style: const TextStyle(
                   fontFamily: 'Pretendard',
                   color: Color(0xFFF4F4F4),
-                  fontSize: 15,
-                  height: 22 / 15,
-                  decoration: TextDecoration.underline,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-            ),
-            const Spacer(),
-            const MixroomLocaleSelector(),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            color: isEditing
-                ? const Color.fromRGBO(244, 244, 244, 0.30)
-                : const Color.fromRGBO(244, 244, 244, 0.20),
-            borderRadius: BorderRadius.circular(40),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: isEditing ? 0.12 : 0.08),
-              width: 0.8,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.26),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: MixroomShellRoundButton(
+                  size: 48,
+                  icon: const Icon(
+                    Icons.settings_rounded,
+                    size: 24,
+                    color: Color(0xFFF4F4F4),
+                  ),
+                  onTap: onOpenSettings,
+                ),
               ),
             ],
           ),
-          alignment: Alignment.center,
-          child: SvgPicture.asset(
-            kMixroomShellAccountProfileHeadAsset,
-            width: 40,
-            height: 40,
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: SizedBox(
+            width: 112,
+            height: 104,
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 4,
+                  child: Container(
+                    width: 104,
+                    height: 104,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: <Color>[
+                          Color(0xFF5B5B5B),
+                          Color(0xFF3E4244),
+                        ],
+                      ),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.42),
+                        width: 0.8,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.38),
+                          blurRadius: 18,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: SvgPicture.asset(
+                      kMixroomShellAccountProfileHeadAsset,
+                      width: 54,
+                      height: 54,
+                    ),
+                  ),
+                ),
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  child: MixroomShellRoundButton(
+                    size: 46,
+                    assetPath: kMixroomShellAccountEditPencilAsset,
+                    iconExtent: 19,
+                    onTap: isEditing ? null : onEditToggle,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 10),
       ],
+    );
+  }
+}
+
+class _AccountLocaleButton extends StatelessWidget {
+  const _AccountLocaleButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final localeProvider = context.watch<LocaleProvider>();
+    final locale = L10n.resolveSupportedLocale(localeProvider.locale);
+    final asset = switch (locale.languageCode) {
+      'ko' => kMixroomLocaleFlagKoAsset,
+      'ja' => kMixroomLocaleFlagJaAsset,
+      _ => kMixroomLocaleFlagEnAsset,
+    };
+    return PopupMenuButton<Locale>(
+      tooltip: L10n.translate(context, 'Language'),
+      position: PopupMenuPosition.under,
+      offset: const Offset(0, 10),
+      color: const Color(0xFF303638),
+      surfaceTintColor: Colors.transparent,
+      onSelected: (selected) => L10n.setLocale(context, selected),
+      itemBuilder: (context) => L10n.supportedLocales
+          .map(
+            (supported) => PopupMenuItem<Locale>(
+              value: supported,
+              child: Text(
+                '${L10n.languageFlag(supported)}  ${L10n.languageName(supported)}',
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          )
+          .toList(growable: false),
+      child: Container(
+        width: 48,
+        height: 48,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: const Color.fromRGBO(100, 100, 100, 0.62),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.32),
+            width: 0.8,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.34),
+              blurRadius: 14,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: SvgPicture.asset(asset, width: 25, height: 25),
+      ),
+    );
+  }
+}
+
+class _ReferenceProfileDetails extends StatelessWidget {
+  const _ReferenceProfileDetails({
+    required this.email,
+    required this.username,
+    required this.nameController,
+    required this.usernameController,
+    required this.bioController,
+    required this.birthdayValue,
+    required this.musicProfileValue,
+    required this.selectedMusicProfile,
+    required this.joinedAt,
+    required this.isEditing,
+    required this.canEditAppProfile,
+    required this.onPickBirthdate,
+    required this.onMusicProfileChanged,
+  });
+
+  final String email;
+  final String username;
+  final TextEditingController nameController;
+  final TextEditingController usernameController;
+  final TextEditingController bioController;
+  final String birthdayValue;
+  final String musicProfileValue;
+  final String? selectedMusicProfile;
+  final String joinedAt;
+  final bool isEditing;
+  final bool canEditAppProfile;
+  final VoidCallback onPickBirthdate;
+  final ValueChanged<String?> onMusicProfileChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final notSet = L10n.translate(context, 'Not set');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _ReferenceGlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _ReferenceProfileField(label: 'Email', value: email),
+              const _ReferenceProfileDivider(),
+              _ReferenceProfileField(
+                label: 'Username',
+                value: username.isEmpty ? notSet : username,
+                controller: usernameController,
+                editing: isEditing && canEditAppProfile,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9_-]')),
+                  LengthLimitingTextInputFormatter(30),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _ReferenceGlassCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _ReferenceProfileField(
+                label: 'Name',
+                value: nameController.text,
+                controller: nameController,
+                editing: isEditing,
+              ),
+              const _ReferenceProfileDivider(),
+              _ReferenceProfileField(
+                label: 'Bio',
+                value: bioController.text.trim().isEmpty
+                    ? L10n.translate(context, 'No bio yet')
+                    : bioController.text,
+                controller: bioController,
+                editing: isEditing && canEditAppProfile,
+                maxLength: 160,
+              ),
+              const _ReferenceProfileDivider(),
+              _ReferenceProfileField(
+                label: 'Birthday',
+                value: birthdayValue,
+                onTap: isEditing && canEditAppProfile ? onPickBirthdate : null,
+              ),
+              const _ReferenceProfileDivider(),
+              _ReferenceMusicProfileField(
+                value: musicProfileValue.isEmpty ? notSet : musicProfileValue,
+                selectedValue: selectedMusicProfile,
+                editing: isEditing && canEditAppProfile,
+                onChanged: onMusicProfileChanged,
+              ),
+              const _ReferenceProfileDivider(),
+              _ReferenceProfileField(label: 'Joined', value: joinedAt),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReferenceGlassCard extends StatelessWidget {
+  const _ReferenceGlassCard({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 5),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
+      child: child,
+    );
+  }
+}
+
+class _ReferenceProfileDivider extends StatelessWidget {
+  const _ReferenceProfileDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(height: 0.8, color: Colors.white.withValues(alpha: 0.48));
+  }
+}
+
+class _ReferenceProfileField extends StatelessWidget {
+  const _ReferenceProfileField({
+    required this.label,
+    required this.value,
+    this.controller,
+    this.editing = false,
+    this.onTap,
+    this.inputFormatters,
+    this.maxLength,
+  });
+
+  final String label;
+  final String value;
+  final TextEditingController? controller;
+  final bool editing;
+  final VoidCallback? onTap;
+  final List<TextInputFormatter>? inputFormatters;
+  final int? maxLength;
+
+  @override
+  Widget build(BuildContext context) {
+    const valueStyle = TextStyle(
+      fontFamily: 'Pretendard',
+      color: Color(0xFFF4F4F4),
+      fontSize: 15.5,
+      fontWeight: FontWeight.w400,
+      height: 1.15,
+    );
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: SizedBox(
+        height: 52,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              L10n.translate(context, label),
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.56),
+                fontSize: 11.5,
+                height: 1,
+              ),
+            ),
+            const SizedBox(height: 3),
+            if (editing && controller != null)
+              SizedBox(
+                height: 22,
+                child: TextField(
+                  controller: controller,
+                  inputFormatters: inputFormatters,
+                  maxLength: maxLength,
+                  style: valueStyle,
+                  cursorColor: const Color(0xFFF4F4F4),
+                  textInputAction: TextInputAction.done,
+                  onTapOutside: (_) => FocusScope.of(context).unfocus(),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    counterText: '',
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              )
+            else
+              Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: valueStyle,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ReferenceMusicProfileField extends StatelessWidget {
+  const _ReferenceMusicProfileField({
+    required this.value,
+    required this.selectedValue,
+    required this.editing,
+    required this.onChanged,
+  });
+
+  final String value;
+  final String? selectedValue;
+  final bool editing;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            L10n.translate(context, 'Using Mixroom for'),
+            style: TextStyle(
+              fontFamily: 'Pretendard',
+              color: Colors.white.withValues(alpha: 0.56),
+              fontSize: 11.5,
+              height: 1,
+            ),
+          ),
+          const SizedBox(height: 2),
+          if (editing)
+            SizedBox(
+              height: 24,
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value:
+                      kMusicProfileOptions.any(
+                        (option) => option.value == selectedValue,
+                      )
+                      ? selectedValue
+                      : null,
+                  isDense: true,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF3E4447),
+                  iconEnabledColor: Colors.white70,
+                  hint: Text(
+                    L10n.translate(context, 'Not set'),
+                    style: const TextStyle(color: Color(0xFFF4F4F4)),
+                  ),
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 15.5,
+                  ),
+                  items: kMusicProfileOptions
+                      .map(
+                        (option) => DropdownMenuItem<String>(
+                          value: option.value,
+                          child: Text(L10n.translate(context, option.label)),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: onChanged,
+                ),
+              ),
+            )
+          else
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                color: Color(0xFFF4F4F4),
+                fontSize: 15.5,
+                height: 1.15,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReferenceProfileDoneButton extends StatelessWidget {
+  const _ReferenceProfileDoneButton({
+    required this.isBusy,
+    required this.onPressed,
+  });
+
+  final bool isBusy;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SizedBox(
+        width: 124,
+        height: 48,
+        child: FilledButton(
+          onPressed: isBusy ? null : onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: const Color.fromRGBO(89, 111, 128, 0.94),
+            disabledBackgroundColor: const Color.fromRGBO(89, 111, 128, 0.58),
+            foregroundColor: const Color(0xFFF4F4F4),
+            elevation: 8,
+            shadowColor: Colors.black.withValues(alpha: 0.34),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+              side: BorderSide(
+                color: Colors.white.withValues(alpha: 0.38),
+                width: 0.8,
+              ),
+            ),
+          ),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 160),
+            child: isBusy
+                ? const SizedBox(
+                    key: ValueKey<String>('profile-saving'),
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFFF4F4F4),
+                    ),
+                  )
+                : Text(
+                    key: const ValueKey<String>('profile-done'),
+                    L10n.translate(context, 'Done'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountDetailsHeading extends StatelessWidget {
+  const _AccountDetailsHeading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      L10n.translate(context, 'Subscription'),
+      style: const TextStyle(
+        fontFamily: 'Pretendard',
+        color: Color(0xFFF4F4F4),
+        fontSize: 22,
+        fontWeight: FontWeight.w800,
+      ),
     );
   }
 }
@@ -916,50 +1289,69 @@ class _EmbeddedLogoutButton extends StatelessWidget {
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 212),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: isBusy ? null : onSignOut,
+        child: Container(
+          decoration: accountGlassDecoration(
+            radius: 24,
+            strong: true,
+          ),
+          child: Material(
+            color: Colors.transparent,
             borderRadius: BorderRadius.circular(24),
-            child: MixroomShellSurface(
-              radius: 24,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-              color: const Color.fromRGBO(84, 112, 143, 0.82),
-              strong: true,
-              child: SizedBox(
-                width: double.infinity,
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  switchInCurve: Curves.easeOutCubic,
-                  switchOutCurve: Curves.easeInCubic,
-                  child: isBusy
-                      ? const SizedBox(
-                          key: ValueKey('logout_spinner_embedded'),
-                          height: 22,
-                          child: Center(
-                            child: SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Color(0xFFF4F4F4),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: isBusy ? null : onSignOut,
+              borderRadius: BorderRadius.circular(24),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 13,
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    child: isBusy
+                        ? const SizedBox(
+                            key: ValueKey('logout_spinner_embedded'),
+                            height: 22,
+                            child: Center(
+                              child: SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    kAccountGlassText,
+                                  ),
                                 ),
                               ),
                             ),
+                          )
+                        : Row(
+                            key: const ValueKey('logout_text_embedded'),
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.logout_rounded,
+                                size: 18,
+                                color: kAccountGlassText,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                L10n.translate(context, 'Log Out'),
+                                style: const TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: kAccountGlassText,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  height: 22 / 15,
+                                ),
+                              ),
+                            ],
                           ),
-                        )
-                      : Text(
-                          key: const ValueKey('logout_text_embedded'),
-                          L10n.translate(context, 'Log Out'),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontFamily: 'Pretendard',
-                            color: Color(0xFFF4F4F4),
-                            fontSize: 15,
-                            height: 22 / 15,
-                          ),
-                        ),
+                  ),
                 ),
               ),
             ),
@@ -1078,12 +1470,8 @@ class _SignInMethodsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1091,11 +1479,11 @@ class _SignInMethodsCard extends StatelessWidget {
             L10n.translate(context, 'Sign-In Methods'),
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           _SignInMethodRow(
             provider: AuthProviderType.email,
             stateLabel: user.provider == AuthProviderType.email
@@ -1103,7 +1491,7 @@ class _SignInMethodsCard extends StatelessWidget {
                 : 'Optional later',
             active: user.provider == AuthProviderType.email,
           ),
-          const SizedBox(height: 8),
+          const AccountGlassDivider(indent: 42),
           _SignInMethodRow(
             provider: AuthProviderType.google,
             stateLabel: user.provider == AuthProviderType.google
@@ -1111,7 +1499,7 @@ class _SignInMethodsCard extends StatelessWidget {
                 : 'Not linked',
             active: user.provider == AuthProviderType.google,
           ),
-          const SizedBox(height: 8),
+          const AccountGlassDivider(indent: 42),
           _SignInMethodRow(
             provider: AuthProviderType.apple,
             stateLabel: user.provider == AuthProviderType.apple
@@ -1119,7 +1507,7 @@ class _SignInMethodsCard extends StatelessWidget {
                 : 'Not linked',
             active: user.provider == AuthProviderType.apple,
           ),
-          const SizedBox(height: 8),
+          const AccountGlassDivider(indent: 42),
           _SignInMethodRow(
             provider: AuthProviderType.kakao,
             stateLabel: user.provider == AuthProviderType.kakao
@@ -1127,7 +1515,7 @@ class _SignInMethodsCard extends StatelessWidget {
                 : 'Not linked',
             active: user.provider == AuthProviderType.kakao,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Text(
             L10n.translate(
               context,
@@ -1160,66 +1548,51 @@ class _SignInMethodRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final providerLabel = L10n.translate(context, provider.label);
-    return Row(
-      children: [
-        Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: active
-                ? const Color(0xFF2E65D8).withOpacity(0.22)
-                : Colors.white.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: active
-                  ? const Color(0xFF76A2FF).withOpacity(0.55)
-                  : Colors.white.withOpacity(0.08),
-            ),
+    final icon = switch (provider) {
+      AuthProviderType.email => Icons.mail_outline_rounded,
+      AuthProviderType.apple => Icons.apple,
+      AuthProviderType.kakao => Icons.chat_bubble_rounded,
+      _ => null,
+    };
+    return SizedBox(
+      height: 56,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 32,
+            child: icon == null
+                ? const Text(
+                    'G',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: kAccountGlassText,
+                      fontSize: 23,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  )
+                : Icon(icon, color: kAccountGlassText, size: 25),
           ),
-          alignment: Alignment.center,
-          child: Text(
-            providerLabel.substring(0, 1),
-            style: TextStyle(
-              color: active ? const Color(0xFFC9DBFF) : Colors.white70,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
+          const SizedBox(width: 12),
         Expanded(
           child: Text(
             providerLabel,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 12.5,
+              fontSize: 14.5,
               fontWeight: FontWeight.w600,
             ),
           ),
         ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: active
-                ? const Color(0xFF2E65D8).withOpacity(0.22)
-                : Colors.white.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
-              color: active
-                  ? const Color(0xFF76A2FF).withOpacity(0.55)
-                  : Colors.white.withOpacity(0.08),
-            ),
-          ),
-          child: Text(
+          Text(
             L10n.translate(context, stateLabel),
             style: TextStyle(
-              color: active ? const Color(0xFFC9DBFF) : Colors.white70,
-              fontSize: 11.5,
+              color: active ? kAccountGlassText : kAccountGlassSubtleText,
+              fontSize: 13,
               fontWeight: FontWeight.w700,
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -1854,60 +2227,60 @@ class _MusicProfileDropdown extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: menuOptions
-                  .map((option) {
-                    final isSelected = option.value == selectedMenuValue;
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => Navigator.pop(menuContext, option.value),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 9,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.white.withValues(alpha: 0.15)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(13),
-                          border: isSelected
-                              ? Border.all(
-                                  color: Colors.white.withValues(alpha: 0.16),
-                                )
-                              : null,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                L10n.translate(context, option.label),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.white.withValues(alpha: 0.76),
-                                  fontSize: 13,
-                                  fontWeight: isSelected
-                                      ? FontWeight.w700
-                                      : FontWeight.w600,
+                    .map((option) {
+                      final isSelected = option.value == selectedMenuValue;
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => Navigator.pop(menuContext, option.value),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.white.withValues(alpha: 0.15)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(13),
+                            border: isSelected
+                                ? Border.all(
+                                    color: Colors.white.withValues(alpha: 0.16),
+                                  )
+                                : null,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  L10n.translate(context, option.label),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: isSelected
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.76),
+                                    fontSize: 13,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w700
+                                        : FontWeight.w600,
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (isSelected) ...[
-                              const SizedBox(width: 8),
-                              const Icon(
-                                Icons.check_rounded,
-                                color: Color(0xFF8FB5FF),
-                                size: 17,
-                              ),
+                              if (isSelected) ...[
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.check_rounded,
+                                  color: Color(0xFF8FB5FF),
+                                  size: 17,
+                                ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                    );
-                  })
-                  .toList(growable: false),
+                      );
+                    })
+                    .toList(growable: false),
               ),
             );
           },
@@ -2081,10 +2454,14 @@ class _SubscriptionEntitlementCardState
   String? _lastShownIapError;
   BillingProductDefinition? _pendingIapProduct;
   DateTime? _lastHandledCompletedPurchaseAtUtc;
+  CloudLlmService? _aiUsageService;
+  AiPromptRateLimitStatus? _aiUsageStatus;
+  bool _aiUsageLoading = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _aiUsageService ??= _createAiUsageService();
     final iapService = context.read<IapService>();
     if (!identical(_boundIapService, iapService)) {
       _boundIapService?.removeListener(_handleIapServiceChanged);
@@ -2102,7 +2479,33 @@ class _SubscriptionEntitlementCardState
   @override
   void dispose() {
     _boundIapService?.removeListener(_handleIapServiceChanged);
+    _aiUsageService?.dispose();
     super.dispose();
+  }
+
+  CloudLlmService _createAiUsageService() {
+    final authService = context.read<AuthService>();
+    return CloudLlmService(
+      proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+      proxyPath: LlmConfig.proxyPath,
+      requestTimeout: Duration(seconds: LlmConfig.requestTimeoutSeconds),
+      authTokenProvider: authService.getIdTokenOrNull,
+      refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
+    );
+  }
+
+  Future<void> _refreshAiUsage() async {
+    final service = _aiUsageService;
+    if (service == null) return;
+    if (mounted) {
+      setState(() => _aiUsageLoading = true);
+    }
+    final status = await service.fetchPromptRateLimitStatus();
+    if (!mounted) return;
+    setState(() {
+      _aiUsageStatus = status;
+      _aiUsageLoading = false;
+    });
   }
 
   void _handleIapServiceChanged() {
@@ -2150,7 +2553,10 @@ class _SubscriptionEntitlementCardState
     // it before awaiting refresh work so reopening Account cannot show it again.
     iapService.consumeCompletedPurchaseNotice();
     await entitlementService.refresh(force: true);
-    await entitlementService.refreshAccountSurface(force: true);
+    await Future.wait(<Future<void>>[
+      entitlementService.refreshAccountSurface(force: true),
+      _refreshAiUsage(),
+    ]);
     if (!mounted) return;
     final planLabel = _completedPurchasePlanLabel(
       product,
@@ -2372,6 +2778,7 @@ class _SubscriptionEntitlementCardState
     }
     await Future.wait(<Future<void>>[
       accountSurfaceFuture,
+      _refreshAiUsage(),
       if (iapRefreshFuture != null) iapRefreshFuture,
     ]);
     if (!silent && mounted) {
@@ -2853,6 +3260,8 @@ class _SubscriptionEntitlementCardState
     return AccountSubscriptionSurface(
       entitlementService: entitlementService,
       iapService: iapService,
+      aiUsageStatus: _aiUsageStatus,
+      isAiUsageLoading: _aiUsageLoading,
       platformKey: _platformKey(),
       regionCode: regionCode,
       platformProvider: provider,
@@ -2912,15 +3321,11 @@ class _SubscriptionComingSoonCard extends StatelessWidget {
         : entitlement.effectivePlanLabel;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.workspace_premium_rounded, color: Color(0xFFA4C2FF)),
+          const Icon(Icons.workspace_premium_rounded, color: kAccountGlassText),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -2999,15 +3404,11 @@ class _LegalPrivacyEntryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.gavel_rounded, color: Color(0xFFA4C2FF)),
+          const Icon(Icons.gavel_rounded, color: kAccountGlassText),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -3040,68 +3441,7 @@ class _LegalPrivacyEntryCard extends StatelessWidget {
           TextButton(
             onPressed: onOpen,
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFBBD2FF),
-              minimumSize: const Size(0, 34),
-            ),
-            child: Text(L10n.translate(context, 'Open')),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AccountSettingsEntryCard extends StatelessWidget {
-  const _AccountSettingsEntryCard({required this.onOpen});
-
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.tune_rounded, color: Color(0xFFA4C2FF)),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  L10n.translate(context, 'Settings'),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  L10n.translate(
-                    context,
-                    'Control project version history and local app preferences.',
-                  ),
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: onOpen,
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFBBD2FF),
+              foregroundColor: kAccountGlassText,
               minimumSize: const Size(0, 34),
             ),
             child: Text(L10n.translate(context, 'Open')),
@@ -3165,78 +3505,70 @@ class _AccountSettingsScreenState extends State<_AccountSettingsScreen> {
                   parent: AlwaysScrollableScrollPhysics(),
                 ),
                 padding: EdgeInsets.fromLTRB(
-                  16,
+                  27,
                   8,
-                  16,
+                  27,
                   mixroomShellBottomPadding(context),
                 ),
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
-                    child: Row(
+                  SizedBox(
+                    height: 92,
+                    child: Stack(
+                      alignment: Alignment.center,
                       children: [
-                        MixroomShellRoundButton(
-                          size: 46,
-                          icon: const Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            size: 18,
-                            color: Colors.white,
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: MixroomShellRoundButton(
+                            size: 48,
+                            icon: const Icon(
+                              Icons.arrow_back_ios_new_rounded,
+                              size: 22,
+                              color: Colors.white,
+                            ),
+                            onTap: () => Navigator.of(context).maybePop(),
                           ),
-                          onTap: () => Navigator.of(context).maybePop(),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                L10n.translate(context, 'Settings'),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  color: Color(0xFFF4F4F4),
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              L10n.translate(context, 'Settings'),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 19,
+                                fontWeight: FontWeight.w800,
                               ),
-                              const SizedBox(height: 3),
-                              Text(
-                                L10n.translate(
-                                  context,
-                                  'Local app preferences',
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  color: Colors.white.withValues(alpha: 0.62),
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              L10n.translate(context, 'Local app preferences'),
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.62),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w500,
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                      ),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 14, 16),
+                    decoration: accountGlassDecoration(
+                      radius: 24,
+                      strong: true,
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Icon(
                           Icons.history_rounded,
-                          color: Color(0xFFA4C2FF),
+                          color: Color(0xFFF4F4F4),
+                          size: 28,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -3247,7 +3579,7 @@ class _AccountSettingsScreenState extends State<_AccountSettingsScreen> {
                                 L10n.translate(context, 'Version History'),
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 13,
+                                  fontSize: 15,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -3259,8 +3591,9 @@ class _AccountSettingsScreenState extends State<_AccountSettingsScreen> {
                                 ),
                                 style: const TextStyle(
                                   color: Colors.white70,
-                                  fontSize: 12,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w500,
+                                  height: 1.35,
                                 ),
                               ),
                               const SizedBox(height: 6),
@@ -3308,15 +3641,11 @@ class _FeedbackEntryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.forum_outlined, color: Color(0xFFA4C2FF)),
+          const Icon(Icons.forum_outlined, color: kAccountGlassText),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -3350,7 +3679,7 @@ class _FeedbackEntryCard extends StatelessWidget {
           TextButton(
             onPressed: () => onOpen(),
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFFBBD2FF),
+              foregroundColor: kAccountGlassText,
               minimumSize: const Size(0, 34),
             ),
             child: Text(L10n.translate(context, 'Open')),
@@ -3410,15 +3739,11 @@ class _SecurityAccessCard extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
-      ),
+      decoration: accountGlassDecoration(radius: 24, strong: true),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.lock_outline_rounded, color: Color(0xFFA4C2FF)),
+          const Icon(Icons.lock_outline_rounded, color: kAccountGlassText),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -3476,7 +3801,7 @@ class _SecurityAccessCard extends StatelessWidget {
                       );
                     },
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFFBBD2FF),
+                foregroundColor: kAccountGlassText,
                 minimumSize: const Size(0, 34),
               ),
               child: Text(L10n.translate(context, 'Change')),
@@ -3586,13 +3911,20 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
             top: false,
             child: Container(
               decoration: BoxDecoration(
-                color: const Color(0xFF0F2038),
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(22),
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[Color(0xF05F6263), Color(0xF043484A)],
                 ),
-                border: Border.all(color: Colors.white.withOpacity(0.10)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(30),
+                ),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.38),
+                  width: 0.8,
+                ),
               ),
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+              padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3663,10 +3995,10 @@ class _ChangePasswordSheetState extends State<_ChangePasswordSheet> {
                     child: ElevatedButton(
                       onPressed: busy ? null : _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF3E82FF),
+                        backgroundColor: kAccountGlassBlue,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.circular(24),
                         ),
                       ),
                       child: Text(
@@ -3725,7 +4057,7 @@ class _PasswordField extends StatelessWidget {
             hintText: L10n.translate(context, hint),
             hintStyle: const TextStyle(color: Colors.white38),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.06),
+            fillColor: Colors.black.withValues(alpha: 0.16),
             suffixIcon: IconButton(
               onPressed: onToggleVisibility,
               icon: Icon(
@@ -3736,12 +4068,14 @@ class _PasswordField extends StatelessWidget {
               ),
             ),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.10)),
+              borderRadius: BorderRadius.circular(18),
+              borderSide: BorderSide(
+                color: Colors.white.withValues(alpha: 0.26),
+              ),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF4F8BFF)),
+              borderRadius: BorderRadius.circular(18),
+              borderSide: const BorderSide(color: kAccountGlassBlue),
             ),
           ),
         ),
@@ -3836,6 +4170,18 @@ DateTime? _parseStoredBirthdate(String raw) {
 String _formatReadableDate(BuildContext context, DateTime value) {
   final locale = Localizations.localeOf(context).toString();
   return DateFormat('MMMM d, yyyy', locale).format(value);
+}
+
+String _formatCompactDate(DateTime value) {
+  return DateFormat('yyyy.MM.dd').format(value);
+}
+
+String _formatStoredBirthdateCompact(BuildContext context, String? raw) {
+  final safe = (raw ?? '').trim();
+  if (safe.isEmpty) return L10n.translate(context, 'Not set');
+  final parsed = _parseStoredBirthdate(safe);
+  if (parsed == null) return safe;
+  return _formatCompactDate(parsed);
 }
 
 String _formatStoredBirthdateForDisplay(BuildContext context, String? raw) {

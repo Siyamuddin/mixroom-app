@@ -2,6 +2,7 @@ const List<String> kInstrumentPickerOrderedCategories = <String>[
   'Tools',
   'On Device',
   'Keys',
+  'Guitars',
   'Strings',
   'Woodwinds',
   'Brass',
@@ -33,6 +34,9 @@ String normalizeInstrumentPickerCategory(String raw) {
     case 'key':
     case 'keys':
       return 'Keys';
+    case 'guitar':
+    case 'guitars':
+      return 'Guitars';
     case 'string':
     case 'strings':
       return 'Strings';
@@ -88,6 +92,9 @@ String instrumentPickerCategoryForValues({
 
   bool hasWord(String word) => text.contains(' $word ');
 
+  if (hasWord('guitar') || hasWord('guitars')) {
+    return 'Guitars';
+  }
   if (hasWord('string') ||
       hasWord('strings') ||
       hasWord('violin') ||

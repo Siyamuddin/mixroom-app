@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -59,6 +61,7 @@ class _FakeProvider:
         response_body: dict | None = None,
         status_code: int = 200,
         forward_error: Exception | None = None,
+        observability: dict | None = None,
     ) -> None:
         self.name = name
         self.api_key: str | None = None
@@ -67,6 +70,7 @@ class _FakeProvider:
         self._response_body = response_body or {"ok": True}
         self._status_code = status_code
         self._forward_error = forward_error
+        self._observability = observability
 
     def forward_request(
         self,
@@ -80,10 +84,42 @@ class _FakeProvider:
         self.api_key = api_key
         self.request_body = request_body
         self.timeout_seconds = timeout_seconds
-        return {
+        result = {
             "statusCode": self._status_code,
             "headers": {"Content-Type": "application/json"},
             "body": json.dumps(self._response_body),
+        }
+        if self._observability is not None:
+            result["observability"] = dict(self._observability)
+        return result
+
+
+class _SequencedFakeProvider:
+    def __init__(self, responses: list[dict | Exception]) -> None:
+        self.name = "fake-provider"
+        self._responses = list(responses)
+        self.request_bodies: list[dict] = []
+        self.timeout_seconds: list[int] = []
+
+    def forward_request(
+        self,
+        *,
+        api_key: str,
+        request_body: dict,
+        timeout_seconds: int,
+    ) -> dict:
+        self.request_bodies.append(json.loads(json.dumps(request_body)))
+        self.timeout_seconds.append(timeout_seconds)
+        index = len(self.request_bodies) - 1
+        if index >= len(self._responses):
+            raise AssertionError("Provider received more calls than expected.")
+        response = self._responses[index]
+        if isinstance(response, Exception):
+            raise response
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(response),
         }
 
 
@@ -100,6 +136,14 @@ class _ReservationResult:
         self.limit_reason = limit_reason
         self.reserved_quota_prompts = reserved_quota_prompts
         self.reserved_grant_prompts = reserved_grant_prompts
+
+
+class _LambdaContext:
+    def __init__(self, remaining_ms: int) -> None:
+        self.remaining_ms = remaining_ms
+
+    def get_remaining_time_in_millis(self) -> int:
+        return self.remaining_ms
 
 
 class _FakeUsageRepo:
@@ -158,6 +202,221 @@ class _FakeUsageRepo:
 
 
 class ApiResponsesTests(unittest.TestCase):
+    def _v3_context_body(self, **overrides):
+        body = {
+            "request_contract": "mixroom_v3_context_v2",
+            "original_request": "Restart playback.",
+            "conversation": [],
+            "core_context": {
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {"project_id": "secret-project", "bpm": 120},
+            },
+            "plan_schema_version": "plan_v3_prototype_2",
+            "supported_command_types": ["transport.restart"],
+            "resource_refs_enabled": True,
+            "project_id": "secret-project",
+            "prompt_trace_id": "trace-server-v3",
+            "analytics_context": {
+                "app_version": "3.0.0",
+                "platform": "test",
+                "ai_architecture": "v3",
+            },
+        }
+        body.update(overrides)
+        return body
+
+    def _v3_respond_plan(self):
+        return {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "respond",
+            "user_message": "No project changes were needed.",
+            "commands": [],
+            "question_options": [],
+        }
+
+    def _v3_provider_plan_payload(self, plan: dict, *, response_id: str) -> dict:
+        return {
+            "id": response_id,
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": "submit_plan_v3",
+                    "arguments": json.dumps(plan),
+                }
+            ],
+            "usage": {"input_tokens": 20, "output_tokens": 10, "total_tokens": 30},
+        }
+
+    def _v3_midi_repair_body(self) -> dict:
+        return self._v3_context_body(
+            original_request="Rewrite the percussion and keep the mix balanced.",
+            supported_command_types=["midi.replace_notes", "mix.apply_goal"],
+            resource_refs_enabled=False,
+            core_context={
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "row_capacity": {
+                        "current_rows": 1,
+                        "max_rows": 5,
+                        "can_create": True,
+                    }
+                },
+                "rows": [
+                    {
+                        "row_id": 101,
+                        "lane_kind": "instrument",
+                        "instrument_id": "free-drums",
+                        "mix_processing_supported": True,
+                        "has_usable_signal": True,
+                        "effects": [],
+                    }
+                ],
+                "clips": [
+                    {
+                        "clip_id": "drum-clip",
+                        "row_id": 101,
+                        "kind": "midi",
+                        "instrument_id": "free-drums",
+                        "length_beats": 8,
+                        "midi_notes": [],
+                    }
+                ],
+                "groups": [],
+                "library_assets": [],
+                "instruments": ["free-drums"],
+                "instrument_catalog": [
+                    {
+                        "instrument_id": "free-drums",
+                        "name": "Free Drums",
+                        "playable_pitch_ranges": [{"low": 35, "high": 81}],
+                    }
+                ],
+                "effects": [],
+            },
+        )
+
+    def _v3_midi_repair_plan(self, *, out_of_bounds: bool) -> dict:
+        return {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Rewrote the percussion and balanced it.",
+            "commands": [
+                {
+                    "command_id": "replace-drums",
+                    "type": "midi.replace_notes",
+                    "arguments": {
+                        "clip_id": "drum-clip",
+                        "notes": [
+                            {
+                                "pitch": 38,
+                                "start_beat": 7.5 if out_of_bounds else 7.0,
+                                "length_beats": 1.0,
+                                "velocity": 0.8,
+                            }
+                        ],
+                    },
+                },
+                {
+                    "command_id": "balance-drums",
+                    "type": "mix.apply_goal",
+                    "arguments": {
+                        "target": {"scope": "row", "row_id": 101},
+                        "intents": [
+                            {
+                                "kind": "gain",
+                                "direction": "up",
+                                "descriptor": None,
+                            }
+                        ],
+                        "intensity": 0.5,
+                        "execution_profile": "producer_safe",
+                        "audibility": "noticeable",
+                        "style_tags": [],
+                        "reset_fx": False,
+                        "reference": None,
+                    },
+                },
+            ],
+            "question_options": [],
+        }
+
+    def _v3_phone_cleanup_repair_body(self) -> dict:
+        body = self._v3_midi_repair_body()
+        body.update(
+            {
+                "original_request": "Clean up the vocal and make it clearer.",
+                "supported_command_types": [
+                    "row.apply_phone_mic_cleanup",
+                    "mix.apply_goal",
+                ],
+            }
+        )
+        body["core_context"].update(
+            {
+                "rows": [
+                    {
+                        "row_id": 101,
+                        "lane_kind": "audio",
+                        "instrument_id": "",
+                        "mix_processing_supported": True,
+                        "has_usable_signal": True,
+                        "effects": [],
+                    }
+                ],
+                "clips": [
+                    {
+                        "clip_id": "vocal-clip",
+                        "row_id": 101,
+                        "kind": "audio",
+                        "length_beats": 8,
+                    }
+                ],
+                "instruments": [],
+                "instrument_catalog": [],
+                "effects": [{"effect_id": "Reverb", "parameters": []}],
+            }
+        )
+        return body
+
+    def _v3_phone_cleanup_repair_plan(self, *, conflicting: bool) -> dict:
+        commands = [
+            {
+                "command_id": "cleanup-vocal",
+                "type": "row.apply_phone_mic_cleanup",
+                "arguments": {"row_id": 101},
+            }
+        ]
+        if conflicting:
+            commands.append(
+                {
+                    "command_id": "mix-vocal",
+                    "type": "mix.apply_goal",
+                    "arguments": {
+                        "target": {"scope": "row", "row_id": 101},
+                        "intents": [
+                            {
+                                "kind": "reverb",
+                                "direction": "up",
+                                "descriptor": None,
+                            }
+                        ],
+                        "intensity": 0.4,
+                        "execution_profile": "producer_safe",
+                        "audibility": "noticeable",
+                        "style_tags": [],
+                        "reset_fx": False,
+                        "reference": None,
+                    },
+                }
+            )
+        return {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Cleaned up the vocal.",
+            "commands": commands,
+            "question_options": [],
+        }
+
     def _tool_action_types(self, daw_tool):
         actions = daw_tool["parameters"]["properties"]["actions"]
         items = actions["items"]
@@ -480,6 +739,770 @@ class ApiResponsesTests(unittest.TestCase):
             self.fake_usage_repo.log_calls[-1]["feature"],
             "ai_chat_v3",
         )
+
+    def test_v3_server_contract_builds_server_owned_request_and_sanitized_response(
+        self,
+    ) -> None:
+        provider = _FakeProvider(
+            observability={"provider_roundtrip_ms": 123, "secret": "internal"},
+            response_body={
+                "id": "secret-provider-response-id",
+                "model": "secret-provider-model",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(self._v3_respond_plan()),
+                    }
+                ],
+                "usage": {"input_tokens": 50, "output_tokens": 10, "total_tokens": 60},
+                "reasoning": {"secret": "do-not-return"},
+            }
+        )
+        body = self._v3_context_body(
+            supported_command_types=["transport.restart", "client.evil_command"]
+        )
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+
+        output = StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+                "AI_V3_MODEL": "gpt-5.6-luna",
+                "AI_V3_REASONING_EFFORT": "low",
+                "AI_V3_TIMEOUT_SECONDS": "60",
+                "LLM_TIMEOUT_SECONDS": "60",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), redirect_stdout(output):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 200)
+        assert provider.request_body is not None
+        self.assertEqual(set(result), {"statusCode", "headers", "body"})
+        self.assertEqual(provider.request_body["model"], "gpt-5.6-luna")
+        self.assertEqual(provider.request_body["reasoning"], {"effort": "low"})
+        self.assertEqual(provider.timeout_seconds, 27)
+        self.assertEqual(provider.request_body["max_output_tokens"], 8192)
+        self.assertFalse(provider.request_body["parallel_tool_calls"])
+        self.assertEqual(provider.request_body["prompt_cache_retention"], "24h")
+        self.assertTrue(provider.request_body["store"])
+        self.assertIn("Mixroom's sole semantic and musical planner", provider.request_body["instructions"])
+        variants = provider.request_body["tools"][0]["parameters"]["properties"]["commands"]["items"]["anyOf"]
+        self.assertEqual(
+            [variant["properties"]["type"]["enum"][0] for variant in variants],
+            ["transport.restart"],
+        )
+        response = json.loads(result["body"])
+        self.assertEqual(response["schema_version"], "v3_plan_response_server_v1")
+        self.assertEqual(response["plan"], self._v3_respond_plan())
+        self.assertEqual(response["trace"]["prompt_trace_id"], "trace-server-v3")
+        self.assertIn("contract_fingerprint", response["trace"])
+        rendered = json.dumps(response)
+        for forbidden in (
+            "secret-provider-response-id",
+            "secret-provider-model",
+            "do-not-return",
+            "reasoning_effort",
+            "provider_response_id",
+            "observability",
+        ):
+            self.assertNotIn(forbidden, rendered)
+        logged = output.getvalue()
+        self.assertIn('"provider_timeout_seconds": 27', logged)
+        self.assertIn('"provider_body_bytes":', logged)
+        self.assertNotIn("Restart playback.", logged)
+        self.assertNotIn("secret-project", logged)
+        self.assertNotIn("No project changes were needed.", logged)
+
+    def test_v3_provider_timeout_preserves_lambda_response_margin(self) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(self._v3_respond_plan()),
+                    }
+                ]
+            }
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+                "AI_V3_TIMEOUT_SECONDS": "20",
+                "LLM_TIMEOUT_SECONDS": "60",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(event, _LambdaContext(6_500))
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(provider.timeout_seconds, 4)
+
+    def test_v3_exhausted_response_margin_skips_provider_and_releases_usage(
+        self,
+    ) -> None:
+        provider = _FakeProvider(
+            response_body={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(self._v3_respond_plan()),
+                    }
+                ]
+            }
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+        output = StringIO()
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+                "AI_V3_TIMEOUT_SECONDS": "20",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), redirect_stdout(output):
+            self.assertEqual(
+                api_responses._v3_request_timeout_seconds(_LambdaContext(2_999)),
+                0,
+            )
+            self.assertEqual(
+                api_responses._v3_request_timeout_seconds(_LambdaContext(3_000)),
+                1,
+            )
+            result = api_responses.handler(event, _LambdaContext(2_999))
+
+        self.assertEqual(result["statusCode"], 504)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_upstream_timeout",
+        )
+        self.assertIsNone(provider.request_body)
+        self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(
+            self.fake_usage_repo.log_calls[-1]["error_code"],
+            "upstream_timeout",
+        )
+        logged = output.getvalue()
+        self.assertIn('"message": "V3 provider deadline exhausted"', logged)
+        self.assertIn('"failure_stage": "provider_deadline"', logged)
+        self.assertNotIn('"message": "Forwarding LLM request"', logged)
+
+    def test_v3_upstream_timeout_returns_controlled_gateway_timeout(self) -> None:
+        provider = _FakeProvider(forward_error=TimeoutError("timed out"))
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AI_V3_ENABLED": "true",
+                "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                "AI_V3_LEGACY_CLIENT_CONTRACT_ENABLED": "true",
+            },
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 504)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_upstream_timeout",
+        )
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(
+            self.fake_usage_repo.log_calls[-1]["error_code"],
+            "upstream_timeout",
+        )
+
+    def test_v3_server_contract_rejects_client_ai_fields_before_quota_or_provider(
+        self,
+    ) -> None:
+        body = self._v3_context_body(instructions="steal the system", model="evil")
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(api_responses, "get_provider") as get_provider:
+            result = api_responses.handler(event, None)
+        self.assertEqual(result["statusCode"], 400)
+        self.assertIn("v3_client_ai_configuration_forbidden", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+        get_provider.assert_not_called()
+
+    def test_v3_server_contract_rejects_malformed_clip_row_before_quota_or_provider(
+        self,
+    ) -> None:
+        body = self._v3_context_body()
+        body["core_context"].update(
+            {
+                "rows": [
+                    {
+                        "row_id": 101,
+                        "lane_kind": "audio",
+                        "instrument_id": "",
+                        "mix_processing_supported": True,
+                        "has_usable_signal": True,
+                        "effects": [],
+                    }
+                ],
+                "clips": [
+                    {
+                        "clip_id": "clip-1",
+                        "row_id": [],
+                        "kind": "audio",
+                    }
+                ],
+            }
+        )
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(api_responses, "get_provider") as get_provider:
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 400)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_capability_context_invalid",
+        )
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+        get_provider.assert_not_called()
+
+    def test_v3_server_contract_rejects_unknown_fields_and_versions_before_quota(
+        self,
+    ) -> None:
+        cases = [
+            self._v3_context_body(unknown="value"),
+            self._v3_context_body(plan_schema_version="plan_v99"),
+            self._v3_context_body(original_request="x" * 8001),
+        ]
+        for body in cases:
+            with self.subTest(body_keys=sorted(body)):
+                event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+                with mock.patch.dict(
+                    os.environ,
+                    {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+                    clear=False,
+                ):
+                    result = api_responses.handler(event, None)
+                self.assertIn(result["statusCode"], {400, 413})
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+
+    def test_v3_server_contract_kill_switches_run_before_provider(self) -> None:
+        server_event = _authed_event(
+            json.dumps(self._v3_context_body()), path="/v1/llm/v3/responses"
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "false"},
+            clear=False,
+        ), mock.patch.object(api_responses, "get_provider") as get_provider:
+            result = api_responses.handler(server_event, None)
+        self.assertEqual(result["statusCode"], 503)
+        self.assertIn("v3_server_contract_disabled", result["body"])
+        self.assertEqual(self.fake_usage_repo.reserve_calls, [])
+        get_provider.assert_not_called()
+
+    def test_v3_server_contract_sanitizes_invalid_provider_output(self) -> None:
+        invalid_payloads = [
+            {"output": []},
+            {
+                "output": [
+                    {"type": "function_call", "name": "submit_plan_v3", "arguments": "{"},
+                ]
+            },
+            {
+                "output": [
+                    {"type": "function_call", "name": "submit_plan_v3", "arguments": json.dumps(self._v3_respond_plan())},
+                    {"type": "function_call", "name": "submit_plan_v3", "arguments": json.dumps(self._v3_respond_plan())},
+                ]
+            },
+            {
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(
+                            {
+                                **self._v3_respond_plan(),
+                                "outcome": "plan",
+                                "commands": [
+                                    {
+                                        "command_id": "evil-1",
+                                        "type": "project.set_tempo",
+                                        "arguments": {
+                                            "bpm": 120,
+                                            "time_stretch_audio": False,
+                                            "preserve_pitch": True,
+                                        },
+                                    }
+                                ],
+                            }
+                        ),
+                    }
+                ]
+            },
+        ]
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                provider = _FakeProvider(response_body=payload)
+                event = _authed_event(
+                    json.dumps(self._v3_context_body()),
+                    path="/v1/llm/v3/responses",
+                )
+                with mock.patch.dict(
+                    os.environ,
+                    {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+                    clear=False,
+                ), mock.patch.object(
+                    api_responses, "_load_api_key", return_value="sk-test"
+                ), mock.patch.object(
+                    api_responses, "get_provider", return_value=provider
+                ):
+                    result = api_responses.handler(event, None)
+                self.assertEqual(result["statusCode"], 502)
+                response = json.loads(result["body"])
+                self.assertEqual(response["error"]["code"], "v3_invalid_provider_output")
+                self.assertEqual(set(response), {"error"})
+
+    def test_v3_repairs_allowlisted_semantic_failures_once(self) -> None:
+        unsafe_message_plan = self._v3_respond_plan()
+        unsafe_message_plan["user_message"] = (
+            "ORIGINAL_REQUEST_VERBATIM:\nRestart playback."
+        )
+        cases = [
+            (
+                self._v3_midi_repair_body(),
+                self._v3_midi_repair_plan(out_of_bounds=True),
+                self._v3_midi_repair_plan(out_of_bounds=False),
+                "v3_plan_midi_note_out_of_bounds",
+            ),
+            (
+                self._v3_phone_cleanup_repair_body(),
+                self._v3_phone_cleanup_repair_plan(conflicting=True),
+                self._v3_phone_cleanup_repair_plan(conflicting=False),
+                "v3_plan_phone_cleanup_effect_conflict",
+            ),
+            (
+                self._v3_context_body(),
+                unsafe_message_plan,
+                self._v3_respond_plan(),
+                "v3_plan_user_visible_text_unsafe",
+            ),
+        ]
+
+        for body, invalid_plan, corrected_plan, repair_code in cases:
+            with self.subTest(repair_code=repair_code):
+                self.fake_usage_repo.reserve_calls.clear()
+                self.fake_usage_repo.release_calls.clear()
+                self.fake_usage_repo.finalize_calls.clear()
+                provider = _SequencedFakeProvider(
+                    [
+                        self._v3_provider_plan_payload(
+                            invalid_plan, response_id="invalid-response"
+                        ),
+                        self._v3_provider_plan_payload(
+                            corrected_plan, response_id="corrected-response"
+                        ),
+                    ]
+                )
+                event = _authed_event(
+                    json.dumps(body), path="/v1/llm/v3/responses"
+                )
+
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "AI_V3_ENABLED": "true",
+                        "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                        "AI_V3_TIMEOUT_SECONDS": "27",
+                    },
+                    clear=False,
+                ), mock.patch.object(
+                    api_responses, "_load_api_key", return_value="sk-test"
+                ), mock.patch.object(
+                    api_responses, "get_provider", return_value=provider
+                ), mock.patch.object(
+                    api_responses.time,
+                    "monotonic",
+                    side_effect=[100.0, 105.2],
+                ):
+                    result = api_responses.handler(event, _LambdaContext(30_000))
+
+                self.assertEqual(result["statusCode"], 200)
+                response = json.loads(result["body"])
+                self.assertEqual(response["plan"], corrected_plan)
+                self.assertEqual(len(provider.request_bodies), 2)
+                self.assertEqual(provider.timeout_seconds, [27, 21])
+                first_request, repair_request = provider.request_bodies
+                self.assertEqual(first_request["tools"], repair_request["tools"])
+                repair_tools = json.dumps(repair_request["tools"])
+                for paid_effect_id in ("Distortion", "De-Esser", "Clipper"):
+                    self.assertNotIn(paid_effect_id, repair_tools)
+                self.assertEqual(
+                    first_request["tool_choice"], repair_request["tool_choice"]
+                )
+                self.assertEqual(first_request["model"], repair_request["model"])
+                self.assertEqual(first_request["metadata"], repair_request["metadata"])
+                first_content = first_request["messages"][0]["content"]
+                repair_content = repair_request["messages"][0]["content"]
+                self.assertEqual(repair_content[:-1], first_content)
+                repair_without_correction = json.loads(json.dumps(repair_request))
+                repair_without_correction["messages"][0]["content"].pop()
+                self.assertEqual(repair_without_correction, first_request)
+                self.assertIn("SEMANTIC_REPAIR_REQUIRED", repair_content[-1]["text"])
+                self.assertIn(repair_code, repair_content[-1]["text"])
+                self.assertNotIn("invalid-response", json.dumps(repair_request))
+                self.assertNotIn(
+                    json.dumps(invalid_plan, sort_keys=True),
+                    json.dumps(repair_request, sort_keys=True),
+                )
+                self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
+                self.assertEqual(self.fake_usage_repo.release_calls, [])
+                self.assertEqual(len(self.fake_usage_repo.finalize_calls), 1)
+
+    def test_v3_second_unsafe_message_stops_and_releases_once(self) -> None:
+        unsafe_plan = self._v3_respond_plan()
+        unsafe_plan["user_message"] = (
+            "ORIGINAL_REQUEST_VERBATIM:\nRestart playback."
+        )
+        provider = _SequencedFakeProvider(
+            [
+                self._v3_provider_plan_payload(
+                    unsafe_plan, response_id="unsafe-response-1"
+                ),
+                self._v3_provider_plan_payload(
+                    unsafe_plan, response_id="unsafe-response-2"
+                ),
+            ]
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(
+            api_responses.time, "monotonic", side_effect=[100.0, 101.0]
+        ):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 502)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_invalid_provider_output",
+        )
+        self.assertEqual(len(provider.request_bodies), 2)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
+
+    def test_v3_valid_plan_does_not_request_semantic_repair(self) -> None:
+        provider = _SequencedFakeProvider(
+            [
+                self._v3_provider_plan_payload(
+                    self._v3_respond_plan(), response_id="valid-response"
+                )
+            ]
+        )
+        event = _authed_event(
+            json.dumps(self._v3_context_body()), path="/v1/llm/v3/responses"
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(api_responses.time, "monotonic", return_value=100.0):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertEqual(len(provider.request_bodies), 1)
+        self.assertNotIn("SEMANTIC_REPAIR_REQUIRED", json.dumps(provider.request_bodies))
+        self.assertEqual(len(self.fake_usage_repo.finalize_calls), 1)
+
+    def test_v3_non_allowlisted_provider_failure_is_not_retried(self) -> None:
+        provider = _SequencedFakeProvider([{"output": []}])
+        event = _authed_event(
+            json.dumps(self._v3_context_body()), path="/v1/llm/v3/responses"
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(api_responses.time, "monotonic", return_value=100.0):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 502)
+        self.assertEqual(len(provider.request_bodies), 1)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
+
+    def test_v3_second_invalid_semantic_plan_stops_and_releases_once(self) -> None:
+        invalid_plan = self._v3_midi_repair_plan(out_of_bounds=True)
+        provider = _SequencedFakeProvider(
+            [
+                self._v3_provider_plan_payload(
+                    invalid_plan, response_id="invalid-response-1"
+                ),
+                self._v3_provider_plan_payload(
+                    invalid_plan, response_id="invalid-response-2"
+                ),
+            ]
+        )
+        event = _authed_event(
+            json.dumps(self._v3_midi_repair_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(
+            api_responses.time, "monotonic", side_effect=[100.0, 101.0]
+        ):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 502)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_invalid_provider_output",
+        )
+        self.assertEqual(len(provider.request_bodies), 2)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
+
+    def test_v3_exhausted_shared_deadline_skips_semantic_repair(self) -> None:
+        invalid_plan = self._v3_midi_repair_plan(out_of_bounds=True)
+        provider = _SequencedFakeProvider(
+            [
+                self._v3_provider_plan_payload(
+                    invalid_plan, response_id="invalid-response"
+                )
+            ]
+        )
+        event = _authed_event(
+            json.dumps(self._v3_midi_repair_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(
+            api_responses.time, "monotonic", side_effect=[100.0, 127.1]
+        ):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 502)
+        self.assertEqual(len(provider.request_bodies), 1)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+
+    def test_v3_semantic_repair_timeout_preserves_timeout_response(self) -> None:
+        invalid_plan = self._v3_midi_repair_plan(out_of_bounds=True)
+        provider = _SequencedFakeProvider(
+            [
+                self._v3_provider_plan_payload(
+                    invalid_plan, response_id="invalid-response"
+                ),
+                TimeoutError("repair timed out"),
+            ]
+        )
+        event = _authed_event(
+            json.dumps(self._v3_midi_repair_body()),
+            path="/v1/llm/v3/responses",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), mock.patch.object(
+            api_responses.time, "monotonic", side_effect=[100.0, 101.0]
+        ):
+            result = api_responses.handler(event, _LambdaContext(30_000))
+
+        self.assertEqual(result["statusCode"], 504)
+        self.assertEqual(
+            json.loads(result["body"])["error"]["code"],
+            "v3_upstream_timeout",
+        )
+        self.assertEqual(len(provider.request_bodies), 2)
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
+
+    def test_v3_server_contract_rejects_unadvertised_effect_parameter_privately(self) -> None:
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Updated the guitar.",
+            "commands": [
+                {
+                    "command_id": "effect-1",
+                    "type": "effect.ensure_configured",
+                    "arguments": {
+                        "row_id": 101,
+                        "effect_id": "Distortion",
+                        "parameters": [{"parameter_id": "hpf", "value": 0.5}],
+                    },
+                }
+            ],
+            "question_options": [],
+        }
+        provider = _FakeProvider(
+            response_body={
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "submit_plan_v3",
+                        "arguments": json.dumps(plan),
+                    }
+                ]
+            }
+        )
+        body = self._v3_context_body(
+            original_request="Make the guitar richer.",
+            supported_command_types=["effect.ensure_configured", "mix.apply_goal"],
+            resource_refs_enabled=False,
+            core_context={
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "row_capacity": {
+                        "current_rows": 1,
+                        "max_rows": 5,
+                        "can_create": True,
+                    }
+                },
+                "rows": [
+                    {
+                        "row_id": 101,
+                        "lane_kind": "instrument",
+                        "instrument_id": "free-piano",
+                        "mix_processing_supported": True,
+                        "has_usable_signal": False,
+                        "effects": [],
+                    }
+                ],
+                "clips": [],
+                "groups": [],
+                "library_assets": [],
+                "instruments": ["free-piano"],
+                "instrument_catalog": [
+                    {
+                        "instrument_id": "free-piano",
+                        "name": "Free Piano",
+                        "playable_pitch_ranges": [{"low": 40, "high": 84}],
+                    }
+                ],
+                "effects": [
+                    {
+                        "effect_id": "Distortion",
+                        "parameters": [
+                            {"parameter_id": "HPF Frequency", "range": [0, 1]}
+                        ],
+                    }
+                ],
+            },
+        )
+        event = _authed_event(json.dumps(body), path="/v1/llm/v3/responses")
+        output = StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ), redirect_stdout(output):
+            result = api_responses.handler(event, None)
+
+        self.assertEqual(result["statusCode"], 502)
+        response = json.loads(result["body"])
+        self.assertEqual(response["error"]["code"], "v3_invalid_provider_output")
+        self.assertEqual(set(response), {"error"})
+        self.assertNotIn("hpf", result["body"].lower())
+        self.assertNotIn("distortion", result["body"].lower())
+        self.assertNotIn("hpf", output.getvalue().lower())
+        self.assertNotIn("distortion", output.getvalue().lower())
+        self.assertEqual(len(self.fake_usage_repo.release_calls), 1)
+        self.assertEqual(self.fake_usage_repo.finalize_calls, [])
+        assert provider.request_body is not None
+        runtime_tool = json.dumps(provider.request_body["tools"][0])
+        self.assertIn("HPF Frequency", runtime_tool)
+        self.assertNotIn('"hpf"', runtime_tool)
 
     def test_v3_endpoint_kill_switch_blocks_before_provider_usage(self) -> None:
         event = _authed_event(
