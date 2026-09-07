@@ -22870,7 +22870,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
     if (_v2LiveMonitoringActive) {
-      if (Platform.isMacOS || Platform.isAndroid) {
+      if (Platform.isMacOS || Platform.isAndroid || Platform.isIOS) {
         // The native input session already owns these channels. Capture can
         // share it without changing the monitoring row or reopening either device.
         if (!_isValidRowIndex(_selectedRow) ||
@@ -22887,28 +22887,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _preparedRecordingChannelStart = _v2LiveMonitoringChannelStart!;
         _preparedRecordingChannelCount = _v2LiveMonitoringChannelCount!;
         return true;
-      } else {
-        final monitoringTargetRow = _v2LiveMonitoringTargetRowId == null
-            ? -1
-            : _rowIndexForId(_v2LiveMonitoringTargetRowId!);
-        final targetMatches =
-            monitoringTargetRow == _selectedRow &&
-            _isValidRowIndex(_selectedRow) &&
-            _rows[_selectedRow].kind == TimelineRowKind.audio &&
-            _v2LiveMonitoringChannelStart ==
-                _rows[_selectedRow].inputChannelStart &&
-            _v2LiveMonitoringChannelCount ==
-                _rows[_selectedRow].inputChannelCount;
-        if (targetMatches) {
-          _preparedRecordingChannelStart = _v2LiveMonitoringChannelStart!;
-          _preparedRecordingChannelCount = _v2LiveMonitoringChannelCount!;
-          return true;
-        }
-        await _setV2LiveMonitoring(false);
-        if (_audioRouteCoordinatorV2?.intent !=
-            AudioRouteIntentV2.playbackOnly) {
-          return false;
-        }
       }
     }
     var v2IntentOperation = AudioRouteIntentOperationV2.standard;
@@ -47927,7 +47905,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (_isBluetoothV2Session &&
           (Platform.isIOS || Platform.isAndroid || Platform.isMacOS) &&
-          !((Platform.isMacOS || Platform.isAndroid) &&
+          !((Platform.isMacOS || Platform.isAndroid || Platform.isIOS) &&
               _v2LiveMonitoringActive) &&
           _audioRouteCoordinatorV2?.state ==
               AudioRouteCoordinatorStateV2.preparingInput) {

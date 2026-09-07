@@ -64,6 +64,8 @@
                                       outputChannels:(NSInteger)outputChannels
                                        inputChannels:(NSInteger)inputChannels;
 + (BOOL)reconfigureBluetoothDuplexRouteV2ObjC;
++ (NSDictionary<NSString *, NSNumber *> * _Nonnull)getLiveInputMonitoringFactsV2ObjC;
++ (void)discardRecordingForMonitoringV2ObjC;
 + (BOOL)validateRecordingRouteV2ObjC;
 + (BOOL)setLiveInputMonitorTargetV2ObjC:(NSInteger)row
                            channelStart:(NSInteger)channelStart

@@ -6481,6 +6481,11 @@ public:
     bool setLiveInputMonitorTargetV2(int row,
                                      int channelStart,
                                      int channelCount);
+    juce::NamedValueSet getLiveInputMonitoringFactsV2();
+    void discardRecordingForMonitoringV2();
+    void advanceInputMonitorStreamGenerationV2() noexcept {
+        inputMonitorStreamGenerationV2.fetch_add(1, std::memory_order_acq_rel);
+    }
     void disableLiveInputMonitoringV2();
     bool shouldRouteLiveInputToGraphV2() const noexcept;
     bool configureAudioDevice(double sampleRate,
@@ -6638,6 +6643,7 @@ private:
     std::atomic<bool> applicationTerminationStarted{false};
     std::mutex engineLifecycleMutex;
     std::atomic<std::uint64_t> engineLifecycleGeneration{1};
+    std::atomic<uint64_t> inputMonitorStreamGenerationV2{1};
     bool formatsRegistered = false; // will only be flipped once to true
     AudioRouteImplementation audioRouteImplementation =
         AudioRouteImplementation::none;
@@ -7450,6 +7456,7 @@ public:
     // ===== AudioIODeviceCallback =====
     void audioDeviceAboutToStart(juce::AudioIODevice *device) override
     {
+        engine.advanceInputMonitorStreamGenerationV2();
         callbackReady.store(false, std::memory_order_release);
         sampleRate = device->getCurrentSampleRate();
         const int preparedBlockCapacity = device->getCurrentBufferSizeSamples();
@@ -7475,6 +7482,7 @@ public:
 
     void audioDeviceStopped() override
     {
+        engine.advanceInputMonitorStreamGenerationV2();
         callbackReady.store(false, std::memory_order_release);
         firstValidCallbackCompleted.store(false, std::memory_order_release);
         firstValidCallbackFrames.store(0, std::memory_order_relaxed);
