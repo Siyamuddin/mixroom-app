@@ -24,11 +24,6 @@ PODS:
     - onnxruntime-objc/Core (= 1.21.0)
   - onnxruntime-objc/Core (1.21.0):
     - onnxruntime-c (= 1.21.0)
-  - PostHog (3.45.1)
-  - posthog_flutter (0.0.1):
-    - Flutter
-    - FlutterMacOS
-    - PostHog (< 4.0.0, >= 3.44.0)
   - sign_in_with_apple (0.0.1):
     - FlutterMacOS
   - Sparkle (2.9.6)
@@ -42,14 +37,12 @@ DEPENDENCIES:
   - flutter_webrtc (from `Flutter/ephemeral/.symlinks/plugins/flutter_webrtc/macos`)
   - FlutterMacOS (from `Flutter/ephemeral`)
   - juce_audio_engine (from `Flutter/ephemeral/.symlinks/plugins/juce_audio_engine/macos`)
-  - posthog_flutter (from `Flutter/ephemeral/.symlinks/plugins/posthog_flutter/macos`)
   - sign_in_with_apple (from `Flutter/ephemeral/.symlinks/plugins/sign_in_with_apple/macos`)
 
 SPEC REPOS:
   trunk:
     - onnxruntime-c
     - onnxruntime-objc
-    - PostHog
     - Sparkle
     - WebRTC-SDK
 
@@ -68,8 +61,6 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral
   juce_audio_engine:
     :path: Flutter/ephemeral/.symlinks/plugins/juce_audio_engine/macos
-  posthog_flutter:
-    :path: Flutter/ephemeral/.symlinks/plugins/posthog_flutter/macos
   sign_in_with_apple:
     :path: Flutter/ephemeral/.symlinks/plugins/sign_in_with_apple/macos
 
@@ -83,8 +74,6 @@ SPEC CHECKSUMS:
   juce_audio_engine: 0d65d391b1de2e3be2e255fd4e6fe8e181f00917
   onnxruntime-c: ac65025f01072d25d7d394a2b43ac30d9397b260
   onnxruntime-objc: 5fa03134356d47b642ec85b1023d9907a123d201
-  PostHog: 596b48ea0c12550479680d6757da5dc6f8d55401
-  posthog_flutter: a677be3d8d9f0ec2af5dd61dd8657be4ec6396d8
   sign_in_with_apple: 6673c03c9e3643f6c8d33601943fbfa9ae99f94e
   Sparkle: b8c9cf4ced217ffc708a1ca5f988a7ba877658db
   WebRTC-SDK: 40d4f5ba05cadff14e4db5614aec402a633f007e

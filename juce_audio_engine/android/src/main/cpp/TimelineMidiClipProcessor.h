@@ -242,10 +242,10 @@ public:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
-        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
-        const double releaseSec = juce::jmax(0.02, cachedPreset.releaseMs / 1000.0);
+        const double attackSec = juce::jmax(0.0, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.0, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.0, 1.0, cachedPreset.sustainLevel);
+        const double releaseSec = juce::jmax(0.0, cachedPreset.releaseMs / 1000.0);
         const float driveGain =
             sampledMode
                 ? 1.0f
@@ -342,7 +342,7 @@ public:
                             !cachedSampledReleaseOverride)
                         {
                             noteReleaseSec =
-                                juce::jmax(0.02, sampledRegion->releaseSec);
+                                juce::jmax(0.0, sampledRegion->releaseSec);
                         }
 
                         const double noteStartSourceSec = note.startBeat * sourceSecPerBeat;
@@ -392,10 +392,10 @@ public:
                             {
                                 if (!cachedSampledAttackOverride)
                                     noteAttackSec =
-                                        juce::jmax(0.001, sampledRegion->attackSec);
+                                        juce::jmax(0.0, sampledRegion->attackSec);
                                 if (!cachedSampledReleaseOverride)
                                     noteReleaseSec =
-                                        juce::jmax(0.02, sampledRegion->releaseSec);
+                                        juce::jmax(0.0, sampledRegion->releaseSec);
                             }
                             const double releaseSourceSec = noteReleaseSec * safeRatio;
 
@@ -528,11 +528,11 @@ public:
                     sampledMode && voice.sampledSource != nullptr;
                 const double voiceAttackSec =
                     (voiceSampled && !cachedSampledAttackOverride)
-                        ? juce::jmax(0.001, voice.sampledAttackSec)
+                        ? juce::jmax(0.0, voice.sampledAttackSec)
                         : attackSec;
                 const double voiceReleaseSec =
                     (voiceSampled && !cachedSampledReleaseOverride)
-                        ? juce::jmax(0.02, voice.sampledReleaseSec)
+                        ? juce::jmax(0.0, voice.sampledReleaseSec)
                         : releaseSec;
 
                 double env = 0.0;
@@ -546,8 +546,11 @@ public:
                 }
                 else
                 {
-                    const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
-                    env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                    if (voiceReleaseSec > 0.0)
+                    {
+                        const double releaseNorm = voice.releaseAgeSec / voiceReleaseSec;
+                        env = voice.releaseStartLevel * (1.0 - releaseNorm);
+                    }
                 }
 
                 if (env <= 0.0)
@@ -662,7 +665,7 @@ public:
                     const double voiceReleaseSec =
                         (sampledMode && voice.sampledSource != nullptr &&
                          !cachedSampledReleaseOverride)
-                            ? juce::jmax(0.02, voice.sampledReleaseSec)
+                            ? juce::jmax(0.0, voice.sampledReleaseSec)
                             : releaseSec;
                     return voice.releasing && voice.releaseAgeSec >= voiceReleaseSec;
                 }),
@@ -839,14 +842,14 @@ private:
         double decaySec,
         double sustainLevel)
     {
-        attackSec = juce::jmax(0.001, attackSec);
-        decaySec = juce::jmax(0.001, decaySec);
-        sustainLevel = juce::jlimit(0.05, 1.0, sustainLevel);
-        if (ageSec < attackSec)
+        attackSec = juce::jmax(0.0, attackSec);
+        decaySec = juce::jmax(0.0, decaySec);
+        sustainLevel = juce::jlimit(0.0, 1.0, sustainLevel);
+        if (attackSec > 0.0 && ageSec < attackSec)
             return juce::jlimit(0.0, 1.0, ageSec / attackSec);
 
         const double decayAge = ageSec - attackSec;
-        if (decayAge < decaySec)
+        if (decaySec > 0.0 && decayAge < decaySec)
         {
             const double t = decayAge / decaySec;
             return 1.0 + ((sustainLevel - 1.0) * t);
@@ -865,7 +868,9 @@ private:
         if (ageSec < holdSec)
             return envelopeHoldLevel(ageSec, attackSec, decaySec, sustainLevel);
 
-        releaseSec = juce::jmax(0.02, releaseSec);
+        releaseSec = juce::jmax(0.0, releaseSec);
+        if (releaseSec <= 0.0)
+            return 0.0;
         const double releaseAge = ageSec - holdSec;
         const double releaseStart =
             envelopeHoldLevel(holdSec, attackSec, decaySec, sustainLevel);
@@ -1439,7 +1444,7 @@ private:
         definition->sfzAssetPath = sfzAssetPath;
         definition->defaultAttackSec = juce::jlimit(0.0, 4.0, globalAttackSec);
         definition->defaultReleaseSec =
-            juce::jlimit(0.02, 12.0, globalReleaseSec);
+            juce::jlimit(0.0, 12.0, globalReleaseSec);
         definition->regions.reserve(rawRegions.size());
 
         for (const auto &r : rawRegions)
@@ -1494,7 +1499,7 @@ private:
                 4.0,
                 readSfzNumeric(r, "ampeg_attack", globalAttackSec));
             regionDef.releaseSec = juce::jlimit(
-                0.02,
+                0.0,
                 12.0,
                 readSfzNumeric(r, "ampeg_release", globalReleaseSec));
             regionDef.pitchKeytrack = juce::jlimit(
@@ -1843,9 +1848,9 @@ private:
         if (params.contains(juce::Identifier("decayMs")))
             preset.decayMs = juce::jlimit(0.0, 2000.0, readParam(params, "decayMs", preset.decayMs));
         if (params.contains(juce::Identifier("sustainLevel")))
-            preset.sustainLevel = juce::jlimit(0.05, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
+            preset.sustainLevel = juce::jlimit(0.0, 1.0, readParam(params, "sustainLevel", preset.sustainLevel));
         if (params.contains(juce::Identifier("releaseMs")))
-            preset.releaseMs = juce::jlimit(20.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
+            preset.releaseMs = juce::jlimit(0.0, 2400.0, readParam(params, "releaseMs", preset.releaseMs));
         if (params.contains(juce::Identifier("drive")))
             preset.drive = juce::jlimit(0.0, 1.0, readParam(params, "drive", preset.drive));
         if (params.contains(juce::Identifier("outputGain")))
@@ -2187,9 +2192,9 @@ private:
             cachedPreset.family == InstrumentFamily::sampled &&
             cachedSampledDefinition != nullptr &&
             !cachedSampledDefinition->regions.empty();
-        const double attackSec = juce::jmax(0.001, cachedPreset.attackMs / 1000.0);
-        const double decaySec = juce::jmax(0.001, cachedPreset.decayMs / 1000.0);
-        const double sustainLevel = juce::jlimit(0.05, 1.0, cachedPreset.sustainLevel);
+        const double attackSec = juce::jmax(0.0, cachedPreset.attackMs / 1000.0);
+        const double decaySec = juce::jmax(0.0, cachedPreset.decayMs / 1000.0);
+        const double sustainLevel = juce::jlimit(0.0, 1.0, cachedPreset.sustainLevel);
 
         for (const auto &event : pending)
         {
@@ -2257,7 +2262,7 @@ private:
                 const double voiceAttackSec =
                     (sampledMode && it->sampledSource != nullptr &&
                      !cachedSampledAttackOverride)
-                        ? juce::jmax(0.001, it->sampledAttackSec)
+                        ? juce::jmax(0.0, it->sampledAttackSec)
                         : attackSec;
                 it->releaseStartLevel = envelopeHoldLevel(
                     it->ageSec,

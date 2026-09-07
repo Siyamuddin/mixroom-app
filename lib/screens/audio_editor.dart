@@ -595,6 +595,8 @@ const List<Map<String, dynamic>> kInstrumentCatalog = [
     "oscillator": 1.0,
     "cutoffHz": 3200.0,
     "attackMs": 18.0,
+    "decayMs": 120.0,
+    "sustainLevel": 0.86,
     "releaseMs": 180.0,
     "drive": 0.08,
   },
@@ -2119,8 +2121,8 @@ _FallbackInstrumentPreset _fallbackPresetForInstrument({
     cutoffHz: getParam('cutoffHz', preset.cutoffHz, 200.0, 16000.0),
     attackMs: getParam('attackMs', preset.attackMs, 0.0, 1000.0),
     decayMs: getParam('decayMs', preset.decayMs, 0.0, 2000.0),
-    sustainLevel: getParam('sustainLevel', preset.sustainLevel, 0.05, 1.0),
-    releaseMs: getParam('releaseMs', preset.releaseMs, 20.0, 2400.0),
+    sustainLevel: getParam('sustainLevel', preset.sustainLevel, 0.0, 1.0),
+    releaseMs: getParam('releaseMs', preset.releaseMs, 0.0, 2400.0),
     drive: getParam('drive', preset.drive, 0.0, 1.0),
     outputGain: getParam('outputGain', preset.outputGain, 0.15, 0.75),
     detune: getParam('detune', preset.detune, 0.0, 0.03),
@@ -2800,14 +2802,14 @@ double _fallbackEnvelopeHoldLevel({
   required double decaySec,
   required double sustainLevel,
 }) {
-  final safeAttack = math.max(0.001, attackSec);
-  final safeDecay = math.max(0.001, decaySec);
-  final safeSustain = sustainLevel.clamp(0.05, 1.0).toDouble();
-  if (ageSec < safeAttack) {
+  final safeAttack = math.max(0.0, attackSec);
+  final safeDecay = math.max(0.0, decaySec);
+  final safeSustain = sustainLevel.clamp(0.0, 1.0).toDouble();
+  if (safeAttack > 0.0 && ageSec < safeAttack) {
     return (ageSec / safeAttack).clamp(0.0, 1.0).toDouble();
   }
   final decayAge = ageSec - safeAttack;
-  if (decayAge < safeDecay) {
+  if (safeDecay > 0.0 && decayAge < safeDecay) {
     final t = decayAge / safeDecay;
     return 1.0 + ((safeSustain - 1.0) * t);
   }
@@ -2830,7 +2832,8 @@ double _fallbackEnvelopeLevel({
       sustainLevel: sustainLevel,
     );
   }
-  final safeRelease = math.max(0.02, releaseSec);
+  final safeRelease = math.max(0.0, releaseSec);
+  if (safeRelease <= 0.0) return 0.0;
   final releaseAge = ageSec - holdSec;
   final releaseStart = _fallbackEnvelopeHoldLevel(
     ageSec: holdSec,
@@ -24484,6 +24487,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     params.putIfAbsent('oscillator', () => 1.0);
     params.putIfAbsent('cutoffHz', () => 3200.0);
     params.putIfAbsent('attackMs', () => 18.0);
+    params.putIfAbsent('decayMs', () => 120.0);
+    params.putIfAbsent('sustainLevel', () => 0.86);
     params.putIfAbsent('releaseMs', () => 180.0);
     params.putIfAbsent('drive', () => 0.08);
     return params;
@@ -26156,8 +26161,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final attackSec = ((params['attackMs'] ?? 4.0) / 1000.0)
         .clamp(0.0, 1.0)
         .toDouble();
+    final decaySec = ((params['decayMs'] ?? 80.0) / 1000.0)
+        .clamp(0.0, 2.0)
+        .toDouble();
+    final sustainLevel = (params['sustainLevel'] ?? 0.92)
+        .clamp(0.0, 1.0)
+        .toDouble();
     final releaseSec = ((params['releaseMs'] ?? 260.0) / 1000.0)
-        .clamp(0.02, 2.4)
+        .clamp(0.0, 2.4)
         .toDouble();
     final grainAttackMs = (params['grainAttackMs'] ?? 18.0)
         .clamp(0.0, 250.0)
@@ -26327,8 +26338,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             ageSec: noteAge,
             holdSec: holdSec,
             attackSec: attackSec,
-            decaySec: 0.08,
-            sustainLevel: 0.92,
+            decaySec: decaySec,
+            sustainLevel: sustainLevel,
             releaseSec: releaseSec,
           ).clamp(0.0, 1.0);
           if (noteEnv <= 0.0) continue;
@@ -26424,15 +26435,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final outputGain = (params['outputGain'] ?? 0.72).clamp(0.2, 2.0);
-    final attackOverrideSec = ((params['attackMs'] ?? -1.0) / 1000.0);
+    final attackOverrideMs = params['attackMs'];
+    final attackOverrideSec =
+        attackOverrideMs != null && attackOverrideMs.isFinite
+            ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
+            : null;
     final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
       0.0,
       2.0,
     )).toDouble();
     final sustainLevel = (params['sustainLevel'] ?? 0.86)
-        .clamp(0.05, 1.0)
+        .clamp(0.0, 1.0)
         .toDouble();
-    final releaseOverrideSec = ((params['releaseMs'] ?? -1.0) / 1000.0);
+    final releaseOverrideMs = params['releaseMs'];
+    final releaseOverrideSec =
+        releaseOverrideMs != null && releaseOverrideMs.isFinite
+            ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
+            : null;
     final sampleStartNorm = (params['sampleStartNorm'] ?? 0.0)
         .clamp(0.0, 0.98)
         .toDouble();
@@ -26455,9 +26474,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       80.0,
       20000.0,
     );
-    final tailSec = releaseOverrideSec > 0
-        ? releaseOverrideSec
-        : definition.defaultReleaseSec;
+    final tailSec = releaseOverrideSec ?? definition.defaultReleaseSec;
     var totalMs = math.max(
       minimumDurationMs,
       endBeat * msPerBeat + tailSec * 1000.0 + 180.0,
@@ -26580,13 +26597,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         1,
         (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
       );
-      final attackSec = attackOverrideSec > 0
-          ? attackOverrideSec
-          : region.attackSec.clamp(0.0, 2.0);
-      final releaseSec = releaseOverrideSec > 0
-          ? releaseOverrideSec
-          : region.releaseSec.clamp(0.02, 12.0);
-      final releaseSamples = math.max(1, (releaseSec * sampleRate).round());
+      final attackSec =
+          attackOverrideSec ?? region.attackSec.clamp(0.0, 2.0).toDouble();
+      final releaseSec =
+          releaseOverrideSec ?? region.releaseSec.clamp(0.0, 12.0);
+      final releaseSamples = math.max(0, (releaseSec * sampleRate).round());
       final playbackRate = _sfzPlaybackRate(
         sample: sample,
         region: region,
@@ -26862,15 +26877,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         (note.lengthBeats * msPerBeat * sampleRate / 1000.0).round(),
       );
       final attackSamples = math.max(
-        1,
+        0,
         (preset.attackMs * sampleRate / 1000.0).round(),
       );
       final decaySamples = math.max(
-        1,
+        0,
         (preset.decayMs * sampleRate / 1000.0).round(),
       );
       final releaseSamples = math.max(
-        1,
+        0,
         (preset.releaseMs * sampleRate / 1000.0).round(),
       );
       final totalNoteSamples = sustainSamples + releaseSamples;
@@ -30083,7 +30098,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     if (extracted != null && extracted.isNotEmpty) {
       clip.normWaveformData = extracted;
-      _waveformCacheByPath[_normalizedClipPath(clip.file.path)] = extracted;
+      if (!_isAllZeroWaveform(extracted)) {
+        // Keep silent peaks out of the shared cache; every later clip on this
+        // path would be served them and paint an empty waveform.
+        _waveformCacheByPath[_normalizedClipPath(clip.file.path)] = extracted;
+      }
       clip.didExtractWaveform = true;
     }
   }
@@ -30442,7 +30461,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final cacheKey = _normalizedClipPath(inputPath);
     try {
       final cached = _waveformCacheByPath[cacheKey];
-      if (cached != null && cached.isNotEmpty) {
+      // Silent peaks are treated as unusable here, matching
+      // `_ensureAiV3ClipWaveformReady`. Adopting them would mark the clip as
+      // extracted and leave it painting an empty waveform for good.
+      if (cached != null && cached.isNotEmpty && !_isAllZeroWaveform(cached)) {
         if (!mounted) return;
         final waitingTracks =
             _waveformPendingTracksByPath.remove(cacheKey) ?? <AudioTrack>{};
@@ -30492,7 +30514,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             final future =
                 _extractWaveformData(inputPath, durSec: durSec, target: target)
                     .then((waveform) {
-                      if (waveform != null && waveform.isNotEmpty) {
+                      if (waveform != null &&
+                          waveform.isNotEmpty &&
+                          !_isAllZeroWaveform(waveform)) {
                         _waveformCacheByPath[cacheKey] = waveform;
                       }
                       return waveform;
@@ -30510,6 +30534,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _waveformPendingTracksByPath.remove(cacheKey) ?? <AudioTrack>{c};
       if (waveform == null || waveform.isEmpty) {
         _markWaveformExtractionFailed(cacheKey, waitingTracks, 'empty result');
+        return;
+      }
+      if (_isAllZeroWaveform(waveform)) {
+        // All-silent peaks from a file that decodes fine usually mean ffmpeg
+        // read it while it was still being written, which is common for
+        // freshly generated or exported audio. Retry rather than accept a
+        // waveform that would paint the clip as empty.
+        _markWaveformExtractionFailed(cacheKey, waitingTracks, 'silent result');
         return;
       }
       _waveformFailureCountByPath.remove(cacheKey);
@@ -83504,6 +83536,231 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Future<bool> _moveRowsBlockImpl(List<int> rows, int delta) async {
+    if (delta == 0) return false;
+    final ordered =
+        rows.where((row) => row >= 0 && row < _rowCount).toSet().toList()
+          ..sort();
+    if (ordered.isEmpty) return false;
+    // The selection travels as one block, so refuse the move outright when
+    // either edge would fall off the timeline instead of letting rows collapse
+    // into each other.
+    if (delta < 0 && ordered.first + delta < 0) return false;
+    if (delta > 0 && ordered.last + delta >= _rowCount) return false;
+
+    // Walk in the direction that leaves the not-yet-moved indices valid.
+    final sequence = delta < 0 ? ordered : ordered.reversed.toList();
+    var changed = false;
+    for (final row in sequence) {
+      if (await _moveRowImpl(row, row + delta)) changed = true;
+    }
+    return changed;
+  }
+
+  Future<void> _moveRows(List<int> rows, int delta) async {
+    await _runRowLayoutActionWithUndo(
+      description: rows.length > 1 ? 'Move rows' : 'Move row',
+      perform: () => _moveRowsBlockImpl(rows, delta),
+    );
+  }
+
+  String _duplicateRowName(String sourceName) {
+    final base = sourceName.trim().isEmpty ? 'Track' : sourceName.trim();
+    final taken = _rows.map((row) => row.name.trim()).toSet();
+    var candidate = '$base Copy';
+    var suffix = 2;
+    while (taken.contains(candidate)) {
+      candidate = '$base Copy $suffix';
+      suffix++;
+    }
+    return candidate;
+  }
+
+  /// Re-adds [clips] onto [row] with fresh clip ids so the copies do not share
+  /// identity with the originals they were cloned from.
+  Future<void> _duplicateRowClips(int row, List<AudioTrack> clips) async {
+    for (final clip in clips) {
+      if (clip.isMidi) {
+        await _addMidiTrack(
+          instrumentId: clip.instrumentId,
+          instrumentName: clip.instrumentName,
+          instrumentParams: Map<String, double>.from(clip.instrumentParams),
+          midiNotes: clip.midiNotes.map((note) => note.copy()).toList(),
+          row: row,
+          timeMs: clip.offset * 1000.0,
+          trimStartRequested: clip.trimStart,
+          trimEndRequested: clip.trimEnd,
+          renderedFile: clip.file,
+          label: clip.label,
+          gain: clip.gain,
+          pitchSemitones: clip.pitchSemitones,
+          sourceTempoBpm: clip.sourceTempoBpm,
+          stretchToProjectTempo: clip.stretchToProjectTempo,
+          tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+          tempoWarpMode: clip.tempoWarpMode,
+          crossfade: clip.crossfade,
+          automation: clip.volumeAutomation.map((p) => p.copy()).toList(),
+          hostedInstrumentStateBase64: clip.hostedInstrumentStateBase64,
+          rowAlreadyEnsured: true,
+          notifyUi: false,
+          updateProjectDuration: false,
+          assumeFreshEngineDefaults: true,
+        );
+        continue;
+      }
+
+      await _addAudioTrackFromProjectFile(
+        projectAudioFile: clip.file,
+        label: clip.label,
+        row: row,
+        timeMs: clip.offset * 1000.0,
+        trimStartRequested: clip.trimStart,
+        trimEndRequested: clip.trimEnd,
+        gain: clip.gain,
+        normalizeVolume: clip.normalizeVolume,
+        normalizeGain: clip.normalizeGain,
+        preNormalizeGain: clip.preNormalizeGain,
+        pitchSemitones: clip.pitchSemitones,
+        isReversed: clip.isReversed,
+        sourceTempoBpm: clip.sourceTempoBpm,
+        stretchToProjectTempo: clip.stretchToProjectTempo,
+        tempoStretchPreservePitch: clip.tempoStretchPreservePitch,
+        tempoWarpMode: clip.tempoWarpMode,
+        crossfade: clip.crossfade,
+        automation: clip.volumeAutomation.map((p) => p.copy()).toList(),
+        rowAlreadyEnsured: true,
+        notifyUi: false,
+        updateProjectDuration: false,
+        assumeFreshEngineDefaults: true,
+      );
+    }
+  }
+
+  /// Inserts a clone of [snapshot] directly below [afterIndex]. Returns the
+  /// index of the new row, or -1 when the engine refused to create it.
+  Future<int> _insertDuplicatedRow(
+    _DeletedRowSnapshot snapshot,
+    int afterIndex,
+  ) async {
+    if (afterIndex < 0 || afterIndex >= _rowCount) return -1;
+    final refRowId = _rowIdAt(afterIndex);
+    if (refRowId < 0) return -1;
+
+    final name = _duplicateRowName(snapshot.row.name);
+    final newRowId = await JuceAudioEngine.insertRowBelow(
+      refRowId,
+      name,
+      iconId: snapshot.row.iconId,
+    );
+    if (newRowId < 0) return -1;
+
+    final insertIndex = afterIndex + 1;
+    // The copy starts outside any track group; joining one would repack row
+    // order underneath us mid-duplicate.
+    final nextRows = List<TimelineRow>.from(_rows)
+      ..insert(
+        insertIndex,
+        snapshot.row.copyWith(rowId: newRowId, name: name, groupId: ''),
+      );
+    await _applyRowsToEditorState(
+      nextRows,
+      refreshAutomationTargets: false,
+      syncClipRows: true,
+    );
+
+    await _duplicateRowClips(insertIndex, snapshot.clips);
+    await _restoreRowSnapshot(
+      RowEffectsSnapshot(
+        insertIndex,
+        snapshot.rowEffects.effects,
+        rowId: newRowId,
+      ),
+    );
+    await _restoreDeletedRowState(
+      insertIndex,
+      snapshot.rowState,
+      snapshot.uiState,
+    );
+    _refreshRowFx(insertIndex);
+    return insertIndex;
+  }
+
+  /// Creates one clone per snapshot, stacked below [anchorRowId]. Returns the
+  /// row ids that were created so the undo path can remove exactly those.
+  Future<List<int>> _createDuplicatedRows(
+    List<_DeletedRowSnapshot> snapshots, {
+    required int anchorRowId,
+  }) async {
+    var insertAfter = _rowIndexForId(anchorRowId);
+    if (insertAfter < 0) insertAfter = _rowCount - 1;
+
+    final createdRowIds = <int>[];
+    for (final snapshot in snapshots) {
+      final createdIndex = await _insertDuplicatedRow(snapshot, insertAfter);
+      if (createdIndex < 0) continue;
+      createdRowIds.add(_rowIdAt(createdIndex));
+      insertAfter = createdIndex;
+    }
+    if (createdRowIds.isEmpty) return createdRowIds;
+
+    await _recomputeAudibleState();
+    _updateOverallDurationIfNeeded(forceRebuild: true);
+    _refreshAudioEditorView();
+    return createdRowIds;
+  }
+
+  Future<void> _removeDuplicatedRows(List<int> rowIds) async {
+    final indices = rowIds
+        .map(_rowIndexForId)
+        .where((index) => index >= 0 && index < _rowCount)
+        .toList()
+      ..sort();
+    if (indices.isEmpty) return;
+    // Bottom-up so the indices we have not deleted yet stay valid.
+    for (final index in indices.reversed) {
+      await _deleteRowImpl(index);
+    }
+    await _recomputeAudibleState();
+    _updateOverallDurationIfNeeded(forceRebuild: true);
+    _refreshAudioEditorView();
+  }
+
+  Future<void> _duplicateRows(List<int> rows) async {
+    final ordered =
+        rows.where((row) => row >= 0 && row < _rowCount).toSet().toList()
+          ..sort();
+    if (ordered.isEmpty) return;
+    if (_rowCount + ordered.length > _effectiveMaxRows) {
+      _showRowLimitReachedNotice();
+      return;
+    }
+
+    // Snapshot every source row before inserting anything, otherwise the
+    // inserts would shift the indices we still need to read from. Holding the
+    // snapshots also lets redo rebuild identical copies.
+    final snapshots = <_DeletedRowSnapshot>[];
+    for (final row in ordered) {
+      final snapshot = await _captureDeletedRowSnapshot(row);
+      if (snapshot == null) return;
+      snapshots.add(snapshot);
+    }
+    final anchorRowId = _rowIdAt(ordered.last);
+    if (anchorRowId < 0) return;
+
+    // A row layout snapshot cannot undo this: it carries no clips, so it would
+    // orphan the copied audio. Delete the created rows instead.
+    await _undoManager.execute(
+      _DuplicateRowsAction(
+        descriptionText: ordered.length > 1
+            ? 'Duplicate rows'
+            : 'Duplicate row',
+        createRows: () =>
+            _createDuplicatedRows(snapshots, anchorRowId: anchorRowId),
+        removeRows: _removeDuplicatedRows,
+      ),
+    );
+  }
+
   void _updateOverallDurationIfNeeded({
     Iterable<AudioTrack>? changedClips,
     Iterable<AudioTrack>? removedClips,
@@ -84118,6 +84375,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _changeInstrumentLaneFromPicker,
                                           onDeleteRow: _deleteRow,
                                           onMoveRow: _moveRow,
+                                          onMoveRows: _moveRows,
+                                          onDuplicateRows: _duplicateRows,
                                           onRenameRow: _renameRow,
                                           onRenameRowGroup: _renameRowGroup,
                                           onSetRowIcon: _setRowIcon,
@@ -89891,6 +90150,38 @@ class _RowLayoutSnapshotAction extends EditorUndoAction {
 
   @override
   Future<void> undo() => applySnapshot(before);
+}
+
+/// Duplicating rows copies clips, so undo has to delete the rows it created
+/// rather than replay a row layout snapshot (which carries no clip state).
+class _DuplicateRowsAction extends EditorUndoAction {
+  _DuplicateRowsAction({
+    required this.descriptionText,
+    required this.createRows,
+    required this.removeRows,
+  });
+
+  final String descriptionText;
+  final Future<List<int>> Function() createRows;
+  final Future<void> Function(List<int> rowIds) removeRows;
+
+  List<int> _createdRowIds = const <int>[];
+
+  @override
+  String get description => descriptionText;
+
+  @override
+  Future<void> redo() async {
+    _createdRowIds = await createRows();
+  }
+
+  @override
+  Future<void> undo() async {
+    if (_createdRowIds.isEmpty) return;
+    final rowIds = _createdRowIds;
+    _createdRowIds = const <int>[];
+    await removeRows(rowIds);
+  }
 }
 
 class _AiV3GroupLayoutAction extends EditorUndoAction {

@@ -244,7 +244,7 @@ double estimateMidiMaterialLengthSec(const juce::Array<TimelineMidiNote> &notes,
         if (v->isInt() || v->isInt64() || v->isDouble())
             releaseMs = (double)(*v);
     }
-    releaseMs = juce::jlimit(10.0, 4000.0, releaseMs);
+    releaseMs = juce::jlimit(0.0, 4000.0, releaseMs);
 
     const double minimumDurationSec = 1.2;
     const double renderedSec =

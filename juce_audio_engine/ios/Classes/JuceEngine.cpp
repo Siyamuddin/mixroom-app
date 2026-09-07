@@ -107,7 +107,7 @@ double estimateMidiMaterialLengthSec(const juce::Array<TimelineMidiNote> &notes,
         if (v->isInt() || v->isInt64() || v->isDouble())
             releaseMs = (double)(*v);
     }
-    releaseMs = juce::jlimit(10.0, 4000.0, releaseMs);
+    releaseMs = juce::jlimit(0.0, 4000.0, releaseMs);
 
     const double minimumDurationSec = 1.2;
     const double renderedSec =
@@ -15533,7 +15533,7 @@ void JuceEngine::updateMasterMeterFromOutput(const float *const *out,
 
     // light smoothing (UI jitter reduction)
     constexpr float alpha = 0.25f;
-    auto smooth = [](float prev, float next)
+    auto smooth = [alpha](float prev, float next)
     { return prev + alpha * (next - prev); };
 
     const float prevPeakL = masterMeter.peakL.load(std::memory_order_relaxed);

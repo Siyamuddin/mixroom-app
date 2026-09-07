@@ -617,13 +617,19 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     _params.putIfAbsent('oscillator', () => 1.0);
     _params.putIfAbsent('cutoffHz', () => 3200.0);
     _params.putIfAbsent('attackMs', () => 18.0);
+    _params.putIfAbsent('decayMs', () => 120.0);
+    _params.putIfAbsent('sustainLevel', () => 0.86);
     _params.putIfAbsent('releaseMs', () => 180.0);
     _params.putIfAbsent('drive', () => 0.08);
   }
 
   bool _isSampledInstrumentId(String id) {
     final normalized = id.trim().toLowerCase();
-    return normalized.startsWith('sfz.') || normalized.startsWith('sfz_asset:');
+    if (normalized.startsWith('sfz.') || normalized.startsWith('sfz_asset:')) {
+      return true;
+    }
+    final spec = _instrumentSpecForId(id);
+    return spec?['isSampled'] == true;
   }
 
   bool _isGranularizerParams() {
@@ -861,6 +867,8 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     params.putIfAbsent('oscillator', () => 1.0);
     params.putIfAbsent('cutoffHz', () => 3200.0);
     params.putIfAbsent('attackMs', () => 18.0);
+    params.putIfAbsent('decayMs', () => 120.0);
+    params.putIfAbsent('sustainLevel', () => 0.86);
     params.putIfAbsent('releaseMs', () => 180.0);
     params.putIfAbsent('drive', () => 0.08);
     return params;
@@ -5543,31 +5551,59 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             const SizedBox(height: 10),
             _instrumentCard(
               title: 'Envelope',
-              subtitle: 'Shape note attack and tail',
-              child: Column(
-                children: [
-                  _labeledSlider(
-                    label: 'Attack',
-                    value: (_params['attackMs'] ?? 18.0).clamp(0.0, 300.0),
-                    min: 0.0,
-                    max: 300.0,
-                    onChanged: (v) {
-                      setState(() => _params['attackMs'] = v);
-                      _queueCommit();
-                    },
-                  ),
-                  _labeledSlider(
-                    label: 'Release',
-                    value: (_params['releaseMs'] ?? 180.0).clamp(20.0, 1200.0),
-                    min: 20.0,
-                    max: 1200.0,
-                    onChanged: (v) {
-                      setState(() => _params['releaseMs'] = v);
-                      _queueCommit();
-                    },
-                  ),
-                ],
-              ),
+              subtitle: externalPlugin
+                  ? 'Shape note attack and tail'
+                  : 'Shape note attack, decay, sustain, and release',
+              child: externalPlugin
+                  ? Column(
+                      children: [
+                        _labeledSlider(
+                          label: 'Attack',
+                          value:
+                              (_params['attackMs'] ?? 18.0).clamp(0.0, 300.0),
+                          min: 0.0,
+                          max: 300.0,
+                          onChanged: (v) {
+                            setState(() => _params['attackMs'] = v);
+                            _queueCommit();
+                          },
+                        ),
+                        _labeledSlider(
+                          label: 'Release',
+                          value: (_params['releaseMs'] ?? 180.0)
+                              .clamp(20.0, 1200.0),
+                          min: 20.0,
+                          max: 1200.0,
+                          onChanged: (v) {
+                            setState(() => _params['releaseMs'] = v);
+                            _queueCommit();
+                          },
+                        ),
+                      ],
+                    )
+                  : _buildAdsrEnvelopeControls(
+                      keyPrefix: 'synth',
+                      accent: accent,
+                      attackMs: (_params['attackMs'] ?? 18.0)
+                          .clamp(0.0, 300.0)
+                          .toDouble(),
+                      attackMaxMs: 300.0,
+                      decayMs: (_params['decayMs'] ?? 120.0)
+                          .clamp(0.0, 2000.0)
+                          .toDouble(),
+                      decayMaxMs: 2000.0,
+                      sustainLevel: (_params['sustainLevel'] ?? 0.86)
+                          .clamp(0.0, 1.0)
+                          .toDouble(),
+                      releaseMs: (_params['releaseMs'] ?? 180.0)
+                          .clamp(0.0, 1200.0)
+                          .toDouble(),
+                      releaseMaxMs: 1200.0,
+                      onChanged: (key, value) {
+                        setState(() => _params[key] = value);
+                        _queueCommit();
+                      },
+                    ),
             ),
           ],
         ],
@@ -5620,13 +5656,110 @@ class _PianoRollEditorState extends State<PianoRollEditor>
     );
   }
 
+  Widget _buildAdsrEnvelopeControls({
+    required String keyPrefix,
+    required Color accent,
+    required double attackMs,
+    required double attackMaxMs,
+    required double decayMs,
+    required double decayMaxMs,
+    required double sustainLevel,
+    required double releaseMs,
+    required double releaseMaxMs,
+    required void Function(String key, double value) onChanged,
+    double graphHeight = 106,
+  }) {
+    Widget envelopeRow({
+      required String parameter,
+      required String label,
+      required String name,
+      required double value,
+      required double min,
+      required double max,
+      required String Function(double value) valueLabelBuilder,
+    }) {
+      return KeyedSubtree(
+        key: ValueKey<String>('${keyPrefix}_${parameter}_slider'),
+        child: _samplerEnvelopeRow(
+          label: label,
+          name: name,
+          value: value,
+          min: min,
+          max: max,
+          accent: accent,
+          valueLabelBuilder: valueLabelBuilder,
+          onChanged: (nextValue) => onChanged(parameter, nextValue),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        SizedBox(
+          key: ValueKey<String>('${keyPrefix}_adsr_graph'),
+          height: graphHeight,
+          width: double.infinity,
+          child: CustomPaint(
+            painter: _AdsrEnvelopePainter(
+              attackMs: attackMs,
+              attackMaxMs: attackMaxMs,
+              decayMs: decayMs,
+              decayMaxMs: decayMaxMs,
+              sustainLevel: sustainLevel,
+              releaseMs: releaseMs,
+              releaseMaxMs: releaseMaxMs,
+              accent: accent,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        envelopeRow(
+          parameter: 'attackMs',
+          label: 'A',
+          name: 'Attack',
+          value: attackMs,
+          min: 0.0,
+          max: attackMaxMs,
+          valueLabelBuilder: _formatEnvelopeMs,
+        ),
+        envelopeRow(
+          parameter: 'decayMs',
+          label: 'D',
+          name: 'Decay',
+          value: decayMs,
+          min: 0.0,
+          max: decayMaxMs,
+          valueLabelBuilder: _formatEnvelopeMs,
+        ),
+        envelopeRow(
+          parameter: 'sustainLevel',
+          label: 'S',
+          name: 'Sustain',
+          value: sustainLevel,
+          min: 0.0,
+          max: 1.0,
+          valueLabelBuilder: (value) => '${(value * 100).round()}%',
+        ),
+        envelopeRow(
+          parameter: 'releaseMs',
+          label: 'R',
+          name: 'Release',
+          value: releaseMs,
+          min: 0.0,
+          max: releaseMaxMs,
+          valueLabelBuilder: _formatEnvelopeMs,
+        ),
+      ],
+    );
+  }
+
   Widget _buildSamplerEnvelopePanel({required Color accent}) {
     final attack = (_params['attackMs'] ?? 6.0).clamp(0.0, 600.0).toDouble();
     final decay = (_params['decayMs'] ?? 120.0).clamp(0.0, 900.0).toDouble();
     final sustain =
-        (_params['sustainLevel'] ?? 0.86).clamp(0.05, 1.0).toDouble();
+        (_params['sustainLevel'] ?? 0.86).clamp(0.0, 1.0).toDouble();
     final release =
-        (_params['releaseMs'] ?? 520.0).clamp(20.0, 1800.0).toDouble();
+        (_params['releaseMs'] ?? 520.0).clamp(0.0, 1800.0).toDouble();
     final output = (_params['outputGain'] ?? 0.72).clamp(0.2, 2.0).toDouble();
     final filterCutoff = (_params['sampleFilterCutoffHz'] ?? 20000.0)
         .clamp(80.0, 20000.0)
@@ -5700,59 +5833,18 @@ class _PianoRollEditorState extends State<PianoRollEditor>
             _buildGranularizerControls(accent: accent, setParam: setParam),
           ],
           const SizedBox(height: 11),
-          SizedBox(
-            height: granular ? 76 : 106,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _SamplerEnvelopePainter(
-                attackMs: attack,
-                decayMs: decay,
-                sustainLevel: sustain,
-                releaseMs: release,
-                accent: accent,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          _samplerEnvelopeRow(
-            label: 'A',
-            name: 'Attack',
-            value: attack,
-            min: 0.0,
-            max: 600.0,
+          _buildAdsrEnvelopeControls(
+            keyPrefix: granular ? 'granularizer' : 'sampler',
             accent: accent,
-            valueLabelBuilder: _formatEnvelopeMs,
-            onChanged: (value) => setParam('attackMs', value),
-          ),
-          _samplerEnvelopeRow(
-            label: 'D',
-            name: 'Decay',
-            value: decay,
-            min: 0.0,
-            max: 900.0,
-            accent: accent,
-            valueLabelBuilder: _formatEnvelopeMs,
-            onChanged: (value) => setParam('decayMs', value),
-          ),
-          _samplerEnvelopeRow(
-            label: 'S',
-            name: 'Sustain',
-            value: sustain,
-            min: 0.05,
-            max: 1.0,
-            accent: accent,
-            valueLabelBuilder: (value) => '${(value * 100).round()}%',
-            onChanged: (value) => setParam('sustainLevel', value),
-          ),
-          _samplerEnvelopeRow(
-            label: 'R',
-            name: 'Release',
-            value: release,
-            min: 20.0,
-            max: 1800.0,
-            accent: accent,
-            valueLabelBuilder: _formatEnvelopeMs,
-            onChanged: (value) => setParam('releaseMs', value),
+            attackMs: attack,
+            attackMaxMs: 600.0,
+            decayMs: decay,
+            decayMaxMs: 900.0,
+            sustainLevel: sustain,
+            releaseMs: release,
+            releaseMaxMs: 1800.0,
+            graphHeight: granular ? 76 : 106,
+            onChanged: setParam,
           ),
           Container(
             height: 1,
@@ -6493,11 +6585,17 @@ class _PianoRollEditorState extends State<PianoRollEditor>
                     overlayRadius: compact ? 18 : 14,
                   ),
                 ),
-                child: DesktopScrollableSlider(
-                  value: value.clamp(min, max),
-                  min: min,
-                  max: max,
-                  onChanged: onChanged,
+                child: MergeSemantics(
+                  child: Semantics(
+                    label: name,
+                    child: DesktopScrollableSlider(
+                      value: value.clamp(min, max),
+                      min: min,
+                      max: max,
+                      semanticFormatterCallback: valueLabelBuilder,
+                      onChanged: onChanged,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -7484,20 +7582,37 @@ class _PianoRollEditorState extends State<PianoRollEditor>
   }
 }
 
-class _SamplerEnvelopePainter extends CustomPainter {
-  _SamplerEnvelopePainter({
+class _AdsrEnvelopePainter extends CustomPainter {
+  _AdsrEnvelopePainter({
     required this.attackMs,
+    required this.attackMaxMs,
     required this.decayMs,
+    required this.decayMaxMs,
     required this.sustainLevel,
     required this.releaseMs,
+    required this.releaseMaxMs,
     required this.accent,
   });
 
   final double attackMs;
+  final double attackMaxMs;
   final double decayMs;
+  final double decayMaxMs;
   final double sustainLevel;
   final double releaseMs;
+  final double releaseMaxMs;
   final Color accent;
+
+  List<double> _phaseWidths() {
+    final attackW = _phaseWidth(attackMs, attackMaxMs, 0.24);
+    final decayW = _phaseWidth(decayMs, decayMaxMs, 0.24);
+    final releaseW = _phaseWidth(releaseMs, releaseMaxMs, 0.30);
+    final sustainW = math.max(0.20, 1.0 - attackW - decayW - releaseW);
+    return <double>[attackW, decayW, sustainW, releaseW];
+  }
+
+  @visibleForTesting
+  List<double> debugPhaseWidths() => _phaseWidths();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -7531,28 +7646,54 @@ class _SamplerEnvelopePainter extends CustomPainter {
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
     }
 
-    final attackW = _phaseWidth(attackMs, 600.0, 0.08, 0.24);
-    final decayW = _phaseWidth(decayMs, 900.0, 0.09, 0.24);
-    final releaseW = _phaseWidth(releaseMs, 1800.0, 0.13, 0.30);
-    final sustainW = math.max(0.20, 1.0 - attackW - decayW - releaseW);
+    final phaseWidths = _phaseWidths();
+    final attackW = phaseWidths[0];
+    final decayW = phaseWidths[1];
+    final sustainW = phaseWidths[2];
+    final releaseW = phaseWidths[3];
     final total = attackW + decayW + sustainW + releaseW;
 
     final x0 = plot.left;
-    final xA = plot.left + plot.width * attackW / total;
-    final xD = xA + plot.width * decayW / total;
-    final xS = xD + plot.width * sustainW / total;
     final xR = plot.right;
+    final xA = (plot.left + plot.width * attackW / total)
+        .clamp(x0, xR)
+        .toDouble();
+    final xD = (xA + plot.width * decayW / total)
+        .clamp(xA, xR)
+        .toDouble();
+    final xS = releaseW <= 0.0
+        ? xR
+        : (xD + plot.width * sustainW / total)
+            .clamp(xD, xR)
+            .toDouble();
+    assert(x0 <= xA && xA <= xD && xD <= xS && xS <= xR);
     final yBase = plot.bottom - 4;
     final yPeak = plot.top + 5;
-    final safeSustain = sustainLevel.clamp(0.05, 1.0).toDouble();
+    final safeSustain = sustainLevel.clamp(0.0, 1.0).toDouble();
     final ySustain = yBase - ((yBase - yPeak) * safeSustain);
-
     final curve = Path()
       ..moveTo(x0, yBase)
-      ..lineTo(xA, yPeak)
-      ..quadraticBezierTo((xA + xD) * 0.5, ySustain, xD, ySustain)
-      ..lineTo(xS, ySustain)
-      ..quadraticBezierTo((xS + xR) * 0.58, yBase, xR, yBase);
+      ..lineTo(xA, yPeak);
+    if (decayMs <= 0.0) {
+      curve.lineTo(xD, ySustain);
+    } else {
+      curve.quadraticBezierTo(
+        (xA + xD) * 0.5,
+        ySustain,
+        xD,
+        ySustain,
+      );
+    }
+    curve.lineTo(xS, ySustain);
+    if (releaseMs <= 0.0) {
+      curve.lineTo(xR, yBase);
+    } else {
+      final releaseControlX = (xS + ((xR - xS) * 0.58))
+          .clamp(xS, xR)
+          .toDouble();
+      assert(releaseControlX >= xS && releaseControlX <= xR);
+      curve.quadraticBezierTo(releaseControlX, yBase, xR, yBase);
+    }
 
     final fill = Path.from(curve)
       ..lineTo(xR, yBase)
@@ -7570,6 +7711,12 @@ class _SamplerEnvelopePainter extends CustomPainter {
           ],
         ).createShader(plot),
     );
+    final guidePaint = Paint()
+      ..strokeWidth = 1
+      ..color = Colors.white.withValues(alpha: 0.10);
+    for (final x in [xA, xD, xS]) {
+      canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), guidePaint);
+    }
     canvas.drawPath(
       curve,
       Paint()
@@ -7580,27 +7727,22 @@ class _SamplerEnvelopePainter extends CustomPainter {
         ..color = accent,
     );
 
-    final guidePaint = Paint()
-      ..strokeWidth = 1
-      ..color = Colors.white.withValues(alpha: 0.10);
-    for (final x in [xA, xD, xS]) {
-      canvas.drawLine(Offset(x, plot.top), Offset(x, plot.bottom), guidePaint);
+    if (xA - x0 >= 18.0) {
+      _drawPhaseLabel(canvas, 'A', Offset((x0 + xA) * 0.5, plot.bottom - 13));
     }
-
-    _drawPhaseLabel(canvas, 'A', Offset((x0 + xA) * 0.5, plot.bottom - 13));
-    _drawPhaseLabel(canvas, 'D', Offset((xA + xD) * 0.5, plot.bottom - 13));
+    if (xD - xA >= 18.0) {
+      _drawPhaseLabel(canvas, 'D', Offset((xA + xD) * 0.5, plot.bottom - 13));
+    }
     _drawPhaseLabel(canvas, 'S', Offset((xD + xS) * 0.5, plot.bottom - 13));
-    _drawPhaseLabel(canvas, 'R', Offset((xS + xR) * 0.5, plot.bottom - 13));
+    if (xR - xS >= 18.0) {
+      _drawPhaseLabel(canvas, 'R', Offset((xS + xR) * 0.5, plot.bottom - 13));
+    }
   }
 
-  double _phaseWidth(
-    double value,
-    double max,
-    double minWidth,
-    double maxWidth,
-  ) {
+  double _phaseWidth(double value, double max, double maxWidth) {
+    if (value <= 0.0 || max <= 0.0) return 0.0;
     final t = (value / max).clamp(0.0, 1.0).toDouble();
-    return minWidth + (maxWidth - minWidth) * math.sqrt(t);
+    return maxWidth * math.sqrt(t);
   }
 
   void _drawPhaseLabel(Canvas canvas, String label, Offset center) {
@@ -7623,11 +7765,14 @@ class _SamplerEnvelopePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SamplerEnvelopePainter oldDelegate) {
+  bool shouldRepaint(covariant _AdsrEnvelopePainter oldDelegate) {
     return attackMs != oldDelegate.attackMs ||
+        attackMaxMs != oldDelegate.attackMaxMs ||
         decayMs != oldDelegate.decayMs ||
+        decayMaxMs != oldDelegate.decayMaxMs ||
         sustainLevel != oldDelegate.sustainLevel ||
         releaseMs != oldDelegate.releaseMs ||
+        releaseMaxMs != oldDelegate.releaseMaxMs ||
         accent != oldDelegate.accent;
   }
 }
