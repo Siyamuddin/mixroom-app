@@ -405,6 +405,214 @@ void main() {
     expect(armed, isNull);
   });
 
+  test(
+    'preferred instrument row wins over a selected midi clip on another row',
+    () async {
+      final tracks = <AudioTrack>[
+        await _buildTrack(
+          engineClipId: 11,
+          kind: ClipKind.midi,
+          label: 'piano',
+          rowIndex: 0,
+        ),
+        await _buildTrack(
+          engineClipId: 22,
+          kind: ClipKind.midi,
+          label: 'synth',
+          rowIndex: 1,
+        ),
+      ];
+
+      final armed = resolveArmedMidiClip(
+        tracks: tracks,
+        activeMidiClipEngineId: 11,
+        primarySelectedClipIndex: 0,
+        preferredRowIndex: 1,
+      );
+
+      expect(armed?.engineClipId, 22);
+    },
+  );
+
+  test(
+    'preferred row keeps the open editor clip when it belongs to that row',
+    () async {
+      final tracks = <AudioTrack>[
+        await _buildTrack(
+          engineClipId: 11,
+          kind: ClipKind.midi,
+          label: 'synth-a',
+          rowIndex: 1,
+        ),
+        await _buildTrack(
+          engineClipId: 22,
+          kind: ClipKind.midi,
+          label: 'synth-b',
+          rowIndex: 1,
+        ),
+      ];
+
+      final armed = resolveArmedMidiClip(
+        tracks: tracks,
+        activeMidiClipEngineId: 22,
+        primarySelectedClipIndex: 0,
+        preferredRowIndex: 1,
+      );
+
+      expect(armed?.engineClipId, 22);
+    },
+  );
+
+  test(
+    'preferred row with no midi clips falls back to the selected midi clip',
+    () async {
+      final tracks = <AudioTrack>[
+        await _buildTrack(
+          engineClipId: 11,
+          kind: ClipKind.midi,
+          label: 'piano',
+          rowIndex: 0,
+        ),
+        await _buildTrack(
+          engineClipId: 22,
+          kind: ClipKind.audio,
+          label: 'voice',
+          rowIndex: 1,
+        ),
+      ];
+
+      final armed = resolveArmedMidiClip(
+        tracks: tracks,
+        activeMidiClipEngineId: null,
+        primarySelectedClipIndex: 0,
+        preferredRowIndex: 1,
+      );
+
+      expect(armed?.engineClipId, 11);
+    },
+  );
+
+  test('preferred audio-only row does not arm midi by itself', () async {
+    final tracks = <AudioTrack>[
+      await _buildTrack(
+        engineClipId: 11,
+        kind: ClipKind.audio,
+        label: 'voice',
+        rowIndex: 0,
+      ),
+      await _buildTrack(
+        engineClipId: 22,
+        kind: ClipKind.midi,
+        label: 'piano',
+        rowIndex: 1,
+      ),
+    ];
+
+    final armed = resolveArmedMidiClip(
+      tracks: tracks,
+      activeMidiClipEngineId: null,
+      primarySelectedClipIndex: 0,
+      preferredRowIndex: 0,
+    );
+
+    expect(armed, isNull);
+  });
+
+  test('header row select arms live MIDI for instrument lanes', () {
+    final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
+    final start = editor.indexOf('onSelectRow:');
+    final end = editor.indexOf('onToggleExpanded:', start);
+    final handler = editor.substring(start, end);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    expect(handler, contains('_selectedRow = row'));
+    expect(handler, contains('_armLiveMidiInputForInstrumentRow'));
+    expect(handler, contains('unawaited('));
+  });
+
+  test(
+    'instrument header arming finds or creates a clip before syncing live MIDI',
+    () {
+      final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
+      final start = editor.indexOf(
+        'Future<void> _armLiveMidiInputForInstrumentRow(int row) async {',
+      );
+      final end = editor.indexOf(
+        'Future<void> _openInstrumentUiForRow(int row) async {',
+        start,
+      );
+      final method = editor.substring(start, end);
+
+      final findClip = method.indexOf('_midiClipIndexForInstrumentRow(row)');
+      final createClip = method.indexOf(
+        'await _createMidiClipInInstrumentLane(',
+      );
+      final retarget = method.indexOf(
+        '_retargetOpenMidiClipEditorToSelection(clipIndex)',
+      );
+      final prepare = method.indexOf(
+        'unawaited(_prepareLiveMidiPreviewRoute())',
+      );
+      final sync = method.indexOf('await _syncLiveMidiInputTargetClip()');
+
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      expect(findClip, greaterThanOrEqualTo(0));
+      expect(createClip, greaterThan(findClip));
+      expect(retarget, greaterThan(createClip));
+      expect(prepare, greaterThan(retarget));
+      expect(sync, greaterThan(prepare));
+      expect(method, contains('openEditor: false'));
+      expect(method, contains('!_rows[row].isInstrumentLane'));
+      expect(method, contains('_isLiveMidiRowArmCurrent(rowId, armEpoch)'));
+      expect(method, contains('_liveMidiRowArmEpoch'));
+      expect(method, isNot(contains('_showPianoRoll = true')));
+    },
+  );
+
+  test('live MIDI lookups follow the selected instrument row', () {
+    final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
+    final armedStart = editor.indexOf('AudioTrack? _armedMidiClipOrNull() {');
+    final armedEnd = editor.indexOf(
+      'int _activeMidiClipEditorIndex() {',
+      armedStart,
+    );
+    final armed = editor.substring(armedStart, armedEnd);
+    final desktopStart = editor.indexOf(
+      'AudioTrack? _desktopMidiTargetClipOrNull() {',
+    );
+    final desktopEnd = editor.indexOf(
+      'bool _desktopKeyboardMidiCanCapture() {',
+      desktopStart,
+    );
+    final desktop = editor.substring(desktopStart, desktopEnd);
+    final syncStart = editor.indexOf(
+      'Future<void> _syncLiveMidiInputTargetClip() async {',
+    );
+    final syncEnd = editor.indexOf(
+      'void _handleUndoHistoryChanged() {',
+      syncStart,
+    );
+    final sync = editor.substring(syncStart, syncEnd);
+
+    expect(armed, contains('preferredRowIndex:'));
+    expect(armed, contains('resolveSelectedInstrumentLaneRecordingRow('));
+    expect(desktop.trim(), contains('return _armedMidiClipOrNull();'));
+    expect(sync, contains('_armedMidiClipOrNull()?.engineClipId'));
+    expect(sync, isNot(contains('_clipIndexForEngineId(activeEngineId)')));
+
+    final selectionStart = editor.indexOf('onSelectionChanged:');
+    final selectionEnd = editor.indexOf(
+      'onSnapSettingsChanged:',
+      selectionStart,
+    );
+    final selection = editor.substring(selectionStart, selectionEnd);
+    expect(selection, contains('_selectedRow = clipRow'));
+    expect(selection, contains('unawaited('));
+    expect(selection, contains('_syncLiveMidiInputTargetClip()'));
+  });
+
   test('resolves a selected instrument lane for midi recording', () {
     final rows = <TimelineRow>[
       TimelineRow(rowId: 1, name: 'Audio', iconId: 0),

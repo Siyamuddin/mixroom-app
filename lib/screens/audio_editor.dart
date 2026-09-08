@@ -5931,6 +5931,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, DesktopEditorWindowLayout> _desktopWindowLayouts =
       <String, DesktopEditorWindowLayout>{};
   int _lastLiveMidiInputTargetClipId = -2;
+  int _liveMidiRowArmEpoch = 0;
   final MidiPreviewNoteCoordinator _pianoRollPreviewNotes =
       MidiPreviewNoteCoordinator();
   bool _closingPianoRollPreview = false;
@@ -8576,13 +8577,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   AudioTrack? _desktopMidiTargetClipOrNull() {
-    if (_activeMidiClipEngineId != null) {
-      final index = _clipIndexForEngineId(_activeMidiClipEngineId!);
-      if (index >= 0 && index < _audioTracks.length) {
-        final clip = _audioTracks[index];
-        if (clip.isMidi) return clip;
-      }
-    }
     return _armedMidiClipOrNull();
   }
 
@@ -15025,6 +15019,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       tracks: _audioTracks,
       activeMidiClipEngineId: _activeMidiClipEngineId,
       primarySelectedClipIndex: _timelinePrimarySelectedClipIndex,
+      preferredRowIndex: resolveSelectedInstrumentLaneRecordingRow(
+        rows: _rows,
+        selectedRow: _selectedRow,
+      ),
     );
   }
 
@@ -15169,20 +15167,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _syncLiveMidiInputTargetClip() async {
     if (!_liveMidiEventPlaybackSupported || _isMidiClipRecording) return;
-    int targetClipId = -1;
-    final activeEngineId = _activeMidiClipEngineId;
-    if (activeEngineId != null) {
-      final activeIndex = _clipIndexForEngineId(activeEngineId);
-      if (activeIndex >= 0 && activeIndex < _audioTracks.length) {
-        final activeClip = _audioTracks[activeIndex];
-        if (activeClip.isMidi && activeClip.engineClipId >= 0) {
-          targetClipId = activeClip.engineClipId;
-        }
-      }
-    }
-    if (targetClipId < 0) {
-      targetClipId = _armedMidiClipOrNull()?.engineClipId ?? -1;
-    }
+    final targetClipId = _armedMidiClipOrNull()?.engineClipId ?? -1;
     await _setLiveMidiInputTargetClipIfNeeded(targetClipId);
   }
 
@@ -34037,6 +34022,55 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return activeIndex;
     }
     return _audioTracks.indexWhere(belongsToRow);
+  }
+
+  bool _isLiveMidiRowArmCurrent(int rowId, int epoch) {
+    if (!mounted) return false;
+    if (epoch != _liveMidiRowArmEpoch) return false;
+    final row = _rowIndexForId(rowId);
+    return row >= 0 &&
+        row < _rows.length &&
+        _rows[row].isInstrumentLane;
+  }
+
+  Future<void> _armLiveMidiInputForInstrumentRow(int row) async {
+    if (_isMidiClipRecording) return;
+    if (row < 0 || row >= _rows.length || !_rows[row].isInstrumentLane) {
+      return;
+    }
+    if (_rows[row].instrumentId.trim().isEmpty) {
+      return;
+    }
+
+    final rowId = _rows[row].rowId;
+    final armEpoch = ++_liveMidiRowArmEpoch;
+    var clipIndex = _midiClipIndexForInstrumentRow(row);
+    if (clipIndex < 0) {
+      final beforeCount = _audioTracks.length;
+      await _createMidiClipInInstrumentLane(
+        row,
+        _transportClock.value.inMilliseconds.toDouble(),
+        openEditor: false,
+      );
+      if (!_isLiveMidiRowArmCurrent(rowId, armEpoch)) return;
+      if (_audioTracks.length <= beforeCount) return;
+      clipIndex = _midiClipIndexForInstrumentRow(_rowIndexForId(rowId));
+    }
+
+    if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
+    final clip = _audioTracks[clipIndex];
+    if (!clip.isMidi || clip.engineClipId < 0) return;
+    if (!_isLiveMidiRowArmCurrent(rowId, armEpoch)) return;
+    if (clip.rowId != rowId && clip.rowIndex != _rowIndexForId(rowId)) {
+      return;
+    }
+
+    if (_showPianoRoll) {
+      _retargetOpenMidiClipEditorToSelection(clipIndex);
+    }
+    if (!_liveMidiEventPlaybackSupported) return;
+    unawaited(_prepareLiveMidiPreviewRoute());
+    await _syncLiveMidiInputTargetClip();
   }
 
   Future<void> _openInstrumentUiForRow(int row) async {
@@ -82867,6 +82901,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _disarmLiveMidiInputForRow(int rowId) async {
+    if (!_liveMidiEventPlaybackSupported) return;
+    final targetId = _lastLiveMidiInputTargetClipId;
+    final targetOnRow = targetId >= 0 &&
+        _audioTracks.any(
+          (clip) => clip.rowId == rowId && clip.engineClipId == targetId,
+        );
+    if (!targetOnRow) return;
+    try {
+      await _releaseAllDesktopMidiNotes();
+    } catch (_) {}
+    await _setLiveMidiInputTargetClipIfNeeded(-1, force: true);
+  }
+
   Future<bool> _deleteRowImpl(int row) async {
     if (row < 0 || row >= _rowCount) return false;
     final deletingRowId = _rowIdAt(row);
@@ -82877,6 +82925,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return false;
     }
+    _liveMidiRowArmEpoch++;
+    _waveformDetailViewportGeneration++;
+    _waveformDetailProvider.beginMutation();
+    try {
+      await _disarmLiveMidiInputForRow(deletingRowId);
     if (_rowCount == 1) {
       await _clearRowContent(row);
       final rowId = deletingRowId;
@@ -82921,6 +82974,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     await _recomputeAudibleState();
     return true;
+    } finally {
+      _waveformDetailProvider.endMutation();
+    }
   }
 
   Future<void> _deleteRow(int row) async {
@@ -84338,9 +84394,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           // selection + headers
                                           // numRows: kNumRows,
                                           // selectedRowIndex: _selectedRow,
-                                          onSelectRow: (row) => setState(
-                                            () => _selectedRow = row,
-                                          ),
+                                          onSelectRow: (row) {
+                                            setState(() => _selectedRow = row);
+                                            unawaited(
+                                              _armLiveMidiInputForInstrumentRow(
+                                                row,
+                                              ),
+                                            );
+                                          },
                                           // rowMuted: _rowMuted,
                                           // rowExpanded: _rowExpanded,
                                           recordingInProgress:
@@ -85079,6 +85140,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     );
                                                 _timelinePrimarySelectedClipIndex =
                                                     primaryClipIndex;
+                                                if (primaryClipIndex >= 0 &&
+                                                    primaryClipIndex <
+                                                        _audioTracks.length) {
+                                                  final clipRow =
+                                                      _audioTracks[primaryClipIndex]
+                                                          .rowIndex;
+                                                  if (clipRow >= 0 &&
+                                                      clipRow < _rowCount) {
+                                                    _selectedRow = clipRow;
+                                                  }
+                                                }
                                                 _retargetOpenClipInspectorToSelection(
                                                   primaryClipIndex,
                                                   origin,

@@ -204,6 +204,7 @@ class WaveformDetailProvider extends ChangeNotifier
   bool _detailJobActive = false;
   bool _disposed = false;
   int _generation = 0;
+  int _mutationDepth = 0;
   int _cachePayloadBytes = 0;
 
   @visibleForTesting
@@ -236,6 +237,20 @@ class WaveformDetailProvider extends ChangeNotifier
   void resumeAfterOverviewWork() {
     if (_disposed) return;
     _pump();
+  }
+
+  void beginMutation() {
+    if (_disposed) return;
+    _mutationDepth++;
+  }
+
+  void endMutation() {
+    if (_disposed) return;
+    if (_mutationDepth <= 0) return;
+    _mutationDepth--;
+    if (_mutationDepth == 0) {
+      _pump();
+    }
   }
 
   void clear() {
@@ -322,6 +337,7 @@ class WaveformDetailProvider extends ChangeNotifier
         .then((tile) {
           if (_disposed || generation != _generation || tile == null) return;
           _insert(tile);
+          if (_mutationDepth > 0) return;
           if (_desired.containsKey(request.key)) notifyListeners();
         })
         .catchError((Object _) => null)

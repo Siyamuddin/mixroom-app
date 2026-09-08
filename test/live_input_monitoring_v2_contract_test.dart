@@ -153,6 +153,10 @@ void main() {
       deletion.indexOf('_disableV2MonitoringBeforeRemovingRow'),
       lessThan(deletion.indexOf('JuceAudioEngine.removeRow')),
     );
+    expect(
+      deletion.indexOf('_disarmLiveMidiInputForRow'),
+      lessThan(deletion.indexOf('JuceAudioEngine.removeRow')),
+    );
   });
 
   test('iOS monitoring uses one verified non-Bluetooth duplex lifecycle', () {
