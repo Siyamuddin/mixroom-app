@@ -518,6 +518,23 @@ void main() {
     expect(armed, isNull);
   });
 
+  test('already selected header taps still notify onSelectRow', () {
+    final timeline = File(
+      'lib/screens/audio_timeline_pro.dart',
+    ).readAsStringSync();
+    final start = timeline.indexOf(
+      'void _handleHeaderTapSelectionAndExpand(',
+    );
+    final end = timeline.indexOf('void ensureRowExpanded(', start);
+    final method = timeline.substring(start, end);
+
+    expect(start, greaterThanOrEqualTo(0));
+    expect(end, greaterThan(start));
+    expect(method, contains('final wasSelected = tappedRow == _selectedRowIndex'));
+    expect(method, contains('if (!notifiedSelect)'));
+    expect(method, contains('widget.onSelectRow(tappedRow)'));
+  });
+
   test('header row select arms live MIDI for instrument lanes', () {
     final editor = File('lib/screens/audio_editor.dart').readAsStringSync();
     final start = editor.indexOf('onSelectRow:');
