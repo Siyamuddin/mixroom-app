@@ -875,34 +875,42 @@ public:
         if (instrument != nullptr)
         {
             processMidiBuffer.ensureSize(kLiveMidiPanicReservedBytes);
+            // Keep the plugin's own bus layout. setPlayConfigDetails(0, N)
+            // disables side buses and is rejected by wrappers like FL Studio's
+            // Symbiosis AU, which then crashes in AudioUnitRender.
             instrument->enableAllBuses();
-            const int instrumentOutputChannels = juce::jmax(
-                1,
-                instrument->getMainBusNumOutputChannels());
-            pluginScratchChannelCount = instrumentOutputChannels;
-            pluginScratchCapacitySamples =
-                juce::jmax(samplesPerBlock, kMixroomRealtimeScratchMaxSamples);
-            pluginScratchBuffer.setSize(pluginScratchChannelCount,
-                                        pluginScratchCapacitySamples,
-                                        false,
-                                        false,
-                                        true);
-            pluginScratchChannelData.resize((size_t)pluginScratchChannelCount);
-            for (int ch = 0; ch < pluginScratchChannelCount; ++ch)
-                pluginScratchChannelData[(size_t)ch] =
-                    pluginScratchBuffer.getWritePointer(ch);
-            pluginScratchView.setDataToReferTo(
-                pluginScratchChannelData.data(),
-                pluginScratchChannelCount,
-                pluginScratchCapacitySamples);
-            instrument->setPlayConfigDetails(
-                0,
-                instrumentOutputChannels,
-                deviceSampleRate,
-                samplesPerBlock);
-            instrument->prepareToPlay(deviceSampleRate, samplesPerBlock);
-            instrument->reset();
-            applyPendingHostedStateIfNeeded();
+            instrument->setRateAndBufferSizeDetails(deviceSampleRate, samplesPerBlock);
+            const int instrumentInputChannels =
+                juce::jmax(0, instrument->getTotalNumInputChannels());
+            const int instrumentOutputChannels =
+                juce::jmax(0, instrument->getTotalNumOutputChannels());
+            const int requiredProcessChannels =
+                juce::jmax(instrumentInputChannels, instrumentOutputChannels);
+            pluginProcessChannelCount = 0;
+            if (requiredProcessChannels > 0 &&
+                requiredProcessChannels <= kMaxHostedPluginScratchChannels)
+            {
+                pluginScratchChannelCount = juce::jmax(requiredProcessChannels, 2);
+                pluginScratchCapacitySamples =
+                    juce::jmax(samplesPerBlock, kMixroomRealtimeScratchMaxSamples);
+                pluginScratchBuffer.setSize(pluginScratchChannelCount,
+                                            pluginScratchCapacitySamples,
+                                            false,
+                                            false,
+                                            true);
+                pluginScratchChannelData.resize((size_t)pluginScratchChannelCount);
+                for (int ch = 0; ch < pluginScratchChannelCount; ++ch)
+                    pluginScratchChannelData[(size_t)ch] =
+                        pluginScratchBuffer.getWritePointer(ch);
+                pluginScratchView.setDataToReferTo(
+                    pluginScratchChannelData.data(),
+                    pluginScratchChannelCount,
+                    pluginScratchCapacitySamples);
+                instrument->prepareToPlay(deviceSampleRate, samplesPerBlock);
+                instrument->reset();
+                applyPendingHostedStateIfNeeded();
+                pluginProcessChannelCount = requiredProcessChannels;
+            }
         }
         editorReady.store(true, std::memory_order_relaxed);
     }
@@ -910,6 +918,7 @@ public:
     void releaseResources() override
     {
         editorReady.store(false, std::memory_order_relaxed);
+        pluginProcessChannelCount = 0;
         if (instrument != nullptr)
             instrument->releaseResources();
     }
@@ -959,11 +968,11 @@ public:
         const int numSamples = buffer.getNumSamples();
         if (numSamples <= 0)
             return;
-        if (numSamples > pluginScratchCapacitySamples ||
+        if (pluginProcessChannelCount <= 0 ||
+            numSamples > pluginScratchCapacitySamples ||
             pluginScratchChannelData.empty() ||
-            pluginScratchChannelCount <= 0)
+            pluginScratchChannelCount < pluginProcessChannelCount)
         {
-            jassertfalse;
             return;
         }
 
@@ -1039,12 +1048,9 @@ public:
             activeTimelineNotes.reset();
         }
 
-        const int requiredChannels =
-            juce::jmin(pluginScratchChannelCount,
-                       juce::jmax(2, instrument->getTotalNumOutputChannels()));
         pluginScratchView.setDataToReferTo(
             pluginScratchChannelData.data(),
-            requiredChannels,
+            pluginProcessChannelCount,
             numSamples);
         pluginScratchView.clear();
         instrument->processBlock(pluginScratchView, midiBuffer);
@@ -1511,6 +1517,8 @@ private:
     std::vector<float *> pluginScratchChannelData;
     int pluginScratchCapacitySamples = 0;
     int pluginScratchChannelCount = 0;
+    int pluginProcessChannelCount = 0;
+    static constexpr int kMaxHostedPluginScratchChannels = 64;
 };
 
 bool resolveHostedInstrumentPluginDescription(const juce::KnownPluginList &pluginList,
