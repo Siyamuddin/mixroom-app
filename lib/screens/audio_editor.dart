@@ -5931,6 +5931,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Map<String, DesktopEditorWindowLayout> _desktopWindowLayouts =
       <String, DesktopEditorWindowLayout>{};
   int _lastLiveMidiInputTargetClipId = -2;
+  int _liveMidiRowArmEpoch = 0;
   final MidiPreviewNoteCoordinator _pianoRollPreviewNotes =
       MidiPreviewNoteCoordinator();
   bool _closingPianoRollPreview = false;
@@ -34023,6 +34024,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return _audioTracks.indexWhere(belongsToRow);
   }
 
+  bool _isLiveMidiRowArmCurrent(int rowId, int epoch) {
+    if (!mounted) return false;
+    if (epoch != _liveMidiRowArmEpoch) return false;
+    final row = _rowIndexForId(rowId);
+    return row >= 0 &&
+        row < _rows.length &&
+        _rows[row].isInstrumentLane;
+  }
+
   Future<void> _armLiveMidiInputForInstrumentRow(int row) async {
     if (_isMidiClipRecording) return;
     if (row < 0 || row >= _rows.length || !_rows[row].isInstrumentLane) {
@@ -34032,6 +34042,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    final rowId = _rows[row].rowId;
+    final armEpoch = ++_liveMidiRowArmEpoch;
     var clipIndex = _midiClipIndexForInstrumentRow(row);
     if (clipIndex < 0) {
       final beforeCount = _audioTracks.length;
@@ -34040,13 +34052,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _transportClock.value.inMilliseconds.toDouble(),
         openEditor: false,
       );
-      if (!mounted || _audioTracks.length <= beforeCount) return;
-      clipIndex = _audioTracks.length - 1;
+      if (!_isLiveMidiRowArmCurrent(rowId, armEpoch)) return;
+      if (_audioTracks.length <= beforeCount) return;
+      clipIndex = _midiClipIndexForInstrumentRow(_rowIndexForId(rowId));
     }
 
     if (clipIndex < 0 || clipIndex >= _audioTracks.length) return;
     final clip = _audioTracks[clipIndex];
     if (!clip.isMidi || clip.engineClipId < 0) return;
+    if (!_isLiveMidiRowArmCurrent(rowId, armEpoch)) return;
+    if (clip.rowId != rowId && clip.rowIndex != _rowIndexForId(rowId)) {
+      return;
+    }
 
     if (_showPianoRoll) {
       _retargetOpenMidiClipEditorToSelection(clipIndex);
@@ -82884,6 +82901,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _disarmLiveMidiInputForRow(int rowId) async {
+    if (!_liveMidiEventPlaybackSupported) return;
+    final targetId = _lastLiveMidiInputTargetClipId;
+    final targetOnRow = targetId >= 0 &&
+        _audioTracks.any(
+          (clip) => clip.rowId == rowId && clip.engineClipId == targetId,
+        );
+    if (!targetOnRow) return;
+    try {
+      await _releaseAllDesktopMidiNotes();
+    } catch (_) {}
+    await _setLiveMidiInputTargetClipIfNeeded(-1, force: true);
+  }
+
   Future<bool> _deleteRowImpl(int row) async {
     if (row < 0 || row >= _rowCount) return false;
     final deletingRowId = _rowIdAt(row);
@@ -82894,6 +82925,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return false;
     }
+    _liveMidiRowArmEpoch++;
+    _waveformDetailViewportGeneration++;
+    _waveformDetailProvider.beginMutation();
+    try {
+      await _disarmLiveMidiInputForRow(deletingRowId);
     if (_rowCount == 1) {
       await _clearRowContent(row);
       final rowId = deletingRowId;
@@ -82938,6 +82974,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
     await _recomputeAudibleState();
     return true;
+    } finally {
+      _waveformDetailProvider.endMutation();
+    }
   }
 
   Future<void> _deleteRow(int row) async {

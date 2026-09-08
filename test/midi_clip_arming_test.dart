@@ -565,6 +565,8 @@ void main() {
       expect(sync, greaterThan(prepare));
       expect(method, contains('openEditor: false'));
       expect(method, contains('!_rows[row].isInstrumentLane'));
+      expect(method, contains('_isLiveMidiRowArmCurrent(rowId, armEpoch)'));
+      expect(method, contains('_liveMidiRowArmEpoch'));
       expect(method, isNot(contains('_showPianoRoll = true')));
     },
   );
