@@ -531,6 +531,8 @@ class JuceAudioEngine {
     }
   }
 
+  /// For macOS hardware updates, a sample rate of zero preserves the selected
+  /// output clock. Positive values request an explicit supported rate edit.
   static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
     int generation, {
     String? outputDeviceName,

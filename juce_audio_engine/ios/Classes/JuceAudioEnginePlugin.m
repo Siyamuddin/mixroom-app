@@ -968,12 +968,6 @@ static BOOL MixroomMacMonitoringTransportIsAllowed(UInt32 transport) {
         !MixroomTransportIsBluetooth(transport);
 }
 
-static BOOL MixroomHardwareSampleRatePreferenceIsSupported(double value) {
-    const NSInteger rounded = (NSInteger)llround(value);
-    return rounded == 44100 || rounded == 48000 ||
-        rounded == 88200 || rounded == 96000;
-}
-
 static BOOL MixroomHardwareBufferPreferenceIsSupported(NSInteger value) {
     return value == 64 || value == 128 || value == 256 ||
         value == 512 || value == 1024;
@@ -1204,10 +1198,10 @@ static BOOL MixroomCoreAudioPropertyIsSettable(
         settable;
 }
 
-static BOOL MixroomCoreAudioSampleRateIsAvailable(
-    AudioDeviceID deviceID,
-    double requestedRate
-) {
+// Preserve the native ranges: some drivers report discrete rates, others a
+// continuous interval. The UI and request validator use the same hardware facts.
+static NSArray<NSDictionary<NSString *, NSNumber *> *> *
+MixroomCoreAudioSampleRateRanges(AudioDeviceID deviceID) {
     AudioObjectPropertyAddress address = {
         kAudioDevicePropertyAvailableNominalSampleRates,
         kAudioObjectPropertyScopeGlobal,
@@ -1215,30 +1209,40 @@ static BOOL MixroomCoreAudioSampleRateIsAvailable(
     };
     UInt32 size = 0;
     if (!AudioObjectHasProperty(deviceID, &address) ||
-        AudioObjectGetPropertyDataSize(
-            deviceID, &address, 0, NULL, &size) != noErr ||
+        AudioObjectGetPropertyDataSize(deviceID, &address, 0, NULL, &size) != noErr ||
         size == 0 || size % sizeof(AudioValueRange) != 0) {
-        return NO;
+        return @[];
     }
     AudioValueRange *ranges = malloc(size);
-    if (ranges == NULL) {
-        return NO;
-    }
+    if (ranges == NULL) return @[];
+    const UInt32 capacity = size;
     const OSStatus status = AudioObjectGetPropertyData(
         deviceID, &address, 0, NULL, &size, ranges);
-    BOOL available = NO;
-    if (status == noErr) {
-        const UInt32 count = size / sizeof(AudioValueRange);
-        for (UInt32 index = 0; index < count; index++) {
-            if (requestedRate >= ranges[index].mMinimum - 0.5 &&
-                requestedRate <= ranges[index].mMaximum + 0.5) {
-                available = YES;
-                break;
+    NSMutableArray *result = [NSMutableArray array];
+    if (status == noErr && size <= capacity && size % sizeof(AudioValueRange) == 0) {
+        for (UInt32 index = 0; index < size / sizeof(AudioValueRange); index++) {
+            const double minimum = ranges[index].mMinimum;
+            const double maximum = ranges[index].mMaximum;
+            if (isfinite(minimum) && isfinite(maximum) &&
+                minimum > 1000.0 && maximum >= minimum) {
+                [result addObject:@{@"minimumHz": @(minimum), @"maximumHz": @(maximum)}];
             }
         }
     }
     free(ranges);
-    return available;
+    return result;
+}
+
+static BOOL MixroomCoreAudioSampleRateIsAvailable(
+    AudioDeviceID deviceID,
+    double requestedRate
+) {
+    if (!isfinite(requestedRate) || requestedRate <= 1000.0) return NO;
+    for (NSDictionary *range in MixroomCoreAudioSampleRateRanges(deviceID)) {
+        if (requestedRate >= [range[@"minimumHz"] doubleValue] &&
+            requestedRate <= [range[@"maximumHz"] doubleValue]) return YES;
+    }
+    return NO;
 }
 
 static BOOL MixroomCoreAudioBufferSizeIsAvailable(
@@ -1280,14 +1284,17 @@ static BOOL MixroomCoreAudioOutputSupportsHardwareSettings(
         kAudioObjectPropertyScopeGlobal,
         kMixroomCoreAudioElement,
     };
-    const BOOL rateSupported = fabs(currentRate - requestedRate) < 1.0 ||
+    const BOOL rateSupported = requestedRate == 0.0 ||
+        fabs(currentRate - requestedRate) < 1.0 ||
         (MixroomCoreAudioPropertyIsSettable(deviceID, rateAddress) &&
          MixroomCoreAudioSampleRateIsAvailable(deviceID, requestedRate));
     const BOOL bufferSupported = currentBuffer == requestedBuffer ||
         (MixroomCoreAudioPropertyIsSettable(deviceID, bufferAddress) &&
          MixroomCoreAudioBufferSizeIsAvailable(deviceID, requestedBuffer));
     return MixroomCoreAudioDeviceIsAlive(deviceID) &&
-        requestedRate > 1000.0 && requestedBuffer > 0 &&
+        isfinite(currentRate) && currentRate > 1000.0 &&
+        isfinite(requestedRate) &&
+        (requestedRate == 0.0 || requestedRate > 1000.0) && requestedBuffer > 0 &&
         rateSupported && bufferSupported;
 }
 
@@ -1723,7 +1730,7 @@ static NSDictionary<NSString *, id> *MixroomRouteEndpoint(
     BOOL bluetoothInputActive
 ) {
     const UInt32 transport = [device[@"transport"] unsignedIntValue];
-    return @{
+    NSMutableDictionary *endpoint = [@{
         @"direction": input ? @"input" : @"output",
         @"nativePortType": device[@"rawTransport"] ?: @"",
         @"normalizedKind": MixroomNormalizedMacRouteKind(
@@ -1736,7 +1743,22 @@ static NSDictionary<NSString *, id> *MixroomRouteEndpoint(
         @"clockDomain": device[@"clockDomain"] ?: [NSNull null],
         @"channelCount": device[input ? @"inputChannels" : @"outputChannels"]
             ?: [NSNull null],
-    };
+    } mutableCopy];
+    if (!input) {
+        const AudioDeviceID deviceID = [device[@"deviceID"] unsignedIntValue];
+        const AudioObjectPropertyAddress rateAddress = {
+            kAudioDevicePropertyNominalSampleRate,
+            kAudioObjectPropertyScopeGlobal,
+            kMixroomCoreAudioElement,
+        };
+        // Bluetooth rate/profile changes remain owned by macOS.
+        const BOOL sampleRateChangeable = !MixroomTransportIsBluetooth(transport) &&
+            MixroomCoreAudioDeviceIsAlive(deviceID) &&
+            MixroomCoreAudioPropertyIsSettable(deviceID, rateAddress);
+        endpoint[@"sampleRateChangeable"] = @(sampleRateChangeable);
+        endpoint[@"sampleRateRanges"] = MixroomCoreAudioSampleRateRanges(deviceID);
+    }
+    return [endpoint autorelease];
 }
 
 static BOOL MixroomEndpointMatchesCoreAudioDevice(
@@ -1759,6 +1781,7 @@ static BOOL MixroomCoreAudioOutputHasNativeClock(
 ) {
     return output != nil && [output[@"uid"] length] > 0 &&
         [output[@"outputChannels"] integerValue] > 0 &&
+        isfinite([output[@"sampleRateHz"] doubleValue]) &&
         [output[@"sampleRateHz"] doubleValue] > 1000.0 &&
         [output[@"bufferFrames"] integerValue] > 0;
 }
@@ -1783,18 +1806,18 @@ static BOOL MixroomMacOutputIsUsable(
 
 static NSDictionary<NSString *, id> *MixroomMacPlaybackOpenPlan(
     NSDictionary<NSString *, id> *output,
-    double preferredRate,
     NSInteger preferredBuffer
 ) {
     if (output == nil ||
         MixroomTransportIsBluetooth([output[@"transport"] unsignedIntValue]) ||
-        !MixroomHardwareSampleRatePreferenceIsSupported(preferredRate) ||
         !MixroomHardwareBufferPreferenceIsSupported(preferredBuffer)) {
         return output;
     }
     NSMutableDictionary<NSString *, id> *plan =
         [NSMutableDictionary dictionaryWithDictionary:output];
-    plan[@"sampleRateHz"] = @(preferredRate);
+    // Reopens follow this output's current clock. Explicit rate edits settle
+    // CoreAudio separately before reopening; a previous device's preference
+    // must never override this device or an external nominal-rate change.
     plan[@"bufferFrames"] = @(preferredBuffer);
     return plan;
 }
@@ -2877,8 +2900,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     [condition release];
 
     [condition lock];
-    const BOOL rateRequested = MixroomSetCoreAudioOutputSampleRate(
-        deviceID, sampleRate);
+    // Zero is an automatic/buffer-only operation: never write the rate,
+    // including when the clock changes while the buffer is settling.
+    const BOOL followOutputSampleRate = sampleRate == 0.0;
+    const BOOL rateRequested = followOutputSampleRate ||
+        MixroomSetCoreAudioOutputSampleRate(deviceID, sampleRate);
     BOOL rateSettled = NO;
     while (rateRequested && self.audioRouteMonitoringV2 &&
            self.macLifecycleTransitionActiveV2 &&
@@ -2889,7 +2915,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         const double actualRate =
             MixroomCoreAudioSampleRate(deviceID).doubleValue;
         if ([actualUID isEqualToString:expectedUID] &&
-            fabs(actualRate - sampleRate) < 1.0) {
+            isfinite(actualRate) && actualRate > 1000.0 &&
+            (followOutputSampleRate || fabs(actualRate - sampleRate) < 1.0)) {
             rateSettled = YES;
             break;
         }
@@ -2921,7 +2948,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         const NSInteger actualBuffer =
             MixroomCoreAudioBufferFrames(deviceID).integerValue;
         if ([actualUID isEqualToString:expectedUID] &&
-            fabs(actualRate - sampleRate) < 1.0 &&
+            isfinite(actualRate) && actualRate > 1000.0 &&
+            (followOutputSampleRate || fabs(actualRate - sampleRate) < 1.0) &&
             actualBuffer == bufferFrames) {
             settled = YES;
             break;
@@ -3408,7 +3436,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 [candidate[@"uid"] isEqualToString:policyOutput[@"uid"]] &&
                 MixroomCoreAudioDeviceIsAlive(
                     [candidate[@"deviceID"] unsignedIntValue]) &&
-                MixroomOutputNameIsUnique(inventory, candidate);
+                MixroomMacOutputIsUsable(inventory, candidate);
             if (!candidateStillUsable) {
                 break;
             }
@@ -3421,7 +3449,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 [JuceBridge beginMacOutputCallbackProofV2ObjC];
                 opened = [JuceBridge
                     reconfigureMacPlaybackRouteV2ObjC:candidate[@"name"]
-                    sampleRate:[source[@"sampleRateHz"] doubleValue]
+                    sampleRate:[candidate[@"sampleRateHz"] doubleValue]
                     bufferFrames:[source[@"bufferFrames"] integerValue]];
                 if (opened) {
                     break;
@@ -3458,9 +3486,13 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         const BOOL restoredPresent = restoredOutput != nil;
         const BOOL snapshotValid =
             outputSnapshotIsValid(snapshot, restoredOutput ?: candidate);
+        // Restore the output profile, but follow its current clock. A prior
+        // capture's rate is not a preference to impose on the hardware.
         const BOOL sourceProfileRestored = restoredOutput != nil &&
-            [MixroomOutputFingerprint(restoredOutput)
-                isEqualToString:self.macIntentSourceFingerprintV2];
+            [restoredOutput[@"uid"] isEqualToString:source[@"uid"]] &&
+            [restoredOutput[@"rawTransport"] isEqual:source[@"rawTransport"]] &&
+            [restoredOutput[@"outputChannels"] isEqual:source[@"outputChannels"]] &&
+            [restoredOutput[@"bufferFrames"] isEqual:source[@"bufferFrames"]];
         const BOOL generationValid = self.macIntentOperationGenerationV2 ==
             self.audioRouteGenerationV2;
         const unsigned long long callbackCount =
@@ -3729,7 +3761,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 ? settledOutput
                 : MixroomMacPlaybackOpenPlan(
                     settledOutput,
-                    self.preferredPlaybackSampleRateV2,
                     self.preferredPlaybackBufferFramesV2);
             [JuceBridge beginMacOutputCallbackProofV2ObjC];
             const BOOL outputOpened = inputCallbackReady && routeStable &&
@@ -4091,7 +4122,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         } else {
             NSDictionary *outputPlan = MixroomMacPlaybackOpenPlan(
                 output,
-                self.preferredPlaybackSampleRateV2,
                 self.preferredPlaybackBufferFramesV2);
             [JuceBridge beginMacOutputCallbackProofV2ObjC];
             success = [JuceBridge
@@ -6132,7 +6162,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     generation:(uint64_t)generation
     transitionID:(uint64_t)transitionID {
 #if TARGET_OS_OSX
-    const double requestedRate = [args[@"preferredSampleRateHz"] doubleValue];
+    id rateArgument = args[@"preferredSampleRateHz"];
+    const double ratePreference = [rateArgument isKindOfClass:[NSNumber class]]
+        ? [rateArgument doubleValue] : NAN;
+    const BOOL followOutputSampleRate = ratePreference == 0.0;
     const NSInteger requestedBuffer =
         [args[@"preferredBufferFrames"] integerValue];
     NSDictionary *sourceSnapshot = [self buildAudioRouteSnapshotV2];
@@ -6143,10 +6176,13 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         ? sourceEndpoints.firstObject : nil;
     NSArray *inventory = MixroomCoreAudioDeviceInventory() ?: @[];
     NSDictionary *target = [self currentMacPlaybackOutputV2:inventory];
+    const double requestedRate = followOutputSampleRate
+        ? [target[@"sampleRateHz"] doubleValue] : ratePreference;
     NSDictionary *source = sourceEndpoint == nil
         ? nil : MixroomOutputForUID(inventory, sourceEndpoint[@"uid"]);
     NSString *diagnosticCode = @"ok";
-    if (!MixroomHardwareSampleRatePreferenceIsSupported(requestedRate) ||
+    if (!isfinite(ratePreference) || ratePreference < 0.0 ||
+        (!followOutputSampleRate && requestedRate <= 1000.0) ||
         !MixroomHardwareBufferPreferenceIsSupported(requestedBuffer)) {
         diagnosticCode = @"unsupported_hardware_settings";
     } else if (generation != self.audioRouteGenerationV2) {
@@ -6161,16 +6197,20 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                source == nil ||
                ![source[@"uid"] isEqualToString:target[@"uid"]]) {
         diagnosticCode = @"route_unstable";
+    } else if (MixroomTransportIsBluetooth([target[@"transport"] unsignedIntValue]) &&
+               !followOutputSampleRate &&
+               fabs(requestedRate - [target[@"sampleRateHz"] doubleValue]) >= 1.0) {
+        diagnosticCode = @"unsupported_hardware_settings";
     } else if (!MixroomTransportIsBluetooth(
                    [target[@"transport"] unsignedIntValue]) &&
                !MixroomCoreAudioOutputSupportsHardwareSettings(
-                   target, requestedRate, requestedBuffer)) {
+                   target, ratePreference, requestedBuffer)) {
         diagnosticCode = @"unsupported_hardware_settings";
     }
 
     const BOOL bluetoothRoute = target != nil &&
         MixroomTransportIsBluetooth([target[@"transport"] unsignedIntValue]);
-    const double effectiveRate = bluetoothRoute
+    double effectiveRate = bluetoothRoute
         ? [target[@"sampleRateHz"] doubleValue] : requestedRate;
     const NSInteger effectiveBuffer = bluetoothRoute
         ? [target[@"bufferFrames"] integerValue] : requestedBuffer;
@@ -6194,13 +6234,25 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         if (!bluetoothRoute) {
             [JuceBridge quiescePlaybackRouteV2ObjC:YES];
             hardwareSettled = [self settleMacOutputHardwareSettingsV2:target
-                sampleRate:effectiveRate
+                sampleRate:followOutputSampleRate ? 0.0 : effectiveRate
                 bufferFrames:effectiveBuffer
                 generation:generation
                 deadlineMs:deadlineMs
                 diagnosticCode:&diagnosticCode];
         }
+        // Re-read the selected output after settling. In automatic mode the
+        // clock may have changed; never reopen using the earlier inventory.
+        NSArray *openInventory = MixroomCoreAudioDeviceInventory() ?: @[];
+        NSDictionary *openTarget = [self currentMacPlaybackOutputV2:openInventory];
+        hardwareSettled = hardwareSettled &&
+            generation == self.audioRouteGenerationV2 &&
+            MixroomMacOutputIsUsable(openInventory, openTarget) &&
+            [openTarget[@"uid"] isEqualToString:target[@"uid"]];
         if (hardwareSettled) {
+            target = openTarget;
+            if (followOutputSampleRate) {
+                effectiveRate = [target[@"sampleRateHz"] doubleValue];
+            }
             [JuceBridge beginMacOutputCallbackProofV2ObjC];
         }
         const BOOL opened = hardwareSettled && [JuceBridge
@@ -6219,8 +6271,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             [self currentMacPlaybackOutputV2:settledInventory];
         snapshot = [self buildAudioRouteSnapshotV2];
         const BOOL settledPreferenceSupported = bluetoothRoute ||
-            (MixroomHardwareSampleRatePreferenceIsSupported(
-                [settled[@"sampleRateHz"] doubleValue]) &&
+            ((followOutputSampleRate ||
+              fabs([settled[@"sampleRateHz"] doubleValue] - requestedRate) < 1.0) &&
              MixroomHardwareBufferPreferenceIsSupported(
                 [settled[@"bufferFrames"] integerValue]));
         success = generation == self.audioRouteGenerationV2 &&
@@ -6267,7 +6319,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 MixroomMonotonicMilliseconds() + 2000.0;
             const BOOL restoreSettled =
                 [self settleMacOutputHardwareSettingsV2:presentSource
-                    sampleRate:[source[@"sampleRateHz"] doubleValue]
+                    sampleRate:followOutputSampleRate
+                        ? 0.0 : [source[@"sampleRateHz"] doubleValue]
                     bufferFrames:[source[@"bufferFrames"] integerValue]
                     generation:generation
                     deadlineMs:restoreDeadlineMs
@@ -6276,12 +6329,15 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                 MixroomCoreAudioDeviceInventory() ?: @[];
             NSDictionary *settledRestorePlan = MixroomOutputForUID(
                 settledRestorePlanInventory, source[@"uid"]);
+            const double restoreRate = followOutputSampleRate
+                ? [settledRestorePlan[@"sampleRateHz"] doubleValue]
+                : [source[@"sampleRateHz"] doubleValue];
             if (restoreSettled) {
                 [JuceBridge beginMacOutputCallbackProofV2ObjC];
             }
             const BOOL restored = restoreSettled && [JuceBridge
                 reconfigureMacPlaybackRouteV2ObjC:settledRestorePlan[@"name"]
-                sampleRate:[source[@"sampleRateHz"] doubleValue]
+                sampleRate:restoreRate
                 bufferFrames:[source[@"bufferFrames"] integerValue]];
             const BOOL restoreCallbackReady = restored &&
                 [JuceBridge waitForMacOutputCallbackProofV2ObjC:MAX(
@@ -6294,7 +6350,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             snapshot = [self buildAudioRouteSnapshotV2];
             sourceRestored = restoreCallbackReady &&
                 fabs([settledSource[@"sampleRateHz"] doubleValue] -
-                     [source[@"sampleRateHz"] doubleValue]) < 1.0 &&
+                     restoreRate) < 1.0 &&
                 [settledSource[@"bufferFrames"] integerValue] ==
                     [source[@"bufferFrames"] integerValue] &&
                 MixroomMacPlaybackSnapshotMatchesPlan(
@@ -6664,7 +6720,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     const double deadlineMs = startedAtMs + 2000.0;
     NSDictionary *targetPlan = MixroomMacPlaybackOpenPlan(
         target,
-        self.preferredPlaybackSampleRateV2,
         self.preferredPlaybackBufferFramesV2);
     if (targetUsable) {
         [JuceBridge beginMacOutputCallbackProofV2ObjC];

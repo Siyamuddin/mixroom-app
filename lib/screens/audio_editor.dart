@@ -38,6 +38,7 @@ import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
+import 'package:mixroom/helpers/daw_output_sample_rate.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_midi_key_state.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
@@ -6095,6 +6096,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const List<int> _dawSampleRateOptions = [44100, 48000, 88200, 96000];
   static const List<int> _dawBufferSizeOptions = [64, 128, 256, 512, 1024];
   int _preferredDawSampleRate = 44100;
+  bool _hasVerifiedDawSampleRate = false;
+  List<int> _availableDawSampleRates = const [];
   int _preferredDawBufferSize = 512;
   int _midiInputChannelFilter = 0;
   bool _audioEngineSettingsApplying = false;
@@ -13478,6 +13481,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         await _deleteUncommittedRecordingFile(unpublishedRecordingPath);
       }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+      _syncDawSampleRateFromRoute(recoveryResult.snapshot);
       _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
         recoveryResult.snapshot,
       );
@@ -13571,6 +13575,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _transportTicker?.stop();
     setState(() {
       _isPlaying = false;
+      if (Platform.isMacOS) _hasVerifiedDawSampleRate = false;
       _syncTransportClock(pausedPosition, playing: false);
     });
     _stopMeterPolling();
@@ -13584,6 +13589,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _handleAudioRouteTransitionV2(AudioRouteTransitionResultV2 result) {
     if (!mounted) return;
     if (!result.succeeded) {
+      _syncDawSampleRateFromRoute(result.snapshot);
       _showSmallNotice(
         Platform.isAndroid
             ? 'Audio output is unavailable. Choose an output in Android.'
@@ -13609,6 +13615,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _v2UserVisibleOutputIdentity = nextOutputIdentity;
     }
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    _syncDawSampleRateFromRoute(result.snapshot);
     final juceName = result.snapshot.juce.outputDeviceName?.trim() ?? '';
     final endpointName = result.snapshot.outputs.isEmpty
         ? ''
@@ -14104,9 +14111,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             0.0,
             1.0,
           );
-      _preferredDawSampleRate = _normalizeDawSampleRate(
-        uiSettings?["sampleRate"],
-      );
+      // The macOS output was admitted at its native clock before project load.
+      // Keep that value even if applying the saved buffer size later fails.
+      if (!Platform.isMacOS) {
+        _preferredDawSampleRate = _normalizeDawSampleRate(
+          uiSettings?["sampleRate"],
+        );
+      }
       _preferredDawBufferSize = _normalizeDawBufferSize(
         uiSettings?["bufferSize"],
       );
@@ -19318,6 +19329,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       if (recoveryResult != null && recoveryResult.succeeded) {
         JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recoveryResult);
+        _syncDawSampleRateFromRoute(recoveryResult.snapshot);
         if (commandIsCurrent()) {
           playStarted = await JuceAudioEngine.play();
         }
@@ -22976,6 +22988,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return false;
       }
       JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+      _syncDawSampleRateFromRoute(result.snapshot);
       final verifiedInput = result.snapshot.inputs.length == 1
           ? result.snapshot.inputs.single
           : null;
@@ -23226,6 +23239,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return;
         }
         JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(recordingResult);
+        _syncDawSampleRateFromRoute(recordingResult.snapshot);
       }
       if (_recordStartCancelRequested) {
         await JuceAudioEngine.stopRecording();
@@ -23338,6 +23352,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    _syncDawSampleRateFromRoute(result.snapshot);
     return true;
   }
 
@@ -23361,6 +23376,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         if (result.succeeded) {
           JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+          _syncDawSampleRateFromRoute(result.snapshot);
           return true;
         }
       }
@@ -44961,6 +44977,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+    _syncDawSampleRateFromRoute(snapshot);
     final advertisedInputs = await JuceAudioEngine.getInputDeviceInfos();
     if (!mounted) return;
 
@@ -45222,6 +45239,31 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _recordingRoutePolicyTimer = null;
   }
 
+  void _syncDawSampleRateFromRoute(AudioRouteSnapshotV2 snapshot) {
+    if (!mounted || !Platform.isMacOS) return;
+    final rate = verifiedDawOutputSampleRate(snapshot);
+    if (snapshot.generation != _audioRouteCoordinatorV2?.generation) return;
+    if (rate == null) {
+      if (_hasVerifiedDawSampleRate || _availableDawSampleRates.isNotEmpty) {
+        _setStateAndRefreshProjectSettings(() {
+          _hasVerifiedDawSampleRate = false;
+          _availableDawSampleRates = const [];
+        });
+      }
+      return;
+    }
+    final availableRates = selectableDawOutputSampleRates(
+      snapshot, commonRates: _dawSampleRateOptions,
+    );
+    if (_hasVerifiedDawSampleRate && rate == _preferredDawSampleRate &&
+        listEquals(availableRates, _availableDawSampleRates)) return;
+    _setStateAndRefreshProjectSettings(() {
+      _availableDawSampleRates = availableRates;
+      _preferredDawSampleRate = rate;
+      _hasVerifiedDawSampleRate = true;
+    });
+  }
+
   int _normalizeDawSampleRate(Object? value) {
     final raw = value is num ? value.toInt() : null;
     if (raw != null && _dawSampleRateOptions.contains(raw)) return raw;
@@ -45244,6 +45286,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<bool> _applyAudioEngineSettingsToNative({
     required String reason,
+    int? requestedSampleRate,
     bool notifyOnFailure = true,
   }) async {
     if (_audioEngineSettingsApplying) return false;
@@ -45268,9 +45311,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return true;
         }
         final result = await coordinator.configurePlaybackHardware(
-          preferredSampleRateHz: _preferredDawSampleRate,
+          // Only an explicit sample-rate edit may change the macOS clock.
+          preferredSampleRateHz:
+              requestedSampleRate ??
+              (Platform.isMacOS ? 0 : _preferredDawSampleRate),
           preferredBufferFrames: _preferredDawBufferSize,
         );
+        if (result.diagnosticCode != 'stale_generation') {
+          _syncDawSampleRateFromRoute(result.snapshot);
+        }
         if (!result.succeeded) {
           if (notifyOnFailure && mounted) {
             _showSmallNotice(
@@ -45281,6 +45330,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
 
         JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+        _syncDawSampleRateFromRoute(result.snapshot);
         final outputKind = result.snapshot.outputs.length == 1
             ? result.snapshot.outputs.first.normalizedKind
             : AudioRouteKindV2.unknown;
@@ -45298,7 +45348,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (_dawBufferSizeOptions.contains(actualBufferSize) &&
                   actualBufferSize != _preferredDawBufferSize)) {
             _setStateAndRefreshProjectSettings(() {
-              if (_dawSampleRateOptions.contains(actualSampleRate)) {
+              if (!Platform.isMacOS &&
+                  _dawSampleRateOptions.contains(actualSampleRate)) {
                 _preferredDawSampleRate = actualSampleRate;
               }
               if (_dawBufferSizeOptions.contains(actualBufferSize)) {
@@ -45683,6 +45734,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : currentOutput;
         _loadingDevices = false;
       });
+      _syncDawSampleRateFromRoute(await JuceAudioEngine.getAudioRouteSnapshotV2());
     } catch (_) {
       if (!mounted) return;
       _setStateAndRefreshProjectSettings(() => _loadingDevices = false);
@@ -46119,51 +46171,99 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        DropdownButtonFormField<int>(
-          key: ValueKey('daw-sample-rate:$_preferredDawSampleRate'),
-          initialValue: _preferredDawSampleRate,
-          isExpanded: true,
-          dropdownColor: kMixroomGlassDropdownMenuColor,
-          style: const TextStyle(color: Colors.white),
-          decoration: _projectSettingsFieldDecoration(
-            labelText: L10n.translate(context, 'Sample Rate'),
-          ),
-          items: _dawSampleRateOptions
-              .map(
-                (sampleRate) => DropdownMenuItem<int>(
-                  value: sampleRate,
-                  child: Text(
-                    sampleRate >= 1000
-                        ? '${(sampleRate / 1000).toStringAsFixed(sampleRate % 1000 == 0 ? 0 : 1)} kHz'
-                        : '$sampleRate Hz',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-              )
-              .toList(),
-          onChanged: deviceControlsDisabled
-              ? null
-              : (sampleRate) async {
-                  if (sampleRate == null ||
-                      sampleRate == _preferredDawSampleRate) {
-                    return;
-                  }
-                  final previous = _preferredDawSampleRate;
-                  _setStateAndRefreshProjectSettings(() {
-                    _preferredDawSampleRate = sampleRate;
-                  });
-                  final applied = await _applyAudioEngineSettingsToNative(
-                    reason: 'sampleRateChanged',
-                  );
-                  if (applied) {
-                    _scheduleProjectAutosave();
-                  } else if (mounted) {
+        if (Platform.isMacOS && _availableDawSampleRates.isEmpty)
+          InputDecorator(
+            key: ValueKey(
+              'daw-sample-rate:${_hasVerifiedDawSampleRate ? _preferredDawSampleRate : 'unavailable'}',
+            ),
+            decoration: _projectSettingsFieldDecoration(
+              labelText: L10n.translate(context, 'Sample Rate'),
+            ),
+            child: Text(
+              _hasVerifiedDawSampleRate
+                  ? formatDawSampleRate(_preferredDawSampleRate)
+                  : L10n.translate(context, 'Unavailable'),
+              style: const TextStyle(color: Colors.white),
+            ),
+          )
+        else
+          DropdownButtonFormField<int>(
+            key: ValueKey(
+              'daw-sample-rate:${Platform.isMacOS && !_hasVerifiedDawSampleRate ? 'unavailable' : _preferredDawSampleRate}',
+            ),
+            initialValue: Platform.isMacOS && !_hasVerifiedDawSampleRate
+                ? null
+                : _preferredDawSampleRate,
+            hint: Text(
+              L10n.translate(
+                context,
+                _audioEngineSettingsApplying ? 'Applying...' : 'Unavailable',
+              ),
+            ),
+            isExpanded: true,
+            dropdownColor: kMixroomGlassDropdownMenuColor,
+            style: const TextStyle(color: Colors.white),
+            decoration: _projectSettingsFieldDecoration(
+              labelText: L10n.translate(context, 'Sample Rate'),
+            ),
+            items:
+                (Platform.isMacOS
+                        ? ({
+                            ..._availableDawSampleRates,
+                            _preferredDawSampleRate,
+                          }.toList()..sort())
+                        : _dawSampleRateOptions)
+                    .map(
+                      (sampleRate) => DropdownMenuItem<int>(
+                        value: sampleRate,
+                        enabled:
+                            !Platform.isMacOS ||
+                            _availableDawSampleRates.contains(sampleRate),
+                        child: Text(
+                          formatDawSampleRate(sampleRate),
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    )
+                    .toList(),
+            onChanged: deviceControlsDisabled
+                ? null
+                : (sampleRate) async {
+                    if (sampleRate == null ||
+                        (Platform.isMacOS &&
+                            !_availableDawSampleRates.contains(sampleRate)) ||
+                        (sampleRate == _preferredDawSampleRate &&
+                            (!Platform.isMacOS || _hasVerifiedDawSampleRate))) {
+                      return;
+                    }
+                    final previous = _preferredDawSampleRate;
                     _setStateAndRefreshProjectSettings(() {
-                      _preferredDawSampleRate = previous;
+                      if (Platform.isMacOS) {
+                        // Recreate the field while applying so a rejected choice
+                        // cannot remain in DropdownButtonFormField's own state.
+                        _hasVerifiedDawSampleRate = false;
+                      } else {
+                        _preferredDawSampleRate = sampleRate;
+                      }
                     });
-                  }
-                },
-        ),
+                    final applied = await _applyAudioEngineSettingsToNative(
+                      reason: 'sampleRateChanged',
+                      requestedSampleRate: sampleRate,
+                    );
+                    if (applied) {
+                      _scheduleProjectAutosave();
+                    } else if (mounted) {
+                      _setStateAndRefreshProjectSettings(() {
+                        // A failed native edit may return a verified recovered
+                        // clock. Do not overwrite that readback with stale UI.
+                        if (!Platform.isMacOS &&
+                            _preferredDawSampleRate == sampleRate) {
+                          _preferredDawSampleRate = previous;
+                        }
+                      });
+                    }
+                  },
+          ),
         const SizedBox(height: 9),
         DropdownButtonFormField<int>(
           key: ValueKey('daw-buffer-size:$_preferredDawBufferSize'),
@@ -46786,6 +46886,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+    _syncDawSampleRateFromRoute(result.snapshot);
     _v2LiveMonitoringRequested = true;
     _v2LiveMonitoringTargetRowId = rowId;
     _v2LiveMonitoringChannelStart = channelStart;
@@ -46846,6 +46947,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return;
         }
         JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
+        _syncDawSampleRateFromRoute(result.snapshot);
         await _refreshSystemSelectedRouteInfoV2();
         return;
       }

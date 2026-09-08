@@ -383,7 +383,8 @@ void main() {
 
     expect(restore, contains('MixroomOutputForUID(inventory, source[@"uid"])'));
     expect(restore, contains('samePolicyOutput'));
-    expect(restore, contains('self.macIntentSourceFingerprintV2'));
+    expect(restore, contains('restoredOutput[@"rawTransport"]'));
+    expect(restore, contains('restoredOutput[@"outputChannels"]'));
     expect(fingerprint, contains('device[@"rawTransport"]'));
     expect(fingerprint, contains('device[@"outputChannels"]'));
     expect(fingerprint, contains('device[@"sampleRateHz"]'));
@@ -393,7 +394,7 @@ void main() {
     expect(restore, contains('reconfigureMacPlaybackRouteV2ObjC'));
     expect(
       restore,
-      contains('sampleRate:[source[@"sampleRateHz"] doubleValue]'),
+      contains('sampleRate:[candidate[@"sampleRateHz"] doubleValue]'),
     );
     expect(
       restore,
@@ -433,7 +434,7 @@ void main() {
     );
     expect(restore, isNot(contains('MixroomOutputFingerprint(candidatePlan)')));
     expect(restore, isNot(contains('currentProfileValid')));
-    expect(restore, contains('macIntentSourceFingerprintV2'));
+    expect(restore, isNot(contains('sampleRate:[source[@"sampleRateHz"] doubleValue]')));
     expect(restore, isNot(contains('sleep')));
     expect(restore, isNot(contains('dispatch_after')));
   });

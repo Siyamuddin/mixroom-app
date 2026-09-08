@@ -56,6 +56,7 @@ class AudioRouteCoordinatorV2 {
   AudioRouteChangeEventV2? _pending;
   String? _lastFingerprint;
   int _latestGeneration = 0;
+  int get generation => _latestGeneration;
   bool _applyInFlight = false;
   bool _intentTransitionInFlight = false;
   Completer<void>? _intentTransitionCompletion;
@@ -535,6 +536,7 @@ class AudioRouteCoordinatorV2 {
     }
   }
 
+  /// On macOS, zero follows the selected output's current sample rate.
   /// Applies the existing project hardware preferences through the same
   /// serialized playback owner. This command intentionally leaves the
   /// coordinator in [AudioRouteCoordinatorStateV2.stable]: an explicit
@@ -550,7 +552,7 @@ class AudioRouteCoordinatorV2 {
         'coordinator_disposed',
       );
     }
-    if (preferredSampleRateHz <= 0 ||
+    if (preferredSampleRateHz < 0 ||
         preferredBufferFrames <= 0 ||
         _state != AudioRouteCoordinatorStateV2.stable ||
         _interruptionActive ||
