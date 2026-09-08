@@ -47,6 +47,14 @@ def _parse_datetime(raw: Any) -> datetime | None:
         return None
 
 
+def _access_period_active(record: dict[str, Any]) -> bool:
+    raw = record.get("access_expires_at")
+    if not raw:
+        return True
+    expiry = _parse_datetime(raw)
+    return expiry is not None and expiry > _utc_now()
+
+
 def _effective_entitlement_status(item: dict[str, Any]) -> str:
     status = str(item.get("status") or "active").strip().lower()
     expires_at = _parse_datetime(item.get("expires_at"))
@@ -276,11 +284,13 @@ class AiUsageRepository:
                 continue
             if str(membership.get("status") or "").strip().lower() != "active":
                 continue
+            if not _access_period_active(membership):
+                continue
             organization_id = str(membership.get("organization_id") or "").strip()
             if not organization_id:
                 continue
             organization = self._load_organization(organization_id)
-            if not organization:
+            if not organization or not _access_period_active(organization):
                 continue
             if str(organization.get("status") or "").strip().lower() not in {
                 "active",

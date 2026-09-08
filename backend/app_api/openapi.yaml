@@ -189,7 +189,7 @@ paths:
           description: Teacher access required
   /v1/education/me/invites:
     post:
-      summary: Invite a student to an education seat
+      summary: Invite a student or manage a shared class link
       security:
         - bearerAuth: []
       requestBody:
@@ -198,16 +198,21 @@ paths:
           application/json:
             schema:
               type: object
-              required: [organization_id, email]
+              required: [organization_id]
               properties:
                 organization_id:
                   type: string
+                action:
+                  type: string
+                  enum: [class_link_get, class_link_create, class_link_revoke]
+                  description: Omit to send an individual email invitation. Class link actions do not send email or reserve a seat.
                 email:
                   type: string
                   format: email
+                  description: Required when action is omitted.
       responses:
         '200':
-          description: Pending student seat invite
+          description: Pending student invitation or shared class_invite record
         '403':
           description: Teacher access required
   /v1/education/me/memberships:
@@ -255,7 +260,8 @@ paths:
           description: Education invite not found
   /v1/education/invites/{invite_token}/accept:
     post:
-      summary: Accept an education invite for the signed-in user
+      summary: Accept an individual or shared class invitation for the signed-in user
+      description: Shared class links grant one student seat per account while capacity remains. Removed or expired student access cannot be restored with a shared link. Existing active members are returned unchanged.
       security:
         - bearerAuth: []
       parameters:
@@ -667,6 +673,7 @@ paths:
           description: Organization records
     post:
       summary: Create or update an internal admin organization for team billing
+      description: Optional access_expires_at sets a future UTC end timestamp; empty clears it and omission preserves it.
       security:
         - bearerAuth: []
       requestBody:
@@ -690,7 +697,6 @@ paths:
             schema:
               type: object
               required:
-                - teacher_user_id
                 - seat_limit
               properties:
                 organization_id:
@@ -699,11 +705,22 @@ paths:
                   type: string
                 seat_limit:
                   type: integer
-                  enum: [10, 20, 30]
+                  minimum: 1
+                  description: Custom student count. Teachers do not consume student seats.
+                  example: 60
+                access_expires_at:
+                  type: string
+                  description: Optional future ISO timestamp with timezone. Empty means no end date. Applies to teacher and student access.
                 teacher_user_id:
                   type: string
+                  description: Legacy existing-account grant. Omit for email invitations.
                 teacher_email:
                   type: string
+                  format: email
+                  description: Required for teacher invitations, including teachers without an account.
+                invite_teacher:
+                  type: boolean
+                  description: Send an email-bound teacher invitation. Ignores teacher_user_id when true.
                 workspace_id:
                   type: string
                 workspace_name:
@@ -711,6 +728,59 @@ paths:
       responses:
         '200':
           description: Education organization provisioned
+  /v1/internal/admin/billing/education-invites:
+    post:
+      summary: Review a student roster or send one Education invitation
+      description: >-
+        Employees review up to 500 emails without writing records. The dashboard
+        sends each new invitation sequentially and displays individual results.
+        Existing pending invites require explicit resend=true; active members
+        are skipped. Email delivery failures keep the reserved seat and invite link.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, organization_id]
+              properties:
+                action:
+                  type: string
+                  enum: [preview, send, resend_teacher, class_link_get, class_link_create, class_link_revoke]
+                organization_id:
+                  type: string
+                emails:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  description: Required for preview.
+                  items:
+                    type: string
+                email:
+                  type: string
+                  description: Required for send.
+                locale:
+                  type: string
+                  enum: [en, ko]
+                  default: en
+                access_expires_at:
+                  type: string
+                  description: Optional future ISO timestamp for new students. Empty inherits the class deadline. Cannot exceed that deadline. Resends keep the existing period.
+                invite_token:
+                  type: string
+                  description: Required for resend_teacher. Must identify a pending teacher invitation in this organization.
+                resend:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Roster review or individual invitation result, including email failure or skipped status
+        '400':
+          description: Invalid roster, inactive school, or no available seats
+        '403':
+          description: Employee is not allowlisted
   /v1/internal/admin/billing/memberships:
     get:
       summary: List internal admin organization memberships
@@ -721,6 +791,7 @@ paths:
           description: Membership records
     post:
       summary: Create or update an internal admin organization membership
+      description: Optional access_expires_at sets a student end timestamp; empty inherits the organization period and omission preserves the saved period.
       security:
         - bearerAuth: []
       requestBody:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
+from common.access_period import access_period_active
 from common.auth import extract_user_id_from_event, json_response, unauthorized
 from common.billing_catalog import (
     catalog_plan_by_code,
@@ -94,7 +95,7 @@ def _active_org_access(
     organizations: list[Dict[str, Any]] = []
     for organization in snapshot.get("organizations") or []:
         org_status = str(organization.get("status") or "").strip().lower()
-        org_is_active = org_status in {"active", "past_due"}
+        org_is_active = org_status in {"active", "past_due"} and access_period_active(organization)
         org_is_visible = org_is_active or org_status in {"locked", "suspended"}
         if not org_is_visible:
             continue
@@ -117,6 +118,7 @@ def _active_org_access(
                     "plan_label": plan.get("label"),
                     "plan_group": plan.get("group"),
                     "seat_limit": organization.get("seat_limit"),
+                    "access_expires_at": organization.get("access_expires_at"),
                 }
             )
         organizations.append(
@@ -129,6 +131,8 @@ def _active_org_access(
                 "role": organization.get("membership_role"),
                 "status": organization.get("status"),
                 "membership_status": organization.get("membership_status"),
+                "access_expires_at": organization.get("access_expires_at"),
+                "access_expired": not access_period_active(organization),
                 "seat_limit": organization.get("seat_limit"),
                 "seats_used": organization.get("seats_used"),
                 "seats_active": organization.get("seats_active"),
@@ -240,7 +244,7 @@ def _normalize_entitlement(raw: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                 source.get("organization_id") or effective_source_subscription_id
             )
             effective_management_channel = "admin"
-            effective_expires_at = None
+            effective_expires_at = source.get("access_expires_at") or None
             effective_product_code = ""
             effective_next_billed_at = None
             effective_seat_count = source.get("seat_limit")

@@ -656,6 +656,7 @@ class L10n {
           'Active through {organization}. Your seat includes Starter-level Mixroom features.',
       'Education invite': 'Education invite',
       'Paste invite link': 'Paste invite link',
+      'Paste invite link or code': 'Paste invite link or code',
       'Accepting': 'Accepting',
       'Accept': 'Accept',
       'Education admin': 'Education admin',
@@ -757,9 +758,10 @@ class L10n {
           'Invite created for {email}, but the email could not be sent. Copy the invite link from Students.',
       'Could not create invite. Check available student seats and try again.':
           'Could not create invite. Check available student seats and try again.',
-      'Paste a valid education invite link.':
-          'Paste a valid education invite link.',
+      'Paste a valid education invite link or code.':
+          'Paste a valid education invite link or code.',
       'Education student seat activated.': 'Education student seat activated.',
+      'Education access activated.': 'Education access activated.',
       'Could not accept this invite. It may have expired or already been used.':
           'Could not accept this invite. It may have expired or already been used.',
       'Could not load education admin data.':
@@ -2780,6 +2782,7 @@ class L10n {
           '{organization}을 통해 활성화되었습니다. 이 좌석에는 Starter 수준의 Mixroom 기능이 포함됩니다.',
       'Education invite': '교육 초대',
       'Paste invite link': '초대 링크 붙여넣기',
+      'Paste invite link or code': '초대 링크 또는 코드 붙여넣기',
       'Accepting': '수락 중',
       'Accept': '수락',
       'Education admin': '교육 관리',
@@ -2880,8 +2883,9 @@ class L10n {
           '{email} 초대를 만들었지만 이메일을 보낼 수 없습니다. 학생 목록에서 초대 링크를 복사하세요.',
       'Could not create invite. Check available student seats and try again.':
           '초대를 만들 수 없습니다. 사용 가능한 학생 좌석을 확인한 뒤 다시 시도하세요.',
-      'Paste a valid education invite link.': '올바른 교육 초대 링크를 붙여넣으세요.',
+      'Paste a valid education invite link or code.': '올바른 교육 초대 링크 또는 코드를 붙여넣으세요.',
       'Education student seat activated.': '교육 학생 좌석이 활성화되었습니다.',
+      'Education access activated.': '교육 이용 권한이 활성화되었습니다.',
       'Could not accept this invite. It may have expired or already been used.':
           '이 초대를 수락할 수 없습니다. 만료되었거나 이미 사용되었을 수 있습니다.',
       'Could not load education admin data.': '교육 관리 데이터를 불러올 수 없습니다.',
@@ -5726,6 +5730,7 @@ class L10n {
           '{organization}を通じて有効です。この席にはStarterレベルのMixroom機能が含まれます。',
       'Education invite': '教育招待',
       'Paste invite link': '招待リンクを貼り付け',
+      'Paste invite link or code': '招待リンクまたはコードを貼り付け',
       'Accepting': '承認中',
       'Accept': '承認',
       'Education admin': '教育管理',
@@ -5825,8 +5830,9 @@ class L10n {
           '{email}への招待を作成しましたが、メールを送信できませんでした。学生一覧から招待リンクをコピーしてください。',
       'Could not create invite. Check available student seats and try again.':
           '招待を作成できませんでした。利用可能な学生席を確認してもう一度お試しください。',
-      'Paste a valid education invite link.': '有効な教育招待リンクを貼り付けてください。',
+      'Paste a valid education invite link or code.': '有効な教育招待リンクまたはコードを貼り付けてください。',
       'Education student seat activated.': '教育学生席が有効になりました。',
+      'Education access activated.': '教育アクセスが有効になりました。',
       'Could not accept this invite. It may have expired or already been used.':
           'この招待を承認できませんでした。期限切れ、または既に使用済みの可能性があります。',
       'Could not load education admin data.': '教育管理データを読み込めませんでした。',

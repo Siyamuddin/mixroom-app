@@ -2120,3 +2120,26 @@ tbody tr[data-billing-selectable="true"] {
     transform: translateX(120%);
   }
 }
+
+/* Hidden duration fields must stay hidden despite the label grid layout. */
+[data-duration] [hidden],
+#education-invites[hidden],
+#education-invites [hidden] {
+  display: none !important;
+}
+
+/* Compact education forms: optional settings stay out of the main flow. */
+.education-options { margin: 8px 0; }
+.education-options > summary { cursor: pointer; font-size: 13px; color: var(--text-muted, #8993a4); }
+.education-options[open] > summary { margin-bottom: 12px; }
+.education-options > .search-input-wrap { margin-bottom: 12px; }
+[data-duration-summary]:empty, #education-invites [data-notice]:empty { display: none; }
+#education-invites { display: grid; gap: 12px; border: 0; border-top: 1px solid var(--border, #29303c); border-radius: 0; background: transparent; }
+#education-invites h3, #education-invites p { margin: 0; }
+#billing-education-provision-form { border: 0; background: transparent; padding: 12px 0; }
+
+#education-teacher-invite-actions[hidden] { display: none; }
+
+#education-class-link[hidden], #education-class-link [hidden], #education-class-link [data-notice]:empty { display: none; }
+#education-class-link { display: grid; gap: 12px; }
+#education-class-link p, #education-class-link h3 { margin: 0; }

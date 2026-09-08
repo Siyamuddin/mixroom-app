@@ -154,6 +154,8 @@ done
 cp "${SITE_DIR}/index.html" "${BUILD_DIR}/index.html"
 cp "${SITE_DIR}/styles.css" "${BUILD_DIR}/styles.css"
 cp "${SITE_DIR}/app.js" "${BUILD_DIR}/app.js"
+cp "${SITE_DIR}/education-invites.mjs" "${BUILD_DIR}/education-invites.mjs"
+cp "${SITE_DIR}/access-duration.mjs" "${BUILD_DIR}/access-duration.mjs"
 if [[ -f "${PROJECT_ROOT}/assets/fonts/Pretendard-Regular.otf" ]]; then
   cp "${PROJECT_ROOT}/assets/fonts/Pretendard-Regular.otf" "${BUILD_DIR}/Pretendard-Regular.otf"
 fi
@@ -186,6 +188,15 @@ EOF
 aws s3 sync "${BUILD_DIR}/" "s3://${BUCKET_NAME}/" \
   --delete \
   --cache-control "public,max-age=300"
+
+# Serve the ES module with a browser-compatible MIME type.
+aws s3 cp "${BUILD_DIR}/education-invites.mjs" "s3://${BUCKET_NAME}/education-invites.mjs" \
+  --cache-control "public,max-age=300" \
+  --content-type "application/javascript"
+
+aws s3 cp "${BUILD_DIR}/access-duration.mjs" "s3://${BUCKET_NAME}/access-duration.mjs" \
+  --cache-control "public,max-age=300" \
+  --content-type "application/javascript"
 
 # Keep the HTML and runtime configuration fresh so a deployment can point an
 # already-open dashboard at versioned JS and CSS assets on its next reload.

@@ -318,7 +318,7 @@ class _AccountSubscriptionSurfaceState
       setState(() {
         _educationAcceptMessage = _t(
           context,
-          'Paste a valid education invite link.',
+          'Paste a valid education invite link or code.',
         );
       });
       return;
@@ -334,7 +334,7 @@ class _AccountSubscriptionSurfaceState
       setState(() {
         _educationAcceptMessage = _t(
           context,
-          'Education student seat activated.',
+          'Education access activated.',
         );
       });
     } catch (_) {
@@ -3098,7 +3098,7 @@ class _EducationInviteAcceptPanel extends StatelessWidget {
                   textInputAction: TextInputAction.done,
                   style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
-                    hintText: _t(context, 'Paste invite link'),
+                    hintText: _t(context, 'Paste invite link or code'),
                     hintStyle: TextStyle(
                       color: Colors.white.withValues(alpha: 0.36),
                     ),
@@ -3472,7 +3472,10 @@ class _EducationTeacherDashboardPageState
         );
       case 0:
       default:
-        return _EducationDashboardOverviewPane(
+        return Column(children: [
+          _EducationClassInvitePanel(service: widget.entitlementService, organizationId: organization.organizationId),
+          const SizedBox(height: 14),
+          _EducationDashboardOverviewPane(
           organization: organization,
           memberships: memberships,
           studentUsage: studentUsage,
@@ -3481,9 +3484,72 @@ class _EducationTeacherDashboardPageState
           emailController: _inviteController,
           isBusy: _inviteBusy,
           onInvite: () => _inviteEducationStudent(organization),
-        );
+        ),
+        ]);
     }
   }
+}
+
+class _EducationClassInvitePanel extends StatefulWidget {
+  const _EducationClassInvitePanel({required this.service, required this.organizationId});
+  final EntitlementService service;
+  final String organizationId;
+  @override
+  State<_EducationClassInvitePanel> createState() => _EducationClassInvitePanelState();
+}
+
+class _EducationClassInvitePanelState extends State<_EducationClassInvitePanel> {
+  String _link = '';
+  String? _message;
+  bool _busy = true;
+  @override
+  void initState() {
+    super.initState();
+    _updateLink('get');
+  }
+  Future<void> _updateLink(String action) async {
+    setState(() { _busy = true; _message = null; });
+    try {
+      final result = await widget.service.educationClassLink(organizationId: widget.organizationId, action: action);
+      if (!mounted) return;
+      setState(() {
+        _link = result['invite_url']?.toString() ?? '';
+        if (action == 'revoke') _message = _t(context, 'Class link revoked.');
+      });
+    } catch (_) {
+      if (mounted) setState(() { _message = _t(context, 'Could not update class link.'); });
+    } finally {
+      if (mounted) setState(() { _busy = false; });
+    }
+  }
+  @override
+  Widget build(BuildContext context) => _EducationPanelShell(
+    title: _t(context, 'Class invite link'),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(_t(context, 'Anyone with this link can join while seats are available.'), style: const TextStyle(color: kAccountGlassMutedText)),
+      if (_link.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        SelectableText(_link, style: const TextStyle(color: kAccountGlassText)),
+      ],
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, children: [
+        if (_link.isEmpty) OutlinedButton(onPressed: _busy ? null : () => _updateLink('create'), child: Text(_t(context, 'Generate class link'))),
+        if (_link.isNotEmpty) ...[
+          OutlinedButton(onPressed: _busy ? null : () async {
+            try {
+              await Clipboard.setData(ClipboardData(text: _link));
+              if (mounted) setState(() { _message = _t(context, 'Class link copied.'); });
+            } catch (_) {
+              if (mounted) setState(() { _message = _t(context, 'Select and copy the link above.'); });
+            }
+          }, child: Text(_t(context, 'Copy link'))),
+          TextButton(onPressed: _busy ? null : () => _updateLink('revoke'), child: Text(_t(context, 'Revoke link'))),
+        ],
+        if (_busy) const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+      ]),
+      if (_message != null) Text(_message!, style: const TextStyle(color: kAccountGlassMutedText)),
+    ]),
+  );
 }
 
 OrganizationAccessItem _currentEducationOrganization(

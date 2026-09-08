@@ -1,3 +1,12 @@
+import { durationFields, readDuration, installDurationControls } from "./access-duration.mjs";
+import { setupEducationInvites, setupEducationClassLink } from "./education-invites.mjs";
+
+installDurationControls(document);
+let educationInvitesController;
+let educationClassLinkController;
+
+document.querySelector('#education-provision-duration').innerHTML = durationFields();
+
 const TOKENS_STORAGE_KEY = "mixroom.admin.site.tokens.v1";
 const LOCALE_STORAGE_KEY = "mixroom.admin.site.locale.v1";
 const SESSION_META_STORAGE_KEY = "mixroom.admin.site.session_meta.v1";
@@ -47,12 +56,6 @@ const ANDREW_ADMIN_EMAIL = "andrew@mixroom.ai";
 const AI_PROMPT_LIMITS_CONFIRM_PHRASE = "APPLY PROMPT LIMITS";
 const FEATURE_FLAGS_CONFIRM_PHRASE = "APPLY FEATURE FLAGS";
 const PRODUCER_CAPTURE_WHITELIST_CONFIRM_PHRASE = "APPLY PRODUCER WHITELIST";
-const ENTITLEMENT_OVERRIDE_DURATION_OPTIONS = [
-  { key: "1d", days: 1, labelKey: "override.duration.1d" },
-  { key: "1w", days: 7, labelKey: "override.duration.1w" },
-  { key: "1m", days: 30, labelKey: "override.duration.1m" },
-  { key: "1y", days: 365, labelKey: "override.duration.1y" },
-];
 const ANALYTICS_RANGE_OPTIONS = [
   { key: "365d", days: 365, labelKey: "analytics.range.1y" },
   { key: "90d", days: 90, labelKey: "analytics.range.3m" },
@@ -161,9 +164,9 @@ const MESSAGES = {
       "Tables are the source of truth. Record editors are collapsed to keep the page scannable.",
     "dev.disclosure.catalogEditor": "Edit billing catalog",
     "dev.disclosure.catalogEditorHelp": "Advanced: writes the full catalog document.",
-    "dev.disclosure.educationProvision": "Provision Education account",
+    "dev.disclosure.educationProvision": "Create education account",
     "dev.disclosure.educationProvisionHelp":
-      "Creates an education org and teacher membership.",
+      "Set up a school, its teacher, and any student seat count.",
     "dev.disclosure.organizationEditor": "Edit organization record",
     "dev.disclosure.membershipEditor": "Edit membership record",
     "dev.disclosure.workspaceEditor": "Edit workspace record",
@@ -481,7 +484,7 @@ const MESSAGES = {
     "override.plan": "Plan to grant",
     "override.seats": "Seat limit",
     "override.seatsHelp":
-      "Studio minimum is 5. Education supports 10, 20, or 30 student seats; teacher/admin access is separate.",
+      "Studio minimum is 5. Education supports a custom positive student count, including 60; teacher/admin access is separate.",
     "override.organizationName": "Team or school name",
     "override.organizationNamePlaceholder": "Optional",
     "override.expiry": "Expiry",
@@ -632,8 +635,8 @@ const MESSAGES = {
       "테이블이 기준 정보입니다. 페이지를 쉽게 훑어볼 수 있도록 레코드 편집기는 접어 두었습니다.",
     "dev.disclosure.catalogEditor": "결제 카탈로그 편집",
     "dev.disclosure.catalogEditorHelp": "고급: 전체 카탈로그 문서를 저장합니다.",
-    "dev.disclosure.educationProvision": "Education 계정 프로비저닝",
-    "dev.disclosure.educationProvisionHelp": "교육 조직과 교사 멤버십을 만듭니다.",
+    "dev.disclosure.educationProvision": "교육 계정 만들기",
+    "dev.disclosure.educationProvisionHelp": "학교, 교사 계정과 원하는 학생 좌석 수를 설정합니다.",
     "dev.disclosure.organizationEditor": "조직 레코드 편집",
     "dev.disclosure.membershipEditor": "멤버십 레코드 편집",
     "dev.disclosure.workspaceEditor": "워크스페이스 레코드 편집",
@@ -951,7 +954,7 @@ const MESSAGES = {
     "override.plan": "부여할 플랜",
     "override.seats": "좌석 수",
     "override.seatsHelp":
-      "Studio는 최소 5석입니다. Education은 학생 좌석 10, 20, 30개를 지원하며 교사/관리자 접근은 별도입니다.",
+      "Studio는 최소 5석입니다. Education은 60석을 포함한 원하는 양의 정수 학생 좌석 수를 지원하며 교사/관리자 접근은 별도입니다.",
     "override.organizationName": "팀 또는 학교 이름",
     "override.organizationNamePlaceholder": "선택 사항",
     "override.expiry": "만료일",
@@ -1411,6 +1414,7 @@ let livePresenceTimer = null;
 let lastActivityPersistAt = 0;
 let welcomeAnimationPlayed = false;
 const analyticsCharts = {};
+let latestTeacherInvite = null;
 
 bindEvents();
 applyLocale();
@@ -1444,7 +1448,6 @@ function bindEvents() {
   elements.feedbackShowMoreButton.addEventListener("click", handleFeedbackShowMore);
   elements.analyticsRangeControls.addEventListener("click", handleAnalyticsRangeClick);
   elements.userInspector.addEventListener("submit", handleInspectorSubmit);
-  elements.userInspector.addEventListener("click", handleInspectorClick);
   elements.userInspector.addEventListener("change", handleInspectorChange);
   elements.aiPromptLimitsForm.addEventListener("submit", handleAiPromptLimitsSubmit);
   elements.aiPromptLimitsResetButton.addEventListener("click", handleAiPromptLimitsReset);
@@ -1990,11 +1993,11 @@ function canEditProducerCaptureWhitelist() {
 }
 
 function canEditBillingCatalog() {
-  return canViewAiRuntimeSettings() && state.billingCatalogConfigurable !== false;
+  return Boolean(tokens?.idToken) && state.billingCatalogConfigurable !== false;
 }
 
 function canEditBillingControlPlane() {
-  return canViewAiRuntimeSettings() && state.collaborationConfigurable !== false;
+  return Boolean(tokens?.idToken) && state.collaborationConfigurable !== false;
 }
 
 function canGrantAiPrompts() {
@@ -3358,7 +3361,27 @@ function renderBillingOrganizations() {
   renderBillingFeedback(elements.billingOrganizationFeedback, state.billingOrganizationFeedback);
 }
 
+function renderEducationInvites() {
+  educationClassLinkController ??= setupEducationClassLink({ root: document.querySelector('#education-class-link'),
+    getOrganization: getSelectedBillingOrganization, request: fetchAdminJson,
+    canEdit: () => Boolean(tokens?.idToken) && state.collaborationConfigurable !== false });
+  educationClassLinkController.render();
+  educationInvitesController ??= setupEducationInvites({
+    root: document.querySelector('#education-invites'),
+    getOrganization: getSelectedBillingOrganization,
+    request: fetchAdminJson,
+    canEdit: () => Boolean(tokens?.idToken) && canEditBillingControlPlane(),
+    onOrganization: organization => {
+      state.billingOrganizations = upsertByKey(state.billingOrganizations, organization, record => record.organization_id);
+      renderBillingOrganizations();
+    },
+  });
+  educationInvitesController.render();
+}
+
 function renderBillingEducationSummary() {
+  refreshTeacherInviteActions();
+  renderEducationInvites();
   const record = getSelectedBillingOrganization();
   if (!elements.billingEducationSummary) return;
   const isEducation = `${record?.plan_code || ""}`.trim().toLowerCase() === "education";
@@ -3368,14 +3391,14 @@ function renderBillingEducationSummary() {
   const used = Number(record?.seats_used || 0);
   const active = Number(record?.seats_active || 0);
   const invited = Number(record?.seats_invited || 0);
-  elements.billingEducationCurrentPlan.textContent = `Current plan: Education ${formatWholeNumber(
+  elements.billingEducationCurrentPlan.textContent = `Education · ${formatWholeNumber(
     limit,
   )} student seats`;
-  elements.billingEducationSeats.textContent = `Student seats used: ${formatWholeNumber(
+  elements.billingEducationSeats.textContent = `${formatWholeNumber(
     used,
   )} / ${formatWholeNumber(limit)} (${formatWholeNumber(active)} active, ${formatWholeNumber(
     invited,
-  )} invited). Teacher/admin access is separate.`;
+  )} pending). ${record.access_expires_at ? `Access ${record.access_expired ? 'ended' : 'ends'} ${formatDate(record.access_expires_at)}.` : 'No end date.'}`;
   elements.billingEducationSummary
     .querySelectorAll("[data-education-seat-preset]")
     .forEach((button) => {
@@ -3389,6 +3412,7 @@ function renderBillingEducationSummary() {
 }
 
 function renderBillingMemberships() {
+  refreshTeacherInviteActions();
   const records = Array.isArray(state.billingMemberships) ? state.billingMemberships : [];
   const configurable = state.collaborationConfigurable !== false;
   const baseMeta = tMaybe(
@@ -3425,7 +3449,7 @@ function renderBillingMemberships() {
               <div class="user-subtext">${escapeHtml(inviteLabel)}</div>
             </td>
             <td>${escapeHtml(record.role || t("detail.na"))}</td>
-            <td>${escapeHtml(formatStatusLabel(record.status || ""))}</td>
+            <td>${escapeHtml(formatStatusLabel(record.status || ""))}<div class="user-subtext">${escapeHtml(record.access_expires_at ? `${new Date(record.access_expires_at) <= new Date() ? 'Access ended' : 'Access ends'} ${formatDate(record.access_expires_at)}` : 'Inherits organization end date')}</div></td>
             <td>${escapeHtml(formatDate(record.updated_at || record.created_at))}</td>
           </tr>
         `;
@@ -3553,6 +3577,7 @@ function renderBillingOrganizationForm() {
   elements.billingOrganizationSharedWorkspaceEnabledInput.checked =
     record?.shared_workspace_enabled !== false;
   elements.billingOrganizationSupportNotesInput.value = `${record?.support_notes || ""}`;
+  document.querySelector('#organization-duration').innerHTML = durationFields({ expiry: record?.access_expires_at || '', keepCurrent: true });
 }
 
 function renderBillingMembershipForm() {
@@ -3560,6 +3585,7 @@ function renderBillingMembershipForm() {
   elements.billingMembershipOrganizationIdInput.value = `${record?.organization_id || ""}`;
   elements.billingMembershipUserIdInput.value = `${record?.user_id || ""}`;
   elements.billingMembershipEmailInput.value = `${record?.email || ""}`;
+  document.querySelector('#membership-duration').innerHTML = durationFields({ noneLabel: 'Inherit organization end date', expiry: record?.access_expires_at || '', keepCurrent: true });
   elements.billingMembershipRoleInput.value = `${record?.role || "member"}`;
   elements.billingMembershipStatusInput.value = `${record?.status || "active"}`;
   elements.billingMembershipSeatConsumedInput.checked = record?.seat_consumed === true;
@@ -3987,9 +4013,66 @@ async function handleBillingCatalogSubmit(event) {
   }
 }
 
+function refreshTeacherInviteActions() {
+  showTeacherInviteActions((state.billingMemberships || []).find(member =>
+    member.organization_id === state.selectedBillingOrganizationId && member.role === 'teacher' && member.status === 'pending'));
+}
+function showTeacherInviteActions(membership) {
+  latestTeacherInvite = membership?.status === 'pending' ? membership : null;
+  document.querySelector('#education-teacher-invite-actions').hidden = !latestTeacherInvite;
+  if (latestTeacherInvite) document.querySelector('#education-teacher-resend').textContent = `Resend to ${latestTeacherInvite.email}`;
+}
+document.querySelector('#education-use-selected-school').addEventListener('click', () => {
+  const school = getSelectedBillingOrganization();
+  if (!school || school.plan_code !== 'education') return;
+  elements.billingEducationProvisionOrgIdInput.value = school.organization_id;
+  elements.billingEducationProvisionNameInput.value = school.name || '';
+  elements.billingEducationProvisionSeatsInput.value = school.seat_limit;
+  document.querySelector('#education-provision-duration').innerHTML = durationFields({ expiry: school.access_expires_at || '' });
+  const teacher = (state.billingMemberships || []).find(member => member.organization_id === school.organization_id && member.role === 'teacher' && ['pending', 'active'].includes(member.status));
+  elements.billingEducationProvisionTeacherEmailInput.value = teacher?.email || '';
+  elements.billingEducationProvisionTeacherUserIdInput.value = teacher?.status === 'active' ? teacher.user_id : '';
+});
+document.querySelector('#education-teacher-copy').addEventListener('click', async () => {
+  if (!latestTeacherInvite) return;
+  try {
+    await navigator.clipboard.writeText(latestTeacherInvite.invite_url);
+    setStatus('Teacher invitation link copied.', 'success');
+  } catch { setStatus(`Teacher link: ${latestTeacherInvite.invite_url}`, 'info'); }
+});
+document.querySelector('#education-teacher-resend').addEventListener('click', async event => {
+  if (!latestTeacherInvite || !canEditBillingControlPlane()) return;
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await fetchAdminJson('/v1/internal/admin/billing/education-invites', {
+      method: 'POST', body: JSON.stringify({ action: 'resend_teacher',
+        organization_id: latestTeacherInvite.organization_id, invite_token: latestTeacherInvite.invite_token }),
+    });
+    state.billingEducationProvisionFeedback = { tone: result.email_sent ? 'success' : 'error',
+      message: result.email_sent ? 'Teacher invitation sent.' : 'Email failed. Copy the teacher link or retry.' };
+  } catch (error) {
+    state.billingEducationProvisionFeedback = { tone: 'error', message: error.message };
+  } finally {
+    button.disabled = false;
+    renderBillingFeedback(elements.billingEducationProvisionFeedback, state.billingEducationProvisionFeedback);
+  }
+});
+
 async function handleBillingEducationProvisionSubmit(event) {
   event.preventDefault();
   if (!tokens?.idToken || !canEditBillingControlPlane()) {
+    return;
+  }
+
+  if (state.billingOrganizationsBusy || !elements.billingEducationProvisionForm.reportValidity()) return;
+  const studentSeats = Number(elements.billingEducationProvisionSeatsInput.value);
+  if (!Number.isSafeInteger(studentSeats) || studentSeats < 1) {
+    state.billingEducationProvisionFeedback = {
+      tone: "error",
+      message: "Enter a positive whole number of student seats.",
+    };
+    renderBillingFeedback(elements.billingEducationProvisionFeedback, state.billingEducationProvisionFeedback);
     return;
   }
 
@@ -3997,6 +4080,10 @@ async function handleBillingEducationProvisionSubmit(event) {
   state.billingEducationProvisionFeedback = null;
   updateBusyState();
   setStatus("Provisioning Education organization...", "info");
+  // Keep a new school's ID across retries if a later provisioning step fails.
+  if (!elements.billingEducationProvisionOrgIdInput.value.trim()) {
+    elements.billingEducationProvisionOrgIdInput.value = crypto.randomUUID();
+  }
 
   try {
     const payload = await fetchAdminJson(ADMIN_BILLING_EDUCATION_PROVISIONING_PATH, {
@@ -4004,9 +4091,10 @@ async function handleBillingEducationProvisionSubmit(event) {
       body: JSON.stringify({
         organization_id: `${elements.billingEducationProvisionOrgIdInput.value || ""}`.trim(),
         name: `${elements.billingEducationProvisionNameInput.value || ""}`.trim(),
-        seat_limit: Number(elements.billingEducationProvisionSeatsInput.value || 20),
-        teacher_user_id:
-          `${elements.billingEducationProvisionTeacherUserIdInput.value || ""}`.trim(),
+        seat_limit: studentSeats,
+        access_expires_at: readDuration(elements.billingEducationProvisionForm),
+        invite_teacher: !elements.billingEducationProvisionTeacherUserIdInput.value.trim(),
+        teacher_user_id: elements.billingEducationProvisionTeacherUserIdInput.value.trim(),
         teacher_email:
           `${elements.billingEducationProvisionTeacherEmailInput.value || ""}`.trim(),
       }),
@@ -4036,9 +4124,13 @@ async function handleBillingEducationProvisionSubmit(event) {
       );
     }
     state.billingEducationProvisionFeedback = {
-      tone: "success",
-      message: "Education org provisioned. Teacher can now invite students from the app.",
+      tone: payload.email_sent === false ? "error" : "success",
+      message: payload.email_sent === false
+        ? "Class created. Teacher email failed. Retry or copy the link below."
+        : `Class ready · ${formatWholeNumber(payload.organization?.seat_limit || studentSeats)} student seats. ${payload.teacher_membership?.status === 'pending' ? 'Teacher invitation sent.' : 'Teacher access active.'}`,
+
     };
+    showTeacherInviteActions(payload.teacher_membership);
     elements.billingEducationProvisionOrgIdInput.value = "";
     elements.billingEducationProvisionNameInput.value = "";
     elements.billingEducationProvisionTeacherUserIdInput.value = "";
@@ -4081,6 +4173,7 @@ async function handleBillingOrganizationSubmit(event) {
         seat_limit: `${elements.billingOrganizationSeatLimitInput.value || ""}`.trim(),
         status: `${elements.billingOrganizationStatusInput.value || ""}`.trim(),
         shared_workspace_enabled: elements.billingOrganizationSharedWorkspaceEnabledInput.checked,
+        access_expires_at: readDuration(elements.billingOrganizationForm),
         support_notes: `${elements.billingOrganizationSupportNotesInput.value || ""}`.trim(),
       }),
     });
@@ -4132,6 +4225,7 @@ async function handleBillingMembershipSubmit(event) {
         role: `${elements.billingMembershipRoleInput.value || ""}`.trim(),
         status: `${elements.billingMembershipStatusInput.value || ""}`.trim(),
         seat_consumed: elements.billingMembershipSeatConsumedInput.checked,
+        access_expires_at: readDuration(elements.billingMembershipForm),
       }),
     });
     if (payload.membership) {
@@ -5737,7 +5831,6 @@ function renderInspector() {
   const readOnlyEntitlementOverride = !canApplyEntitlementOverrides();
   const confirmValue = inspectorConfirmValue(user);
   const adminFirstName = currentAdminFirstName();
-  const defaultOverrideExpiry = toDateTimeLocalValue(addDays(new Date(), 7));
   const providerBadges = (Array.isArray(user.linked_providers) ? user.linked_providers : [])
     .map((provider) => `<span class="badge">${escapeHtml(formatProviderLabel(provider))}</span>`)
     .join("");
@@ -5862,27 +5955,7 @@ function renderInspector() {
               ${readOnlyEntitlementOverride ? "disabled" : ""}
             />
           </label>
-          <label class="search-input-wrap">
-            <span class="search-label">${escapeHtml(t("override.expiry"))}</span>
-            <input
-              class="text-input"
-              type="datetime-local"
-              name="expiresAt"
-              value="${escapeHtml(defaultOverrideExpiry)}"
-              ${readOnlyEntitlementOverride ? "disabled" : ""}
-              required
-            />
-          </label>
-          <div class="duration-row">
-            ${ENTITLEMENT_OVERRIDE_DURATION_OPTIONS.map(
-              (option) => `<button
-                class="button button-secondary button-compact"
-                type="button"
-                data-override-duration-days="${option.days}"
-                ${readOnlyEntitlementOverride ? "disabled" : ""}
-              >${escapeHtml(t(option.labelKey))}</button>`,
-            ).join("")}
-          </div>
+          ${durationFields({ allowNone: false, disabled: readOnlyEntitlementOverride })}
           <label class="search-input-wrap">
             <span class="search-label">${escapeHtml(t("override.reason"))}</span>
             <textarea
@@ -6163,29 +6236,6 @@ function currentAdminFirstName() {
   return local.replace(/[-_]/g, ".").split(".", 1)[0];
 }
 
-function addDays(date, days) {
-  const next = new Date(date.getTime());
-  next.setDate(next.getDate() + Number(days || 0));
-  return next;
-}
-
-function toDateTimeLocalValue(date) {
-  const pad = (value) => `${value}`.padStart(2, "0");
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join("-") + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function entitlementOverrideExpiryIso(localValue) {
-  const date = new Date(`${localValue || ""}`);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  return date.toISOString();
-}
-
 function expectedOverrideIdentifiers(user) {
   return new Set(
     [user.email, user.username, user.user_id]
@@ -6344,6 +6394,7 @@ function setSignedOutState() {
 }
 
 function updateBusyState() {
+  educationInvitesController?.render();
   const signedIn = !!tokens?.idToken;
   const destructiveBusy =
     state.deleteBusy
@@ -6999,19 +7050,6 @@ function handleFeedbackTableClick(event) {
   void loadSelectedFeedbackDetail({ silent: true });
 }
 
-function handleInspectorClick(event) {
-  const button = event.target.closest("[data-override-duration-days]");
-  if (!button) {
-    return;
-  }
-  const form = button.closest("#entitlement-override-form");
-  const input = form?.querySelector("input[name='expiresAt']");
-  if (!input) {
-    return;
-  }
-  input.value = toDateTimeLocalValue(addDays(new Date(), Number(button.dataset.overrideDurationDays || 0)));
-}
-
 function handleInspectorChange(event) {
   const planSelect = event.target.closest("#entitlement-override-form select[name='planCode']");
   if (!planSelect) {
@@ -7023,8 +7061,8 @@ function handleInspectorChange(event) {
     return;
   }
   if (planSelect.value === "education") {
-    seatInput.min = "10";
-    seatInput.step = "10";
+    seatInput.min = "1";
+    seatInput.step = "1";
     seatInput.value = "20";
     return;
   }
@@ -7057,7 +7095,13 @@ async function handleInspectorSubmit(event) {
   if (overrideForm) {
     const formData = new FormData(overrideForm);
     const planCode = `${formData.get("planCode") || ""}`.trim();
-    const expiresAtLocal = `${formData.get("expiresAt") || ""}`.trim();
+    let expiresAt;
+    try { expiresAt = readDuration(overrideForm); }
+    catch (error) {
+      state.overrideFeedback = { userId: user.user_id, tone: "error", message: error.message };
+      renderInspector();
+      return;
+    }
     const reason = `${formData.get("reason") || ""}`.trim();
     const confirmIdentifier = `${formData.get("confirmIdentifier") || ""}`.trim();
     const confirmAdminFirstName = `${formData.get("confirmAdminFirstName") || ""}`.trim();
@@ -7097,7 +7141,7 @@ async function handleInspectorSubmit(event) {
         body: JSON.stringify({
           user_id: user.user_id,
           plan_code: planCode,
-          expires_at: entitlementOverrideExpiryIso(expiresAtLocal),
+          expires_at: expiresAt,
           seat_limit: Number(`${formData.get("seatLimit") || ""}`.trim() || 0),
           organization_name: `${formData.get("organizationName") || ""}`.trim(),
           reason,
@@ -7113,7 +7157,7 @@ async function handleInspectorSubmit(event) {
         tone: "success",
         message: t("override.applied", {
           plan: formatTierLabel(planCode),
-          date: formatDate(payload.subscription?.expires_at || entitlementOverrideExpiryIso(expiresAtLocal)),
+          date: formatDate(payload.subscription?.expires_at || expiresAt),
         }),
       };
       renderAdminUsers(state.adminUsers);

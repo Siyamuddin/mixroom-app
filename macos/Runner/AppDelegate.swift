@@ -12,6 +12,7 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
   private var sampleBrowserAccessChannel: FlutterMethodChannel?
   private var activeSampleBookmarks: [String: URL] = [:]
   private var initialMixroomPath: String?
+  private var initialMixroomUrl: String?
   private var channelsInitialized = false
   private var kakaoAuthSession: ASWebAuthenticationSession?
 
@@ -39,6 +40,25 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
       }
     }
     sender.reply(toOpenOrPrint: .failure)
+  }
+
+  @objc(application:openURLs:)
+  dynamic override func application(_ application: NSApplication, open urls: [URL]) {
+    var unhandled: [URL] = []
+    for url in urls {
+      if url.scheme == "mixroom", url.host == "education",
+         url.pathComponents.dropFirst().first == "invites",
+         url.pathComponents.count == 3 {
+        initialMixroomUrl = url.absoluteString
+        bindChannelsIfNeeded()
+        channel?.invokeMethod("openMixroomUrl", arguments: url.absoluteString)
+      } else {
+        unhandled.append(url)
+      }
+    }
+    if !unhandled.isEmpty {
+      super.application(application, open: unhandled)
+    }
   }
 
   @objc(applicationShouldTerminateAfterLastWindowClosed:)
@@ -87,6 +107,9 @@ class AppDelegate: FlutterAppDelegate, ASWebAuthenticationPresentationContextPro
       if call.method == "getInitialMixroomPath" {
         result(self.initialMixroomPath)
         self.initialMixroomPath = nil
+      } else if call.method == "getInitialMixroomUrl" {
+        result(self.initialMixroomUrl)
+        self.initialMixroomUrl = nil
       } else {
         result(FlutterMethodNotImplemented)
       }

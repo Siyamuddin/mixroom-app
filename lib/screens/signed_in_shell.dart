@@ -123,7 +123,7 @@ class _SignedInShellState extends State<SignedInShell> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Education student seat activated.'),
+          content: Text('Education access activated.'),
           duration: Duration(seconds: 4),
         ),
       );

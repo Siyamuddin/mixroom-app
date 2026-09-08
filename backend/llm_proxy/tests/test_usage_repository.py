@@ -170,6 +170,79 @@ class UsageRepositoryTests(unittest.TestCase):
         self.assertEqual(context["subscription_tier"], "education")
         self.assertEqual(context["source_type"], "organization")
 
+    def test_load_user_context_ignores_expired_class(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "free",
+                "status": "active",
+            }
+        )
+        repo._collaboration_table = _FakeCollaborationTable(
+            [
+                {
+                    "entity_type": "membership",
+                    "user_id": "user-123",
+                    "organization_id": "edu-1",
+                    "status": "active",
+                    "role": "student",
+                }
+            ],
+            {
+                "edu-1": {
+                    "entity_type": "organization",
+                    "organization_id": "edu-1",
+                    "plan_code": "education",
+                    "access_expires_at": "2000-01-01T00:00:00+00:00",
+                    "status": "active",
+                }
+            },
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "free")
+
+    def test_load_user_context_ignores_expired_student(self) -> None:
+        repo = object.__new__(AiUsageRepository)
+        repo._state_table = None
+        repo._events_table = None
+        repo._entitlements_table = _FakeEntitlementsTable(
+            {
+                "user_id": "user-123",
+                "plan_code": "free",
+                "status": "active",
+            }
+        )
+        repo._collaboration_table = _FakeCollaborationTable(
+            [
+                {
+                    "entity_type": "membership",
+                    "user_id": "user-123",
+                    "organization_id": "edu-1",
+                    "status": "active",
+                    "role": "student",
+                    "access_expires_at": "2000-01-01T00:00:00+00:00",
+                }
+            ],
+            {
+                "edu-1": {
+                    "entity_type": "organization",
+                    "organization_id": "edu-1",
+                    "plan_code": "education",
+
+                    "status": "active",
+                }
+            },
+        )
+
+        context = repo.load_user_context("user-123")
+
+        self.assertEqual(context["subscription_tier"], "free")
+
     def test_load_user_context_ignores_non_student_education_membership(self) -> None:
         repo = object.__new__(AiUsageRepository)
         repo._state_table = None
