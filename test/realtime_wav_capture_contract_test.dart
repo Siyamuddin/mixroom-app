@@ -114,7 +114,12 @@ void main() {
       iosStop,
     );
     final iosBlock = applePlugin.substring(iosStop, iosEnd);
-    expect(iosBlock, contains('dispatch_async(MixroomIOSLifecycleQueue()'));
+    expect(iosBlock, contains('[self stopIOSCaptureV2:result]'));
+    final lifecycleStart = applePlugin.indexOf('- (void)stopIOSCaptureV2:');
+    final lifecycleEnd = applePlugin.indexOf('\n#endif', lifecycleStart);
+    final lifecycle = applePlugin.substring(lifecycleStart, lifecycleEnd);
+    expect(lifecycle, contains('dispatch_async(MixroomIOSLifecycleQueue()'));
+    expect(lifecycle, contains('finalizeWithCurrent:'));
     expect(iosBlock, contains('[JuceBridge stopRecordingObjC]'));
 
     final androidStop = androidPlugin.indexOf('"stopRecording" -> {');

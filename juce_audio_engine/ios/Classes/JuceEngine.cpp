@@ -14927,6 +14927,32 @@ bool JuceEngine::setLiveInputMonitorTargetV2(int row,
 #endif
 }
 
+juce::NamedValueSet JuceEngine::getLiveInputMonitoringFactsV2()
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    const bool connectionsValid = liveMonitorConnections.size() == liveMonitorChannelCount &&
+        std::all_of(liveMonitorConnections.begin(), liveMonitorConnections.end(),
+                    [this](const auto &connection) { return graph.isConnected(connection); });
+    const bool active = shouldRouteLiveInputToGraphV2() && liveInputMonitoringEnabled &&
+        liveMonitorTargetRow >= 0 && liveMonitorTargetRow < (int)rows.size() &&
+        liveMonitorChannelStart >= 0 && (liveMonitorChannelCount == 1 || liveMonitorChannelCount == 2) &&
+        validateRecordingRouteV2() && connectionsValid;
+    juce::NamedValueSet facts;
+    facts.set("active", active);
+    facts.set("targetRow", liveMonitorTargetRow);
+    facts.set("channelStart", liveMonitorChannelStart);
+    facts.set("channelCount", liveMonitorChannelCount);
+    facts.set("connectionCount", liveMonitorConnections.size());
+    facts.set("connectionsValid", connectionsValid);
+    facts.set("streamGeneration", (juce::int64)inputMonitorStreamGenerationV2.load(std::memory_order_acquire));
+    return facts;
+}
+
+void JuceEngine::discardRecordingForMonitoringV2()
+{
+    wavCapture.stop(true);
+}
+
 void JuceEngine::disableLiveInputMonitoringV2()
 {
 #if JUCE_IOS
@@ -15281,7 +15307,10 @@ RealtimeWavCapture::StopResult JuceEngine::stopRecording()
     auto captureResult = wavCapture.stop();
     independentInputCaptureMode.store(false, std::memory_order_release);
 
-    routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
+#if JUCE_MAC && !JUCE_IOS
+    if (!isV2PlaybackSession())
+#endif
+        routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 #if JUCE_IOS
     logCurrentAudioDeviceState("recording-stopped");
 #else
@@ -15303,7 +15332,10 @@ void JuceEngine::discardRecordingCapture()
 {
     wavCapture.stop(true);
     independentInputCaptureMode.store(false, std::memory_order_release);
-    routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
+#if JUCE_MAC && !JUCE_IOS
+    if (!isV2PlaybackSession())
+#endif
+        routeLiveInputToRow(/*row=*/0, /*channelCount=*/0, /*channelStart=*/0);
 }
 
 bool JuceEngine::isRecording() const

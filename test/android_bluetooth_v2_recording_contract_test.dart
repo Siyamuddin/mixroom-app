@@ -156,7 +156,11 @@ void main() {
     ]) {
       expect(capture, isNot(contains(forbidden)));
     }
-    expect(capture, contains('JuceBridge.startRecordingJNI'));
+    expect(capture, contains('captureLifecycleV2.start('));
+    expect(
+      plugin,
+      contains('JuceBridge.startRecordingJNI(path, channelStart, channelCount)'),
+    );
     expect(capture, isNot(contains('allowsCapture')));
   });
 

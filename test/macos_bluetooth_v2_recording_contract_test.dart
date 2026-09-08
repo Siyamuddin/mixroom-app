@@ -647,7 +647,7 @@ void main() {
         plugin,
         '- (void)setAudioRouteIntentV2:(NSDictionary *)args\n'
             '                   completion:(void (^)(NSDictionary<NSString *, id> *))completion {',
-        '#else\n    self.iosIntentCompletionDeliveredV2 = NO;',
+        '#else\n    if (self.iosLifecycleTransitionActiveV2) {',
       );
 
       expect(asyncIntent, contains('beginsInvalidationRecovery'));
