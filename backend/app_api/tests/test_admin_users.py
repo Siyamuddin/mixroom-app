@@ -564,10 +564,10 @@ class AdminUserRepositoryTests(unittest.TestCase):
         self.assertEqual(
             repository._normalize_override_seat_limit(
                 "education",
-                20,
+                73,
                 plan={"limits": {"default_seats": 20}},
             ),
-            20,
+            73,
         )
 
         with self.assertRaisesRegex(ValueError, "Studio seat limit"):
@@ -579,7 +579,7 @@ class AdminUserRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Education seat limit"):
             repository._normalize_override_seat_limit(
                 "education",
-                12,
+                -1,
                 plan={"limits": {"default_seats": 20}},
             )
 

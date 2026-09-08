@@ -78,6 +78,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val monitoringTargetRow: Int = 0,
     val bluetoothSelectionMode: AndroidBluetoothRouteSelectionModeV2? = null,
     val startedNanos: Long = SystemClock.elapsedRealtimeNanos(),
+    val captureCancelRequested: AtomicBoolean = AtomicBoolean(false),
     val cancelled: AtomicBoolean = AtomicBoolean(false),
     val routeInvalidated: AtomicBoolean = AtomicBoolean(false),
     val cleanupClaimed: AtomicBoolean = AtomicBoolean(false),
@@ -1341,12 +1342,23 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     startedNanos: Long,
     outcome: IntentOutcomeV2,
   ) {
+    val completedMonitor = recordingOperationV2?.takeIf {
+      it.purpose == InputLifecyclePurposeV2.MONITORING &&
+        (audioRouteIntentV2 == AudioRouteIntentV2.MONITORING ||
+          audioRouteIntentV2 == AudioRouteIntentV2.RECORDING)
+    }
     mainHandler.post {
       // Commit the verified playback fingerprint and release transition
       // ownership together on the observer's main-thread serialization path.
       // Notifications queued by the completed reopen therefore remain owned
       // by this transaction instead of becoming a new physical route change.
       var deliveredOutcome = outcome
+      if (outcome.status == "success" && completedMonitor != null &&
+        (!isCaptureOperationCurrentV2(completedMonitor) || generation != audioRouteGenerationV2 ||
+          (audioRouteIntentV2 == AudioRouteIntentV2.RECORDING && completedMonitor.captureCancelRequested.get()))
+      ) {
+        deliveredOutcome = IntentOutcomeV2("failure", "stale_generation")
+      }
       if (
         outcome.status == "success" &&
           audioRouteIntentV2 == AudioRouteIntentV2.PLAYBACK_ONLY
@@ -2617,7 +2629,12 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val operation = recordingOperationV2
       ?: return IntentOutcomeV2("failure", "actual_state_unavailable")
     if (
-      operation.purpose != InputLifecyclePurposeV2.RECORDING ||
+      !isCaptureOperationCurrentV2(operation) ||
+      operation.captureCancelRequested.get() ||
+      !((operation.purpose == InputLifecyclePurposeV2.RECORDING &&
+        audioRouteIntentV2 == AudioRouteIntentV2.PREPARING_RECORDING) ||
+        (operation.purpose == InputLifecyclePurposeV2.MONITORING &&
+          audioRouteIntentV2 == AudioRouteIntentV2.MONITORING)) ||
       operation.cancelled.get() ||
       recordingCancellationRequestedV2.get() ||
       generation != operation.generation ||
@@ -2630,15 +2647,22 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     val readiness = validatePreparedRecordingV2(operation)
     if (readiness != "ok") return IntentOutcomeV2("failure", readiness)
+    if (!isCaptureOperationCurrentV2(operation) || operation.captureCancelRequested.get()) {
+      return IntentOutcomeV2("failure", "stale_generation")
+    }
     audioRouteIntentV2 = AudioRouteIntentV2.RECORDING
     return IntentOutcomeV2("success", "ok")
   }
 
-  private fun verifyMonitoringIntentV2(generation: Long): IntentOutcomeV2 {
+  private fun verifyMonitoringIntentV2(generation: Long, targetRow: Int, channelStart: Int, channelCount: Int): IntentOutcomeV2 {
     val operation = recordingOperationV2
       ?: return IntentOutcomeV2("failure", "actual_state_unavailable")
     if (
       operation.purpose != InputLifecyclePurposeV2.MONITORING ||
+      !isCaptureOperationCurrentV2(operation) ||
+      targetRow != operation.monitoringTargetRow ||
+      channelStart != operation.recordingChannelStart ||
+      channelCount != operation.recordingChannelCount ||
       operation.cancelled.get() ||
       generation != operation.generation ||
       generation != audioRouteGenerationV2 ||
@@ -2648,12 +2672,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     val readiness = validatePreparedRecordingV2(operation)
     if (readiness != "ok") return IntentOutcomeV2("failure", readiness)
-    if (!activateVerifiedMonitorGraphV2(
-        operation.monitoringTargetRow,
-        operation.recordingChannelStart,
-        operation.recordingChannelCount,
-      )) {
-      return IntentOutcomeV2("failure", "monitoring_unavailable")
+    if (!isCaptureOperationCurrentV2(operation)) {
+      return IntentOutcomeV2("failure", "stale_generation")
     }
     audioRouteIntentV2 = AudioRouteIntentV2.MONITORING
     return IntentOutcomeV2("success", "ok")
@@ -2785,7 +2805,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             audioRouteIntentV2 == AudioRouteIntentV2.RECORDING ||
             audioRouteIntentV2 == AudioRouteIntentV2.MONITORING
           ) {
-            verifyMonitoringIntentV2(generation)
+            verifyMonitoringIntentV2(generation, requestedMonitoringTargetRow, requestedChannelStart, requestedChannelCount)
           } else {
             prepareSystemSelectedMonitoringV2(
               generation,
@@ -2838,6 +2858,13 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     result: MethodChannel.Result,
   ) {
     val operation = recordingOperationV2
+    if (args.boolValue("cancelOnly") && operation?.purpose == InputLifecyclePurposeV2.MONITORING &&
+      (audioRouteIntentV2 == AudioRouteIntentV2.MONITORING || audioRouteIntentV2 == AudioRouteIntentV2.RECORDING)
+    ) {
+      operation.captureCancelRequested.set(true)
+      result.success(null)
+      return
+    }
     val restorePlayback = args.boolValue("restorePlayback", true)
     operation?.let {
       selectCleanupDispositionV2(
@@ -2896,81 +2923,107 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     return operation
   }
 
+  private val captureNativeV2 = object : AndroidCaptureNativeV2 {
+    override fun isRecording() = JuceBridge.isRecordingJNI()
+    override fun start(path: String, channelStart: Int, channelCount: Int) =
+      JuceBridge.startRecordingJNI(path, channelStart, channelCount)
+    override fun stop(preserveMonitoring: Boolean): Map<String, Any> =
+      if (preserveMonitoring) JuceBridge.finalizeRecordingForMonitoringV2JNI()
+      else JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
+    override fun discard(preserveMonitoring: Boolean) {
+      if (preserveMonitoring) JuceBridge.discardRecordingForMonitoringV2JNI()
+      else JuceBridge.discardRecordingCaptureV2JNI()
+    }
+  }
+  private val captureLifecycleV2 = AndroidCaptureLifecycleV2(captureNativeV2)
+
+  private fun isCaptureOperationCurrentV2(operation: RecordingOperationV2): Boolean =
+    recordingOperationV2 === operation && !lifecycleDisposedV2 &&
+      !operation.cancelled.get() && !operation.routeInvalidated.get() &&
+      !operation.cleanupClaimed.get() && !recordingCancellationRequestedV2.get() &&
+      operation.generation == audioRouteGenerationV2
+
+  private fun verifiedMonitorGraphMatchesV2(operation: RecordingOperationV2): Boolean {
+    val facts = JuceBridge.getLiveInputMonitoringFactsV2JNI()
+    return facts.boolValue("active") &&
+      facts.intValue("targetRow", -1) == operation.monitoringTargetRow &&
+      facts.intValue("channelStart", -1) == operation.recordingChannelStart &&
+      facts.intValue("channelCount") == operation.recordingChannelCount &&
+      facts.intValue("connectionCount") == operation.recordingChannelCount
+  }
+
   private fun startPreparedCaptureV2(
     args: Map<String, Any?>,
     result: MethodChannel.Result,
   ) {
     val operation = recordingOperationV2
-    if (
-      operation == null ||
-      operation.purpose != InputLifecyclePurposeV2.RECORDING ||
-      operation.cancelled.get() ||
-      recordingCancellationRequestedV2.get() ||
-      audioRouteIntentV2 != AudioRouteIntentV2.PREPARING_RECORDING ||
-      lifecycleTransitionInProgressV2
+    val monitoringCapture = operation?.purpose == InputLifecyclePurposeV2.MONITORING &&
+      audioRouteIntentV2 == AudioRouteIntentV2.MONITORING
+    val preparedCapture = operation?.purpose == InputLifecyclePurposeV2.RECORDING &&
+      audioRouteIntentV2 == AudioRouteIntentV2.PREPARING_RECORDING
+    if (operation == null || (!monitoringCapture && !preparedCapture) ||
+      !isCaptureOperationCurrentV2(operation) || lifecycleTransitionInProgressV2
     ) {
       result.success(false)
       return
     }
-    val requestedChannelStart = args.intValue("channelStart")
-    val requestedChannelCount = args.intValue("channelCount")
-    if (
-      requestedChannelStart != operation.recordingChannelStart ||
-      requestedChannelCount != operation.recordingChannelCount
-    ) {
-      result.success(false)
-      return
-    }
+    operation.captureCancelRequested.set(false)
     lifecycleTransitionInProgressV2 = true
     audioLifecycleExecutorV2.execute {
-      var started = false
-      try {
-        val readiness = validatePreparedRecordingV2(operation)
-        if (
-          readiness == "ok" &&
-          !operation.cancelled.get() &&
-          !recordingCancellationRequestedV2.get() &&
-          operation.generation == audioRouteGenerationV2
-        ) {
-          started = JuceBridge.startRecordingJNI(
-            args.stringValue("path"),
-            operation.recordingChannelStart,
-            operation.recordingChannelCount,
-          )
-        }
-        if (
-          started &&
-          (operation.cancelled.get() ||
-            recordingCancellationRequestedV2.get() ||
-            operation.generation != audioRouteGenerationV2)
-        ) {
-          JuceBridge.discardRecordingCaptureV2JNI()
-          started = false
-        }
+      val started = try {
+        captureLifecycleV2.start(
+          args.stringValue("path"),
+          operation.recordingChannelStart, operation.recordingChannelCount,
+          args.intValue("channelStart"), args.intValue("channelCount"),
+          monitoringCapture,
+          { isCaptureOperationCurrentV2(operation) && validatePreparedRecordingV2(operation) == "ok" },
+          { operation.captureCancelRequested.get() },
+        )
       } catch (error: Exception) {
         Log.e("JuceAudioEngine", "Android V2 capture start failed", error)
-      } finally {
-        lifecycleTransitionInProgressV2 = false
+        false
       }
-      mainHandler.post { result.success(started) }
+      mainHandler.post {
+        // A route event/cancel can arrive between executor completion and delivery.
+        if (started && (!isCaptureOperationCurrentV2(operation) || operation.captureCancelRequested.get())) {
+          audioLifecycleExecutorV2.execute {
+            try {
+              if (recordingOperationV2 === operation) captureNativeV2.discard(monitoringCapture)
+            } finally {
+              mainHandler.post {
+                lifecycleTransitionInProgressV2 = false
+                result.success(false)
+              }
+            }
+          }
+        } else {
+          lifecycleTransitionInProgressV2 = false
+          result.success(started)
+        }
+      }
     }
   }
 
   private fun stopPreparedCaptureV2(result: MethodChannel.Result) {
+    val operation = recordingOperationV2
+    if (operation == null || lifecycleTransitionInProgressV2) {
+      result.success(mapOf("success" to false, "diagnosticCode" to "route_unstable"))
+      return
+    }
+    val preserveMonitoring = operation.purpose == InputLifecyclePurposeV2.MONITORING
     lifecycleTransitionInProgressV2 = true
     audioLifecycleExecutorV2.execute {
       val captureResult = try {
-        JuceBridge.stopRecordingWithoutPlaybackRestoreJNI()
+        captureLifecycleV2.stop(preserveMonitoring) { isCaptureOperationCurrentV2(operation) }
       } catch (error: Exception) {
         Log.e("JuceAudioEngine", "Android V2 capture stop failed", error)
-        hashMapOf<String, Any>(
-          "success" to false,
-          "diagnosticCode" to "writer_finalize_failed",
-        )
-      } finally {
-        lifecycleTransitionInProgressV2 = false
+        mapOf<String, Any>("success" to false, "diagnosticCode" to "writer_finalize_failed")
       }
-      mainHandler.post { result.success(captureResult) }
+      mainHandler.post {
+        lifecycleTransitionInProgressV2 = false
+        result.success(if (isCaptureOperationCurrentV2(operation)) captureResult
+          else captureResult + mapOf("success" to false, "diagnosticCode" to "route_unstable"))
+      }
     }
   }
 
@@ -3328,6 +3381,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
 
   private fun validatePreparedRecordingV2(operation: RecordingOperationV2): String {
     if (
+      !isCaptureOperationCurrentV2(operation) ||
       operation.cancelled.get() ||
       recordingCancellationRequestedV2.get() ||
       operation.generation != audioRouteGenerationV2
@@ -3353,6 +3407,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         actualInput = facts.actualInput
         actualOutput = facts.actualOutput
         if (operation.purpose == InputLifecyclePurposeV2.MONITORING) {
+          if (!AndroidNativeStreamEpochV2.matches(
+              operation.nativeOutputEpochGate.expected(), facts.outputStream.streamEpoch ?: 0L,
+            )) return "route_unstable"
+          if (!verifiedMonitorGraphMatchesV2(operation)) return "monitoring_unavailable"
           AndroidMonitoringReadinessV2.validate(facts)
         } else {
           AndroidSystemSelectedDuplexReadinessV2.validate(facts)
@@ -3375,7 +3433,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     ) {
       return "route_unstable"
     }
-    return "ok"
+    return if (isCaptureOperationCurrentV2(operation)) "ok" else "stale_generation"
   }
 
   private fun audioModeName(mode: Int): String =

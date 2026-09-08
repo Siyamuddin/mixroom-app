@@ -255,6 +255,23 @@ class ApiEntitlementsTests(unittest.TestCase):
         self.assertEqual(payload["limits"]["ai_prompts_daily"], 400)
         self.assertEqual(payload["access_sources"][1]["plan_code"], "education")
 
+    def test_class_deadline_is_returned_and_expired_access_is_removed(self):
+        organization = {
+            "organization_id": "edu-1", "name": "Day class", "status": "active",
+            "membership_status": "active", "membership_role": "student", "plan_code": "education",
+            "access_expires_at": "2999-01-01T00:00:00+00:00",
+        }
+        module.collaboration_repo.build_user_access_snapshot.return_value["organizations"] = [organization]
+        response = module.handler({"rawPath": "/v1/entitlements/me"}, object())
+        payload = decode_json_response(response)
+        self.assertEqual(payload["plan_code"], "education")
+        self.assertEqual(payload["expires_at"], organization["access_expires_at"])
+        organization["access_expires_at"] = "2000-01-01T00:00:00+00:00"
+        response = module.handler({"rawPath": "/v1/entitlements/me"}, object())
+        payload = decode_json_response(response)
+        self.assertEqual(payload["plan_code"], "free")
+        self.assertFalse(any(source.get("source_type") == "organization" for source in payload["access_sources"]))
+
     def test_education_teacher_org_is_visible_without_student_entitlement(self):
         self.repo.put_entitlement(
             {

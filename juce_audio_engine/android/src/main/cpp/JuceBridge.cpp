@@ -3509,6 +3509,29 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_discardRecordingCaptureV2JNI(JNI
     JuceEngine::get().discardRecordingCaptureV2Android();
 }
 
+// Capture-only operations retain the monitor graph and the prepared input route.
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_finalizeRecordingForMonitoringV2JNI(JNIEnv *env, jclass)
+{
+    return namedValueStatsToJavaMap(env, JuceEngine::get().finalizeRecordingCapture().toNamedValueSet());
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_discardRecordingForMonitoringV2JNI(JNIEnv *, jclass)
+{
+    JuceEngine::get().discardRecordingForMonitoringV2Android();
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getLiveInputMonitoringFactsV2JNI(JNIEnv *env, jclass)
+{
+    juce::NamedValueSet facts;
+    juce::MessageManager::getInstance()->callSync([&] {
+        facts = JuceEngine::get().getLiveInputMonitoringFactsV2();
+    });
+    return namedValueStatsToJavaMap(env, facts);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_isRecordingJNI(JNIEnv *, jclass)
 {

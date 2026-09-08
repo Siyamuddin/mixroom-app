@@ -1339,41 +1339,60 @@
                         20 student seats
                       </button>
                       <button class="button button-secondary" type="button" data-education-seat-preset="30">
-                        Upgrade to 30 student seats
+                        30 student seats
                       </button>
+                      <button class="button button-ghost" type="button" data-education-seat-preset="60">60 student seats</button>
                     </div>
                   </div>
-                  <details class="dev-disclosure">
+                  <section id="education-class-link" class="billing-provision-card" hidden>
+                    <h3>Education invite code</h3>
+                    <p class="panel-meta">Share one code with the class. Students paste it in Account → Subscription → Education invite. No email invites needed.</p>
+                    <input data-code class="text-input" readonly aria-label="Education invite code" spellcheck="false" hidden />
+                    <input data-link class="text-input" readonly aria-label="Class invite link" hidden />
+                    <div class="search-actions">
+                      <button data-create class="button button-secondary" type="button">Generate code</button>
+                      <button data-copy-code class="button button-secondary" type="button" hidden>Copy code</button>
+                      <button data-copy-link class="button button-secondary" type="button" hidden>Copy link</button>
+                      <button data-revoke class="button button-ghost" type="button" hidden>Revoke code &amp; link</button>
+                    </div>
+                    <p data-notice class="panel-meta" role="status" aria-live="polite"></p>
+                  </section>
+                  <section id="education-invites" class="billing-provision-card" hidden>
+                    <h3>Invite students · <span data-organization>Selected school</span></h3>
+                    <label class="search-input-wrap"><span class="search-label">Student emails</span>
+                      <textarea data-roster class="text-area" rows="4" spellcheck="false" aria-label="Student email addresses" placeholder="Paste emails, one per line or separated by commas"></textarea>
+                      <small>Up to 500 per batch. Accounts can be created later.</small>
+                    </label>
+                    <details class="education-options">
+                      <summary>Invite settings</summary>
+                      <label class="search-input-wrap"><span class="search-label">Email language</span>
+                        <select data-language class="select-input"><option value="en">English</option><option value="ko">한국어</option></select>
+                      </label>
+                      <div data-invite-duration></div>
+                      <p class="field-help">Defaults to the class end date. Custom periods start at review.</p>
+                    </details>
+                    <div class="search-actions">
+                      <button data-preview class="button button-secondary" type="button">Review emails</button>
+                      <button data-send class="button button-secondary" type="button" disabled>Send invitations</button>
+                      <button data-retry class="button button-ghost" type="button" hidden>Retry failed</button>
+                    </div>
+                    <p data-notice class="panel-meta" role="status" aria-live="polite"></p>
+                    <div data-results class="compact-table-wrap"></div>
+                    <details class="education-options"><summary>How students join</summary><p class="panel-meta">Sign in with the invited email. In Mixroom, open Account → Subscription → Education invite, paste the invitation link, and accept.</p></details>
+                  </section>
+                  <details class="dev-disclosure" open>
                     <summary>
                       <span data-i18n="dev.disclosure.educationProvision">Provision Education account</span>
-                      <small data-i18n="dev.disclosure.educationProvisionHelp">
-                        Creates an education org and teacher membership.
-                      </small>
+
                     </summary>
                   <form id="billing-education-provision-form" class="form-stack billing-provision-card">
-                    <div>
-                      <p class="panel-label">Education quick setup</p>
-                      <h3>Provision teacher account</h3>
-                      <p class="panel-meta">
-                        Creates the Education org and assigns the teacher outside the student seat count. Students receive Starter-level personal cloud storage.
-                      </p>
-                    </div>
+                    <p class="panel-meta">Enter an email to invite a teacher, or an existing account ID to activate access.</p>
                     <div class="inspector-grid">
-                      <label class="search-input-wrap" for="billing-education-provision-org-id">
-                        <span class="search-label">Organization ID</span>
-                        <input
-                          id="billing-education-provision-org-id"
-                          class="text-input"
-                          type="text"
-                          autocomplete="off"
-                          spellcheck="false"
-                          placeholder="optional"
-                        />
-                      </label>
                       <label class="search-input-wrap" for="billing-education-provision-name">
-                        <span class="search-label">Organization name</span>
+                        <span class="search-label">School / class name</span>
                         <input
                           id="billing-education-provision-name"
+                          required
                           class="text-input"
                           type="text"
                           autocomplete="off"
@@ -1384,50 +1403,63 @@
                     <div class="inspector-grid">
                       <label class="search-input-wrap" for="billing-education-provision-seats">
                         <span class="search-label">Student seats</span>
-                        <select id="billing-education-provision-seats" class="select-input">
-                          <option value="10">10 student seats</option>
-                          <option value="20" selected>20 student seats</option>
-                          <option value="30">30 student seats</option>
-                        </select>
+                        <input id="billing-education-provision-seats" class="text-input" type="number" min="1" step="1" value="60" required aria-describedby="education-seat-help" />
+                        <small id="education-seat-help">Teacher included separately.</small>
                       </label>
                       <label class="search-input-wrap" for="billing-education-provision-teacher-user-id">
-                        <span class="search-label">Teacher user ID</span>
-                        <input
-                          id="billing-education-provision-teacher-user-id"
-                          class="text-input"
-                          type="text"
-                          autocomplete="off"
-                          spellcheck="false"
-                        />
+                        <span class="search-label">Teacher user ID (optional)</span>
+                        <input id="billing-education-provision-teacher-user-id" class="text-input" type="text" autocomplete="off" placeholder="Leave blank to invite by email" />
                       </label>
                     </div>
                     <label class="search-input-wrap" for="billing-education-provision-teacher-email">
                       <span class="search-label">Teacher email</span>
                       <input
                         id="billing-education-provision-teacher-email"
+                          required
                         class="text-input"
                         type="email"
                         autocomplete="off"
                         spellcheck="false"
                       />
                     </label>
+                    <div id="education-provision-duration"></div>
+
                     <div class="search-actions">
                       <button
                         id="billing-education-provision-selected-user-button"
                         class="button button-ghost"
                         type="button"
                       >
-                        Use selected user
+                        Use selected teacher
                       </button>
                       <button
                         id="billing-education-provision-save-button"
                         class="button button-secondary"
                         type="submit"
                       >
-                        Provision Education
+                        Set up class
                       </button>
                     </div>
-                    <p id="billing-education-provision-feedback" class="panel-meta"></p>
+                    <p id="billing-education-provision-feedback" class="panel-meta" role="status" aria-live="polite"></p>
+                    <div id="education-teacher-invite-actions" class="search-actions" hidden>
+                      <button id="education-teacher-copy" class="button button-ghost" type="button">Copy teacher link</button>
+                      <button id="education-teacher-resend" class="button button-ghost" type="button">Resend teacher email</button>
+                    </div>
+                    <details class="education-options">
+                      <summary>Existing school</summary>
+                      <button id="education-use-selected-school" class="button button-ghost" type="button">Use selected school</button>
+                      <label class="search-input-wrap" for="billing-education-provision-org-id">
+                        <span class="search-label">Existing organization ID</span>
+                        <input
+                          id="billing-education-provision-org-id"
+                          class="text-input"
+                          type="text"
+                          autocomplete="off"
+                          spellcheck="false"
+                          placeholder="Leave blank to create a school"
+                        />
+                      </label>
+                    </details>
                   </form>
                   </details>
                   <details class="dev-disclosure">
@@ -1499,6 +1531,7 @@
                         </span>
                       </label>
                     </div>
+                    <div id="organization-duration"></div>
                     <label class="search-input-wrap" for="billing-organization-support-notes">
                       <span class="search-label" data-i18n="billing.organization.supportNotes">Support notes</span>
                       <textarea
@@ -1637,6 +1670,8 @@
                       <input id="billing-membership-seat-consumed" type="checkbox" />
                       <span data-i18n="billing.membership.seatConsumed">Seat consumed</span>
                     </label>
+                    <div id="membership-duration"></div>
+                    <p class="panel-meta">Student access ends at the earlier of this date and the organization end date. Changing a date does not send an email.</p>
                     <div class="search-actions">
                       <button
                         id="billing-membership-save-button"
@@ -1975,6 +2010,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=admin-limits-full-count-20260813" type="module"></script>
+    <script src="./app.js?v=employee-provisioning-20260908" type="module"></script>
   </body>
 </html>

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
+from common.education_invites import review_education_roster, invite_education_student, send_education_invite_email, resend_teacher_invite
 from common import config
 from common.admin_access_repository import AdminAccessRepository
 from common.auth import extract_claims_from_event, json_response, unauthorized
@@ -171,7 +172,33 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     updated_by_user_id=admin_user_id,
                     updated_by_email=admin_email,
                 )
+                if payload.get("teacher_membership", {}).get("status") == "pending":
+                    sent, error = send_education_invite_email(
+                        membership=payload["teacher_membership"], organization=payload["organization"], locale=body.get("locale", "en"),
+                    )
+                    payload.update(email_sent=sent, email_error=error)
                 return _finalize(json_response(200, payload))
+
+        if path.endswith("/v1/internal/admin/billing/education-invites") and method == "POST":
+            body = parse_json_body(event)
+            if body.get("action") in {"class_link_get", "class_link_create", "class_link_revoke"}:
+                link = collaboration_repo.education_class_link(str(body.get("organization_id") or "").strip(),
+                    body["action"].removeprefix("class_link_"), updated_by_user_id=admin_user_id)
+                payload = {"class_invite": link}
+            elif body.get("action") == "preview":
+                payload = review_education_roster(
+                    collaboration_repo, str(body.get("organization_id") or "").strip(), body.get("emails"),
+                    access_expires_at=body.get("access_expires_at", ""),
+                )
+            elif body.get("action") == "send":
+                payload = invite_education_student(
+                    collaboration_repo, body, admin_user_id=admin_user_id, admin_email=admin_email,
+                )
+            elif body.get("action") == "resend_teacher":
+                payload = resend_teacher_invite(collaboration_repo, body)
+            else:
+                raise ValueError("Choose preview, send, or resend_teacher.")
+            return _finalize(json_response(200, payload))
 
         if path.endswith("/v1/internal/admin/billing/memberships"):
             if method == "GET":

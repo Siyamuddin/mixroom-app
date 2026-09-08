@@ -370,6 +370,41 @@ void main() {
     expect(completers.containsKey(2), isTrue);
   });
 
+  test('row mutation caches tiles without notifying painters', () async {
+    final source = _source();
+    final completer = Completer<WaveformDetailTile?>();
+    final provider = WaveformDetailProvider(
+      loadTile: (_) => completer.future,
+      overviewWorkPending: () => false,
+    );
+    addTearDown(provider.dispose);
+    var notifications = 0;
+    provider.addListener(() => notifications++);
+
+    provider.beginMutation();
+    provider.requestTiles(<WaveformDetailTileRequest>[
+      WaveformDetailTileRequest(source: source, tileIndex: 0),
+    ]);
+    completer.complete(
+      _tile(
+        WaveformDetailTileRequest(source: source, tileIndex: 0),
+        const <double>[0.5, 0.25],
+      ),
+    );
+    await _flushAsync();
+
+    expect(notifications, 0);
+    expect(provider.cachedTileCount, 1);
+    expect(
+      provider.peakForSourceRange(source.path, 0.0, 100.0),
+      closeTo(0.5, 0.0001),
+    );
+
+    provider.endMutation();
+    await _flushAsync();
+    expect(notifications, 0);
+  });
+
   test('a failed detail load leaves the provider usable', () async {
     final source = _source();
     var attempts = 0;
@@ -390,9 +425,6 @@ void main() {
     await _flushAsync();
 
     expect(attempts, 2);
-    expect(
-      provider.peakForSourceRange(source.path, 2000.0, 2100.0),
-      isNotNull,
-    );
+    expect(provider.peakForSourceRange(source.path, 2000.0, 2100.0), isNotNull);
   });
 }

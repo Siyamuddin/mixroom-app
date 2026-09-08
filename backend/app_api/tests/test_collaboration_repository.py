@@ -7,6 +7,13 @@ from src.common.collaboration_repository import CollaborationRepository
 
 
 class CollaborationRepositoryTests(unittest.TestCase):
+    def setUp(self):
+        # Existing fixtures model membership reads with list_memberships.
+        patch = mock.patch.object(CollaborationRepository, '_consistent_memberships',
+            lambda repo, organization_id: repo.list_memberships(organization_id=organization_id))
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_list_memberships_filters_non_membership_entities_for_user_queries(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository._table = object()
@@ -112,7 +119,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
         self.assertEqual(snapshot["summary"]["workspace_count"], 1)
         self.assertEqual(snapshot["summary"]["cloud_project_count"], 1)
 
-    def test_build_user_access_snapshot_hides_education_workspaces(self):
+    def test_build_user_access_snapshot_upgrades_education_class_cloud(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository._table = object()
         repository.list_memberships = lambda **kwargs: [
@@ -157,12 +164,16 @@ class CollaborationRepositoryTests(unittest.TestCase):
             "used_bytes": 0,
         }
 
+        repository.save_organization = mock.Mock(return_value={"shared_workspace_enabled": True})
         snapshot = repository.build_user_access_snapshot("student-1")
 
         self.assertEqual(snapshot["organizations"][0]["plan_code"], "education")
-        self.assertEqual(snapshot["workspaces"], [])
-        self.assertEqual(snapshot["cloud_projects"], [])
-        self.assertEqual(snapshot["summary"]["workspace_count"], 0)
+        self.assertEqual(snapshot["workspaces"][0]["workspace_id"], "edu-1-classroom")
+        self.assertEqual(snapshot["cloud_projects"][0]["project_id"], "class-project")
+        self.assertEqual(snapshot["summary"]["workspace_count"], 1)
+        repository.save_organization.assert_called_once_with({
+            "organization_id": "edu-1", "shared_workspace_enabled": True,
+        })
 
     def test_build_user_access_snapshot_hides_private_project_for_non_owner(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
@@ -1186,6 +1197,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
     def test_accept_invite_rejects_wrong_signed_in_email(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository._table = mock.Mock()
+        repository.get_organization = mock.Mock(return_value={"organization_id": "org-1", "status": "active"})
         invite = {
             "entity_type": "membership",
             "entity_id": "membership#org-1:invite",
@@ -1211,6 +1223,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
     def test_accept_invite_clears_duplicate_invite_for_existing_member_same_email(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository._table = mock.Mock()
+        repository.get_organization = mock.Mock(return_value={"organization_id": "org-1", "status": "active"})
         invite = {
             "entity_type": "membership",
             "entity_id": "membership#org-1:invite",
@@ -1338,7 +1351,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
                 }
             )
 
-    def test_provision_education_organization_creates_teacher_without_workspace(self):
+    def test_provision_education_organization_creates_teacher_and_class_cloud(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
         repository.save_organization = mock.Mock(
             return_value={
@@ -1346,7 +1359,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
                 "organization_id": "edu-1",
                 "name": "Academy",
                 "plan_code": "education",
-                "seat_limit": 20,
+                "seat_limit": 73,
             }
         )
         repository.save_membership = mock.Mock(
@@ -1359,14 +1372,15 @@ class CollaborationRepositoryTests(unittest.TestCase):
                 "seat_consumed": False,
             }
         )
-        repository.save_workspace = mock.Mock()
+        repository.list_workspaces = mock.Mock(return_value=[])
+        repository.save_workspace = mock.Mock(return_value={"workspace_id": "education-cloud-edu-1"})
         repository.get_organization = mock.Mock(
             return_value={
                 "entity_type": "organization",
                 "organization_id": "edu-1",
                 "name": "Academy",
                 "plan_code": "education",
-                "seat_limit": 20,
+                "seat_limit": 73,
                 "seats_used": 0,
             }
         )
@@ -1375,7 +1389,7 @@ class CollaborationRepositoryTests(unittest.TestCase):
             {
                 "organization_id": "edu-1",
                 "name": "Academy",
-                "seat_limit": 20,
+                "seat_limit": 73,
                 "teacher_user_id": "teacher-1",
                 "teacher_email": "Teacher@Example.com",
             },
@@ -1386,24 +1400,24 @@ class CollaborationRepositoryTests(unittest.TestCase):
         self.assertEqual(payload["organization"]["plan_code"], "education")
         repository.save_organization.assert_called_once()
         organization_payload = repository.save_organization.call_args.args[0]
-        self.assertFalse(organization_payload["shared_workspace_enabled"])
+        self.assertTrue(organization_payload["shared_workspace_enabled"])
+        self.assertEqual(organization_payload["seat_limit"], 73)
         membership_payload = repository.save_membership.call_args.args[0]
         self.assertEqual(membership_payload["role"], "teacher")
         self.assertFalse(membership_payload["seat_consumed"])
         self.assertEqual(membership_payload["email"], "teacher@example.com")
-        repository.save_workspace.assert_not_called()
-        self.assertEqual(payload["workspace"], {})
+        repository.save_workspace.assert_called_once()
+        self.assertEqual(payload["workspace"]["workspace_id"], "education-cloud-edu-1")
 
-    def test_provision_education_organization_requires_valid_seat_option(self):
+    def test_provision_education_rejects_invalid_counts_before_writing(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)
-
-        with self.assertRaisesRegex(ValueError, "10, 20, or 30"):
-            repository.provision_education_organization(
-                {
-                    "seat_limit": 25,
-                    "teacher_user_id": "teacher-1",
-                }
-            )
+        repository.save_organization = mock.Mock()
+        for count in (0, -1, 1.5, True, "abc", "", None):
+            with self.subTest(count=count), self.assertRaisesRegex(ValueError, "positive whole number"):
+                repository.provision_education_organization({
+                    "seat_limit": count, "teacher_user_id": "teacher-1",
+                })
+        repository.save_organization.assert_not_called()
 
     def test_delete_personal_cloud_project_removes_versioned_s3_objects(self):
         repository = CollaborationRepository.__new__(CollaborationRepository)

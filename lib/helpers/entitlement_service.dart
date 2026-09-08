@@ -555,6 +555,18 @@ class EntitlementService extends ChangeNotifier {
     return null;
   }
 
+  Future<Map<String, dynamic>> educationClassLink({
+    required String organizationId,
+    String action = 'get',
+  }) async {
+    final payload = await _postAuthed('/v1/education/me/invites', body: {
+      'organization_id': organizationId,
+      'action': 'class_link_$action',
+    });
+    final link = payload['class_invite'];
+    return link is Map ? Map<String, dynamic>.from(link) : <String, dynamic>{};
+  }
+
   Future<OrganizationMembershipItem?> acceptEducationInvite({
     required String inviteToken,
   }) async {

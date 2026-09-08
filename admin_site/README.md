@@ -4,6 +4,8 @@ This is the standalone employee-facing admin website for Mixroom.
 
 It is not part of the Flutter app.
 
+For Education setup, access periods, and bulk student onboarding, see [the employee guide](EDUCATION_EMPLOYEE_GUIDE.md).
+
 For the concrete production rollout on `admin.mixroom.ai`, see:
 
 - `admin_site/DEPLOY_ADMIN_MIXROOM_AI.md`

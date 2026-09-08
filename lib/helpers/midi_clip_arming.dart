@@ -5,28 +5,57 @@ AudioTrack? resolveArmedMidiClip({
   required int? activeMidiClipEngineId,
   required int primarySelectedClipIndex,
   int? requiredRowIndex,
+  int? preferredRowIndex,
 }) {
   bool isEligible(AudioTrack track) =>
       track.isMidi &&
       (requiredRowIndex == null || track.rowIndex == requiredRowIndex);
 
-  if (activeMidiClipEngineId != null && activeMidiClipEngineId >= 0) {
+  AudioTrack? activeEditorClip() {
+    if (activeMidiClipEngineId == null || activeMidiClipEngineId < 0) {
+      return null;
+    }
     for (final track in tracks) {
       if (track.engineClipId == activeMidiClipEngineId && isEligible(track)) {
         return track;
       }
     }
+    return null;
   }
 
-  if (primarySelectedClipIndex >= 0 &&
-      primarySelectedClipIndex < tracks.length) {
-    final track = tracks[primarySelectedClipIndex];
-    if (isEligible(track)) {
-      return track;
+  AudioTrack? firstClipOnRow(int rowIndex) {
+    for (final track in tracks) {
+      if (isEligible(track) && track.rowIndex == rowIndex) {
+        return track;
+      }
     }
+    return null;
   }
 
-  return null;
+  AudioTrack? primarySelectedClip() {
+    if (primarySelectedClipIndex >= 0 &&
+        primarySelectedClipIndex < tracks.length) {
+      final track = tracks[primarySelectedClipIndex];
+      if (isEligible(track)) {
+        return track;
+      }
+    }
+    return null;
+  }
+
+  final active = activeEditorClip();
+  if (preferredRowIndex != null) {
+    if (active != null && active.rowIndex == preferredRowIndex) {
+      return active;
+    }
+    final preferred = firstClipOnRow(preferredRowIndex);
+    if (preferred != null) {
+      return preferred;
+    }
+    return primarySelectedClip();
+  }
+
+  return active ?? primarySelectedClip();
 }
 
 int? resolveSelectedInstrumentLaneRecordingRow({

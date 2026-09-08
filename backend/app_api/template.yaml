@@ -310,6 +310,7 @@ Conditions:
   HasAdminCognitoUserPoolId: !Not [!Equals [!Ref AdminCognitoUserPoolId, '']]
   HasSocialAuthSecretArn: !Not [!Equals [!Ref SocialAuthSecretArn, '']]
   HasAppAuthSecretArn: !Not [!Equals [!Ref AppAuthSecretArn, '']]
+  HasPostmarkServerTokenParameterName: !Not [!Equals [!Ref PostmarkServerTokenParameterName, '']]
   HasPostmarkServerTokenSecretArn: !Not [!Equals [!Ref PostmarkServerTokenSecretArn, '']]
   HasStibeeAccessTokenSecretArn: !Not [!Equals [!Ref StibeeAccessTokenSecretArn, '']]
   HasStibeeWebhookSharedSecretArn: !Not [!Equals [!Ref StibeeWebhookSharedSecretArn, '']]
@@ -2068,7 +2069,29 @@ Resources:
                   - secretsmanager:GetSecretValue
                 Resource: !Ref CloudProjectR2SecretAccessKeySecretArn
           - !Ref AWS::NoValue
+        - !If
+          - HasPostmarkServerTokenSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref PostmarkServerTokenSecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasPostmarkServerTokenParameterName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PostmarkServerTokenParameterName}
+          - !Ref AWS::NoValue
       Events:
+        AdminEducationInvitesPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/internal/admin/billing/education-invites
+            Method: post
         AdminBillingCatalogGet:
           Type: Api
           Properties:

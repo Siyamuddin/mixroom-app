@@ -3760,9 +3760,32 @@ void main() {
         .tap(find.byKey(const ValueKey('timeline_tablet_row_header_1')));
     await tester.pumpAndSettle();
 
-    expect(selectedRows, <int>[1]);
+    expect(selectedRows, <int>[0, 1]);
     expect(find.byKey(const ValueKey('expanded_row_1')), findsOneWidget);
     expect(find.byKey(const ValueKey('expanded_row_2')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('tapping the already selected header still reports onSelectRow',
+      (tester) async {
+    final selectedRows = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: _namedTrackRows(2),
+        expandRowsOnTrackSelect: false,
+        onMoveClipCommit: (_, __, ___) async {},
+        onSelectRow: selectedRows.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _tapRowHeader(tester, 0);
+    await _tapRowHeader(tester, 0);
+
+    expect(selectedRows, <int>[0, 0]);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

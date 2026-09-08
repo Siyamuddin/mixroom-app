@@ -5,10 +5,12 @@ from html import escape
 from typing import Any, Dict
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from common.access_period import access_period_active
 from common.auth import extract_user_id_from_event, json_response, unauthorized
 from common.billing_catalog import merge_capabilities, merge_limits
 from common.billing_catalog_repository import BillingCatalogRepository
 from common.collaboration_repository import CollaborationRepository
+from common.education_invites import send_education_invite_email
 from common.email_delivery import EmailDeliveryError, EmailSuppressedError, send_auth_email
 from common.events import RequestBodyError, parse_json_body
 from common.logging_utils import build_request_log_context, log_request_complete
@@ -102,7 +104,7 @@ def _enrich_cloud_projects_with_profiles(
 
 
 def _is_teacher_membership(membership: Dict[str, Any]) -> bool:
-    if str(membership.get("status") or "").strip().lower() != "active":
+    if str(membership.get("status") or "").strip().lower() != "active" or not access_period_active(membership):
         return False
     role = str(membership.get("role") or "").strip().lower()
     return role in {"owner", "admin", "manager", "teacher"}
@@ -334,7 +336,7 @@ def _effective_entitlement_for_cloud(
     for organization in snapshot.get("organizations") or []:
         if str(organization.get("organization_id") or "").strip() != organization_id:
             continue
-        if not _org_status_allows_read(organization.get("status")):
+        if not access_period_active(organization) or not _org_status_allows_read(organization.get("status")):
             continue
         if str(organization.get("membership_status") or "active").strip().lower() != "active":
             continue
@@ -508,7 +510,7 @@ def _cloud_storage_payload(
         organization = organizations_by_id.get(organization_id, {})
         if not _workspace_status_allows_read(workspace.get("status")):
             continue
-        if not _org_status_allows_read(organization.get("status")):
+        if not access_period_active(organization) or not _org_status_allows_read(organization.get("status")):
             continue
         if str(organization.get("membership_status") or "active").strip().lower() != "active":
             continue
@@ -586,82 +588,11 @@ def _enforce_cloud_project_quota(
     return entitlement
 
 
-def _send_education_invite_email(
-    *,
-    membership: Dict[str, Any],
-    organization: Dict[str, Any],
-    locale: str = "",
-) -> tuple[bool, str]:
-    email = str(membership.get("email") or "").strip().lower()
-    email_locale = _education_invite_email_locale(locale)
-    invite_url = _url_with_query_param(
-        str(membership.get("invite_url") or "").strip(),
-        "lang",
-        email_locale,
+def _send_education_invite_email(*, membership, organization, locale=""):
+    return send_education_invite_email(
+        membership=membership, organization=organization, locale=locale,
+        send_email=send_auth_email,
     )
-    app_invite_url = str(membership.get("app_invite_url") or "").strip()
-    if not email or not invite_url:
-        return False, "missing_invite_email_or_url"
-    organization_name = str(organization.get("name") or "Mixroom Education").strip()
-    safe_org = escape(organization_name)
-    safe_url = escape(invite_url, quote=True)
-    safe_app_url = escape(app_invite_url, quote=True)
-    if email_locale == "ko":
-        subject = f"{organization_name}에서 Mixroom 교육 좌석에 초대했습니다"
-        app_line = f"\nMixroom 앱에서 바로 열기:\n{app_invite_url}\n" if app_invite_url else ""
-        text_body = (
-            f"{organization_name}에서 Mixroom 교육 좌석에 초대했습니다.\n\n"
-            f"아래 링크에서 초대를 수락하세요:\n{invite_url}\n\n"
-            f"{app_line}"
-            "예상하지 못한 초대라면 이 이메일을 무시해 주세요."
-        )
-        app_link_html = (
-            f"<p><a href=\"{safe_app_url}\">Mixroom 앱에서 열기</a></p>"
-            if app_invite_url
-            else ""
-        )
-        html_body = (
-            f"<p><strong>{safe_org}</strong>에서 Mixroom 교육 좌석에 초대했습니다.</p>"
-            f"<p><a href=\"{safe_url}\">교육 초대 수락하기</a></p>"
-            f"{app_link_html}"
-            "<p>예상하지 못한 초대라면 이 이메일을 무시해 주세요.</p>"
-        )
-    else:
-        subject = f"You're invited to {organization_name} on Mixroom"
-        app_line = (
-            f"\nOpen directly in the Mixroom app:\n{app_invite_url}\n"
-            if app_invite_url
-            else ""
-        )
-        text_body = (
-            f"You have been invited to join {organization_name} on Mixroom.\n\n"
-            f"Accept your education seat here:\n{invite_url}\n\n"
-            f"{app_line}"
-            "If you were not expecting this invite, you can ignore this email."
-        )
-        app_link_html = (
-            f"<p><a href=\"{safe_app_url}\">Open in the Mixroom app</a></p>"
-            if app_invite_url
-            else ""
-        )
-        html_body = (
-            f"<p>You have been invited to join <strong>{safe_org}</strong> on Mixroom.</p>"
-            f"<p><a href=\"{safe_url}\">Accept your education seat</a></p>"
-            f"{app_link_html}"
-            "<p>If you were not expecting this invite, you can ignore this email.</p>"
-        )
-    try:
-        send_auth_email(
-            to_email=email,
-            subject=subject,
-            text_body=text_body,
-            html_body=html_body,
-        )
-        return True, ""
-    except EmailSuppressedError:
-        return False, "suppressed"
-    except EmailDeliveryError:
-        return False, "delivery_failed"
 
 
 def _send_organization_invite_email(
@@ -1010,7 +941,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     error="not_found",
                 )
             if method == "GET":
-                invite = repo.get_membership_by_invite_token(invite_token)
+                invite = (repo.get_education_class_link_by_token(invite_token) if CollaborationRepository.is_education_class_token(invite_token)
+                          else repo.get_membership_by_invite_token(invite_token))
                 if not invite:
                     return _finalize(
                         json_response(404, {"error": "Education invite not found."}),
@@ -1073,6 +1005,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     json_response(403, {"error": "Teacher access required."}),
                     error="forbidden",
                 )
+            if body.get("action") in {"class_link_get", "class_link_create", "class_link_revoke"}:
+                link = repo.education_class_link(organization_id, body["action"].removeprefix("class_link_"), updated_by_user_id=user_id)
+                return _finalize(json_response(200, {"class_invite": link}))
             membership = repo.save_membership(
                 {
                     "organization_id": organization_id,

@@ -6805,15 +6805,18 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         (toggleSelectModifierHeld || _desktopToggleSelectionModifierPressed);
     final wasSelected = tappedRow == _selectedRowIndex;
     final oldExpanded = List<bool>.from(_rowExpanded);
+    var notifiedSelect = false;
 
     setState(() {
       if (toggleSelect) {
         _toggleRowInSelection(tappedRow);
+        notifiedSelect = true;
         return;
       }
 
       if (rangeSelect) {
         _applyRowRangeSelection(tappedRow);
+        notifiedSelect = true;
         return;
       }
 
@@ -6825,6 +6828,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           _automationEditorTargetId = null;
         }
         _selectSingleRow(tappedRow);
+        notifiedSelect = true;
         if (widget.expandRowsOnTrackSelect) {
           if (_allowsMultipleExpandedRows) {
             _rowExpanded[tappedRow] = true;
@@ -6839,6 +6843,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
       if (_selectedRowIndices.length > 1) {
         _selectSingleRow(tappedRow);
+        notifiedSelect = true;
         return;
       }
 
@@ -6855,6 +6860,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         }
       }
     });
+
+    // Re-tapping an already-selected header still re-arms live MIDI.
+    if (!notifiedSelect) {
+      widget.onSelectRow(tappedRow);
+    }
 
     _notifyRowExpansionChanges(oldExpanded, notifyToggle: true);
   }
