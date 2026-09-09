@@ -958,6 +958,24 @@ class CollaborationApiTests(unittest.TestCase):
         self.assertEqual(response["statusCode"], 403)
         module.repo.save_membership.assert_not_called()
 
+    def test_teacher_can_create_class_link_without_email(self):
+        module.repo.education_class_link.return_value = {'invite_url': 'https://www.mixroom.ai/?invite=edu.token'}
+        response = module.handler({'rawPath': '/v1/education/me/invites',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': '{"organization_id":"org-1","action":"class_link_create"}'}, object())
+        self.assertEqual(response['statusCode'], 200)
+        module.repo.education_class_link.assert_called_once_with('org-1', 'create', updated_by_user_id='user-1')
+        module.send_auth_email.assert_not_called()
+        module.repo.save_membership.assert_not_called()
+
+    def test_student_cannot_manage_class_link(self):
+        module.repo.build_user_access_snapshot.return_value['memberships'][0]['role'] = 'student'
+        response = module.handler({'rawPath': '/v1/education/me/invites',
+            'requestContext': {'http': {'method': 'POST'}},
+            'body': '{"organization_id":"org-1","action":"class_link_revoke"}'}, object())
+        self.assertEqual(response['statusCode'], 403)
+        module.repo.education_class_link.assert_not_called()
+
     def test_teacher_can_invite_student(self):
         response = module.handler(
             {
@@ -996,7 +1014,7 @@ class CollaborationApiTests(unittest.TestCase):
         module.send_auth_email.assert_called_once()
         kwargs = module.send_auth_email.call_args.kwargs
         self.assertIn("초대", kwargs["subject"])
-        self.assertIn("교육 초대 수락하기", kwargs["html_body"])
+        self.assertIn("초대 코드", kwargs["html_body"])
         self.assertIn("lang=ko", kwargs["html_body"])
         self.assertIn("lang=ko", kwargs["text_body"])
 

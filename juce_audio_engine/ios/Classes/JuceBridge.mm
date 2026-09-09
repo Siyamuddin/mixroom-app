@@ -3222,6 +3222,25 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return success;
 }
 
++ (NSDictionary *)getLiveInputMonitoringFactsV2ObjC
+{
+    juce::NamedValueSet facts;
+    juce::MessageManager::getInstance()->callSync([&] {
+        facts = JuceEngine::get().getLiveInputMonitoringFactsV2();
+    });
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    for (int i = 0; i < facts.size(); ++i) {
+        NSString *key = [NSString stringWithUTF8String:facts.getName(i).toString().toRawUTF8()];
+        result[key] = @((long long)(juce::int64)facts.getValueAt(i));
+    }
+    return result;
+}
+
++ (void)discardRecordingForMonitoringV2ObjC
+{
+    JuceEngine::get().discardRecordingForMonitoringV2();
+}
+
 + (void)disableLiveInputMonitoringV2ObjC
 {
     void (^apply)(void) = ^{

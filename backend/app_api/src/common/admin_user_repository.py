@@ -28,7 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
 from . import config
 from .billing_catalog import catalog_plan_by_code, infer_plan_code
 from .billing_catalog_repository import BillingCatalogRepository
-from .collaboration_repository import CollaborationRepository
+from .collaboration_repository import CollaborationRepository, education_seat_limit
 from .models import (
     choose_primary_subscription,
     entitlement_capabilities_for_status,
@@ -524,8 +524,6 @@ class AdminUserRepository:
             raise ValueError("Expiry date must be a valid ISO timestamp.")
         if expiry_dt <= current:
             raise ValueError("Expiry date must be in the future.")
-        if expiry_dt > current + timedelta(days=370):
-            raise ValueError("Admin entitlement overrides can last at most 1 year.")
         safe_expires_at = expiry_dt.isoformat()
         retention_expires_at = (expiry_dt + timedelta(days=90)).isoformat()
 
@@ -881,12 +879,10 @@ class AdminUserRepository:
                 raise ValueError("Studio seat limit is too large.")
             return seat_limit
         if plan_code == "education":
-            seat_limit = _safe_int(raw_seat_limit) or _safe_int(
-                (limits or {}).get("default_seats"),
-            ) or 20
-            if seat_limit not in {10, 20, 30}:
-                raise ValueError("Education seat limit must be 10, 20, or 30.")
-            return seat_limit
+            return education_seat_limit(
+                raw_seat_limit if raw_seat_limit is not None
+                else (limits or {}).get("default_seats", 20)
+            )
         if plan_code == "enterprise":
             seat_limit = _safe_int(raw_seat_limit) or _safe_int(
                 (limits or {}).get("members"),
@@ -991,6 +987,7 @@ class AdminUserRepository:
                     "seat_limit": seat_limit,
                     "status": "active",
                     "source_provider": "admin_grant",
+                    "access_expires_at": subscription.get("expires_at") or "",
                     "source_subscription_id": subscription.get("subscription_id"),
                     "last_active_subscription_id": subscription.get("subscription_id"),
                     "support_notes": "Created by admin entitlement override.",
@@ -1013,6 +1010,7 @@ class AdminUserRepository:
                 "seat_limit": seat_limit,
                 "owner_user_id": user_id,
                 "source_provider": "admin_grant",
+                "access_expires_at": subscription.get("expires_at") or "",
                 "source_subscription_id": subscription.get("subscription_id"),
                 "last_active_subscription_id": subscription.get("subscription_id"),
                 "shared_workspace_enabled": True,

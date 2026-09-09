@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import time
+import random
 import json
 import re
 from datetime import datetime, timezone
@@ -27,6 +30,7 @@ except ModuleNotFoundError:  # pragma: no cover - local dev/test fallback
     class BotoCoreError(Exception):
         pass
 
+from .access_period import access_period_active, saved_access_expiry, earliest_access_expiry, parse_access_expiry
 from . import config
 from .cloud_object_storage import (
     cloud_project_storage_mode,
@@ -47,7 +51,20 @@ _MEMBERSHIP_ROLES = frozenset(
     {"owner", "admin", "manager", "teacher", "student", "member", "viewer"}
 )
 _RESERVED_SEAT_STATUSES = frozenset({"pending", "active"})
-_EDUCATION_SEAT_OPTIONS = (10, 20, 30)
+_EDUCATION_SEAT_OPTIONS = (10, 20, 30, 60)
+
+
+def education_seat_limit(value: Any) -> int:
+    """Validate a custom student count without truncating fractions or allowing unlimited seats."""
+    text = str(value).strip()
+    if isinstance(value, bool) or not text.isascii() or not text.isdigit():
+        raise ValueError("Education seat limit must be a positive whole number.")
+    count = int(text)
+    if count < 1:
+        raise ValueError("Education seat limit must be a positive whole number.")
+    return count
+
+
 _WORKSPACE_STATUSES = frozenset({"active", "locked", "archived"})
 _PROJECT_STATUSES = frozenset({"draft", "active", "archived", "purge_pending", "purged"})
 _ORG_READ_STATUSES = frozenset({"active", "past_due", "locked", "suspended"})
@@ -146,6 +163,7 @@ def _seat_reserved(membership: Dict[str, Any]) -> bool:
     return (
         _safe_str(membership.get("status")).lower() in _RESERVED_SEAT_STATUSES
         and _safe_bool(membership.get("seat_consumed"), default=False)
+        and access_period_active(membership)
     )
 
 
@@ -154,11 +172,11 @@ def _is_cloud_project_bundle(project: Dict[str, Any]) -> bool:
 
 
 def _org_allows_read(organization: Dict[str, Any]) -> bool:
-    return _safe_str(organization.get("status") or "active").lower() in _ORG_READ_STATUSES
+    return access_period_active(organization) and _safe_str(organization.get("status") or "active").lower() in _ORG_READ_STATUSES
 
 
 def _org_allows_write(organization: Dict[str, Any]) -> bool:
-    return _safe_str(organization.get("status") or "active").lower() in _ORG_WRITE_STATUSES
+    return access_period_active(organization) and _safe_str(organization.get("status") or "active").lower() in _ORG_WRITE_STATUSES
 
 
 def _workspace_allows_read(workspace: Dict[str, Any]) -> bool:
@@ -219,9 +237,13 @@ class CollaborationRepository:
                 default=20 if plan_code == "education" else 0,
             ),
         )
+        if plan_code == "education":
+            seat_limit = education_seat_limit(
+                payload.get("seat_limit", current.get("seat_limit", 20))
+            )
         if seat_limit < 0:
             raise ValueError("Organization seat limit is invalid.")
-        current_seats = self._organization_seat_summary(organization_id)
+        current_seats = self._organization_seat_summary(organization_id, consistent=plan_code == "education")
         if seat_limit > 0 and current_seats["used"] > seat_limit:
             raise ValueError("Seat limit cannot be lower than seats currently used.")
         seat_options = (
@@ -245,6 +267,7 @@ class CollaborationRepository:
             "entity_id": self._entity_id("organization", organization_id),
             "entity_type": "organization",
             "organization_id": organization_id,
+            "access_expires_at": saved_access_expiry(payload, current),
             "name": _payload_or_current_str(payload, current, "name", default=organization_id),
             "status": status,
             "plan_code": plan_code,
@@ -269,7 +292,7 @@ class CollaborationRepository:
             "updated_by_user_id": _safe_str(updated_by_user_id),
             "updated_by_email": _safe_str(updated_by_email).lower(),
         }
-        self._table.put_item(Item=record)
+        self._put_organization(record, current)
         return self._with_organization_seat_summary(record)
 
     def transition_organization_lifecycle(
@@ -323,7 +346,7 @@ class CollaborationRepository:
             "seats_available",
         ):
             record.pop(derived_key, None)
-        self._table.put_item(Item=record)
+        self._put_organization(record, current)
         return self._with_organization_seat_summary(record)
 
     def lock_organization(
@@ -489,11 +512,20 @@ class CollaborationRepository:
     ) -> Dict[str, Any]:
         teacher_user_id = _safe_str(payload.get("teacher_user_id"))
         teacher_email = _safe_email(payload.get("teacher_email"))
-        if not teacher_user_id:
-            raise ValueError("Teacher user ID is required.")
-        seat_limit = _safe_int(payload.get("seat_limit"), default=20)
-        if seat_limit not in _EDUCATION_SEAT_OPTIONS:
-            raise ValueError("Education seat limit must be 10, 20, or 30.")
+        invite_teacher = payload.get("invite_teacher") is True or not teacher_user_id
+        if invite_teacher:
+            if len(teacher_email) > 254 or not re.fullmatch(r"[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+", teacher_email):
+                raise ValueError("Enter a valid teacher email address.")
+            teacher_user_id = ""
+        existing_teacher = None
+        if invite_teacher and _safe_str(payload.get("organization_id")):
+            for member in self.list_memberships(organization_id=_safe_str(payload["organization_id"])):
+                if _safe_email(member.get("email")) == teacher_email and member.get("status") in {"active", "pending"}:
+                    if member.get("role") != "teacher":
+                        raise ValueError("This email already belongs to a different role in this school.")
+                    existing_teacher = member
+                    break
+        seat_limit = education_seat_limit(payload.get("seat_limit", 20))
 
         organization = self.save_organization(
             {
@@ -507,13 +539,13 @@ class CollaborationRepository:
             updated_by_email=updated_by_email,
         )
         organization_id = _safe_str(organization.get("organization_id"))
-        teacher_membership = self.save_membership(
+        teacher_membership = existing_teacher or self.save_membership(
             {
                 "organization_id": organization_id,
                 "user_id": teacher_user_id,
                 "email": teacher_email,
                 "role": "teacher",
-                "status": "active",
+                "status": "pending" if invite_teacher else "active",
                 "seat_consumed": False,
             },
             updated_by_user_id=updated_by_user_id,
@@ -600,12 +632,17 @@ class CollaborationRepository:
         accepted_email: str = "",
         updated_by_user_id: str = "",
     ) -> Dict[str, Any]:
+        if self.is_education_class_token(invite_token):
+            return self._accept_education_class_link(_safe_str(invite_token), _safe_str(user_id), _safe_email(accepted_email))
         invite = self.get_membership_by_invite_token(invite_token)
         if not invite:
             raise FileNotFoundError("Education invite not found.")
         if _safe_str(invite.get("status")) != "pending":
             raise ValueError("Education invite is no longer pending.")
         organization_id = _safe_str(invite.get("organization_id"))
+        organization = self.get_organization(organization_id)
+        if not access_period_active(invite) or not access_period_active(organization):
+            raise ValueError("This education access period has ended. Contact your teacher.")
         safe_user_id = _safe_str(user_id)
         if not organization_id or not safe_user_id:
             raise ValueError("Education invite cannot be accepted.")
@@ -617,12 +654,15 @@ class CollaborationRepository:
             raise PermissionError("This education invite was sent to a different email address.")
         existing = self.get_membership(organization_id, safe_user_id)
         if existing and _safe_str(existing.get("entity_id")) != _safe_str(invite.get("entity_id")):
-            if _safe_str(existing.get("status")) == "active":
+            if _safe_str(existing.get("status")) == "active" and access_period_active(existing):
+                if invite.get("role") == "teacher" and existing.get("role") != "teacher":
+                    raise ValueError("This account already has a different role in this school. Contact support.")
                 old_entity_id = _safe_str(invite.get("entity_id"))
                 if old_entity_id:
                     self._table.delete_item(Key={"entity_id": old_entity_id})
                 return existing
-            raise ValueError("This account already has an education seat record.")
+            if access_period_active(existing):
+                raise ValueError("This account already has an education seat record.")
 
         accepted = self.save_membership(
             {
@@ -631,8 +671,9 @@ class CollaborationRepository:
                 "email": invite.get("email"),
                 "role": invite.get("role") or "student",
                 "status": "active",
-                "seat_consumed": True,
+                "seat_consumed": False if invite.get("role") == "teacher" else True,
                 "invite_token": invite.get("invite_token"),
+                "access_expires_at": earliest_access_expiry(invite, organization) if invite.get("access_expires_at") else "",
                 "replaces_membership_entity_id": invite.get("entity_id"),
             },
             updated_by_user_id=updated_by_user_id or safe_user_id,
@@ -712,7 +753,24 @@ class CollaborationRepository:
             reverse=True,
         )
 
-    def save_membership(
+    def save_membership(self, payload, *, updated_by_user_id="", updated_by_email=""):
+        deadline = time.monotonic() + 22
+        for attempt in range(32):
+            try:
+                return self._save_membership_once(payload, updated_by_user_id=updated_by_user_id, updated_by_email=updated_by_email)
+            except ClientError as exc:
+                code = exc.response.get("Error", {}).get("Code")
+                if code not in {"TransactionCanceledException", "TransactionConflictException"}:
+                    raise
+                reasons = exc.response.get("CancellationReasons") or []
+                if reasons and any(r.get("Code") not in {None, "None", "ConditionalCheckFailed", "TransactionConflict"} for r in reasons):
+                    raise
+                if attempt == 31 or time.monotonic() >= deadline:
+                    raise ValueError("The class is busy or its link changed. Please try again.") from exc
+                # Spread a whole class arriving together across the retry window.
+                time.sleep(random.uniform(0.01, min(1.2, 0.04 * (2 ** min(attempt, 5)))))
+
+    def _save_membership_once(
         self,
         payload: Dict[str, Any],
         *,
@@ -740,6 +798,8 @@ class CollaborationRepository:
             raise ValueError("Membership role is invalid.")
         entity_id = self._entity_id("membership", f"{organization_id}:{user_id}")
         current = self._get_item(entity_id)
+        if payload.get("_shared_invite_token") and current.get("status") == "active" and access_period_active(current):
+            return current
         replacing_entity_id = _safe_str(payload.get("replaces_membership_entity_id"))
         seat_consumed = _safe_bool(
             payload.get("seat_consumed"),
@@ -748,16 +808,37 @@ class CollaborationRepository:
                 default=status in _RESERVED_SEAT_STATUSES,
             ),
         )
+        access_expires_at = saved_access_expiry(payload, current)
+        if status in _RESERVED_SEAT_STATUSES:
+            if not access_period_active(organization):
+                raise ValueError("This organization's access period has ended. Extend it before granting seats.")
+            if access_expires_at and organization.get("access_expires_at"):
+                if parse_access_expiry(access_expires_at) > parse_access_expiry(organization["access_expires_at"]):
+                    raise ValueError("Student access cannot end after the organization's access period.")
+        admission_members = self._consistent_memberships(organization_id) if organization.get("plan_code") == "education" else None
+        if payload.get("_shared_invite_token"):
+            if organization.get("plan_code") != "education" or organization.get("status") != "active":
+                raise ValueError("This class is inactive.")
+            prior = current or next((m for m in admission_members if _safe_email(m.get("email")) == email), {})
+            if prior and (prior.get("status") in {"removed", "revoked", "inactive"} or not access_period_active(prior)):
+                raise ValueError("Your class access was removed or has ended. Contact your teacher.")
+            pending = next((m for m in admission_members if _safe_email(m.get("email")) == email and m.get("status") == "pending"), {})
+            if pending and pending.get("role") != "student":
+                raise ValueError("Use your personal teacher invitation to activate teacher access.")
+            replacing_entity_id = pending.get("entity_id") or ""
+            access_expires_at = pending.get("access_expires_at") or current.get("access_expires_at") or ""
         if status in _RESERVED_SEAT_STATUSES and seat_consumed:
             if email:
                 self._ensure_no_reserved_email_membership(
                     organization_id,
                     email,
                     excluding_membership_entity_ids={entity_id, replacing_entity_id},
+                    members=admission_members,
                 )
             self._ensure_available_seat(
                 organization_id,
                 excluding_membership_entity_id=replacing_entity_id or entity_id,
+                organization=organization, members=admission_members,
             )
         now = _utc_now_iso()
         existing_invite_token = _safe_str(current.get("invite_token") or payload.get("invite_token"))
@@ -768,6 +849,7 @@ class CollaborationRepository:
             "entity_id": entity_id,
             "entity_type": "membership",
             "organization_id": organization_id,
+            "access_expires_at": access_expires_at,
             "user_id": user_id,
             "email": email or _safe_email(current.get("email")),
             "role": role,
@@ -784,7 +866,10 @@ class CollaborationRepository:
             "updated_by_user_id": _safe_str(updated_by_user_id),
             "updated_by_email": _safe_str(updated_by_email).lower(),
         }
-        self._table.put_item(Item=record)
+        if organization.get("plan_code") == "education":
+            self._commit_education_membership(record, organization, replacing_entity_id, payload.get("_shared_invite_token"))
+        else:
+            self._table.put_item(Item=record)
         return record
 
     def list_workspaces(
@@ -852,7 +937,10 @@ class CollaborationRepository:
             "locked_at": _payload_or_current_str(payload, current, "locked_at"),
             "archived_at": _payload_or_current_str(payload, current, "archived_at"),
         }
-        self._table.put_item(Item=record)
+        # DynamoDB secondary index keys must be absent, never empty.
+        # An organization-owned class workspace has no individual owner yet.
+        stored_record = {key: value for key, value in record.items() if key != "user_id" or value}
+        self._table.put_item(Item=stored_record)
         return record
 
     def list_cloud_projects(
@@ -985,6 +1073,8 @@ class CollaborationRepository:
                 safe_user_id,
                 organization_id,
             )
+            if organization.get("plan_code") == "education" and membership is None:
+                raise PermissionError("An active Education membership is required.")
             is_workspace_owner = _safe_str(workspace.get("user_id")) == safe_user_id
             role = _safe_str(membership.get("role")) if membership else ""
             if not is_workspace_owner and role not in _WORKSPACE_CREATE_ROLES:
@@ -1453,7 +1543,8 @@ class CollaborationRepository:
             if _safe_str(item.get("entity_type")) == "membership"
         ]
         active_memberships = [
-            item for item in memberships if _safe_str(item.get("status")) == "active"
+            item for item in memberships
+            if _safe_str(item.get("status")) == "active" and access_period_active(item)
         ]
         organizations: list[Dict[str, Any]] = []
         seen_org_ids: set[str] = set()
@@ -1468,6 +1559,7 @@ class CollaborationRepository:
             organizations.append(
                 {
                     **organization,
+                    "access_expires_at": earliest_access_expiry(organization, membership),
                     "membership_role": _safe_str(membership.get("role")),
                     "membership_status": _safe_str(membership.get("status")),
                     "can_write": _org_allows_write(organization),
@@ -1596,6 +1688,167 @@ class CollaborationRepository:
             "document_version_id": _safe_str(response.get("VersionId")),
         }
 
+    def _consistent_memberships(self, organization_id):
+        # A GSI cannot supply strongly consistent reads. Version checks below
+        # reject any scan that overlaps another admission or capacity change.
+        result = []
+        args = {"ConsistentRead": True,
+                "FilterExpression": "#kind = :kind AND organization_id = :org",
+                "ExpressionAttributeNames": {"#kind": "entity_type"},
+                "ExpressionAttributeValues": {":kind": "membership", ":org": organization_id}}
+        while True:
+            page = self._table.scan(**args)
+            result.extend(page.get("Items") or [])
+            if not page.get("LastEvaluatedKey"):
+                return result
+            args["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+
+    def _put_organization(self, record, current):
+        version = int(current.get("seat_revision") or 0)
+        record["seat_revision"] = version + 1
+        try:
+            self._table.put_item(Item=record,
+                ConditionExpression="attribute_not_exists(#rev)" if "seat_revision" not in current else "#rev = :rev",
+                ExpressionAttributeNames={"#rev": "seat_revision"},
+                **({"ExpressionAttributeValues": {":rev": version}} if "seat_revision" in current else {}))
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                raise ValueError("The class changed while saving. Please retry.") from exc
+            raise
+
+    def _commit_education_membership(self, record, organization, replacing_id, shared_token):
+        version = int(organization.get("seat_revision") or 0)
+        values = {":next": version + 1}
+        condition = "attribute_not_exists(#rev)"
+        if "seat_revision" in organization:
+            condition = "#rev = :rev"
+            values[":rev"] = version
+        transaction = [
+            {"Update": {"TableName": self._table.name,
+                "Key": {"entity_id": self._entity_id("organization", record["organization_id"])},
+                "UpdateExpression": "SET #rev = :next", "ConditionExpression": condition,
+                "ExpressionAttributeNames": {"#rev": "seat_revision"}, "ExpressionAttributeValues": values}},
+            {"Put": {"TableName": self._table.name, "Item": record}},
+        ]
+        if replacing_id and replacing_id != record["entity_id"]:
+            transaction.append({"Delete": {"TableName": self._table.name, "Key": {"entity_id": replacing_id},
+                "ConditionExpression": "#status = :pending", "ExpressionAttributeNames": {"#status": "status"},
+                "ExpressionAttributeValues": {":pending": "pending"}}})
+        if shared_token:
+            transaction.append({"ConditionCheck": {"TableName": self._table.name,
+                "Key": {"entity_id": self._entity_id("education_link", record["organization_id"])},
+                "ConditionExpression": "#token = :token AND #status = :active",
+                "ExpressionAttributeNames": {"#token": "invite_token", "#status": "status"},
+                "ExpressionAttributeValues": {":token": shared_token, ":active": "active"}}})
+        self._table.meta.client.transact_write_items(TransactItems=transaction)
+
+    def education_class_link(self, organization_id, action="get", *, updated_by_user_id=""):
+        organization = self.get_organization(organization_id)
+        if not organization or organization.get("plan_code") != "education":
+            raise ValueError("Select an Education class.")
+        key = self._entity_id("education_link", organization_id)
+        current = self._get_item(key)
+        if action == "get":
+            return self._with_education_code(current) if current.get("status") == "active" and access_period_active(organization) and organization.get("status") == "active" else {}
+        if action == "revoke":
+            if current:
+                self._table.update_item(Key={"entity_id": key}, UpdateExpression="SET #status = :revoked",
+                    ExpressionAttributeNames={"#status": "status"}, ExpressionAttributeValues={":revoked": "revoked"})
+            return {}
+        if action != "create":
+            raise ValueError("Choose get, create, or revoke.")
+        if not access_period_active(organization) or organization.get("status") != "active":
+            raise ValueError("This class is not active. Extend its access period before creating a link.")
+        if current.get("status") == "active":
+            return self._with_education_code(current)
+        encoded = base64.urlsafe_b64encode(organization_id.encode()).decode().rstrip("=")
+        token = f"edu.{encoded}.{uuid4().hex}"
+        record = {"entity_id": key, "entity_type": "education_link", "organization_id": organization_id,
+                  "status": "active", "role": "student", "invite_token": token,
+                  "invite_url": f"https://www.mixroom.ai/?auth=signup&invite={token}",
+                  "app_invite_url": f"mixroom://education/invites/{token}",
+                  "created_at": _utc_now_iso(), "updated_at": _utc_now_iso(), "updated_by_user_id": updated_by_user_id}
+        try:
+            self._table.put_item(Item=record, ConditionExpression="attribute_not_exists(#status) OR #status = :revoked",
+                ExpressionAttributeNames={"#status": "status"}, ExpressionAttributeValues={":revoked": "revoked"})
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                return self.education_class_link(organization_id)
+            raise
+        return self._with_education_code(record)
+
+    @staticmethod
+    def is_education_class_token(token):
+        token = _safe_str(token)
+        return token.startswith("edu.") or bool(re.fullmatch(r"[2-9A-HJ-NP-Z]{10}", token.replace("-", "").upper()))
+
+    def _with_education_code(self, record):
+        # Stable aliases let existing links keep working without changing the
+        # canonical token used by atomic seat admission and revocation.
+        alphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+        for salt in range(10):
+            value = int.from_bytes(hashlib.sha256(f"{record['invite_token']}:{salt}".encode()).digest(), "big")
+            characters = []
+            for _ in range(10):
+                value, digit = divmod(value, len(alphabet))
+                characters.append(alphabet[digit])
+            code = "".join(characters)
+            alias = {"entity_id": self._entity_id("education_code", code), "entity_type": "education_code",
+                     "organization_id": record["organization_id"], "invite_token": record["invite_token"]}
+            try:
+                self._table.put_item(Item=alias,
+                    ConditionExpression="attribute_not_exists(entity_id) OR invite_token = :token",
+                    ExpressionAttributeValues={":token": record["invite_token"]})
+                return {**record, "invite_code": code[:5] + "-" + code[5:]}
+            except ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                    raise
+        raise ValueError("Could not generate a class code. Please try again.")
+
+    def get_education_class_link_by_token(self, token):
+        token = _safe_str(token)
+        if not token.startswith("edu."):
+            code = token.replace("-", "").upper()
+            if not re.fullmatch(r"[2-9A-HJ-NP-Z]{10}", code):
+                return {}
+            alias = self._get_item(self._entity_id("education_code", code))
+            token = alias.get("invite_token", "")
+        try:
+            prefix, encoded, secret = token.split(".")
+            if prefix != "edu" or not re.fullmatch(r"[a-f0-9]{32}", secret):
+                return {}
+            organization_id = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+        except (ValueError, UnicodeError):
+            return {}
+        record = self._get_item(self._entity_id("education_link", organization_id))
+        return record if record.get("invite_token") == token and record.get("status") == "active" else {}
+
+    def _accept_education_class_link(self, token, user_id, email):
+        link = self.get_education_class_link_by_token(token)
+        if not link:
+            raise ValueError("This class invitation is invalid or revoked.")
+        organization_id = link["organization_id"]
+        organization = self.get_organization(organization_id)
+        if not organization or organization.get("plan_code") != "education" or organization.get("status") != "active" or not access_period_active(organization):
+            raise ValueError("This class has ended or is inactive.")
+        if not user_id or not email:
+            raise PermissionError("Sign in to Mixroom before joining this class.")
+        existing = self.get_membership(organization_id, user_id)
+        if existing.get("status") == "active" and access_period_active(existing):
+            return existing
+        members = self._consistent_memberships(organization_id)
+        prior = existing or next((m for m in members if _safe_email(m.get("email")) == _safe_email(email)), {})
+        if prior and (prior.get("status") in {"removed", "revoked", "inactive"} or not access_period_active(prior)):
+            raise ValueError("Your class access was removed or has ended. Contact your teacher.")
+        pending = next((m for m in members if _safe_email(m.get("email")) == _safe_email(email) and m.get("status") == "pending" and access_period_active(m)), {})
+        if pending and pending.get("role") != "student":
+            raise ValueError("Use your personal teacher invitation to activate teacher access.")
+        return self.save_membership({"organization_id": organization_id, "user_id": user_id, "email": email,
+            "role": "student", "status": "active", "seat_consumed": True,
+            "access_expires_at": pending.get("access_expires_at") or existing.get("access_expires_at") or "",
+            "replaces_membership_entity_id": pending.get("entity_id") or "", "_shared_invite_token": link["invite_token"]},
+            updated_by_user_id=user_id)
+
     def _entity_id(self, entity_type: str, identifier: str) -> str:
         return f"{entity_type}#{_safe_str(identifier)}"
 
@@ -1604,14 +1857,15 @@ class CollaborationRepository:
         organization_id: str,
         *,
         excluding_membership_entity_id: str = "",
+        organization=None, members=None,
     ) -> None:
-        organization = self.get_organization(organization_id)
+        organization = organization or self.get_organization(organization_id)
         seat_limit = _safe_int(organization.get("seat_limit"), default=0)
         if seat_limit <= 0:
             return
         seats_used = self._organization_seat_summary(
             organization_id,
-            excluding_membership_entity_id=excluding_membership_entity_id,
+            excluding_membership_entity_id=excluding_membership_entity_id, members=members,
         )["used"]
         if seats_used >= seat_limit:
             raise ValueError("Organization seat limit reached.")
@@ -1622,12 +1876,13 @@ class CollaborationRepository:
         email: str,
         *,
         excluding_membership_entity_ids: set[str],
+        members=None,
     ) -> None:
         safe_email = _safe_email(email)
         if not safe_email:
             return
         excluded = {_safe_str(entity_id) for entity_id in excluding_membership_entity_ids}
-        for membership in self.list_memberships(organization_id=organization_id):
+        for membership in (members if members is not None else self.list_memberships(organization_id=organization_id)):
             if _safe_str(membership.get("entity_id")) in excluded:
                 continue
             if _safe_email(membership.get("email")) != safe_email:
@@ -1640,10 +1895,13 @@ class CollaborationRepository:
         organization_id: str,
         *,
         excluding_membership_entity_id: str = "",
+        consistent=False, members=None,
     ) -> Dict[str, int]:
+        if consistent and members is None:
+            members = self._consistent_memberships(organization_id)
         active = 0
         invited = 0
-        for membership in self.list_memberships(organization_id=organization_id):
+        for membership in (members if members is not None else self.list_memberships(organization_id=organization_id)):
             if _safe_str(membership.get("entity_id")) == excluding_membership_entity_id:
                 continue
             if not _seat_reserved(membership):
@@ -1663,6 +1921,7 @@ class CollaborationRepository:
         if not organization:
             return {}
         record = dict(organization)
+        record["access_expired"] = not access_period_active(record)
         seat_limit = _safe_int(record.get("seat_limit"), default=0)
         summary = self._organization_seat_summary(_safe_str(record.get("organization_id")))
         record["seats_active"] = summary["active"]
@@ -1712,7 +1971,7 @@ class CollaborationRepository:
             _safe_str(project.get("user_id")) == safe_user_id
             or _safe_str(workspace.get("user_id")) == safe_user_id
         )
-        if membership is None and not is_owner:
+        if membership is None and (not is_owner or organization.get("plan_code") == "education"):
             raise FileNotFoundError("Cloud project not found.")
         if not self._workspace_visible_to_user(
             workspace,
@@ -1756,13 +2015,16 @@ class CollaborationRepository:
             return False
         if not _workspace_allows_write(workspace):
             return False
-        if _safe_str(project.get("user_id")) == user_id:
+        if _safe_str(project.get("user_id")) == user_id and organization.get("plan_code") != "education":
             return True
         membership = self._active_membership_for_org(
             user_id,
             _safe_str(project.get("organization_id") or workspace.get("organization_id")),
         )
-        return bool(membership and _safe_str(membership.get("role")) in _WRITE_ACCESS_ROLES)
+        return bool(membership and (
+            _safe_str(project.get("user_id")) == user_id
+            or _safe_str(membership.get("role")) in _WRITE_ACCESS_ROLES
+        ))
 
     def _active_membership_for_org(
         self,
@@ -1772,7 +2034,7 @@ class CollaborationRepository:
         for membership in self.list_memberships(user_id=user_id):
             if _safe_str(membership.get("organization_id")) != organization_id:
                 continue
-            if _safe_str(membership.get("status")) != "active":
+            if _safe_str(membership.get("status")) != "active" or not access_period_active(membership):
                 continue
             return membership
         return None
@@ -1838,7 +2100,7 @@ class CollaborationRepository:
         if self._table is None:
             return {}
         try:
-            return self._table.get_item(Key={"entity_id": entity_id}).get("Item") or {}
+            return self._table.get_item(Key={"entity_id": entity_id}, ConsistentRead=True).get("Item") or {}
         except (BotoCoreError, ClientError):
             return {}
 

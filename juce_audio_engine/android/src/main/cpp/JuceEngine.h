@@ -5072,6 +5072,7 @@ public:
     juce::NamedValueSet activateLiveInputMonitoringV2(int row,
                                                       int channelStart,
                                                       int channelCount);
+    juce::NamedValueSet getLiveInputMonitoringFactsV2();
     bool shouldRouteLiveInputToGraphV2() const noexcept;
     void routeLiveInputToRow(int row, int channelCount, int channelStart = 0);
     bool prepareRecordingInputs(int desiredInputChannels,
@@ -5096,6 +5097,7 @@ public:
     void completeRecordingStop(bool restorePlaybackRoute);
     RealtimeWavCapture::StopResult stopRecording(bool restorePlaybackRoute = true);
     void discardRecordingCaptureV2Android();
+    void discardRecordingForMonitoringV2Android();
     bool isRecording() const;
     void captureInput(const float *const *input,
                       int numInputChannels,

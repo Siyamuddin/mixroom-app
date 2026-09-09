@@ -1265,6 +1265,46 @@ void main() {
     await coordinator.dispose();
   });
 
+  test(
+      'repeated capture returns to monitoring without playback reconfiguration',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator =
+        AudioRouteCoordinatorV2(adapter: adapter, settlingDelay: Duration.zero);
+    await coordinator.start();
+    Future<void> monitor() async {
+      final result = await coordinator.transitionIntent(
+        AudioRouteIntentV2.monitoring,
+        operation: AudioRouteIntentOperationV2.systemSelectedMonitoring,
+        recordingChannelStart: 2,
+        recordingChannelCount: 2,
+        monitoringTargetRow: 3,
+      );
+      expect(result.succeeded, isTrue);
+      expect(coordinator.state, AudioRouteCoordinatorStateV2.stable);
+    }
+
+    await monitor();
+    for (var take = 0; take < 3; take++) {
+      expect(
+          (await coordinator.transitionIntent(AudioRouteIntentV2.recording))
+              .succeeded,
+          isTrue);
+      await monitor();
+      expect(coordinator.intent, AudioRouteIntentV2.monitoring);
+    }
+    expect(adapter.appliedGenerations, isEmpty);
+    expect(
+        adapter.appliedIntents
+            .where((intent) => intent == AudioRouteIntentV2.playbackOnly),
+        isEmpty);
+    expect(
+        adapter.appliedMonitoringTargetRows.whereType<int>(), everyElement(3));
+    expect(adapter.appliedRecordingChannelStarts.whereType<int>(),
+        everyElement(2));
+    await coordinator.dispose();
+  });
+
   test('route change invalidates monitoring exactly once', () async {
     final adapter = _FakeAdapter();
     final invalidated = <AudioRouteChangeEventV2>[];
