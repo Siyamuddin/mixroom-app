@@ -121,6 +121,7 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_removeMasterEffectJNI(JNIEnv *, jclass, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_reorderMasterEffectsJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectsJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectInstanceIdsJNI(JNIEnv *, jclass);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectIdsJNI(JNIEnv *, jclass);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterPluginParametersJNI(JNIEnv *, jclass, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectJNI(JNIEnv *, jclass, jint, jstring, jobject);

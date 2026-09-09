@@ -2787,6 +2787,20 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<List<String>> getMasterEffectInstanceIds() async {
+    try {
+      final list =
+          await _ch.invokeListMethod<String>('getMasterEffectInstanceIds');
+      return list ?? <String>[];
+    } on MissingPluginException catch (e) {
+      _logError('getMasterEffectInstanceIds', e);
+      return <String>[];
+    } on PlatformException catch (e) {
+      _logError('getMasterEffectInstanceIds', e);
+      return <String>[];
+    }
+  }
+
   static Future<List<String>> getMasterEffectIds() async {
     try {
       final list = await _ch.invokeListMethod<String>('getMasterEffectIds');

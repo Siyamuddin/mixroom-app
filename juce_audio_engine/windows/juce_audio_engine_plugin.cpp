@@ -1977,6 +1977,13 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "getMasterEffectInstanceIds") {
+      const auto values =
+          CallOnMessageThreadSync([] { return JuceEngine::get().getMasterEffectInstanceIds(); });
+      result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
+      return;
+    }
+
     if (method_call.method_name() == "getMasterEffectIds") {
       const auto values =
           CallOnMessageThreadSync([] { return JuceEngine::get().getMasterEffectIds(); });

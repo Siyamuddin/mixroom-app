@@ -8177,6 +8177,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         result(nil);
     } else if ([call.method isEqualToString:@"getMasterEffects"]) {
         result([JuceBridge getMasterEffectsObjC]);
+    } else if ([call.method isEqualToString:@"getMasterEffectInstanceIds"]) {
+        result([JuceBridge getMasterEffectInstanceIdsObjC]);
     } else if ([call.method isEqualToString:@"getMasterEffectIds"]) {
         result([JuceBridge getMasterEffectIdsObjC]);
     } else if ([call.method isEqualToString:@"getMasterEffectState"]) {

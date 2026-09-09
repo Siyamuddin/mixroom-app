@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Train and export mix_refine_v1 apply and magnitude ONNX models."""
+"""Train plugin-aware apply and continuous-parameter ONNX refinement models."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import hashlib
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
 FEATURE_COUNT = 77
 FEATURE_CONTRACT = "mix_refine_v1"
+PLUGIN_CONTRACT = "mix_refine_plugins_v2"
+PLUGIN_FEATURE_COUNT = 141
 
 
 @dataclass(frozen=True)
@@ -23,16 +27,65 @@ class ObjectiveRows:
 
 def _examples(dataset_dir: Path) -> Iterator[dict[str, Any]]:
     manifest = json.loads((dataset_dir / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("mix_feature_contract_version") != FEATURE_CONTRACT:
+    if manifest.get("mix_feature_contract_version") != FEATURE_CONTRACT or manifest.get("feature_count") != FEATURE_COUNT:
         raise ValueError("Dataset feature contract does not match mix_refine_v1.")
+    if manifest.get("dataset_schema_version") != "producer_training_examples_v2":
+        raise ValueError("Reconvert captures with the v2 converter before training.")
+    if manifest.get("errors"):
+        raise ValueError("Conversion errors must be resolved before training.")
+    archive_ids = set()
+    for shard in manifest.get("episode_archive_shards", []):
+        name = str(shard["name"])
+        if Path(name).name != name:
+            raise ValueError("Invalid archive shard filename")
+        raw = (dataset_dir / name).read_bytes()
+        if len(raw) != shard.get("bytes") or hashlib.sha256(raw).hexdigest() != shard.get("sha256"):
+            raise ValueError("Episode archive checksum or byte count mismatch")
+        rows = [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
+        if len(rows) != shard.get("examples"):
+            raise ValueError("Episode archive count mismatch")
+        for row in rows:
+            if row.get("schema_version") != "producer_mixing_episode_archive_v1" or not row.get("archive_id") or row["archive_id"] in archive_ids:
+                raise ValueError("Invalid or duplicate episode archive")
+            archive_ids.add(row["archive_id"])
+    if manifest.get("episodes_archived", 0) != len(archive_ids):
+        raise ValueError("Episode archive total mismatch")
+    groups: dict[str, str] = {}
+    seen: set[str] = set()
+    count = 0
     for shard in manifest.get("shards") or []:
-        path = dataset_dir / str(shard["name"])
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                yield json.loads(line)
+        name = str(shard["name"])
+        if Path(name).name != name:
+            raise ValueError("Invalid shard filename.")
+        raw = (dataset_dir / name).read_bytes()
+        if len(raw) != shard.get("bytes") or hashlib.sha256(raw).hexdigest() != shard.get("sha256"):
+            raise ValueError("Shard checksum or byte count mismatch.")
+        lines = [line for line in raw.decode("utf-8").splitlines() if line.strip()]
+        if len(lines) != shard.get("examples"):
+            raise ValueError("Shard example count mismatch.")
+        for line in lines:
+            example = json.loads(line)
+            if example.get("mix_feature_contract_version") != FEATURE_CONTRACT or example.get("dataset_schema_version") != "producer_training_examples_v2":
+                raise ValueError("Example contract mismatch.")
+            identifier = example.get("example_id")
+            group, split = example.get("group_id"), example.get("split")
+            if not identifier or identifier in seen or not group or split not in {"train", "validation", "test"}:
+                raise ValueError("Invalid identity, duplicate example, or split.")
+            seen.add(identifier)
+            if group in groups and groups[group] != split:
+                raise ValueError("Source group leaks across dataset splits.")
+            groups[group] = split
+            vector = example.get("feature_vector")
+            if vector is not None and (not isinstance(vector, list) or len(vector) != FEATURE_COUNT or
+                any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in vector)):
+                raise ValueError("Invalid feature vector.")
+            count += 1
+            yield example
+    if count != manifest.get("examples_written"):
+        raise ValueError("Dataset example count mismatch.")
 
 
-def load_objective(dataset_dir: Path, objective: str) -> ObjectiveRows:
+def load_objective(dataset_dir: Path, objective: str, *, plugins: bool = False) -> ObjectiveRows:
     if objective not in {"mix_apply", "mix_magnitude"}:
         raise ValueError("Unknown objective.")
     features: list[list[float]] = []
@@ -48,12 +101,26 @@ def load_objective(dataset_dir: Path, objective: str) -> ObjectiveRows:
         if (
             not isinstance(vector, list)
             or len(vector) != FEATURE_COUNT
+            or isinstance(label, bool)
             or not isinstance(label, (int, float))
+            or not math.isfinite(label)
+            or (objective == "mix_apply" and label not in (0, 1))
+            or (objective == "mix_magnitude" and not 0 <= label <= 3)
         ):
             raise ValueError(f"Invalid {objective} training example.")
+        if plugins:
+            extension = example.get("plugin_feature_vector")
+            if example.get("plugin_feature_contract_version") != PLUGIN_CONTRACT or not isinstance(extension, list) or len(extension) != 64 or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in extension):
+                raise ValueError("Reconvert captures with the plugin feature contract before training.")
+            vector = [*vector, *extension]
         features.append([float(value) for value in vector])
         labels.append(float(label))
-        weights.append(float(example.get("sample_weight") or 1.0))
+        weight = example.get("sample_weight")
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight) or not 0 < weight <= 1:
+            raise ValueError("Invalid eligible sample weight.")
+        if _mapping(example.get("exclusion_reasons")).get(objective):
+            raise ValueError("Eligible example has exclusion reasons.")
+        weights.append(float(weight))
         splits.append(str(example.get("split") or "train"))
     return ObjectiveRows(features, labels, weights, splits)
 
@@ -69,16 +136,25 @@ def validate_readiness(
     minimum_apply: int,
     minimum_magnitude: int,
 ) -> None:
-    if len(apply.labels) < minimum_apply:
-        raise ValueError(f"Need at least {minimum_apply} eligible apply examples.")
-    if len(set(apply.labels)) < 2:
-        raise ValueError("Apply training requires both accepted and rejected examples.")
-    if len(magnitude.labels) < minimum_magnitude:
-        raise ValueError(
-            f"Need at least {minimum_magnitude} eligible AI magnitude examples."
-        )
-    if not any(split == "train" for split in apply.splits + magnitude.splits):
-        raise ValueError("Dataset has no training split.")
+    for name, rows, minimum in (("apply", apply, minimum_apply), ("magnitude", magnitude, minimum_magnitude)):
+        train_labels = [label for label, split in zip(rows.labels, rows.splits) if split == "train"]
+        if len(train_labels) < minimum:
+            raise ValueError(f"Need at least {minimum} eligible {name} training examples.")
+        for split in ("train", "validation", "test"):
+            values = [label for label, row_split in zip(rows.labels, rows.splits) if row_split == split]
+            if not values:
+                raise ValueError(f"Missing {name} {split} examples.")
+            if name == "apply" and set(values) != {0.0, 1.0}:
+                raise ValueError(f"Apply {split} requires both accepted and rejected examples.")
+
+
+def validate_plugin_coverage(dataset_dir: Path) -> None:
+    rows = [r for r in _examples(dataset_dir) if r.get("final_plugin_target")]
+    for split in ("train", "validation", "test"):
+        apply = {r["labels"]["apply"] for r in rows if r["split"] == split and r["eligibility"]["mix_apply"]}
+        magnitude = [r for r in rows if r["split"] == split and r["eligibility"]["mix_magnitude"]]
+        if apply != {0, 1} or not magnitude:
+            raise ValueError(f"Plugin {split} needs accepted/rejected apply examples and continuous parameter corrections; level-only data cannot establish plugin readiness.")
 
 
 def _arrays(rows: ObjectiveRows, split: str, np: Any) -> tuple[Any, Any, Any]:
@@ -99,6 +175,8 @@ def train(
 ) -> dict[str, Any]:
     try:
         import numpy as np
+        import onnx
+        import onnxruntime as ort
         from sklearn.linear_model import LogisticRegression, Ridge
         from sklearn.metrics import accuracy_score, mean_absolute_error, roc_auc_score
         from skl2onnx import convert_sklearn
@@ -108,14 +186,15 @@ def train(
             "Install backend/training/requirements.txt before training."
         ) from exc
 
-    apply = load_objective(dataset_dir, "mix_apply")
-    magnitude = load_objective(dataset_dir, "mix_magnitude")
+    apply = load_objective(dataset_dir, "mix_apply", plugins=True)
+    magnitude = load_objective(dataset_dir, "mix_magnitude", plugins=True)
     validate_readiness(
         apply,
         magnitude,
         minimum_apply=minimum_apply,
         minimum_magnitude=minimum_magnitude,
     )
+    validate_plugin_coverage(dataset_dir)
     apply_x, apply_y, apply_w = _arrays(apply, "train", np)
     magnitude_x, magnitude_y, magnitude_w = _arrays(magnitude, "train", np)
     apply_model = LogisticRegression(
@@ -129,12 +208,12 @@ def train(
         sample_weight=magnitude_w,
     )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    input_type = [("features", FloatTensorType([None, FEATURE_COUNT]))]
+    output_dir.mkdir(parents=True, exist_ok=False)
+    input_type = [("features", FloatTensorType([None, PLUGIN_FEATURE_COUNT]))]
     apply_path = output_dir / "mix_apply_classifier_producer_capture.onnx"
     magnitude_path = output_dir / "mix_magnitude_regressor_producer_capture.onnx"
     apply_path.write_bytes(
-        convert_sklearn(apply_model, initial_types=input_type, target_opset=17).SerializeToString()
+        convert_sklearn(apply_model, initial_types=input_type, target_opset=17, options={id(apply_model): {"zipmap": False}}).SerializeToString()
     )
     magnitude_path.write_bytes(
         convert_sklearn(
@@ -142,8 +221,19 @@ def train(
         ).SerializeToString()
     )
 
+    for path in (apply_path, magnitude_path):
+        model = onnx.load(str(path))
+        onnx.helper.set_model_props(model, {"mix_feature_contract_version": PLUGIN_CONTRACT})
+        onnx.save(model, str(path))
+
+    eligible_examples = [e for e in _examples(dataset_dir) if e["eligibility"].get("mix_apply") or e["eligibility"].get("mix_magnitude")]
+    from collections import Counter
     metrics: dict[str, Any] = {
-        "feature_contract": FEATURE_CONTRACT,
+        "feature_contract": PLUGIN_CONTRACT,
+        "feature_count": PLUGIN_FEATURE_COUNT,
+        "training_group_ids": sorted({e["group_id"] for e in eligible_examples if e["split"] == "train"}),
+        "action_coverage": dict(Counter(e["candidate_action"]["type"] for e in eligible_examples)),
+        "plugin_parameter_coverage": dict(Counter(str((e.get("final_plugin_target") or {}).get("parameter_name")) for e in eligible_examples if e.get("final_plugin_target"))),
         "apply_examples": len(apply.labels),
         "magnitude_examples": len(magnitude.labels),
         "models": {
@@ -151,22 +241,37 @@ def train(
             "magnitude": magnitude_path.name,
         },
     }
-    apply_vx, apply_vy, _ = _arrays(apply, "validation", np)
-    if len(apply_vy):
-        probabilities = apply_model.predict_proba(apply_vx)[:, 1]
-        metrics["apply_validation_accuracy"] = float(
-            accuracy_score(apply_vy, probabilities >= 0.5)
-        )
-        if len(set(apply_vy.tolist())) > 1:
-            metrics["apply_validation_auc"] = float(
-                roc_auc_score(apply_vy, probabilities)
-            )
-    magnitude_vx, magnitude_vy, _ = _arrays(magnitude, "validation", np)
-    if len(magnitude_vy):
-        prediction = magnitude_model.predict(magnitude_vx)
-        metrics["magnitude_validation_mae"] = float(
-            mean_absolute_error(magnitude_vy, prediction)
-        )
+    for split in ("validation", "test"):
+        ax, ay, _ = _arrays(apply, split, np)
+        mx, my, _ = _arrays(magnitude, split, np)
+        probabilities = apply_model.predict_proba(ax)[:, 1]
+        metrics[f"apply_{split}_accuracy"] = float(accuracy_score(ay, probabilities >= 0.5))
+        metrics[f"apply_{split}_auc"] = float(roc_auc_score(ay, probabilities))
+        metrics[f"apply_{split}_always_accept_accuracy"] = float(np.mean(ay == 1))
+        metrics[f"magnitude_{split}_mae"] = float(mean_absolute_error(my, magnitude_model.predict(mx)))
+        metrics[f"magnitude_{split}_unchanged_mae"] = float(mean_absolute_error(my, np.ones_like(my)))
+    # Verify the actual artifacts with the same output decoding as production.
+    import sys
+    proxy_src = Path(__file__).resolve().parents[1] / "llm_proxy" / "src"
+    if str(proxy_src) not in sys.path:
+        sys.path.insert(0, str(proxy_src))
+    from common.mix_resolve import OnnxMixModelRunner
+    decoder = OnnxMixModelRunner.__new__(OnnxMixModelRunner)
+    decoder._np = np
+    for path, model, rows, classifier in ((apply_path, apply_model, apply, True), (magnitude_path, magnitude_model, magnitude, False)):
+        onnx.checker.check_model(str(path))
+        session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        x, _, _ = _arrays(rows, "test", np)
+        if classifier:
+            actual = [decoder._extract_apply_score(decoder._run_named_outputs(session, row.tolist())) for row in x]
+            expected = model.predict_proba(x)[:, 1]
+        else:
+            actual = session.run(None, {session.get_inputs()[0].name: x})[0].reshape(-1)
+            expected = model.predict(x)
+        if not np.allclose(actual, expected, atol=1e-5, rtol=1e-5):
+            raise ValueError("Exported ONNX predictions differ from trained model.")
+    metrics["onnx_runtime_parity"] = "passed"
+    metrics["publication_approved"] = False
     (output_dir / "training_manifest.json").write_text(
         json.dumps(metrics, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -181,15 +286,22 @@ def main() -> int:
     parser.add_argument("--minimum-apply", type=int, default=100)
     parser.add_argument("--minimum-magnitude", type=int, default=100)
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--require-ready", action="store_true", help="Also enforce sample and split readiness during validation")
     args = parser.parse_args()
     dataset = Path(args.dataset)
-    apply = load_objective(dataset, "mix_apply")
-    magnitude = load_objective(dataset, "mix_magnitude")
+    apply = load_objective(dataset, "mix_apply", plugins=True)
+    magnitude = load_objective(dataset, "mix_magnitude", plugins=True)
     if args.validate_only:
+        if args.require_ready:
+            validate_readiness(apply, magnitude, minimum_apply=args.minimum_apply, minimum_magnitude=args.minimum_magnitude)
+            validate_plugin_coverage(dataset)
         print(
             json.dumps(
                 {
-                    "feature_contract": FEATURE_CONTRACT,
+                    "format_validation": "passed",
+                    "readiness_checked": args.require_ready,
+                    "feature_contract": PLUGIN_CONTRACT,
+                    "feature_count": PLUGIN_FEATURE_COUNT,
                     "apply_examples": len(apply.labels),
                     "magnitude_examples": len(magnitude.labels),
                     "apply_classes": sorted(set(apply.labels)),

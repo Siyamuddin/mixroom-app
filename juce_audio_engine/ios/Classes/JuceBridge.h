@@ -310,6 +310,7 @@
 + (void)reorderMasterEffectsObjC:(NSInteger)fromIndex
                          toIndex:(NSInteger)toIndex;
 + (NSArray<NSString *> *)getMasterEffectsObjC;
++ (NSArray<NSString *> *)getMasterEffectInstanceIdsObjC;
 + (NSArray<NSString *> *)getMasterEffectIdsObjC;
 + (NSString *)getMasterEffectStateObjC:(NSInteger)effectIndex;
 + (BOOL)setMasterEffectStateObjC:(NSInteger)effectIndex

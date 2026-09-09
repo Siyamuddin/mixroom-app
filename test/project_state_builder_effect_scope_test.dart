@@ -14,13 +14,14 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           calls.add(call);
+          final individual = (call.arguments as Map?)?['forceIndividualRow'] == true;
           switch (call.method) {
             case 'getTrackEffectsForRow':
-              return <String>['Row EQ'];
+              return <String>[individual ? 'Row EQ' : 'Group Reverb'];
             case 'getTrackEffectIdsForRow':
-              return <String>['builtin.row-eq'];
+              return <String>[individual ? 'builtin.row-eq' : 'builtin.group-reverb'];
             case 'getTrackEffectInstanceIdsForRow':
-              return <String>['row-effect-instance'];
+              return <String>[individual ? 'row-effect-instance' : 'group-effect-instance'];
             case 'getTrackPluginParameters':
               return <Map<String, dynamic>>[];
             case 'getRowEffectBypassState':
@@ -37,7 +38,7 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  test('group lead state reads its individual row effect chain', () async {
+  test('group lead state keeps individual and group bus effect chains separate', () async {
     final state =
         await ProjectStateBuilder(
           classifier: InstrumentClassifier(enabled: false),
@@ -81,10 +82,12 @@ void main() {
       }.contains(call.method),
     );
     expect(rowEffectCalls, isNotEmpty);
-    for (final call in rowEffectCalls) {
-      final arguments = Map<String, dynamic>.from(call.arguments as Map);
-      expect(arguments['forceIndividualRow'], isTrue, reason: call.method);
-    }
+    expect(rowEffectCalls.any((call) => (call.arguments as Map)['forceIndividualRow'] == true), isTrue);
+    expect(rowEffectCalls.any((call) => (call.arguments as Map)['forceIndividualRow'] != true), isTrue);
+    expect(state.groupBuses.single['effects'][0]['effectId'], 'builtin.group-reverb');
+    expect(state.groupBuses.single['effects'][0]['instanceId'], 'group-effect-instance');
+    expect(state.toMagnitudeResolverJson()['group_buses'], state.groupBuses);
+
   });
 
   test('runtime project roles follow the current row order', () async {

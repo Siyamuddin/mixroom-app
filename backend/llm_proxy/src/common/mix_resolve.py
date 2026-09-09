@@ -13,6 +13,11 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from .mix_plugin_contract import (
+    CONTRACT as PLUGIN_CONTRACT, FEATURE_COUNT as PLUGIN_FEATURE_COUNT,
+    extra_features, parameter_target, is_continuous, proposed_value, bus_target, STRUCTURAL_ACTIONS,
+)
+
 _DEFAULT_APPLY_MODEL_FILENAME = (
     "mix_apply_classifier_official_sessions_20260330_seed1.onnx"
 )
@@ -113,6 +118,10 @@ class OnnxMixModelRunner:
             or _DEFAULT_BUNDLE_VERSION
         )
 
+    def feature_contract(self) -> str:
+        self._ensure_sessions()
+        return self._feature_contract
+
     def predict_apply_score(self, features: list[float]) -> float | None:
         self._ensure_sessions()
         named_outputs = self._run_named_outputs(self._apply_session, features)
@@ -140,10 +149,10 @@ class OnnxMixModelRunner:
         )
         context = {
             "mix_magnitude_model_source": self._model_source,
+            "mix_feature_contract_version": getattr(self, "_feature_contract", _CONTRACT_VERSION),
             "mix_magnitude_model_bundle_version": self._bundle_version,
             "mix_apply_model_version": apply_version,
             "mix_magnitude_regressor_version": magnitude_version,
-            "mix_feature_contract_version": _CONTRACT_VERSION,
         }
         if self._model_fetch_ms > 0:
             context["mix_model_fetch_ms"] = self._model_fetch_ms
@@ -175,6 +184,17 @@ class OnnxMixModelRunner:
                     sess_options=options,
                     providers=["CPUExecutionProvider"],
                 )
+                contracts = []
+                for session in (self._apply_session, self._magnitude_session):
+                    metadata = session.get_modelmeta().custom_metadata_map
+                    contract = metadata.get("mix_feature_contract_version", _CONTRACT_VERSION)
+                    expected = {_CONTRACT_VERSION: _FEATURE_COUNT, PLUGIN_CONTRACT: PLUGIN_FEATURE_COUNT}.get(contract)
+                    if expected is None or session.get_inputs()[0].shape[-1] != expected:
+                        raise ValueError("Mix model feature metadata/shape mismatch")
+                    contracts.append(contract)
+                if len(set(contracts)) != 1:
+                    raise ValueError("Apply and magnitude models use different contracts")
+                self._feature_contract = contracts[0]
                 self._np = np
                 self._ort = ort
                 self._apply_path = str(resolved.apply_path)
@@ -427,6 +447,9 @@ class MixResolveService:
                     fallback_reason="feature_contract_mismatch",
                 )
 
+            model_contract = self._runner.feature_contract() if hasattr(self._runner, "feature_contract") else _CONTRACT_VERSION
+            if model_contract not in {_CONTRACT_VERSION, PLUGIN_CONTRACT}:
+                raise ValueError("Unsupported model feature contract")
             onnx_started_at = time.perf_counter()
             refined_actions: list[dict[str, Any]] = []
             debug_entries: list[dict[str, Any]] = []
@@ -442,6 +465,8 @@ class MixResolveService:
                         fallback_reason="feature_contract_mismatch",
                     )
 
+                if model_contract == PLUGIN_CONTRACT:
+                    features.extend(extra_features(normalized_project, action))
                 apply_score = self._runner.predict_apply_score(features)
                 raw_magnitude = self._runner.predict_scalar(features)
                 if apply_score is None or raw_magnitude is None:
@@ -449,6 +474,23 @@ class MixResolveService:
                         normalized_actions,
                         fallback_reason="inference_failed",
                     )
+
+                parameter = parameter_target(normalized_project, action) if action["type"] in {"adjust_effect_param_by_name", "adjust_master_effect_param_by_name"} else None
+                categorical = action["type"] in STRUCTURAL_ACTIONS or (parameter is not None and not is_continuous(parameter[1]))
+                if model_contract == PLUGIN_CONTRACT and categorical:
+                    # A choice or insertion cannot be attenuated by a magnitude.
+                    # Its apply model must make an actual keep/drop decision.
+                    dropped = apply_score < 0.5
+                    if not dropped:
+                        refined_actions.append(action)
+                    debug_entries.append({
+                        "action_index": index, "action_type": action["type"],
+                        "before": action, "after": None if dropped else action,
+                        "apply_score": apply_score, "raw_magnitude": raw_magnitude,
+                        "final_scale": 0.0 if dropped else 1.0,
+                        "decision": "drop_discrete" if dropped else "keep_discrete", "dropped": dropped,
+                    })
+                    continue
 
                 predicted_scale = max(0.0, min(3.0, float(raw_magnitude)))
                 decision = "keep"
@@ -491,6 +533,7 @@ class MixResolveService:
                     normalized_project,
                     action,
                     predicted_scale,
+                    plugin_contract=model_contract == PLUGIN_CONTRACT,
                 )
                 refined_actions.append(refined_action)
                 debug_entries.append(
@@ -531,6 +574,7 @@ class MixResolveService:
         goal: dict[str, Any],
         action: dict[str, Any],
         strict: bool = False,
+        candidate_actions: list[dict[str, Any]] | None = None,
     ) -> list[float]:
         """Build the exact production feature vector without running ONNX.
 
@@ -544,7 +588,7 @@ class MixResolveService:
             *self._build_context_features(
                 project=normalized_project,
                 goal=normalized_goal,
-                actions=[normalized_action],
+                actions=_normalize_actions(candidate_actions) if candidate_actions is not None else [normalized_action],
                 strict=strict,
             ),
             *self._build_action_features(normalized_project, normalized_action),
@@ -1234,11 +1278,40 @@ def _scale_action(
     project: dict[str, Any],
     action: dict[str, Any],
     scale: float,
+    *, plugin_contract: bool = False,
 ) -> dict[str, Any]:
     if abs(scale - 1.0) < 0.03:
         return action
 
+    target = parameter_target(project, action) if action["type"] in {"adjust_effect_param_by_name", "adjust_master_effect_param_by_name"} else None
+    if target is not None and not is_continuous(target[1]):
+        return action
     data = dict(action["data"])
+    bus = bus_target(project, action) if plugin_contract else None
+    if bus is not None and action["type"] in {"set_row_gain", "set_row_pan"}:
+        key = "gain" if action["type"].endswith("gain") else "pan"
+        current = bus.get(key)
+        if not isinstance(current, (int, float)):
+            return action
+        mode = data.get("mode", "delta")
+        value = data.get("value") if mode == "set" else data.get("delta")
+        if not isinstance(value, (int, float)):
+            return action
+        delta = value - current if mode == "set" else value
+        data.update(mode="set", value=max(0.0, min(3.0 if key == "gain" else 1.0, current + delta * scale)))
+        data.pop("delta", None)
+        return {"type": action["type"], "data": data}
+    if plugin_contract and target is not None:
+        parameter = target[1]
+        proposal = proposed_value(parameter, data)
+        if proposal is None:
+            return action
+        current = float(parameter["value"])
+        data["value"] = max(parameter["min"], min(parameter["max"], current + (proposal - current) * scale))
+        data["mode"] = "set"
+        for key in ("value_norm", "delta_norm", "delta"):
+            data.pop(key, None)
+        return {"type": action["type"], "data": data}
     mode = str(data.get("mode") or "delta").strip().lower()
 
     def scale_key(key: str) -> None:

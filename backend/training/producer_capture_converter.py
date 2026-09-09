@@ -23,9 +23,10 @@ if str(LLM_PROXY_SRC) not in sys.path:
     sys.path.insert(0, str(LLM_PROXY_SRC))
 
 from common.mix_resolve import MixResolveService, contract_version  # noqa: E402
+from common.mix_plugin_contract import CONTRACT as PLUGIN_CONTRACT, extra_features, plugin_supervision, bus_target
 
 CAPTURE_SCHEMA = "producer_training_capture_v4"
-DATASET_SCHEMA = "producer_training_examples_v1"
+DATASET_SCHEMA = "producer_training_examples_v2"
 SUPPORTED_MODEL_ACTIONS = frozenset(
     {
         "set_row_gain",
@@ -58,6 +59,7 @@ class ConversionStats:
     objectives: Counter[str] = field(default_factory=Counter)
     splits: Counter[str] = field(default_factory=Counter)
     action_types: Counter[str] = field(default_factory=Counter)
+    exclusions: Counter[str] = field(default_factory=Counter)
 
     def manifest(self, *, shards: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -65,6 +67,8 @@ class ConversionStats:
             "source_schema_version": CAPTURE_SCHEMA,
             "mix_feature_contract_version": contract_version(),
             "feature_count": 77,
+            "plugin_feature_contract_version": PLUGIN_CONTRACT,
+            "plugin_feature_count": 64,
             "bundles_seen": self.bundles_seen,
             "bundles_converted": self.bundles_converted,
             "episodes_seen": self.episodes_seen,
@@ -73,13 +77,15 @@ class ConversionStats:
             "objective_example_counts": dict(sorted(self.objectives.items())),
             "split_counts": dict(sorted(self.splits.items())),
             "action_type_counts": dict(sorted(self.action_types.items())),
+            "exclusion_reason_counts": dict(sorted(self.exclusions.items())),
             "shards": shards,
         }
 
 
 class JsonlShardWriter:
-    def __init__(self, directory: Path, shard_size: int) -> None:
+    def __init__(self, directory: Path, shard_size: int, *, prefix: str = "examples") -> None:
         self.directory = directory
+        self.prefix = prefix
         self.shard_size = max(1, shard_size)
         self.directory.mkdir(parents=True, exist_ok=True)
         self._handle = None
@@ -98,7 +104,7 @@ class JsonlShardWriter:
 
     def _open_next(self) -> None:
         self.close_handle()
-        name = f"examples-{self._shard_count:05d}.jsonl"
+        name = f"{self.prefix}-{self._shard_count:05d}.jsonl"
         self._shard_count += 1
         self._count = 0
         self._handle = (self.directory / name).open("w", encoding="utf-8")
@@ -147,12 +153,6 @@ def _project(episode: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(project.get("rows"), list):
         raise ConversionError("missing_project_state")
     return project
-
-
-def _project_after(episode: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
-    after = _mapping(episode.get("state_after"))
-    project = _mapping(after.get("project_state"))
-    return project if isinstance(project.get("rows"), list) else fallback
 
 
 def _effect_name(project: dict[str, Any], *, row: int | None, index: int, master: bool) -> str:
@@ -267,47 +267,14 @@ def _candidate_actions(
     return result
 
 
-def _goal(episode: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
-    diagnosis = str(episode.get("diagnosis") or "other").strip().lower()
-    kind = {
-        "tone": "eq",
-        "masking": "balance",
-        "level_balance": "gain",
-        "dynamics": "compressor",
-        "space_depth": "reverb",
-        "stereo_image": "pan",
-        "distortion_noise": "distortion",
-    }.get(diagnosis, "balance")
-    action_type = str(action.get("type") or "")
-    scope = "master" if "master" in action_type else "row" if "row" in action_type or "effect" in action_type else "auto"
-    request = _mapping(episode.get("request_or_context"))
-    return {
-        "intensity": 0.5,
-        "execution_profile": "producer_safe",
-        "audibility": "noticeable",
-        "target": {"scope": scope},
-        "intents": [{"kind": kind}],
-        "instruction_present": bool(str(request.get("prompt") or "").strip()),
-    }
-
-
-def _outcome(episode: dict[str, Any]) -> tuple[int, float, str]:
-    signals = _mapping(episode.get("outcome_signals"))
-    rejected = episode.get("status") == "rejected" or (
-        signals.get("rejected_by_undo") is True
-        and signals.get("restored_by_redo") is not True
-    )
-    if rejected:
+def _outcome(episode: dict[str, Any]) -> tuple[int | None, float, str]:
+    # Taxonomy annotations and playback are not quality judgments.
+    outcome = episode.get("producer_outcome")
+    if outcome == "accepted":
+        return 1, 1.0, "producer_accepted"
+    if outcome == "rejected":
         return 0, 1.0, "producer_rejected"
-    provenance = _mapping(episode.get("provenance"))
-    if provenance.get("label") == "producer":
-        return 1, 1.0, "producer_confirmed"
-    if signals.get("survived_next_playback") is True:
-        return 1, 0.9, "implicit_playback_acceptance"
-    confidence = _number(provenance.get("confidence")) or 0.0
-    if provenance.get("label") == "inferred":
-        return 1, max(0.35, min(0.65, confidence)), "inferred_acceptance"
-    return 1, 0.25, "unconfirmed_completion"
+    return None, 0.0, "unconfirmed"
 
 
 def _action_delta(project: dict[str, Any], action: dict[str, Any]) -> float | None:
@@ -316,6 +283,11 @@ def _action_delta(project: dict[str, Any], action: dict[str, Any]) -> float | No
     value = _number(data.get("value"))
     if value is None:
         return _first_number((data.get("delta"), data.get("delta_norm")))
+    if str(data.get("mode") or "delta").lower() != "set":
+        return value
+    if action_type.startswith("set_row_") and bus_target(project, action) is not None:
+        current = _final_scalar(project, action)
+        return value - current if current is not None else None
     if action_type.startswith("set_row_"):
         row_number = _number(data.get("row"))
         if row_number is None:
@@ -329,9 +301,9 @@ def _action_delta(project: dict[str, Any], action: dict[str, Any]) -> float | No
         current = _number(mix.get("gain_0to3" if action_type == "set_row_gain" else "pan_0to1"))
         return value - current if current is not None else None
     if action_type == "set_master_gain":
-        return value - (_number(project.get("master_gain_0to3")) or 1.0)
+        return value - (_number(project.get("master_gain_0to3")) if _number(project.get("master_gain_0to3")) is not None else 1.0)
     if action_type == "set_master_pan":
-        return value - (_number(project.get("master_pan_0to1")) or 0.5)
+        return value - (_number(project.get("master_pan_0to1")) if _number(project.get("master_pan_0to1")) is not None else 0.5)
     return None
 
 
@@ -340,37 +312,8 @@ def _same_target(left: dict[str, Any], right: dict[str, Any]) -> bool:
         return False
     left_data = _mapping(left.get("data"))
     right_data = _mapping(right.get("data"))
-    keys = ("row", "effect_name_contains", "param_name")
+    keys = ("row", "effect_name_contains", "param_name", "param_name_contains_any", "force_individual_row")
     return all(left_data.get(key) == right_data.get(key) for key in keys)
-
-
-def _magnitude_scale(
-    project: dict[str, Any],
-    actions: list[tuple[dict[str, Any], str]],
-    index: int,
-    apply_label: int,
-) -> float | None:
-    action, source = actions[index]
-    if source != "ai":
-        return None
-    if apply_label == 0:
-        return 0.0
-    ai_delta = _action_delta(project, action)
-    correction = next(
-        (
-            candidate
-            for candidate, candidate_source in actions[index + 1 :]
-            if candidate_source == "manual" and _same_target(action, candidate)
-        ),
-        None,
-    )
-    if correction is None:
-        return 1.0
-    final_delta = _action_delta(project, correction)
-    if ai_delta is None or final_delta is None or abs(ai_delta) < 1e-9:
-        return None
-    scale = final_delta / ai_delta
-    return max(0.0, min(3.0, scale))
 
 
 def _audio_delta(episode: dict[str, Any]) -> dict[str, float] | None:
@@ -390,6 +333,36 @@ def _split(group_id: str) -> str:
     return "train" if bucket < 90 else "validation" if bucket < 95 else "test"
 
 
+def _final_scalar(project: dict[str, Any], action: dict[str, Any]) -> float | None:
+    kind, data = action["type"], _mapping(action.get("data"))
+    if kind in {"set_master_gain", "set_master_pan"}:
+        return _number(project.get("master_gain_0to3" if kind.endswith("gain") else "master_pan_0to1"))
+    if kind in {"set_row_gain", "set_row_pan"}:
+        bus = bus_target(project, action)
+        if bus is not None:
+            return _number(bus.get("gain" if kind.endswith("gain") else "pan"))
+        row = next((row for row in project.get("rows", [])
+                    if isinstance(row, dict) and row.get("row") == data.get("row")), {})
+        return _number(_mapping(row.get("mix")).get("gain_0to3" if kind.endswith("gain") else "pan_0to1"))
+    return None
+
+
+def _final_scale(project: dict[str, Any], after: dict[str, Any], action: dict[str, Any]) -> float | None:
+    # Only emit ratios with an actual final value. EQ/FX and structural edits
+    # remain archived until an instance-aware target extractor is implemented.
+    final = _final_scalar(after, action)
+    if final is None:
+        return None
+    proposal = _action_delta(project, action)
+    target = {"type": action["type"], "data": {**action["data"], "mode": "set", "value": final}}
+    delta = _action_delta(project, target)
+    if proposal is None or delta is None or abs(proposal) < 1e-9:
+        return None
+    ratio = delta / proposal
+    # Do not clip incompatible supervision into plausible-looking labels.
+    return ratio if 0 <= ratio <= 3 else None
+
+
 def convert_bundle(
     bundle: dict[str, Any], *, resolver: MixResolveService | None = None
 ) -> list[dict[str, Any]]:
@@ -404,74 +377,134 @@ def convert_bundle(
     episodes = bundle.get("episodes")
     if not isinstance(episodes, list):
         raise ConversionError("missing_episodes")
-
     feature_builder = resolver or MixResolveService()
-    group_id = _sha256(session_id)
+    # Old session-salted project refs cannot establish independence.
+    stable_group = bundle.get("source_group_ref") or (
+        bundle.get("project_ref") if bundle.get("segmentation_version") == "natural_action_burst_v2" else None
+    )
+    group_id = _sha256(str(stable_group or session_id))
     result: list[dict[str, Any]] = []
-    for episode_index, raw_episode in enumerate(episodes):
-        if not isinstance(raw_episode, dict):
-            continue
-        project = _project(raw_episode)
-        actions = _candidate_actions(raw_episode, _project_after(raw_episode, project))
-        apply_label, sample_weight, label_source = _outcome(raw_episode)
-        diagnoses = raw_episode.get("diagnoses")
-        if not isinstance(diagnoses, list) or not diagnoses:
-            diagnoses = [str(raw_episode.get("diagnosis") or "other")]
-        strategies = raw_episode.get("strategies")
-        if not isinstance(strategies, list):
-            strategies = []
-        audio_delta = _audio_delta(raw_episode)
-        for action_index, (action, source) in enumerate(actions):
-            goal = _goal(raw_episode, action)
-            features = feature_builder.build_training_feature_vector(
-                project=project,
-                goal=goal,
-                action=action,
-                strict=False,
-            )
-            magnitude_scale = _magnitude_scale(
-                project, actions, action_index, apply_label
-            )
-            supported = action["type"] in SUPPORTED_MODEL_ACTIONS
-            example_id = _sha256(
-                f"{session_id}:{episode_index}:{action_index}:{json.dumps(action, sort_keys=True)}"
-            )
-            eligibility = {
-                "mix_apply": supported,
-                "mix_magnitude": supported and magnitude_scale is not None,
-                "diagnosis_strategy": True,
-                "producer_acceptance": True,
-                "audio_result_delta": audio_delta is not None,
-            }
-            result.append(
-                {
-                    "dataset_schema_version": DATASET_SCHEMA,
-                    "mix_feature_contract_version": contract_version(),
-                    "example_id": example_id,
-                    "group_id": group_id,
-                    "split": _split(group_id),
-                    "source": {
-                        "capture_schema_version": CAPTURE_SCHEMA,
-                        "consent_version": consent_version,
-                        "action_source": source,
-                        "episode_disposition": str(raw_episode.get("disposition") or ""),
-                        "label_source": label_source,
-                    },
-                    "candidate_action": action,
-                    "goal": goal,
-                    "feature_vector": features,
-                    "labels": {
-                        "apply": apply_label,
-                        "magnitude_scale": magnitude_scale,
-                        "acceptance": apply_label,
-                        "diagnoses": sorted({str(item) for item in diagnoses}),
-                        "strategies": sorted({str(item) for item in strategies}),
-                        "audio_feature_delta": audio_delta,
-                    },
-                    "sample_weight": sample_weight,
-                    "eligibility": eligibility,
-                }
-            )
+    for episode_index, episode in enumerate(episodes):
+        if not isinstance(episode, dict):
+            raise ConversionError("episode_not_object")
+        project = _project(episode)
+        after = _mapping(_mapping(episode.get("state_after")).get("project_state"))
+        apply_label, weight, label_source = _outcome(episode)
+        traces = episode.get("inference_traces") or []
+        if not isinstance(traces, list):
+            raise ConversionError("invalid_inference_traces")
+        candidates: list[tuple[dict[str, Any], str, dict[str, Any] | None]] = []
+        for trace in traces:
+            if not isinstance(trace, dict) or trace.get("mix_feature_contract_version") != contract_version():
+                raise ConversionError("inference_feature_contract_mismatch")
+            if not isinstance(trace.get("project_state"), dict) or not isinstance(trace["project_state"].get("rows"), list):
+                raise ConversionError("missing_inference_project")
+            if not isinstance(trace.get("goal"), dict) or not isinstance(trace.get("strict"), bool):
+                raise ConversionError("missing_inference_goal_or_strict")
+            batch = trace.get("actions")
+            if not isinstance(batch, list):
+                raise ConversionError("missing_candidate_batch")
+            for action in batch:
+                if not isinstance(action, dict) or not isinstance(action.get("data"), dict) or not action.get("type"):
+                    raise ConversionError("invalid_candidate_action")
+                candidates.append((action, "ai", trace))
+        raw_candidates = _candidate_actions(episode, after or project)
+        candidates.extend((action, source, None) for action, source in raw_candidates if source == "manual" or not traces)
+        for index, (action, source, trace) in enumerate(candidates):
+            reasons: list[str] = []
+            features = None
+            goal = None
+            if trace is None:
+                reasons.append("missing_exact_inference_context")
+            else:
+                goal = trace["goal"]
+                features = feature_builder.build_training_feature_vector(
+                    project=trace["project_state"], goal=goal, action=action,
+                    strict=trace["strict"], candidate_actions=trace["actions"],
+                )
+                if trace.get("fallback_used") is True:
+                    reasons.append("inference_fallback")
+                # A candidate suppressed by the model was never auditioned.
+                resolved = trace.get("resolved_actions") or []
+                if not any(isinstance(item, dict) and _same_target(action, item) for item in resolved):
+                    reasons.append("candidate_not_auditioned")
+                if sum(_same_target(action, item) for item in trace["actions"]) != 1 or len(traces) != 1:
+                    reasons.append("ambiguous_proposal_target")
+            if not stable_group:
+                reasons.append("missing_stable_source_group")
+            if apply_label is None:
+                reasons.append("outcome_not_confirmed")
+            if episode.get("status") != "complete":
+                reasons.append("episode_not_complete")
+            if "row" in action["data"] and trace is not None:
+                target_row = action["data"]["row"]
+                before_row = next((r for r in project.get("rows", []) if isinstance(r, dict) and r.get("row") == target_row), {})
+                after_row = next((r for r in after.get("rows", []) if isinstance(r, dict) and r.get("row") == target_row), {})
+                identity = _mapping(trace.get("row_identities")).get(str(target_row), before_row.get("row_id"))
+                if not after_row:
+                    reasons.append("target_track_removed")
+                elif identity is None or after_row.get("row_id") is None:
+                    reasons.append("missing_track_identity")
+                elif identity != after_row["row_id"]:
+                    reasons.append("target_track_changed")
+            if action["type"] in {"set_row_gain", "set_row_pan", "set_master_gain", "set_master_pan"}:
+                if _final_scalar(after, action) is None:
+                    reasons.append("missing_final_target")
+                if trace is not None and _final_scalar(trace["project_state"], action) is None:
+                    reasons.append("missing_initial_target")
+            if episode.get("capture_warning"):
+                reasons.append("capture_warning")
+            if not after or not isinstance(after.get("rows"), list):
+                reasons.append("missing_final_state")
+            signals = _mapping(episode.get("outcome_signals"))
+            if signals.get("undo_redo_observed") or signals.get("rejected_by_undo"):
+                reasons.append("ambiguous_history_change")
+            if action["type"] not in SUPPORTED_MODEL_ACTIONS:
+                reasons.append("unsupported_model_action")
+            plugin_target, plugin_reasons = plugin_supervision(trace["project_state"], after, action) if trace and after else (None, [])
+            reasons.extend(plugin_reasons)
+            if apply_label == 1 and plugin_target is not None and not plugin_target.get("preserved"):
+                reasons.append("plugin_proposal_not_preserved")
+            # The v2 questionnaire explicitly distinguishes rejecting ALL
+            # changes from partial success; partial remains unlabelled.
+            scale = _final_scale(trace["project_state"], after, action) if trace and after else None
+            if plugin_target is not None:
+                scale = plugin_target.get("magnitude_scale")
+            # A kept result may completely reverse or eliminate an individual proposal.
+            if apply_label == 1 and _final_scalar(after, action) is not None and (scale is None or scale == 0):
+                reasons.append("proposal_not_preserved")
+            eligible = not reasons
+            magnitude = scale if eligible and apply_label == 1 else None
+            if magnitude is None:
+                magnitude_reasons = [*reasons, "no_confirmed_scalar_target"]
+            else:
+                magnitude_reasons = []
+            example_id = _sha256(f"{session_id}:{episode_index}:{index}:{json.dumps(action, sort_keys=True)}")
+            result.append({
+                "dataset_schema_version": DATASET_SCHEMA,
+                "mix_feature_contract_version": contract_version(),
+                "example_id": example_id, "group_id": group_id, "split": _split(group_id),
+                "source": {
+                    "capture_schema_version": CAPTURE_SCHEMA, "consent_version": consent_version,
+                    "session_id": session_id, "episode_id": episode.get("episode_id", str(episode_index)),
+                    "action_source": source, "label_source": label_source,
+                    "model_context": trace.get("model_context", {}) if trace else {},
+                },
+                "candidate_action": action, "goal": goal, "feature_vector": features,
+                "plugin_feature_contract_version": PLUGIN_CONTRACT,
+                "plugin_feature_vector": extra_features(trace["project_state"], action) if trace else None,
+                "final_plugin_target": plugin_target,
+                "labels": {"apply": apply_label, "magnitude_scale": magnitude,
+                    "acceptance": apply_label, "diagnoses": episode.get("diagnoses", []),
+                    "strategies": episode.get("strategies", []), "audio_feature_delta": _audio_delta(episode)},
+                "producer_notes": episode.get("producer_notes", ""),
+                "sample_weight": weight,
+                "eligibility": {"mix_apply": eligible, "mix_magnitude": magnitude is not None,
+                    "diagnosis_strategy": _mapping(episode.get("provenance")).get("label") == "producer",
+                    "producer_acceptance": apply_label is not None,
+                    "audio_result_delta": _audio_delta(episode) is not None},
+                "exclusion_reasons": {"mix_apply": reasons, "mix_magnitude": magnitude_reasons},
+            })
     return result
 
 
@@ -480,7 +513,7 @@ def _local_documents(inputs: list[str]) -> Iterator[tuple[str, bytes]]:
         path = Path(raw).expanduser()
         candidates = sorted(path.rglob("*.json")) if path.is_dir() else [path]
         for candidate in candidates:
-            if candidate.is_file():
+            if candidate.is_file() and not candidate.name.endswith(".upload.json"):
                 yield str(candidate), candidate.read_bytes()
 
 
@@ -574,8 +607,11 @@ def run(
     temp = tempfile.TemporaryDirectory() if is_s3_output else None
     output_dir = Path(temp.name) if temp else Path(output).expanduser()
     writer = JsonlShardWriter(output_dir, shard_size)
+    archive_writer = JsonlShardWriter(output_dir, min(shard_size, 100), prefix="episodes")
+    archived_ids: set[str] = set()
     stats = ConversionStats()
     seen_examples: set[str] = set()
+    converted_sources: list[tuple[str, int]] = []
     resolver = MixResolveService()
     try:
         for source, body in _documents(inputs):
@@ -595,17 +631,33 @@ def run(
                     stats.examples_written += 1
                     stats.splits[example["split"]] += 1
                     stats.action_types[example["candidate_action"]["type"]] += 1
+                    for objective, reasons in example["exclusion_reasons"].items():
+                        for reason in reasons:
+                            stats.exclusions[f"{objective}:{reason}"] += 1
                     for objective, eligible in example["eligibility"].items():
                         if eligible:
                             stats.objectives[objective] += 1
+                for episode_index, episode in enumerate(decoded["episodes"]):
+                    archive_id = _sha256(f"{decoded['session_id']}:{episode_index}")
+                    if archive_id in archived_ids:
+                        continue
+                    archived_ids.add(archive_id)
+                    archive_writer.write({
+                        "schema_version": "producer_mixing_episode_archive_v1",
+                        "archive_id": archive_id,
+                        "session_id": decoded["session_id"],
+                        "consent_version": decoded["consent_version"],
+                        "project_ref": decoded.get("project_ref"),
+                        "source_group_ref": decoded.get("source_group_ref"),
+                        "segmentation_version": decoded.get("segmentation_version"),
+                        "episode": episode,
+                        "events": [event for event in decoded.get("event_journal", [])
+                                   if isinstance(event, dict) and _mapping(event.get("payload")).get("episode_id") == episode.get("episode_id", str(episode_index))],
+                        "session_context_events": [event for event in decoded.get("event_journal", [])
+                                                   if isinstance(event, dict) and not _mapping(event.get("payload")).get("episode_id")],
+                    })
                 stats.bundles_converted += 1
-                _mark_ingestion(
-                    sessions_table,
-                    source,
-                    status="converted",
-                    output=output,
-                    example_count=len(examples),
-                )
+                converted_sources.append((source, len(examples)))
             except (ConversionError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 reason = str(exc) or exc.__class__.__name__
                 stats.errors[reason] += 1
@@ -618,16 +670,22 @@ def run(
                     error=reason,
                 )
         writer.finish()
+        archive_writer.finish()
         manifest = stats.manifest(shards=writer.shards)
+        manifest["episode_archive_shards"] = archive_writer.shards
+        manifest["episodes_archived"] = len(archived_ids)
         (output_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         if is_s3_output:
             _upload_directory(output_dir, output)
+        for source, count in converted_sources:
+            _mark_ingestion(sessions_table, source, status="converted", output=output, example_count=count)
         return manifest
     finally:
         writer.close_handle()
+        archive_writer.close_handle()
         if temp is not None:
             temp.cleanup()
 

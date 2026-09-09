@@ -284,6 +284,78 @@ AiV3PreparedBundle _bundle({
 }
 
 void main() {
+  test(
+    'capture observer preserves normal refinement and its exact inputs',
+    () async {
+      final traces = <Map<String, dynamic>>[];
+      var enabled = false;
+      final project = _project();
+      final goal = GoalVector.fromJson({
+        'intensity': 0.7,
+        'execution_profile': 'creative_bold',
+      });
+      final actions = <MixAction>[
+        MixAction('set_row_gain', {'row': 0, 'mode': 'set', 'value': 1.4}),
+      ];
+      final predictor = CapturingMagnitudePredictor(
+        _Predictor((a) => a),
+        captureEnabled: () => enabled,
+        captureToken: () => 'session:request',
+        onTrace: traces.add,
+      );
+      final first = await predictor.refine(
+        project: project,
+        goal: goal,
+        actions: actions,
+        strict: true,
+      );
+      expect(first.actions, actions);
+      expect(traces, isEmpty);
+      enabled = true;
+      final second = await predictor.refine(
+        project: project,
+        goal: goal,
+        actions: actions,
+        strict: true,
+      );
+      expect(second.actions, actions);
+      expect(traces.single['project_state'], project.toMagnitudeResolverJson());
+      expect(traces.single['goal'], goal.toJson());
+      expect(traces.single['actions'], actions.map((a) => a.toJson()).toList());
+      expect(traces.single['strict'], true);
+    },
+  );
+
+  test(
+    'late refinement cannot attach to a different capture request',
+    () async {
+      var token = 'first';
+      final completion = Completer<MagnitudeRefineResult>();
+      final traces = <Map<String, dynamic>>[];
+      final actions = [
+        MixAction('set_row_gain', {'row': 0, 'mode': 'set', 'value': 1.2}),
+      ];
+      final predictor = CapturingMagnitudePredictor(
+        _AsyncPredictor((_) => completion.future),
+        captureEnabled: () => true,
+        captureToken: () => token,
+        onTrace: traces.add,
+      );
+      final pending = predictor.refine(
+        project: _project(),
+        goal: GoalVector.fromJson({}),
+        actions: actions,
+        strict: false,
+      );
+      token = 'second';
+      completion.complete(
+        MagnitudeRefineResult(actions: actions, fallbackUsed: false),
+      );
+      expect((await pending).actions, actions);
+      expect(traces, isEmpty);
+    },
+  );
+
   test('runtime role overrides follow current project row indexes', () {
     final project = ProjectState(
       bpm: 120,
@@ -1114,6 +1186,7 @@ void main() {
   );
 
   test('refined eager row actions receive execution normalization', () async {
+    List<MixAction>? inferenceActions;
     final result =
         await AiV3MixGoalMaterializer(
           mixModel: _FixedMixModel(<MixAction>[
@@ -1124,13 +1197,16 @@ void main() {
             }),
           ]),
           magnitudePredictor: _Predictor(
-            (_) => <MixAction>[
+            (actions) {
+              inferenceActions = actions;
+              return <MixAction>[
               MixAction('set_row_pan', const <String, dynamic>{
                 'row': 0,
                 'mode': 'delta',
                 'delta': 0.1,
               }),
-            ],
+            ];
+            },
           ),
         ).materialize(
           bundle: _bundle(),
@@ -1142,6 +1218,7 @@ void main() {
 
     final raw = (result.bundle.actions.single.data['actions'] as List)
         .cast<Map<String, dynamic>>();
+    expect(inferenceActions!.single.data['force_individual_row'], isTrue);
     expect(raw, hasLength(1));
     expect(raw.single['type'], 'set_row_pan');
     expect((raw.single['data'] as Map)['force_individual_row'], isTrue);

@@ -6161,6 +6161,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void>? _aiModelsWarmupFuture;
   late final ProducerDataCollector _producerCollector;
   late final ProducerTrainingUploadService _producerTrainingUploadService;
+  Timer? _producerUploadRetryTimer;
+  final Object _producerAiMutationZone = Object();
   late final AuthService _producerCaptureAuth;
   ProducerCaptureUploadState _producerCaptureUploadState =
       ProducerCaptureUploadState.idle;
@@ -8690,10 +8692,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final action = await _undoManager.undo();
     if (action != null && _producerDataMode) {
       unawaited(
-        _producerCollector.recordUndoRedo(
-          isUndo: true,
-          description: action.description,
-        ),
+        _producerCollector
+            .recordUndoRedo(
+              isUndo: true,
+              description: action.description,
+              undoTransactionId: identityHashCode(action).toString(),
+            )
+            .catchError((Object _) {}),
       );
     }
     if (action != null) {
@@ -8725,10 +8730,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final action = await _undoManager.redo();
     if (action != null && _producerDataMode) {
       unawaited(
-        _producerCollector.recordUndoRedo(
-          isUndo: false,
-          description: action.description,
-        ),
+        _producerCollector
+            .recordUndoRedo(
+              isUndo: false,
+              description: action.description,
+              undoTransactionId: identityHashCode(action).toString(),
+            )
+            .catchError((Object _) {}),
       );
     }
     if (action != null) {
@@ -9447,8 +9455,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final authService = context.read<AuthService>();
     _producerCaptureAuth = authService;
     _producerTrainingUploadService = ProducerTrainingUploadService();
+    _producerUploadRetryTimer = Timer.periodic(const Duration(seconds: 30), (
+      _,
+    ) {
+      unawaited(
+        _producerTrainingUploadService
+            .drainPending(
+              auth: _producerCaptureAuth,
+              collector: _producerCollector,
+            )
+            .catchError((Object _) {}),
+      );
+    });
     _producerCollector = ProducerDataCollector(
       snapshotProvider: _buildProducerSnapshot,
+      ownerIdProvider: () => authService.signedInUser?.userId,
       onUploadStateChanged: (state) {
         _producerCaptureUploadState = state;
         if (mounted) setState(() {});
@@ -9465,7 +9486,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         collector: _producerCollector,
       ),
     );
-    _magnitudePredictor = !kUseLearnedMagnitudePredictor
+    final baseMagnitudePredictor = !kUseLearnedMagnitudePredictor
         ? const NoopMixingMagnitudePredictor()
         : kUseRemoteLearnedMagnitudePredictor
         ? RemoteMixingMagnitudePredictor(
@@ -9481,6 +9502,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             applyModelAsset: kMixApplyClassifierAsset,
             magnitudeModelAsset: kMixMagnitudeRegressorAsset,
           );
+    _magnitudePredictor = CapturingMagnitudePredictor(
+      baseMagnitudePredictor,
+      captureEnabled: () => _producerDataMode && _producerCollector.isEnabled,
+      onTrace: _producerCollector.recordInferenceTrace,
+      captureToken: () => _producerCollector.inferenceCaptureToken,
+    );
     unawaited(_magnitudePredictor.startBackgroundRefresh());
 
     _mixModel = LocalMixingModel();
@@ -12937,6 +12964,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(
       _closeAndUploadProducerSession(
         'screen_dispose',
+        awaitUpload: true,
       ).whenComplete(_producerTrainingUploadService.close),
     );
     WidgetsBinding.instance.removeObserver(this);
@@ -12970,6 +12998,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _cloudAutoSyncTimer?.cancel();
     _cloudAutoSyncTimer = null;
     _projectAutosaveCoordinator.dispose();
+    _producerUploadRetryTimer?.cancel();
     _producerCaptureAccessHttpClient.close();
     _copiedChatMessageTimer?.cancel();
     _copiedChatMessageTimer = null;
@@ -18987,6 +19016,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    if (_producerDataMode) {
+      await _setProducerDataMode(false, closeReason: 'project_exit');
+    }
     await _saveProject(showSnackBar: false);
     _setDawPanelVisible('add_actions', false);
     _setDawPanelVisible('chat_panel', false);
@@ -19244,16 +19276,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final targetPlaying = !_isPlaying;
     if (_producerDataMode) {
       unawaited(
-        _producerCollector.recordPlaybackContext({
-          'event': targetPlaying ? 'play' : 'stop',
-          'playhead_ms': _globalAudioClock.inMilliseconds,
-          'loop_enabled': _loopEnabled,
-          if (_loopEnabled) ...{
-            'loop_start_ms': _loopStartMs,
-            'loop_end_ms': _loopEndMs,
-          },
-          'selected_track': _selectedRow,
-        }),
+        _producerCollector
+            .recordPlaybackContext({
+              'event': targetPlaying ? 'play' : 'stop',
+              'playhead_ms': _globalAudioClock.inMilliseconds,
+              'loop_enabled': _loopEnabled,
+              if (_loopEnabled) ...{
+                'loop_start_ms': _loopStartMs,
+                'loop_end_ms': _loopEndMs,
+              },
+              'selected_track': _selectedRow,
+            })
+            .catchError((Object _) {}),
       );
     }
     _transportDesiredPlaying = targetPlaying;
@@ -34036,9 +34070,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return false;
     if (epoch != _liveMidiRowArmEpoch) return false;
     final row = _rowIndexForId(rowId);
-    return row >= 0 &&
-        row < _rows.length &&
-        _rows[row].isInstrumentLane;
+    return row >= 0 && row < _rows.length && _rows[row].isInstrumentLane;
   }
 
   Future<void> _armLiveMidiInputForInstrumentRow(int row) async {
@@ -42700,7 +42732,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             key: _projectSettingsProducerCaptureSwitchKey,
             value: _showProducerCaptureUi,
             activeTrackColor: const Color(0xFF1F89E3),
-            onChanged: (v) {
+            onChanged: (v) async {
+              if (!v && _producerDataMode) {
+                await _setProducerDataMode(
+                  false,
+                  closeReason: 'project_setting_disabled',
+                );
+              }
+              if (!mounted) return;
               _setStateAndRefreshProjectSettings(
                 () => _showProducerCaptureUi = v,
               );
@@ -46981,7 +47020,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 : monitoringAvailable &&
                       (_liveInputMonitoringEffective ??
                           _shouldEnableLiveInputMonitoring(_audioRouteInfo));
-            final monitoringSubtitle = !monitoringAvailable && !monitoringEnabled
+            final monitoringSubtitle =
+                !monitoringAvailable && !monitoringEnabled
                 ? L10n.translate(
                     context,
                     'Monitoring is unavailable for the current audio route.',
@@ -50959,7 +50999,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     data: data,
                     project: project,
                     roleOverrides: aiV3CurrentRoleOverrides(project),
-                    bypassLearnedMagnitudes: _producerDataMode,
+                    bypassLearnedMagnitudes: false,
                     allowedEffectIds: _allowedBuiltInEffectIdsForCurrentPlan(),
                     effectConstraints: orderedEffectConstraints,
                     projectId: _projectId,
@@ -66187,6 +66227,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool emitActionSummaries = true,
     bool stageEffectEnsures = false,
     bool batchUndoGraphMutations = false,
+  }) => runZoned(
+    () => _applyMixingResultWithCaptureOrigin(
+      mix,
+      emitActionSummaries: emitActionSummaries,
+      stageEffectEnsures: stageEffectEnsures,
+      batchUndoGraphMutations: batchUndoGraphMutations,
+    ),
+    zoneValues: {_producerAiMutationZone: true},
+  );
+
+  Future<MixApplyReport> _applyMixingResultWithCaptureOrigin(
+    MixingResult mix, {
+    bool emitActionSummaries = true,
+    bool stageEffectEnsures = false,
+    bool batchUndoGraphMutations = false,
   }) async {
     if (mix.isNoOp || mix.actions.isEmpty) {
       return const MixApplyReport(attempted: 0, applied: 0);
@@ -68377,15 +68432,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _recordProducerManualEdit(String kind, Map<String, dynamic> payload) {
-    if (!_producerDataMode) return;
+    if (!_producerDataMode ||
+        _v3ExecutionInProgress ||
+        Zone.current[_producerAiMutationZone] == true)
+      return;
     unawaited(
-      _producerCollector.recordManualEdit(
-        kind: kind,
-        payload: {...payload, 'at': DateTime.now().toUtc().toIso8601String()},
-        projectId: _projectId,
-        projectName: _projectName,
-        projectDir: _projectDir,
-      ),
+      _producerCollector
+          .recordManualEdit(
+            kind: kind,
+            payload: {
+              ...payload,
+              if (_undoManager.lastAction != null)
+                'undo_transaction_id': identityHashCode(
+                  _undoManager.lastAction,
+                ).toString(),
+              'at': DateTime.now().toUtc().toIso8601String(),
+            },
+            projectId: _projectId,
+            projectName: _projectName,
+            projectDir: _projectDir,
+          )
+          .catchError((Object _) {}),
     );
   }
 
@@ -69185,6 +69252,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+    final producerBefore = _producerDataMode
+        ? await _safeProducerSnapshot()
+        : null;
     final expectations = await _captureAiV3Expectations(actions);
     final workflowRuntime = AiV3WorkflowRuntime();
     final executionSummariesByCommandId = <String, List<String>>{};
@@ -69249,6 +69319,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   );
                 },
               );
+      if (_producerDataMode && producerBefore != null) {
+        final after = await _safeProducerSnapshot();
+        if (after != null) {
+          await _producerCollector
+              .recordAiStep(
+                prompt: _producerCollector.lastPrompt,
+                preSnapshot: producerBefore,
+                postSnapshot: after,
+                resolvedActions: actions
+                    .map(
+                      (a) => <String, dynamic>{'type': a.type, 'data': a.data},
+                    )
+                    .toList(),
+                undoTransactionId: _undoManager.lastAction == null
+                    ? null
+                    : identityHashCode(_undoManager.lastAction).toString(),
+                projectId: _projectId,
+                projectDir: _projectDir,
+              )
+              .catchError((Object _) {});
+        }
+      }
       releaseTransactionNoticeCapture();
       executionStopwatch.stop();
       final verifiedActionNotices = deferredActionNotices.isNotEmpty
@@ -75696,16 +75788,66 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Future<void> _closeAndUploadProducerSession(String reason) async {
+  Future<Map<String, dynamic>?> _safeProducerSnapshot() async {
+    try {
+      return await _buildProducerSnapshot();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _closeAndUploadProducerSession(
+    String reason, {
+    bool awaitUpload = false,
+  }) async {
     try {
       await _producerCollector.closeSession(reason: reason);
-      await _producerTrainingUploadService.drainPending(
-        auth: _producerCaptureAuth,
-        collector: _producerCollector,
-      );
+      final upload = _producerTrainingUploadService
+          .drainPending(
+            auth: _producerCaptureAuth,
+            collector: _producerCollector,
+          )
+          .catchError((Object _) {});
+      if (awaitUpload) {
+        await upload;
+      } else {
+        unawaited(upload);
+      }
     } catch (_) {
       // Training capture is observation-only.
     }
+  }
+
+  String _producerEpisodeSummary(Map<String, dynamic> episode) {
+    final request = episode['request_or_context'] as Map?;
+    final prompt = request?['prompt']?.toString() ?? '';
+    final time = DateTime.tryParse(
+      episode['started_at']?.toString() ?? '',
+    )?.toLocal();
+    final changes = (episode['control_changes'] as List?) ?? const [];
+    final controlSummary = changes.whereType<Map>().take(8).map((change) {
+      final label = [change['effect_name'], change['parameter_name'] ?? change['kind']]
+          .where((value) => value != null).join(' · ');
+      final before = change['before'], after = change['after'];
+      final values = before is! Map && before is! List && after is! Map && after is! List
+          ? ': $before → $after ${change['unit'] ?? ''}' : '';
+      return '$label$values';
+    }).join('\n');
+    final actions = (episode['actions_raw'] as List?) ?? const [];
+    final edits = actions
+        .whereType<Map>()
+        .take(8)
+        .map((action) {
+          final data = (action['payload'] ?? action['data']) as Map?;
+          return '${action['kind'] ?? action['type']}${data?['row'] == null ? '' : ' [${data!['row']}]'}';
+        })
+        .join(', ');
+    return [
+      if (time != null)
+        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+      if (prompt.isNotEmpty) prompt,
+      if (controlSummary.isNotEmpty) controlSummary else edits,
+    ].join('\n');
   }
 
   Future<void> _reviewSampledProducerEpisodes() async {
@@ -75777,6 +75919,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final strategies = <String>{
         ...((episode['strategies'] as List?) ?? const []).map((v) => '$v'),
       };
+      var producerOutcome = 'not_evaluated';
+      var producerNotes = '';
       final actionCount =
           ((episode['actions_raw'] as List?) ?? const []).length;
       final save = await showDialog<bool>(
@@ -75892,6 +76036,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         height: 1.4,
                       ),
                     ),
+                    Text(
+                      _producerEpisodeSummary(episode),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
                     const SizedBox(height: 18),
                     Flexible(
                       child: SingleChildScrollView(
@@ -75974,6 +76125,58 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   )
                                   .toList(),
                             ),
+                            const SizedBox(height: 18),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_outcome',
+                              ),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Wrap(
+                              spacing: 7,
+                              runSpacing: 7,
+                              children: [
+                                for (final value in [
+                                  'accepted',
+                                  'rejected',
+                                  'partial',
+                                  'experimenting',
+                                  'not_evaluated',
+                                ])
+                                  buildCaptureChoice(
+                                    label: L10n.translate(
+                                      context,
+                                      'producer_capture_outcome_$value',
+                                    ),
+                                    selected: producerOutcome == value,
+                                    onSelected: (_) => setDialogState(
+                                      () => producerOutcome = value,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            TextField(
+                              maxLength: 2000,
+                              minLines: 2,
+                              maxLines: 4,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                labelText: L10n.translate(
+                                  context,
+                                  'producer_capture_notes',
+                                ),
+                                labelStyle: const TextStyle(
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              onChanged: (value) => producerNotes = value,
+                            ),
                           ],
                         ),
                       ),
@@ -76048,6 +76251,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           episodeId: episode['episode_id'].toString(),
           diagnoses: selectedDiagnoses.toList(),
           strategies: strategies.toList(),
+          outcome: producerOutcome,
+          notes: producerNotes,
         );
       }
     }
@@ -76076,11 +76281,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
         _showSmallNotice(L10n.translate(context, 'producer_capture_enabled'));
       } else {
-        if (_producerCollector.hasPendingPromptCycle) {
-          await _producerCollector.finalizeActiveEpisode(
-            disposition: 'mode_disabled',
-          );
-        }
+        await _producerCollector.finalizeActiveEpisode(
+          disposition: 'mode_disabled',
+        );
         await _reviewSampledProducerEpisodes();
         await _closeAndUploadProducerSession(closeReason);
         _producerDataMode = false;
@@ -76117,17 +76320,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    final snapshot = finalSnapshot ?? await _buildProducerSnapshot();
+    final snapshot = finalSnapshot ?? await _safeProducerSnapshot();
+    if (snapshot == null) return;
     final shouldAdvanceQueue =
         disposition == 'manual_mark' && _producerGuidedPromptAwaitingFinal;
     _producerGuidedPromptAwaitingFinal = false;
-    await _producerCollector.recordPromptCycleStop(
-      finalSnapshot: snapshot,
-      disposition: disposition,
-      projectId: _projectId,
-      projectName: _projectName,
-      projectDir: _projectDir,
-    );
+    await _producerCollector
+        .recordPromptCycleStop(
+          finalSnapshot: snapshot,
+          disposition: disposition,
+          projectId: _projectId,
+          projectName: _projectName,
+          projectDir: _projectDir,
+        )
+        .catchError((Object _) {});
     if (mounted) {
       setState(() {});
     }
@@ -76876,8 +77082,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       Map<String, dynamic>? producerPreSnapshot;
       if (_producerDataMode) {
-        producerPreSnapshot = await _buildProducerSnapshot();
-        await _producerCollector.recordAiRequest(prompt: trimmed);
+        producerPreSnapshot = await _safeProducerSnapshot();
+        await _producerCollector
+            .recordAiRequest(prompt: trimmed)
+            .catchError((Object _) {});
         _throwIfChatFlowStopped(chatFlowId);
         _producerGuidedPromptAwaitingFinal = false;
         if (_producerCollector.hasPendingPromptCycle) {
@@ -77036,18 +77244,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
 
           if (_producerDataMode && producerPreSnapshot != null) {
-            final producerPostSnapshot = await _buildProducerSnapshot();
+            final producerPostSnapshot = await _safeProducerSnapshot();
             _throwIfChatFlowStopped(chatFlowId);
-            await _producerCollector.recordAiStep(
-              prompt: trimmed,
-              preSnapshot: producerPreSnapshot,
-              postSnapshot: producerPostSnapshot,
-              resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
-              llmPayload: reply.meta,
-              projectId: _projectId,
-              projectName: _projectName,
-              projectDir: _projectDir,
-            );
+            await _producerCollector
+                .recordAiStep(
+                  prompt: trimmed,
+                  preSnapshot: producerPreSnapshot,
+                  postSnapshot:
+                      producerPostSnapshot ??
+                      {'capture_warning': 'snapshot_unavailable'},
+                  resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
+                  llmPayload: reply.meta,
+                  captureWarning: applyReport.applied < applyReport.attempted
+                      ? 'partial_ai_application'
+                      : null,
+                  undoTransactionId: _undoManager.lastAction == null
+                      ? null
+                      : identityHashCode(_undoManager.lastAction).toString(),
+                  projectId: _projectId,
+                  projectName: _projectName,
+                  projectDir: _projectDir,
+                )
+                .catchError((Object _) {});
             _throwIfChatFlowStopped(chatFlowId);
           }
         }
@@ -77555,8 +77773,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     Map<String, dynamic>? producerPreSnapshot;
     if (_producerDataMode) {
-      producerPreSnapshot = await _buildProducerSnapshot();
-      await _producerCollector.recordAiRequest(prompt: prompt);
+      producerPreSnapshot = await _safeProducerSnapshot();
+      await _producerCollector
+          .recordAiRequest(prompt: prompt)
+          .catchError((Object _) {});
       _producerGuidedPromptAwaitingFinal = false;
       if (_producerCollector.hasPendingPromptCycle) {
         await _finalizeProducerPromptCycle(
@@ -77696,17 +77916,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
 
         if (_producerDataMode && producerPreSnapshot != null) {
-          final producerPostSnapshot = await _buildProducerSnapshot();
-          await _producerCollector.recordAiStep(
-            prompt: prompt,
-            preSnapshot: producerPreSnapshot,
-            postSnapshot: producerPostSnapshot,
-            resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
-            llmPayload: reply.meta,
-            projectId: _projectId,
-            projectName: _projectName,
-            projectDir: _projectDir,
-          );
+          final producerPostSnapshot = await _safeProducerSnapshot();
+          await _producerCollector
+              .recordAiStep(
+                prompt: prompt,
+                preSnapshot: producerPreSnapshot,
+                postSnapshot:
+                    producerPostSnapshot ??
+                    {'capture_warning': 'snapshot_unavailable'},
+                resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
+                llmPayload: reply.meta,
+                captureWarning: applyReport.applied < applyReport.attempted
+                    ? 'partial_ai_application'
+                    : null,
+                undoTransactionId: _undoManager.lastAction == null
+                    ? null
+                    : identityHashCode(_undoManager.lastAction).toString(),
+                projectId: _projectId,
+                projectName: _projectName,
+                projectDir: _projectDir,
+              )
+              .catchError((Object _) {});
         }
       }
 
@@ -83208,7 +83438,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _disarmLiveMidiInputForRow(int rowId) async {
     if (!_liveMidiEventPlaybackSupported) return;
     final targetId = _lastLiveMidiInputTargetClipId;
-    final targetOnRow = targetId >= 0 &&
+    final targetOnRow =
+        targetId >= 0 &&
         _audioTracks.any(
           (clip) => clip.rowId == rowId && clip.engineClipId == targetId,
         );
@@ -83234,50 +83465,50 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _waveformDetailProvider.beginMutation();
     try {
       await _disarmLiveMidiInputForRow(deletingRowId);
-    if (_rowCount == 1) {
-      await _clearRowContent(row);
-      final rowId = deletingRowId;
-      if (rowId >= 0) {
-        await JuceAudioEngine.renameRow(rowId, 'Track 1');
-        await JuceAudioEngine.setRowIcon(rowId, 0);
-        await _applyRowsToEditorState(
-          <TimelineRow>[
-            TimelineRow(
-              rowId: rowId,
-              name: 'Track 1',
-              iconId: 0,
-              kind: TimelineRowKind.audio,
-            ),
-          ],
-          refreshAutomationTargets: false,
-          syncClipRows: false,
-        );
-        await _recomputeAudibleState();
+      if (_rowCount == 1) {
+        await _clearRowContent(row);
+        final rowId = deletingRowId;
+        if (rowId >= 0) {
+          await JuceAudioEngine.renameRow(rowId, 'Track 1');
+          await JuceAudioEngine.setRowIcon(rowId, 0);
+          await _applyRowsToEditorState(
+            <TimelineRow>[
+              TimelineRow(
+                rowId: rowId,
+                name: 'Track 1',
+                iconId: 0,
+                kind: TimelineRowKind.audio,
+              ),
+            ],
+            refreshAutomationTargets: false,
+            syncClipRows: false,
+          );
+          await _recomputeAudibleState();
+        }
+        return true;
       }
+      final removedClips = _clipsForFadeResolution(
+        rowIds: <int>{deletingRowId},
+      ).toList(growable: false);
+
+      final ok = await JuceAudioEngine.removeRow(deletingRowId);
+      if (!ok) return false;
+
+      for (final clip in removedClips) {
+        clip.audioStartTimer?.cancel();
+        _clipFadeRowIdByEngineId.remove(clip.engineClipId);
+      }
+      _audioTracks.removeWhere((clip) => clip.rowId == deletingRowId);
+      _updateOverallDurationIfNeeded(removedClips: removedClips);
+
+      final nextRows = List<TimelineRow>.from(_rows)..removeAt(row);
+      await _applyRowsToEditorState(
+        nextRows,
+        refreshAutomationTargets: false,
+        syncClipRows: true,
+      );
+      await _recomputeAudibleState();
       return true;
-    }
-    final removedClips = _clipsForFadeResolution(
-      rowIds: <int>{deletingRowId},
-    ).toList(growable: false);
-
-    final ok = await JuceAudioEngine.removeRow(deletingRowId);
-    if (!ok) return false;
-
-    for (final clip in removedClips) {
-      clip.audioStartTimer?.cancel();
-      _clipFadeRowIdByEngineId.remove(clip.engineClipId);
-    }
-    _audioTracks.removeWhere((clip) => clip.rowId == deletingRowId);
-    _updateOverallDurationIfNeeded(removedClips: removedClips);
-
-    final nextRows = List<TimelineRow>.from(_rows)..removeAt(row);
-    await _applyRowsToEditorState(
-      nextRows,
-      refreshAutomationTargets: false,
-      syncClipRows: true,
-    );
-    await _recomputeAudibleState();
-    return true;
     } finally {
       _waveformDetailProvider.endMutation();
     }

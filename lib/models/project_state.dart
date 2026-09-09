@@ -110,6 +110,7 @@ class ProjectState {
   final int maxRows;
   final List<RowState> rows;
   final List<TrackGroup> trackGroups;
+  final List<Map<String, dynamic>> groupBuses;
   final List<EffectState> masterEffects;
   final List<List<int>> overlapMatrix; // row-row overlap (0/1)
   final List<List<double>> overlapRatioMatrix; // row-row overlap amount (0..1)
@@ -124,6 +125,7 @@ class ProjectState {
     required this.maxRows,
     required this.rows,
     this.trackGroups = const [],
+    this.groupBuses = const [],
     this.masterEffects = const [],
     required this.overlapMatrix,
     this.overlapRatioMatrix = const [],
@@ -139,6 +141,7 @@ class ProjectState {
         'max_rows': maxRows,
         'rows': rows.map((r) => r.toJson()).toList(),
         'track_groups': trackGroups.map((group) => group.toJson()).toList(),
+        'group_buses': groupBuses,
         'master_effects': masterEffects.map((e) => e.toJson()).toList(),
         'overlap_matrix': overlapMatrix,
         'overlap_ratio_matrix': overlapRatioMatrix,
@@ -154,6 +157,7 @@ class ProjectState {
         'max_rows': maxRows,
         'rows': rows.map((r) => r.toMagnitudeResolverJson()).toList(),
         'track_groups': trackGroups.map((group) => group.toJson()).toList(),
+        'group_buses': groupBuses,
         'master_effects': masterEffects.map((e) => e.toJson()).toList(),
         'overlap_matrix': overlapMatrix,
         'overlap_ratio_matrix': overlapRatioMatrix,
@@ -490,6 +494,7 @@ class EffectParameterState {
   final dynamic value;
   final double? min;
   final double? max;
+  final Map<String, dynamic> metadata;
 
   const EffectParameterState({
     required this.id,
@@ -498,6 +503,7 @@ class EffectParameterState {
     required this.value,
     this.min,
     this.max,
+    this.metadata = const {},
   });
 
   factory EffectParameterState.fromMap(Map<String, dynamic> m) {
@@ -525,10 +531,30 @@ class EffectParameterState {
       value: parsedValue,
       min: m['min'] is num ? (m['min'] as num).toDouble() : null,
       max: m['max'] is num ? (m['max'] as num).toDouble() : null,
+      metadata: {
+        for (final entry in m.entries)
+          if (const {
+                'unit',
+                'interval',
+                'default',
+                'valueNormalized',
+                'defaultNormalized',
+                'intervalNormalized',
+                'displayMin',
+                'displayMid',
+                'displayMax',
+                'displayDefault',
+                'displayValue',
+                'choices',
+              }.contains(entry.key) ||
+              entry.key.startsWith('choice_'))
+            entry.key: entry.value,
+      },
     );
   }
 
   Map<String, dynamic> toJson() => {
+        ...metadata,
         'id': id,
         'name': name,
         'type': type,

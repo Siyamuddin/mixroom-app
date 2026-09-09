@@ -12,7 +12,7 @@ class ProducerTrainingUploadService {
     : _httpClient = httpClient ?? http.Client();
 
   final http.Client _httpClient;
-  bool _draining = false;
+  Future<void>? _drain;
 
   Future<void> deleteSession({
     required AuthService auth,
@@ -44,15 +44,30 @@ class ProducerTrainingUploadService {
   Future<void> drainPending({
     required AuthService auth,
     required ProducerDataCollector collector,
-  }) async {
-    if (_draining || !auth.isSignedIn || !AppApiConfig.hasApiBaseUrl) return;
-    _draining = true;
-    try {
-      for (final file in await collector.listPendingUploadFiles()) {
-        await _uploadOne(auth: auth, collector: collector, file: file);
-      }
-    } finally {
-      _draining = false;
+  }) {
+    if (_drain != null) return _drain!;
+    if (!auth.isSignedIn || !AppApiConfig.hasApiBaseUrl)
+      return Future<void>.value();
+    return _drain = _drainPending(
+      auth,
+      collector,
+    ).whenComplete(() => _drain = null);
+  }
+
+  Future<void> _drainPending(
+    AuthService auth,
+    ProducerDataCollector collector,
+  ) async {
+    for (final file in await collector.listPendingUploadFiles()) {
+      final document = jsonDecode(await file.readAsString()) as Map;
+      final ownerRef = document['local_owner_ref']?.toString() ?? '';
+      if (ownerRef.isEmpty || ownerRef != _currentOwnerRef(auth)) continue;
+      await _uploadOne(
+        auth: auth,
+        collector: collector,
+        file: file,
+        ownerRef: ownerRef,
+      );
     }
   }
 
@@ -60,16 +75,28 @@ class ProducerTrainingUploadService {
     required AuthService auth,
     required ProducerDataCollector collector,
     required File file,
+    required String ownerRef,
   }) async {
     try {
+      _requireOwner(auth, ownerRef);
       await collector.updateUploadStatus(file, 'uploading');
-      final rawDocument = (jsonDecode(await file.readAsString()) as Map)
+      final payloadFile = File('${file.path}.payload');
+      List<int> bytes;
+      if (await payloadFile.exists()) {
+        bytes = await payloadFile.readAsBytes();
+      } else {
+        final rawDocument = (jsonDecode(await file.readAsString()) as Map)
+            .cast<String, dynamic>();
+        final sanitized = sanitizeProducerTrainingBundle(rawDocument);
+        bytes = utf8.encode(
+          const JsonEncoder.withIndent('  ').convert(sanitized),
+        );
+        final temporary = File('${payloadFile.path}.tmp');
+        await temporary.writeAsBytes(bytes, flush: true);
+        await temporary.rename(payloadFile.path);
+      }
+      final document = (jsonDecode(utf8.decode(bytes)) as Map)
           .cast<String, dynamic>();
-      final document = _sanitizeProducerTrainingBundle(rawDocument);
-      final bytes = utf8.encode(
-        const JsonEncoder.withIndent('  ').convert(document),
-      );
-      await file.writeAsBytes(bytes, flush: true);
       final sessionId = (document['session_id'] ?? '').toString().trim();
       if (sessionId.isEmpty) throw StateError('Capture session ID is missing.');
       final checksum = sha256.convert(bytes).toString();
@@ -86,6 +113,7 @@ class ProducerTrainingUploadService {
           'sha256': checksum,
           'media_manifest': document['media_manifest'] ?? const [],
         },
+        ownerRef: ownerRef,
       );
       final uploadUrl = (reserve['upload_url'] ?? '').toString();
       if (uploadUrl.isEmpty) throw StateError('Upload URL was not returned.');
@@ -94,6 +122,7 @@ class ProducerTrainingUploadService {
             in ((reserve['upload_headers'] as Map?) ?? const {}).entries)
           entry.key.toString(): entry.value.toString(),
       };
+      _requireOwner(auth, ownerRef);
       final putResponse = await _httpClient
           .put(Uri.parse(uploadUrl), headers: headers, body: bytes)
           .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds * 3));
@@ -114,6 +143,7 @@ class ProducerTrainingUploadService {
           'segmentation_version': document['segmentation_version'],
           'media_manifest': document['media_manifest'] ?? const [],
         },
+        ownerRef: ownerRef,
       );
       await collector.updateUploadStatus(file, 'uploaded');
     } catch (error) {
@@ -128,10 +158,12 @@ class ProducerTrainingUploadService {
   Future<Map<String, dynamic>> _postAuthed(
     AuthService auth,
     String path,
-    Map<String, dynamic> body,
-  ) async {
-    final response = await auth.authorizedRequest(
-      (token) => _httpClient
+    Map<String, dynamic> body, {
+    required String ownerRef,
+  }) async {
+    final response = await auth.authorizedRequest((token) {
+      _requireOwner(auth, ownerRef);
+      return _httpClient
           .post(
             _uri(path),
             headers: <String, String>{
@@ -141,9 +173,8 @@ class ProducerTrainingUploadService {
             },
             body: jsonEncode(body),
           )
-          .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
-      expireSessionOnAuthFailure: false,
-    );
+          .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds));
+    }, expireSessionOnAuthFailure: false);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException('Request $path failed (${response.statusCode}).');
     }
@@ -151,6 +182,16 @@ class ProducerTrainingUploadService {
     return decoded is Map
         ? decoded.cast<String, dynamic>()
         : const <String, dynamic>{};
+  }
+
+  String? _currentOwnerRef(AuthService auth) {
+    final id = auth.signedInUser?.userId;
+    return id == null || id.isEmpty ? null : ProducerDataCollector.ownerRef(id);
+  }
+
+  void _requireOwner(AuthService auth, String expected) {
+    if (_currentOwnerRef(auth) != expected)
+      throw StateError('Capture upload account changed.');
   }
 
   Uri _uri(String path) {
@@ -161,10 +202,17 @@ class ProducerTrainingUploadService {
   void close() => _httpClient.close();
 }
 
-Map<String, dynamic> _sanitizeProducerTrainingBundle(
+Map<String, dynamic> sanitizeProducerTrainingBundle(
   Map<String, dynamic> document,
 ) {
   const removedKeys = <String>{
+    'local_owner_ref',
+    'upload',
+    'event_journal_file',
+    'statebase64',
+    'state_base64',
+    'client_name',
+    'account_id',
     'project_name',
     'row_name',
     'clip_name',
@@ -203,7 +251,9 @@ Map<String, dynamic> _sanitizeProducerTrainingBundle(
       return value.map((item) => sanitize(item, key: key)).toList();
     }
     if (value is! String) return value;
-    if (normalizedKey.contains('path') || normalizedKey.contains('file')) {
+    if (normalizedKey.contains('path') ||
+        normalizedKey == 'file' ||
+        normalizedKey.endsWith('_file')) {
       return '[redacted]';
     }
     return value

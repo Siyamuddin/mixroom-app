@@ -618,6 +618,8 @@ class ProjectStateBuilder {
 
     final masterEffects = <EffectState>[];
     final masterNames = await JuceAudioEngine.getMasterEffects();
+    final masterIds = await JuceAudioEngine.getMasterEffectIds();
+    final masterInstanceIds = await JuceAudioEngine.getMasterEffectInstanceIds();
     for (int i = 0; i < masterNames.length; i++) {
       final params = exposedEffectParameters(
         masterNames[i],
@@ -627,6 +629,8 @@ class ProjectStateBuilder {
         EffectState(
           effectIndex: i,
           name: masterNames[i],
+          effectId: masterIds.length == masterNames.length ? masterIds[i] : '',
+          instanceId: masterInstanceIds.length == masterNames.length ? masterInstanceIds[i] : '',
           isBypassed: await JuceAudioEngine.getMasterEffectBypassState(i),
           parameters: params
               .map((p) =>
@@ -634,6 +638,34 @@ class ProjectStateBuilder {
               .toList(),
         ),
       );
+    }
+
+    final groupBuses = <Map<String, dynamic>>[];
+    for (final group in trackGroups) {
+      final members = rows.where((row) => group.rowIds.contains(row.rowId)).toList();
+      if (members.isEmpty) continue;
+      final lead = members.first.rowIndex;
+      final names = await JuceAudioEngine.getTrackEffectsForRow(lead);
+      final ids = await JuceAudioEngine.getTrackEffectIdsForRow(lead);
+      final instances = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(lead);
+      final effects = <Map<String, dynamic>>[];
+      for (var index = 0; index < names.length; index++) {
+        final params = exposedEffectParameters(names[index],
+            await JuceAudioEngine.getTrackPluginParameters(lead, index));
+        effects.add(EffectState(
+          effectIndex: index,
+          instanceId: instances.length == names.length ? instances[index] : '',
+          effectId: ids.length == names.length ? ids[index] : '',
+          name: names[index],
+          isBypassed: await JuceAudioEngine.getRowEffectBypassState(lead, index),
+          parameters: params.map((p) => EffectParameterState.fromMap(p)).toList(),
+        ).toJson());
+      }
+      groupBuses.add({
+        'group_id': group.id, 'row_indices': members.map((row) => row.rowIndex).toList(),
+        'gain': group.gain, 'pan': group.pan, 'muted': group.muted,
+        'soloed': group.soloed, 'effects': effects,
+      });
     }
 
     final bpm = bpmFallback;
@@ -652,6 +684,7 @@ class ProjectStateBuilder {
         maxRows: effectiveMaxRows,
         rows: rows,
         trackGroups: trackGroups,
+        groupBuses: groupBuses,
         masterEffects: masterEffects,
         overlapMatrix: overlap,
         overlapRatioMatrix: overlapRatio);

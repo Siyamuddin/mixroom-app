@@ -6430,6 +6430,7 @@ public:
                                   const juce::var &newValue);
     juce::StringArray getMasterEffects();
     juce::StringArray getMasterEffectIds();
+    juce::StringArray getMasterEffectInstanceIds();
     juce::String getMasterEffectStateBase64(int effectIndex);
     bool setMasterEffectStateBase64(int effectIndex,
                                     const juce::String &stateBase64);

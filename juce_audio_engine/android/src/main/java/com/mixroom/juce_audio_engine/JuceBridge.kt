@@ -223,6 +223,7 @@ object JuceBridge {
     @JvmStatic external fun removeMasterEffectJNI(effectIndex: Int)
     @JvmStatic external fun reorderMasterEffectsJNI(fromIndex: Int, toIndex: Int)
     @JvmStatic external fun getMasterEffectsJNI(): ArrayList<String>
+    @JvmStatic external fun getMasterEffectInstanceIdsJNI(): ArrayList<String>
     @JvmStatic external fun getMasterEffectIdsJNI(): ArrayList<String>
     @JvmStatic external fun getMasterPluginParametersJNI(effectIndex: Int): ArrayList<HashMap<String, Any>>
     @JvmStatic external fun setMasterEffectJNI(effectIndex: Int, paramId: String, value: Any)

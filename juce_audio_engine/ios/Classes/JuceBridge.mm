@@ -4549,6 +4549,17 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return out;
 }
 
++ (NSArray<NSString *> *)getMasterEffectInstanceIdsObjC
+{
+    auto ids = JuceEngine::get().getMasterEffectInstanceIds();
+    NSMutableArray *out = [NSMutableArray array];
+    for (auto &s : ids)
+    {
+        [out addObject:[NSString stringWithUTF8String:s.toRawUTF8()]];
+    }
+    return out;
+}
+
 + (NSArray<NSString *> *)getMasterEffectIdsObjC
 {
     auto ids = JuceEngine::get().getMasterEffectIds();

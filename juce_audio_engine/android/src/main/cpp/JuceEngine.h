@@ -5000,6 +5000,7 @@ public:
                                   const juce::var &newValue);
     juce::StringArray getMasterEffects();
     juce::StringArray getMasterEffectIds();
+    juce::StringArray getMasterEffectInstanceIds();
     juce::Array<juce::NamedValueSet> getMasterPluginParameterInfo(int effectIndex);
     void bypassMasterEffect(int effectIndex, bool shouldBypass);
     bool getMasterEffectBypassState(int effectIndex);

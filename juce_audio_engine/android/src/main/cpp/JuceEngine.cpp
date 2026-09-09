@@ -9200,6 +9200,16 @@ juce::StringArray JuceEngine::getMasterEffects()
     return out;
 }
 
+juce::StringArray JuceEngine::getMasterEffectInstanceIds()
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    juce::StringArray ids;
+    if (masterEffectChain != nullptr)
+        for (auto &nodeID : *masterEffectChain)
+            ids.add(juce::String((juce::int64)nodeID.uid));
+    return ids;
+}
+
 juce::StringArray JuceEngine::getMasterEffectIds()
 {
     if (masterEffectIds.size() == 0 && masterEffectChain != nullptr && masterEffectChain->size() > 0)
@@ -9561,12 +9571,20 @@ juce::Array<juce::NamedValueSet> JuceEngine::getTrackPluginParameterInfo(int row
                 e.set("id", p->getName(128));
             e.set("name", p->getName(128));
             e.set("unit", p->getLabel());
+            e.set("valueNormalized", p->getValue());
+            e.set("defaultNormalized", p->getDefaultValue());
+            e.set("displayMin", p->getText(0.0f, 128));
+            e.set("displayMid", p->getText(0.5f, 128));
+            e.set("displayMax", p->getText(1.0f, 128));
+            e.set("displayValue", p->getText(p->getValue(), 128));
+            e.set("unit", p->getLabel());
 
             if (auto *fp = dynamic_cast<juce::AudioParameterFloat *>(p))
             {
                 e.set("type", "float");
                 e.set("min", fp->range.start);
                 e.set("max", fp->range.end);
+                e.set("interval", fp->range.interval);
                 e.set("interval", fp->range.interval);
                 e.set("default",
                       fp->range.convertFrom0to1(p->getDefaultValue()));
@@ -9655,12 +9673,20 @@ juce::Array<juce::NamedValueSet> JuceEngine::getMasterPluginParameterInfo(int ef
                 e.set("id", p->getName(128));
             e.set("name", p->getName(128));
             e.set("unit", p->getLabel());
+            e.set("valueNormalized", p->getValue());
+            e.set("defaultNormalized", p->getDefaultValue());
+            e.set("displayMin", p->getText(0.0f, 128));
+            e.set("displayMid", p->getText(0.5f, 128));
+            e.set("displayMax", p->getText(1.0f, 128));
+            e.set("displayValue", p->getText(p->getValue(), 128));
+            e.set("unit", p->getLabel());
 
             if (auto *fp = dynamic_cast<juce::AudioParameterFloat *>(p))
             {
                 e.set("type", "float");
                 e.set("min", fp->range.start);
                 e.set("max", fp->range.end);
+                e.set("interval", fp->range.interval);
                 e.set("interval", fp->range.interval);
                 e.set("default",
                       fp->range.convertFrom0to1(p->getDefaultValue()));

@@ -95,7 +95,7 @@ void main() {
     },
   );
 
-  test('marks a recent episode rejected when the producer undoes it', () async {
+  test('records undo as ambiguous instead of rejecting unrelated actions', () async {
     final projectDir = await Directory.systemTemp.createTemp(
       'mixroom_producer_undo_',
     );
@@ -117,8 +117,9 @@ void main() {
     final file = await collector.closeSession();
     final document = jsonDecode(await file!.readAsString()) as Map;
     final episode = (document['episodes'] as List).single as Map;
-    expect(episode['status'], 'rejected');
-    expect((episode['outcome_signals'] as Map)['rejected_by_undo'], isTrue);
+    expect(episode['status'], 'complete');
+    expect((episode['outcome_signals'] as Map)['undo_redo_observed'], isTrue);
+    expect((episode['outcome_signals'] as Map)['rejected_by_undo'], isFalse);
   });
 
   test(

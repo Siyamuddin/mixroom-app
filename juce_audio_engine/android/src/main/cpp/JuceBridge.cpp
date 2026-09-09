@@ -744,6 +744,13 @@ jobject namedValueSetArrayToJavaParameterList(JNIEnv *env, const juce::Array<juc
         if (entry.contains("value"))
             putVar(map, "value", entry["value"]);
 
+        for (const auto *key : {"interval", "valueNormalized", "defaultNormalized"})
+            if (entry.contains(key))
+                putFloat(map, key, (float)entry[key]);
+        for (const auto *key : {"displayMin", "displayMid", "displayMax", "displayValue"})
+            if (entry.contains(key))
+                putStr(map, key, entry[key].toString());
+
         for (int i = 0;; ++i)
         {
             juce::String key = "choice_" + juce::String(i);
@@ -3064,6 +3071,15 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectsJNI(JNIEnv *env,
     juce::MessageManager::getInstance()->callSync([&]
                                                   { names = JuceEngine::get().getMasterEffects(); });
     return stringArrayToJavaList(env, names);
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectInstanceIdsJNI(JNIEnv *env, jclass)
+{
+    juce::StringArray ids;
+    juce::MessageManager::getInstance()->callSync([&]
+                                                  { ids = JuceEngine::get().getMasterEffectInstanceIds(); });
+    return stringArrayToJavaList(env, ids);
 }
 
 extern "C" JNIEXPORT jobject JNICALL

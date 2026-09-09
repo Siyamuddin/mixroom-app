@@ -4637,6 +4637,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "getMasterEffects" -> {
           result.success(JuceBridge.getMasterEffectsJNI())
         }
+        "getMasterEffectInstanceIds" -> {
+          result.success(JuceBridge.getMasterEffectInstanceIdsJNI())
+        }
         "getMasterEffectIds" -> {
           result.success(JuceBridge.getMasterEffectIdsJNI())
         }

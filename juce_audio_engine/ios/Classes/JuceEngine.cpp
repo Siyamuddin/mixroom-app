@@ -12939,6 +12939,16 @@ juce::StringArray JuceEngine::getMasterEffects()
     return out;
 }
 
+juce::StringArray JuceEngine::getMasterEffectInstanceIds()
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    juce::StringArray ids;
+    if (masterEffectChain != nullptr)
+        for (auto &nodeID : *masterEffectChain)
+            ids.add(juce::String((juce::int64)nodeID.uid));
+    return ids;
+}
+
 juce::StringArray JuceEngine::getMasterEffectIds()
 {
     if (masterEffectIds.size() == 0 && masterEffectChain != nullptr && masterEffectChain->size() > 0)

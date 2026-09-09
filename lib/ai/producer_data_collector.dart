@@ -6,6 +6,8 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'producer_control_changes.dart';
+
 typedef ProducerSnapshotProvider = Future<Map<String, dynamic>> Function();
 
 enum ProducerCaptureUploadState {
@@ -25,21 +27,27 @@ enum ProducerCaptureUploadState {
 class ProducerDataCollector {
   ProducerDataCollector({
     ProducerSnapshotProvider? snapshotProvider,
+    String? Function()? ownerIdProvider,
     Duration episodeIdleTimeout = const Duration(seconds: 15),
     void Function(ProducerCaptureUploadState state)? onUploadStateChanged,
   }) : _snapshotProvider = snapshotProvider,
+       _ownerIdProvider = ownerIdProvider,
        _episodeIdleTimeout = episodeIdleTimeout,
        _onUploadStateChanged = onUploadStateChanged;
 
   static const String directoryName = 'producer_sessions';
   static const String schemaVersion = 'producer_training_capture_v4';
   static const String consentVersion = 'producer_training_2026_08_v1';
-  static const String segmentationVersion = 'natural_action_burst_v1';
+  static const String segmentationVersion = 'natural_action_burst_v2';
   static const String featureExtractorVersion = 'state_audio_proxy_v1';
   static const int maximumAudioPairsPerSession = 20;
   static const int maximumReviewEpisodes = 3;
 
   final ProducerSnapshotProvider? _snapshotProvider;
+  final String? Function()? _ownerIdProvider;
+
+  static String ownerRef(String userId) =>
+      sha256.convert(utf8.encode(userId)).toString();
   final Duration _episodeIdleTimeout;
   final void Function(ProducerCaptureUploadState state)? _onUploadStateChanged;
 
@@ -54,6 +62,49 @@ class ProducerDataCollector {
   String? _projectId;
   Directory? _projectDir;
   String _sessionSalt = '';
+  final List<Map<String, dynamic>> _inferenceTraces = [];
+  int _traceGeneration = 0;
+  String lastPrompt = '';
+  final Map<String, String> _historyEpisodes = {};
+  String get inferenceCaptureToken =>
+      '${activeSessionId ?? ''}:$_traceGeneration';
+  Future<void> _ioTail = Future<void>.value();
+  Future<void> _operations = Future<void>.value();
+  final Object _operationZone = Object();
+
+  Future<T> _serialize<T>(Future<T> Function() operation) {
+    if (Zone.current[_operationZone] == true) return operation();
+    final result = _operations.then(
+      (_) => runZoned(operation, zoneValues: {_operationZone: true}),
+    );
+    _operations = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return result;
+  }
+
+  void recordInferenceTrace(Map<String, dynamic> trace) {
+    if (!_enabled) return;
+    final safe = _sanitizeMap(trace);
+    final identities = trace['row_identities'];
+    if (identities is Map) {
+      safe['row_identities'] = {
+        for (final entry in identities.entries)
+          entry.key.toString(): _stableTrackRef(entry.value),
+      };
+    }
+    _inferenceTraces.add(safe);
+  }
+
+  void clearInferenceTraces() => _inferenceTraces.clear();
+
+  Future<void> _write(Future<void> Function() operation) {
+    final next = _ioTail.then((_) => operation());
+    _ioTail = next.catchError((Object _) {});
+    return next;
+  }
+
   ProducerCaptureUploadState _uploadState = ProducerCaptureUploadState.idle;
 
   bool get isEnabled => _enabled;
@@ -68,10 +119,12 @@ class ProducerDataCollector {
   }
 
   Future<void> setEnabled(bool enabled) async {
-    _enabled = enabled;
-    if (!enabled && _session != null) {
-      await closeSession(reason: 'disabled');
-    }
+    return _serialize(() async {
+      _enabled = enabled;
+      if (!enabled && _session != null) {
+        await closeSession(reason: 'disabled');
+      }
+    });
   }
 
   Future<void> beginSession({
@@ -79,13 +132,15 @@ class ProducerDataCollector {
     String? projectId,
     Directory? projectDir,
   }) async {
-    if (!_enabled) return;
-    _applyProjectContext(projectId: projectId, projectDir: projectDir);
-    await _ensureSession();
-    _checkpoint = _sanitizeSnapshot(initialSnapshot);
-    _session!['initial_state'] = _checkpoint;
-    await _appendEvent('session_started', {'checkpoint': _checkpoint});
-    await _flush();
+    return _serialize(() async {
+      if (!_enabled) return;
+      _applyProjectContext(projectId: projectId, projectDir: projectDir);
+      await _ensureSession();
+      _checkpoint = _sanitizeSnapshot(initialSnapshot);
+      _session!['initial_state'] = _checkpoint;
+      await _appendEvent('session_started', {'checkpoint': _checkpoint});
+      await _flush();
+    });
   }
 
   Future<void> recordAiStep({
@@ -94,55 +149,74 @@ class ProducerDataCollector {
     required Map<String, dynamic> postSnapshot,
     required List<Map<String, dynamic>> resolvedActions,
     Map<String, dynamic>? llmPayload,
+    String? undoTransactionId,
+    String? captureWarning,
     String? projectId,
     String? projectName,
     Directory? projectDir,
   }) async {
-    if (!_enabled) return;
-    _applyProjectContext(projectId: projectId, projectDir: projectDir);
-    await _ensureSession();
-    await finalizeActiveEpisode(
-      finalSnapshot: preSnapshot,
-      disposition: 'new_ai_prompt',
-    );
+    return _serialize(() async {
+      if (!_enabled) return;
+      _applyProjectContext(projectId: projectId, projectDir: projectDir);
+      await _ensureSession();
+      await finalizeActiveEpisode(
+        finalSnapshot: preSnapshot,
+        disposition: 'new_ai_prompt',
+      );
 
-    final before = _sanitizeSnapshot(preSnapshot);
-    final after = _sanitizeSnapshot(postSnapshot);
-    final actions = resolvedActions.map(_sanitizeMap).toList(growable: false);
-    _activeEpisode = _newEpisode(
-      stateBefore: before,
-      requestOrContext: {
-        'source': 'ai_prompt',
+      final before = _sanitizeSnapshot(preSnapshot);
+      final after = _sanitizeSnapshot(postSnapshot);
+      final actions = resolvedActions.map(_sanitizeMap).toList();
+      _activeEpisode = _newEpisode(
+        stateBefore: before,
+        requestOrContext: {
+          'source': 'ai_prompt',
+          'prompt': prompt.trim(),
+          if (llmPayload != null) 'ai_metadata': _sanitizeMap(llmPayload),
+        },
+      );
+      if (captureWarning != null)
+        _activeEpisode!['capture_warning'] = _safeToken(captureWarning);
+      _activeEpisode!['inference_traces'] = List<Map<String, dynamic>>.from(
+        _inferenceTraces,
+      );
+      _inferenceTraces.clear();
+      if (undoTransactionId != null) {
+        _historyEpisodes[undoTransactionId] = _activeEpisode!['episode_id']
+            .toString();
+      }
+      _activeEpisode!['actions_raw'] = actions;
+      _activeEpisode!['actions_relational'] = actions
+          .map(_relationalAction)
+          .toList();
+      _activeEpisode!['state_after'] = after;
+      _inferLabels(_activeEpisode!);
+      _attachDiagnostics(_activeEpisode!, before: before, after: after);
+      _checkpoint = after;
+      await _appendEvent('ai_step', {
+        'episode_id': _activeEpisode!['episode_id'],
         'prompt': prompt.trim(),
-        if (llmPayload != null) 'ai_metadata': _sanitizeMap(llmPayload),
-      },
-    );
-    _activeEpisode!['actions_raw'] = actions;
-    _activeEpisode!['actions_relational'] = actions
-        .map(_relationalAction)
-        .toList();
-    _activeEpisode!['state_after'] = after;
-    _inferLabels(_activeEpisode!);
-    _attachDiagnostics(_activeEpisode!, before: before, after: after);
-    _checkpoint = after;
-    await _appendEvent('ai_step', {
-      'episode_id': _activeEpisode!['episode_id'],
-      'prompt': prompt.trim(),
-      'actions': actions,
+        'actions': actions,
+      });
+      _armEpisodeTimer();
+      await _flush();
     });
-    _armEpisodeTimer();
-    await _flush();
   }
 
   Future<void> recordAiRequest({
     required String prompt,
     Map<String, dynamic> context = const <String, dynamic>{},
   }) async {
-    if (!_enabled) return;
-    await _ensureSession();
-    await _appendEvent('ai_request', <String, dynamic>{
-      'prompt': prompt.trim(),
-      if (context.isNotEmpty) 'context': _sanitizeMap(context),
+    return _serialize(() async {
+      if (!_enabled) return;
+      await _ensureSession();
+      _inferenceTraces.clear();
+      lastPrompt = prompt.trim();
+      _traceGeneration++;
+      await _appendEvent('ai_request', <String, dynamic>{
+        'prompt': prompt.trim(),
+        if (context.isNotEmpty) 'context': _sanitizeMap(context),
+      });
     });
   }
 
@@ -153,134 +227,209 @@ class ProducerDataCollector {
     String? projectName,
     Directory? projectDir,
   }) async {
-    if (!_enabled) return;
-    _applyProjectContext(projectId: projectId, projectDir: projectDir);
-    await _ensureSession();
-    _activeEpisode ??= _newEpisode(
-      stateBefore: _checkpoint ?? const {},
-      requestOrContext: const {'source': 'manual_work'},
-    );
-
-    final action = <String, dynamic>{
-      'at': DateTime.now().toUtc().toIso8601String(),
-      'kind': _safeToken(kind),
-      'payload': _sanitizeMap(payload),
-    };
-    final actions = (_activeEpisode!['actions_raw'] as List)
-        .cast<Map<String, dynamic>>();
-    final key = _coalesceKey(action);
-    final existing = actions.lastIndexWhere(
-      (candidate) => _coalesceKey(candidate) == key,
-    );
-    if (existing >= 0 && _isContinuousMutation(kind)) {
-      final first = actions[existing];
-      action['payload'] = _coalescePayload(
-        (first['payload'] as Map?)?.cast<String, dynamic>() ?? const {},
-        (action['payload'] as Map).cast<String, dynamic>(),
+    return _serialize(() async {
+      if (!_enabled) return;
+      _applyProjectContext(projectId: projectId, projectDir: projectDir);
+      await _ensureSession();
+      if (_activeEpisode == null) {
+        final latest = _latestEpisode();
+        if (latest != null &&
+            latest['disposition'] == 'idle_timeout' &&
+            (latest['request_or_context'] as Map?)?['source'] == 'ai_prompt') {
+          _activeEpisode = latest;
+          latest['status'] = 'active';
+          latest.remove('ended_at');
+        }
+      }
+      _activeEpisode ??= _newEpisode(
+        stateBefore: _checkpoint ?? const {},
+        requestOrContext: const {'source': 'manual_work'},
       );
-      actions[existing] = action;
-    } else {
-      actions.add(action);
-    }
-    _activeEpisode!['actions_relational'] = actions
-        .map(_relationalAction)
-        .toList();
-    _inferLabels(_activeEpisode!);
-    await _appendEvent('mix_mutation', {
-      'episode_id': _activeEpisode!['episode_id'],
-      'action': action,
+
+      final historyId = payload['undo_transaction_id']?.toString();
+      if (historyId != null)
+        _historyEpisodes[historyId] = _activeEpisode!['episode_id'].toString();
+      final action = <String, dynamic>{
+        'at': DateTime.now().toUtc().toIso8601String(),
+        'kind': _safeToken(kind),
+        'payload': _sanitizeMap(payload),
+      };
+      final actions = (_activeEpisode!['actions_raw'] as List)
+          .cast<Map<String, dynamic>>();
+      final key = _coalesceKey(action);
+      final existing = actions.lastIndexWhere(
+        (candidate) => _coalesceKey(candidate) == key,
+      );
+      if (existing >= 0 && _isContinuousMutation(kind)) {
+        final first = actions[existing];
+        action['payload'] = _coalescePayload(
+          (first['payload'] as Map?)?.cast<String, dynamic>() ?? const {},
+          (action['payload'] as Map).cast<String, dynamic>(),
+        );
+        actions[existing] = action;
+      } else {
+        actions.add(action);
+      }
+      _activeEpisode!['actions_relational'] = actions
+          .map(_relationalAction)
+          .toList();
+      _inferLabels(_activeEpisode!);
+      await _appendEvent('mix_mutation', {
+        'episode_id': _activeEpisode!['episode_id'],
+        'action': action,
+      });
+      _armEpisodeTimer();
+      await _flush();
     });
-    _armEpisodeTimer();
-    await _flush();
   }
 
   Future<void> recordUndoRedo({
     required bool isUndo,
     String description = '',
+    String? undoTransactionId,
   }) async {
-    if (!_enabled) return;
-    await _ensureSession();
-    final now = DateTime.now().toUtc();
-    final episode =
-        _activeEpisode ??
-        _latestEpisodeWithin(now, const Duration(seconds: 30));
-    if (episode != null) {
-      final outcome = (episode['outcome_signals'] as Map)
-          .cast<String, dynamic>();
-      outcome[isUndo ? 'rejected_by_undo' : 'restored_by_redo'] = true;
-      outcome['decision_at'] = now.toIso8601String();
-      if (isUndo) episode['status'] = 'rejected';
-    }
-    await _appendEvent(isUndo ? 'undo' : 'redo', {
-      if (description.trim().isNotEmpty) 'description': description.trim(),
-      if (episode != null) 'episode_id': episode['episode_id'],
+    return _serialize(() async {
+      if (!_enabled) return;
+      await _ensureSession();
+      final mappedId = _historyEpisodes[undoTransactionId];
+      final matching = _episodes().where((e) => e['episode_id'] == mappedId);
+      final episode = undoTransactionId == null
+          ? (_activeEpisode ?? _latestEpisode())
+          : (matching.isEmpty ? null : matching.first);
+      if (episode != null) {
+        final outcome = (episode['outcome_signals'] as Map)
+            .cast<String, dynamic>();
+        outcome['undo_redo_observed'] = true;
+        outcome['last_history_operation'] = isUndo ? 'undo' : 'redo';
+        // A history operation may affect only part of an episode. Never infer
+        // rejection or acceptance without an action-level transaction mapping.
+        outcome['rejected_by_undo'] = false;
+        outcome['restored_by_redo'] = !isUndo;
+        if (episode['status'] == 'rejected') episode['status'] = 'complete';
+        episode['producer_outcome'] = 'not_evaluated';
+      }
+      try {
+        final snapshot = await _snapshotProvider?.call();
+        if (snapshot != null) {
+          _checkpoint = _sanitizeSnapshot(snapshot);
+          if (episode != null) episode['state_after'] = _checkpoint;
+        }
+      } catch (_) {
+        if (episode != null)
+          episode['capture_warning'] = 'history_snapshot_unavailable';
+      }
+      await _appendEvent(isUndo ? 'undo' : 'redo', {
+        if (description.trim().isNotEmpty) 'description': description.trim(),
+        if (episode != null) 'episode_id': episode['episode_id'],
+      });
+      await _flush();
     });
-    await _flush();
   }
 
   Future<void> recordPlaybackContext(Map<String, dynamic> context) async {
-    if (!_enabled) return;
-    await _ensureSession();
-    final safe = _sanitizeMap(context);
-    _session!['latest_playback_context'] = safe;
-    if (safe['event'] == 'play') {
-      final latest = _latestEpisode();
-      if (latest != null && latest['status'] == 'complete') {
-        final outcome = (latest['outcome_signals'] as Map)
-            .cast<String, dynamic>();
-        outcome['survived_next_playback'] = true;
-        outcome['playback_at'] = DateTime.now().toUtc().toIso8601String();
+    return _serialize(() async {
+      if (!_enabled) return;
+      await _ensureSession();
+      final safe = _sanitizeMap(context);
+      _session!['latest_playback_context'] = safe;
+      if (safe['event'] == 'play') {
+        final latest = _latestEpisode();
+        if (latest != null && latest['status'] == 'complete') {
+          final outcome = (latest['outcome_signals'] as Map)
+              .cast<String, dynamic>();
+          outcome['survived_next_playback'] = true;
+          outcome['playback_at'] = DateTime.now().toUtc().toIso8601String();
+        }
       }
-    }
-    await _appendEvent('playback_context', safe);
-    await _flush();
+      await _appendEvent('playback_context', safe);
+      await _flush();
+    });
   }
 
   Future<void> finalizeActiveEpisode({
     Map<String, dynamic>? finalSnapshot,
     String disposition = 'idle_timeout',
   }) async {
-    _episodeTimer?.cancel();
-    _episodeTimer = null;
-    final episode = _activeEpisode;
-    if (episode == null) return;
-    Map<String, dynamic> after;
-    try {
-      final source =
-          finalSnapshot ??
-          await _snapshotProvider?.call() ??
-          _checkpoint ??
-          const <String, dynamic>{};
-      after = _sanitizeSnapshot(source);
-    } catch (_) {
-      after = _checkpoint ?? const {};
-      episode['capture_warning'] = 'final_snapshot_unavailable';
-    }
-    episode['state_after'] = after;
-    episode['ended_at'] = DateTime.now().toUtc().toIso8601String();
-    episode['disposition'] = disposition;
-    episode['status'] = episode['status'] == 'rejected'
-        ? 'rejected'
-        : 'complete';
-    final raw = ((episode['actions_raw'] as List?) ?? const [])
-        .whereType<Map>();
-    episode['actions_relational'] = raw
-        .map((value) => _relationalAction(value.cast<String, dynamic>()))
-        .toList();
-    _inferLabels(episode);
-    _attachDiagnostics(
-      episode,
-      before: (episode['state_before'] as Map).cast<String, dynamic>(),
-      after: after,
-    );
-    _checkpoint = after;
-    _activeEpisode = null;
-    await _appendEvent('episode_closed', {
-      'episode_id': episode['episode_id'],
-      'disposition': disposition,
-      'status': episode['status'],
+    return _serialize(() async {
+      _episodeTimer?.cancel();
+      _episodeTimer = null;
+      if (_session == null) return;
+      Map<String, dynamic> after;
+      var unavailable = false;
+      try {
+        final source = finalSnapshot ?? await _snapshotProvider?.call();
+        after = source == null
+            ? (_checkpoint ?? const {})
+            : _sanitizeSnapshot(source);
+        unavailable = source == null;
+      } catch (_) {
+        after = _checkpoint ?? const {};
+        unavailable = true;
+      }
+      var episode = _activeEpisode;
+      // Native plugin windows can change parameters without a Flutter gesture.
+      // Reconcile controls at boundaries so those sessions/corrections survive.
+      // This is an observed state transition, not a fabricated gesture history.
+      if (episode == null &&
+          !unavailable &&
+          _checkpoint != null &&
+          producerControlChanges(_checkpoint!, after).isNotEmpty) {
+        final latest = _latestEpisode();
+        if (latest != null &&
+            latest['disposition'] == 'idle_timeout' &&
+            (latest['request_or_context'] as Map?)?['source'] == 'ai_prompt') {
+          episode = latest;
+          episode.remove('producer_outcome');
+          episode['provenance'] = {'label': 'unknown', 'confidence': 0.0};
+        } else {
+          episode = _newEpisode(
+            stateBefore: _checkpoint!,
+            requestOrContext: const {'source': 'observed_plugin_or_mix_change'},
+          );
+        }
+        (episode['actions_raw'] as List).add({
+          'kind': 'observed_state_change',
+          'payload': {'source': 'snapshot_reconciliation'},
+        });
+        await _appendEvent('observed_state_change', {
+          'episode_id': episode['episode_id'],
+          'state_before': _checkpoint,
+          'state_after': after,
+        });
+      }
+      if (episode == null) return;
+      if (unavailable)
+        episode['capture_warning'] = 'final_snapshot_unavailable';
+      episode['state_after'] = after;
+      episode['control_changes'] = producerControlChanges(
+        (episode['state_before'] as Map).cast<String, dynamic>(),
+        after,
+      );
+      episode['ended_at'] = DateTime.now().toUtc().toIso8601String();
+      episode['disposition'] = disposition;
+      episode['status'] = episode['status'] == 'rejected'
+          ? 'rejected'
+          : 'complete';
+      final raw = ((episode['actions_raw'] as List?) ?? const [])
+          .whereType<Map>();
+      episode['actions_relational'] = raw
+          .map((value) => _relationalAction(value.cast<String, dynamic>()))
+          .toList();
+      _inferLabels(episode);
+      _attachDiagnostics(
+        episode,
+        before: (episode['state_before'] as Map).cast<String, dynamic>(),
+        after: after,
+      );
+      _checkpoint = after;
+      _activeEpisode = null;
+      await _appendEvent('episode_closed', {
+        'episode_id': episode['episode_id'],
+        'disposition': disposition,
+        'status': episode['status'],
+      });
+      await _flush();
     });
-    await _flush();
   }
 
   Future<void> recordPromptCycleStop({
@@ -290,20 +439,24 @@ class ProducerDataCollector {
     String? projectName,
     Directory? projectDir,
   }) async {
-    _applyProjectContext(projectId: projectId, projectDir: projectDir);
-    await finalizeActiveEpisode(
-      finalSnapshot: finalSnapshot,
-      disposition: disposition,
-    );
+    return _serialize(() async {
+      _applyProjectContext(projectId: projectId, projectDir: projectDir);
+      await finalizeActiveEpisode(
+        finalSnapshot: finalSnapshot,
+        disposition: disposition,
+      );
+    });
   }
 
   Future<void> setQualityRating(double rating0To5) async {
-    if (!_enabled || _session == null) return;
-    final target = _activeEpisode ?? _latestEpisode();
-    if (target != null) {
-      target['quality_rating_0_to_5'] = rating0To5.clamp(0.0, 5.0);
-    }
-    await _flush();
+    return _serialize(() async {
+      if (!_enabled || _session == null) return;
+      final target = _activeEpisode ?? _latestEpisode();
+      if (target != null) {
+        target['quality_rating_0_to_5'] = rating0To5.clamp(0.0, 5.0);
+      }
+      await _flush();
+    });
   }
 
   List<Map<String, dynamic>> reviewCandidates({
@@ -334,87 +487,137 @@ class ProducerDataCollector {
     required String episodeId,
     required List<String> diagnoses,
     required List<String> strategies,
+    String outcome = 'not_evaluated',
+    String notes = '',
   }) async {
-    Map<String, dynamic>? episode;
-    for (final candidate in _episodes()) {
-      if (candidate['episode_id'] == episodeId) episode = candidate;
-    }
-    if (episode == null) return;
-    final selectedDiagnoses = diagnoses.map(_safeToken).toSet().toList();
-    episode['diagnoses'] = List<String>.from(selectedDiagnoses)..sort();
-    episode['diagnosis'] = selectedDiagnoses.isEmpty
-        ? 'other'
-        : selectedDiagnoses.first;
-    episode['strategies'] = strategies.map(_safeToken).toSet().toList()..sort();
-    episode['provenance'] = {'label': 'producer', 'confidence': 1.0};
-    await _appendEvent('producer_label', {
-      'episode_id': episodeId,
-      'diagnosis': episode['diagnosis'],
-      'diagnoses': episode['diagnoses'],
-      'strategies': episode['strategies'],
+    return _serialize(() async {
+      Map<String, dynamic>? episode;
+      for (final candidate in _episodes()) {
+        if (candidate['episode_id'] == episodeId) episode = candidate;
+      }
+      if (episode == null) return;
+      final selectedDiagnoses = diagnoses.map(_safeToken).toSet().toList();
+      episode['diagnoses'] = List<String>.from(selectedDiagnoses)..sort();
+      episode['diagnosis'] = selectedDiagnoses.isEmpty
+          ? 'other'
+          : selectedDiagnoses.first;
+      episode['strategies'] = strategies.map(_safeToken).toSet().toList()
+        ..sort();
+      const outcomes = {
+        'accepted',
+        'rejected',
+        'partial',
+        'experimenting',
+        'not_evaluated',
+      };
+      if (!outcomes.contains(outcome))
+        throw ArgumentError.value(outcome, 'outcome');
+      episode['producer_outcome'] = outcome;
+      episode['producer_notes'] = _sanitizeText(
+        notes.trim().substring(0, notes.trim().length.clamp(0, 2000)),
+      );
+      episode['provenance'] = {'label': 'producer', 'confidence': 1.0};
+      await _appendEvent('producer_label', {
+        'episode_id': episodeId,
+        'diagnosis': episode['diagnosis'],
+        'diagnoses': episode['diagnoses'],
+        'strategies': episode['strategies'],
+        'outcome': episode['producer_outcome'],
+        'notes': episode['producer_notes'],
+      });
+      await _flush();
     });
-    await _flush();
   }
 
   Future<File?> exportActiveSession({Directory? projectDir}) async {
-    if (projectDir != null) _applyProjectContext(projectDir: projectDir);
-    if (_session == null || _sessionFile == null) return null;
-    await _flush();
-    return _sessionFile;
+    return _serialize(() async {
+      if (projectDir != null) _applyProjectContext(projectDir: projectDir);
+      if (_session == null || _sessionFile == null) return null;
+      await _flush();
+      return _sessionFile;
+    });
   }
 
   Future<File?> closeSession({String reason = 'completed'}) async {
-    if (_session == null) return null;
-    await finalizeActiveEpisode(disposition: reason);
-    _session!['ended_at'] = DateTime.now().toUtc().toIso8601String();
-    _session!['close_reason'] = reason;
-    _session!['upload'] = {
-      'status': 'pending',
-      'attempts': 0,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    };
-    await _appendEvent('session_closed', {'reason': reason});
-    await _embedEventJournal();
-    await _flush();
-    final closed = _sessionFile;
-    _setUploadState(ProducerCaptureUploadState.pending);
-    _session = null;
-    _sessionFile = null;
-    _journalFile = null;
-    _checkpoint = null;
-    _activeEpisode = null;
-    _episodeCounter = 0;
-    return closed;
+    return _serialize(() async {
+      if (_session == null) return null;
+      _enabled = false;
+      _traceGeneration++;
+      await finalizeActiveEpisode(disposition: reason);
+      _session!['ended_at'] = DateTime.now().toUtc().toIso8601String();
+      _session!['close_reason'] = reason;
+      _session!['upload'] = {
+        'status': 'pending',
+        'attempts': 0,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      await _appendEvent('session_closed', {'reason': reason});
+      await _embedEventJournal();
+      await _flush();
+      final closed = _sessionFile;
+      _setUploadState(ProducerCaptureUploadState.pending);
+      _session = null;
+      _sessionFile = null;
+      _journalFile = null;
+      _checkpoint = null;
+      _activeEpisode = null;
+      _episodeCounter = 0;
+      _historyEpisodes.clear();
+      return closed;
+    });
   }
 
   Future<List<File>> listSessionFiles() async {
-    final roots = <Directory>[await _applicationRootDir()];
-    if (_projectDir != null) roots.insert(0, await _rootDir());
-    final files = <String, File>{};
-    for (final dir in roots) {
-      if (!await dir.exists()) continue;
-      await for (final entity in dir.list(followLinks: false)) {
-        if (entity is File && entity.path.endsWith('.json')) {
-          files[p.normalize(entity.path)] = entity;
+    return _serialize(() async {
+      final roots = <Directory>[await _applicationRootDir()];
+      if (_projectDir != null) roots.insert(0, await _rootDir());
+      final files = <String, File>{};
+      for (final dir in roots) {
+        if (!await dir.exists()) continue;
+        await for (final entity in dir.list(followLinks: false)) {
+          if (entity is File && entity.path.endsWith('.json')) {
+            files[p.normalize(entity.path)] = entity;
+          }
         }
       }
-    }
-    final result = files.values.toList()
-      ..sort((a, b) => b.path.compareTo(a.path));
-    return result;
+      final result = files.values.toList()
+        ..sort((a, b) => b.path.compareTo(a.path));
+      return result;
+    });
   }
 
   Future<List<File>> listPendingUploadFiles() async {
-    final pending = <File>[];
-    for (final file in await listSessionFiles()) {
-      try {
-        final document = jsonDecode(await file.readAsString()) as Map;
-        final status = ((document['upload'] as Map?)?['status'] ?? '')
-            .toString();
-        if (status == 'pending' || status == 'retry_needed') pending.add(file);
-      } catch (_) {}
-    }
-    return pending;
+    return _serialize(() async {
+      final pending = <File>[];
+      for (final file in await listSessionFiles()) {
+        try {
+          final document = jsonDecode(await file.readAsString()) as Map;
+          var status = ((document['upload'] as Map?)?['status'] ?? '')
+              .toString();
+          if (status == 'recording' && file.path != _sessionFile?.path) {
+            document['close_reason'] = 'interrupted_recovery';
+            document['ended_at'] = DateTime.now().toUtc().toIso8601String();
+            for (final episode
+                in (document['episodes'] as List? ?? const [])
+                    .whereType<Map>()) {
+              if (episode['status'] == 'active') {
+                episode['status'] = 'interrupted';
+                episode['capture_warning'] =
+                    'interrupted_before_final_snapshot';
+              }
+            }
+            document['upload'] = {'status': 'pending', 'attempts': 0};
+            await _writeDocument(file, document);
+            status = 'pending';
+          }
+          if (status == 'pending' ||
+              status == 'retry_needed' ||
+              status == 'uploading')
+            pending.add(file);
+        } catch (_) {}
+      }
+      return pending;
+    });
   }
 
   Future<void> updateUploadStatus(
@@ -422,32 +625,31 @@ class ProducerDataCollector {
     String status, {
     String? error,
   }) async {
-    try {
-      final document = (jsonDecode(await file.readAsString()) as Map)
-          .cast<String, dynamic>();
-      final previous = ((document['upload'] as Map?) ?? const {})
-          .cast<String, dynamic>();
-      document['upload'] = {
-        ...previous,
-        'status': status,
-        'attempts':
-            ((previous['attempts'] as num?)?.toInt() ?? 0) +
-            (status == 'uploading' ? 1 : 0),
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-        if (error != null && error.isNotEmpty)
-          'last_error': _sanitizeText(error),
-      };
-      await file.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(document),
-        flush: true,
-      );
-      _setUploadState(switch (status) {
-        'uploading' => ProducerCaptureUploadState.uploading,
-        'uploaded' => ProducerCaptureUploadState.uploaded,
-        'retry_needed' => ProducerCaptureUploadState.retryNeeded,
-        _ => ProducerCaptureUploadState.pending,
-      });
-    } catch (_) {}
+    return _serialize(() async {
+      try {
+        final document = (jsonDecode(await file.readAsString()) as Map)
+            .cast<String, dynamic>();
+        final previous = ((document['upload'] as Map?) ?? const {})
+            .cast<String, dynamic>();
+        document['upload'] = {
+          ...previous,
+          'status': status,
+          'attempts':
+              ((previous['attempts'] as num?)?.toInt() ?? 0) +
+              (status == 'uploading' ? 1 : 0),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+          if (error != null && error.isNotEmpty)
+            'last_error': _sanitizeText(error),
+        };
+        await _writeDocument(file, document);
+        _setUploadState(switch (status) {
+          'uploading' => ProducerCaptureUploadState.uploading,
+          'uploaded' => ProducerCaptureUploadState.uploaded,
+          'retry_needed' => ProducerCaptureUploadState.retryNeeded,
+          _ => ProducerCaptureUploadState.pending,
+        });
+      } catch (_) {}
+    });
   }
 
   Future<void> _ensureSession() async {
@@ -464,6 +666,8 @@ class ProducerDataCollector {
     _journalFile = File(p.join(dir.path, '$sessionId.events.ndjson'));
     _session = {
       'schema_version': schemaVersion,
+      if ((_ownerIdProvider?.call() ?? '').isNotEmpty)
+        'local_owner_ref': ownerRef(_ownerIdProvider!.call()!),
       'session_id': sessionId,
       'started_at': now.toIso8601String(),
       'consent_version': consentVersion,
@@ -476,7 +680,7 @@ class ProducerDataCollector {
         'maximum_pairs': maximumAudioPairsPerSession,
       },
       if ((_projectId ?? '').isNotEmpty)
-        'project_ref': _stableHash(_projectId!),
+        'project_ref': _projectGroup(_projectId!),
       'event_journal_file': p.basename(_journalFile!.path),
       'episodes': <Map<String, dynamic>>[],
       'media_manifest': <Map<String, dynamic>>[],
@@ -545,6 +749,7 @@ class ProducerDataCollector {
   }
 
   void _inferLabels(Map<String, dynamic> episode) {
+    if ((episode['provenance'] as Map?)?['label'] == 'producer') return;
     final kinds = ((episode['actions_raw'] as List?) ?? const [])
         .whereType<Map>()
         .map(
@@ -686,6 +891,11 @@ class ProducerDataCollector {
           )
           .toList();
     }
+    if (value is String &&
+        key.toLowerCase() == 'effectid' &&
+        _sanitizeText(value) != value) {
+      return 'plugin_${sha256.convert(utf8.encode(value))}';
+    }
     if (value is String) return _sanitizeText(value, key: key);
     return value;
   }
@@ -775,16 +985,18 @@ class ProducerDataCollector {
 
   void _armEpisodeTimer() {
     _episodeTimer?.cancel();
-    _episodeTimer = Timer(_episodeIdleTimeout, () {
-      unawaited(finalizeActiveEpisode());
-    });
+    _episodeTimer = Zone.root.run(
+      () => Timer(_episodeIdleTimeout, () {
+        unawaited(finalizeActiveEpisode().catchError((Object _) {}));
+      }),
+    );
   }
 
   void _applyProjectContext({String? projectId, Directory? projectDir}) {
     if ((projectId ?? '').trim().isNotEmpty) _projectId = projectId!.trim();
     if (projectDir != null) _projectDir = projectDir;
     if (_session != null && (_projectId ?? '').isNotEmpty) {
-      _session!['project_ref'] = _stableHash(_projectId!);
+      _session!['project_ref'] = _projectGroup(_projectId!);
     }
   }
 
@@ -796,11 +1008,11 @@ class ProducerDataCollector {
       'type': type,
       'payload': payload,
     };
-    await _journalFile!.writeAsString(
-      '${jsonEncode(event)}\n',
-      mode: FileMode.append,
-      flush: true,
-    );
+    final file = _journalFile!;
+    final line = '${jsonEncode(event)}\n';
+    await _write(() async {
+      await file.writeAsString(line, mode: FileMode.append, flush: true);
+    });
   }
 
   Future<void> _embedEventJournal() async {
@@ -822,11 +1034,17 @@ class ProducerDataCollector {
 
   Future<void> _flush() async {
     if (_session == null || _sessionFile == null) return;
-    await _sessionFile!.parent.create(recursive: true);
-    await _sessionFile!.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(_session),
-      flush: true,
-    );
+    await _writeDocument(_sessionFile!, _session!);
+  }
+
+  Future<void> _writeDocument(File file, Map document) async {
+    final content = const JsonEncoder.withIndent('  ').convert(document);
+    await _write(() async {
+      await file.parent.create(recursive: true);
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(content, flush: true);
+      await temporary.rename(file.path);
+    });
   }
 
   List<Map<String, dynamic>> _episodes() =>
@@ -835,12 +1053,6 @@ class ProducerDataCollector {
 
   Map<String, dynamic>? _latestEpisode() =>
       _episodes().isEmpty ? null : _episodes().last;
-
-  Map<String, dynamic>? _latestEpisodeWithin(DateTime now, Duration duration) {
-    final latest = _latestEpisode();
-    final ended = DateTime.tryParse((latest?['ended_at'] ?? '').toString());
-    return ended != null && now.difference(ended) <= duration ? latest : null;
-  }
 
   Future<Directory> _rootDir() async {
     if (_projectDir != null) {
@@ -853,6 +1065,10 @@ class ProducerDataCollector {
     final base = await getApplicationSupportDirectory();
     return Directory(p.join(base.path, directoryName));
   }
+
+  // Project IDs are UUIDs. Versioned hash is stable across capture sessions.
+  String _projectGroup(String id) =>
+      sha256.convert(utf8.encode('mixroom-source-group-v1:$id')).toString();
 
   String _stableHash(Object value) => sha256
       .convert(utf8.encode('$_sessionSalt:${value.toString()}'))
@@ -868,6 +1084,10 @@ class ProducerDataCollector {
   }
 
   static const Set<String> _redactedKeys = {
+    'statebase64',
+    'state_base64',
+    'client_name',
+    'account_id',
     'project_name',
     'row_name',
     'clip_name',
@@ -891,7 +1111,9 @@ class ProducerDataCollector {
 
 String _sanitizeText(String value, {String key = ''}) {
   final normalized = key.toLowerCase();
-  if (normalized.contains('path') || normalized.contains('file')) {
+  if (normalized.contains('path') ||
+      normalized == 'file' ||
+      normalized.endsWith('_file')) {
     return '[redacted]';
   }
   return value
