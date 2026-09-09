@@ -63,6 +63,8 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @property (nonatomic, assign) BOOL iosObservedOutputWasBluetoothV2;
 @property (nonatomic, copy) NSString *iosVerifiedPlaybackOutputFingerprintV2;
 @property (nonatomic, assign) BOOL iosVerifiedPlaybackOutputWasBluetoothV2;
+@property (nonatomic, assign) double iosObservedPlaybackSampleRateV2;
+@property (nonatomic, copy) NSString *iosInputStatusFingerprintV2;
 @property (nonatomic, copy) NSString *iosLastObservedRouteCauseV2;
 @property (atomic, copy) NSString *currentAudioRouteIntentV2;
 @property (atomic, copy) NSDictionary<NSString *, id> *iosRecordingOutputV2;
@@ -99,6 +101,8 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @property (atomic, retain) NSCondition *macHardwareSettingsConditionV2;
 @property (atomic, copy) NSString *macSelectedOutputUIDV2;
 @property (atomic, copy) NSString *macSelectedInputUIDV2;
+@property (nonatomic) AudioDeviceID macCapabilitiesInputDeviceV2;
+@property (nonatomic, copy) NSArray *macInputCapabilitiesV2;
 @property (atomic, assign) BOOL macIntentFollowsSystemInputV2;
 #endif
 #if !TARGET_OS_OSX
@@ -179,6 +183,10 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 - (void)stopAudioRouteMonitoringV2;
 - (void)handleAudioRoutePropertyChangeV2:(NSString *)cause;
 - (void)updateObservedOutputDeviceV2:(uint32_t)deviceID;
+#if TARGET_OS_OSX
+- (void)refreshMacInputCapabilitiesV2;
+- (void)observeMacInputCapabilitiesV2:(AudioDeviceID)deviceID;
+#endif
 #if !TARGET_OS_OSX
 - (BOOL)startIOSAudioRouteMonitoringV2;
 - (void)stopIOSAudioRouteMonitoringV2;
@@ -187,6 +195,20 @@ extern void mixroomScheduleOttPluginEditorAutotest(void);
 @end
 
 #if TARGET_OS_OSX
+// Capability listeners use a distinct callback tuple owned by the permanent
+// route owner, so capture listener teardown cannot remove discovery listeners.
+static OSStatus MixroomInputCapabilitiesPropertyListenerV2(
+    AudioObjectID objectID, UInt32 count,
+    const AudioObjectPropertyAddress addresses[], void *clientData
+) {
+    #pragma unused(objectID, count, addresses)
+    JuceAudioEnginePlugin *plugin = (JuceAudioEnginePlugin *)clientData;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [plugin refreshMacInputCapabilitiesV2];
+    });
+    return noErr;
+}
+
 static OSStatus MixroomAudioRoutePropertyListenerV2(
     AudioObjectID objectID,
     UInt32 numberAddresses,
@@ -577,6 +599,70 @@ static NSString *MixroomIOSOutputFingerprint(
     }
     [parts sortUsingSelector:@selector(compare:)];
     return [parts componentsJoinedByString:@";"];
+}
+
+static NSString *MixroomIOSInputStatusFingerprint(AVAudioSession *session) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    NSArray<AVAudioSessionPortDescription *> *availableInputs =
+        session.availableInputs;
+    if (availableInputs == nil) {
+        [parts addObject:@"inventory|unknown"];
+    } else {
+        for (AVAudioSessionPortDescription *input in availableInputs) {
+            [parts addObject:[NSString stringWithFormat:@"available|%@|%@|%@",
+                input.UID ?: @"",
+                input.portType ?: @"",
+                input.channels == nil ? @"unknown" : @(input.channels.count)]];
+        }
+    }
+    AVAudioSessionPortDescription *preferredInput = session.preferredInput;
+    [parts addObject:[NSString stringWithFormat:@"preferred|%@",
+        preferredInput.UID ?: @""]];
+    for (AVAudioSessionPortDescription *input in session.currentRoute.inputs) {
+        [parts addObject:[NSString stringWithFormat:@"current|%@|%@|%@",
+            input.UID ?: @"",
+            input.portType ?: @"",
+            input.channels == nil ? @"unknown" : @(input.channels.count)]];
+    }
+    [parts sortUsingSelector:@selector(compare:)];
+    return [parts componentsJoinedByString:@";"];
+}
+
+static NSDictionary<NSString *, id> *MixroomIOSRecordingInputConfiguration(
+    AVAudioSession *session
+) {
+    NSArray<AVAudioSessionPortDescription *> *availableInputs =
+        session.availableInputs;
+    const BOOL sessionCanReportInputAvailability =
+        [session.category isEqualToString:AVAudioSessionCategoryPlayAndRecord] ||
+        [session.category isEqualToString:AVAudioSessionCategoryRecord] ||
+        [session.category isEqualToString:AVAudioSessionCategoryMultiRoute];
+    AVAudioSessionPortDescription *activeInput =
+        sessionCanReportInputAvailability && session.currentRoute.inputs.count == 1
+            ? session.currentRoute.inputs.firstObject : nil;
+    AVAudioSessionPortDescription *resolvedInput = activeInput;
+    if (resolvedInput == nil && session.preferredInput != nil) {
+        for (AVAudioSessionPortDescription *input in availableInputs ?: @[]) {
+            if ([input.UID isEqualToString:session.preferredInput.UID]) {
+                resolvedInput = input;
+                break;
+            }
+        }
+    }
+    if (resolvedInput == nil && availableInputs.count == 1) {
+        resolvedInput = availableInputs.firstObject;
+    }
+    id inputAvailable = activeInput != nil
+        ? @YES
+        : (!sessionCanReportInputAvailability || availableInputs == nil
+            ? [NSNull null] : @(availableInputs.count > 0));
+    return @{
+        @"channelStart": @0,
+        @"channelCount": @1,
+        @"inputAvailable": inputAvailable,
+        @"resolvedDeviceName": resolvedInput.portName ?: @"",
+        @"deviceNameVerified": @(activeInput != nil),
+    };
 }
 
 static NSString *MixroomIOSObservedRouteCause(
@@ -1845,17 +1931,46 @@ static BOOL MixroomMacInputIsUsable(
         MixroomCoreAudioDeviceIsAlive(deviceID.unsignedIntValue);
 }
 
+static NSArray<NSString *> *MixroomMacInputChannelNames(NSDictionary *device) {
+    NSMutableArray *names = [NSMutableArray array];
+    const AudioDeviceID deviceID = [device[@"deviceID"] unsignedIntValue];
+    const NSInteger count = [device[@"inputChannels"] isKindOfClass:[NSNumber class]]
+        ? [device[@"inputChannels"] integerValue] : 0;
+    for (NSInteger index = 1; index <= count; index++) {
+        AudioObjectPropertyAddress address = {
+            kAudioObjectPropertyElementName, kAudioDevicePropertyScopeInput,
+            (AudioObjectPropertyElement)index,
+        };
+        CFStringRef value = NULL;
+        UInt32 size = sizeof(value);
+        NSString *name = @"";
+        if (AudioObjectHasProperty(deviceID, &address) &&
+            AudioObjectGetPropertyData(deviceID, &address, 0, NULL, &size, &value) == noErr && value != NULL) {
+            name = [(NSString *)value stringByTrimmingCharactersInSet:
+                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+        [names addObject:name];
+        if (value != NULL) CFRelease(value);
+    }
+    return names;
+}
+
 static NSArray<NSDictionary<NSString *, id> *> *
-MixroomMacV2InputDeviceInfos(void) {
+MixroomMacV2InputDeviceInfos(NSString *selectedUID) {
     NSArray<NSDictionary<NSString *, id> *> *inventory =
         MixroomCoreAudioDeviceInventory() ?: @[];
     AudioDeviceID defaultInput = MixroomDefaultCoreAudioInputDevice();
     NSMutableArray<NSDictionary<NSString *, id> *> *infos =
         [NSMutableArray array];
     for (NSDictionary<NSString *, id> *device in inventory) {
-        if (!MixroomMacInputIsUsable(inventory, device)) {
-            continue;
-        }
+        const AudioDeviceID deviceID = [device[@"deviceID"] unsignedIntValue];
+        NSNumber *channels = [device[@"inputChannels"] isKindOfClass:[NSNumber class]]
+            ? device[@"inputChannels"] : nil;
+        // Inventory is independent of capture readiness. Retain a known input
+        // with missing clock/channel facts so the UI can explain that state.
+        const BOOL knownInput = channels.integerValue > 0 || deviceID == defaultInput ||
+            (selectedUID.length > 0 && [device[@"uid"] isEqualToString:selectedUID]);
+        if (!knownInput || !MixroomCoreAudioDeviceIsAlive(deviceID)) continue;
         NSString *name = [device[@"name"]
             stringByTrimmingCharactersInSet:
                 [NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -1866,12 +1981,12 @@ MixroomMacV2InputDeviceInfos(void) {
         [infos addObject:@{
             @"uid": device[@"uid"] ?: @"",
             @"name": name,
-            @"channelCount": device[@"inputChannels"] ?: @0,
+            @"channelCount": channels ?: @0,
+            @"channelNames": MixroomMacInputChannelNames(device),
             @"clockDomain": device[@"clockDomain"] ?: [NSNull null],
             @"isBluetoothInput": @(MixroomTransportIsBluetooth(transport)),
             @"isBuiltIn": @(MixroomTransportIsBuiltIn(transport)),
-            @"isDefault": @([device[@"deviceID"] unsignedIntValue] ==
-                defaultInput),
+            @"isDefault": [device[@"deviceID"] unsignedIntValue] == defaultInput ? @YES : @NO,
             @"transport": MixroomTransportLabel(transport),
         }];
     }
@@ -1901,15 +2016,7 @@ MixroomMacV2InputDeviceInfos(void) {
         if (MixroomMacInputIsUsable(devices, selected)) {
             return selected;
         }
-        self.macSelectedInputUIDV2 = nil;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (self.eventSink != nil) {
-                self.eventSink(@{
-                    @"event": @"macV2InputPreferenceChanged",
-                    @"followsSystemInput": @YES,
-                });
-            }
-        });
+        return nil; // Keep explicit identity until the user changes it.
     }
     NSDictionary *systemInput = MixroomInputForDeviceID(
         devices, MixroomDefaultCoreAudioInputDevice());
@@ -2563,6 +2670,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 - (NSDictionary<NSString *, id> *)initialisePlaybackV2 {
     self.preferredPlaybackSampleRateV2 = 0.0;
     self.preferredPlaybackBufferFramesV2 = 0;
+#if !TARGET_OS_OSX
+    self.iosObservedPlaybackSampleRateV2 = 0.0;
+    self.iosInputStatusFingerprintV2 = nil;
+#endif
 #if TARGET_OS_OSX
     self.macSelectedOutputUIDV2 = nil;
     self.macSelectedInputUIDV2 = nil;
@@ -2846,6 +2957,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             MixroomIOSOutputFingerprint(session.currentRoute);
         self.iosVerifiedPlaybackOutputWasBluetoothV2 =
             MixroomIOSOutputIsBluetooth(output);
+        self.iosObservedPlaybackSampleRateV2 = session.sampleRate;
     }
     return @{
         @"success": @(success),
@@ -3322,10 +3434,13 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         [args[@"monitoringTargetRow"] isKindOfClass:[NSNumber class]]
             ? [args[@"monitoringTargetRow"] integerValue] : -1;
     const NSInteger requiredInputChannels =
-        recordingChannelStart + recordingChannelCount;
+        recordingChannelStart >= 0 && recordingChannelStart <= INT_MAX - 2 &&
+        (recordingChannelCount == 1 || recordingChannelCount == 2)
+            ? recordingChannelStart + recordingChannelCount : 0;
     const BOOL validRecordingSelection = recordingChannelStart >= 0 &&
         (recordingChannelCount == 1 || recordingChannelCount == 2) &&
-        requiredInputChannels >= 1 && requiredInputChannels <= 32;
+        requiredInputChannels >= 1 && recordingChannelStart <= INT_MAX - 2 &&
+        (recordingChannelCount == 1 || recordingChannelStart % 2 == 0);
     const BOOL monitoringIntent = [intent isEqualToString:@"monitoring"];
     const BOOL systemSelectedMonitoring =
         [intentOperation isEqualToString:@"systemSelectedMonitoring"];
@@ -3743,6 +3858,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             NSDictionary *settledDefaultOutput =
                 [self currentMacPlaybackOutputV2:settledInventory];
             const BOOL routeStable = settledInput != nil &&
+                [settledInput[@"inputChannels"] integerValue] >= requiredInputChannels &&
                 settledOutput != nil && settledDefaultOutput != nil &&
                 [settledInput[@"uid"] isEqualToString:input[@"uid"]] &&
                 [settledDefaultOutput[@"uid"]
@@ -4243,9 +4359,10 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ? [args[@"monitoringTargetRow"] integerValue] : -1;
     const NSInteger requiredInputChannels =
         recordingChannelStart + recordingChannelCount;
-    const BOOL validRecordingSelection = recordingChannelStart >= 0 &&
-        (recordingChannelCount == 1 || recordingChannelCount == 2) &&
-        requiredInputChannels >= 1 && requiredInputChannels <= 32;
+    // The current iOS V2 engine policy opens one system-selected mono input.
+    // Reject any other saved/requested range before mutating AVAudioSession.
+    const BOOL validRecordingSelection =
+        recordingChannelStart == 0 && recordingChannelCount == 1;
     const BOOL monitoringIntent = [intent isEqualToString:@"monitoring"];
     const BOOL systemSelectedMonitoring =
         [intentOperation isEqualToString:@"systemSelectedMonitoring"];
@@ -4435,17 +4552,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
                     (MixroomIOSMonotonicMilliseconds() -
                      self.iosIntentOperationStartedAtMsV2)))
                 : 0;
-            const BOOL routeForcesMono =
-                MixroomIOSRouteIsBluetoothHFPDuplex(session.currentRoute);
-            const NSInteger routeInputChannels = routeForcesMono
-                ? 1
-                : MAX(
-                    (NSInteger)session.inputNumberOfChannels,
-                    (NSInteger)session.maximumInputNumberOfChannels);
-            const NSInteger effectiveChannelStart = routeForcesMono
-                ? 0 : recordingChannelStart;
-            const NSInteger effectiveChannelCount = routeForcesMono
-                ? 1 : recordingChannelCount;
+            const NSInteger routeInputChannels =
+                MixroomIOSRouteIsBluetoothHFPDuplex(session.currentRoute)
+                    ? 1
+                    : MAX(
+                        (NSInteger)session.inputNumberOfChannels,
+                        (NSInteger)session.maximumInputNumberOfChannels);
+            const NSInteger effectiveChannelStart = recordingChannelStart;
+            const NSInteger effectiveChannelCount = recordingChannelCount;
             const NSInteger effectiveRequiredInputChannels =
                 effectiveChannelStart + effectiveChannelCount;
             self.iosIntentRecordingChannelStartV2 = effectiveChannelStart;
@@ -4819,8 +4933,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         }
         const BOOL recoveryPlaybackPreferencesValid =
             !recoveringAfterPhysicalInvalidation ||
-            (MixroomHardwareSampleRatePreferenceIsSupported(
-                 self.preferredPlaybackSampleRateV2) &&
+            ((self.preferredPlaybackSampleRateV2 == 0.0 ||
+              MixroomHardwareSampleRatePreferenceIsSupported(
+                  self.preferredPlaybackSampleRateV2)) &&
              MixroomHardwareBufferPreferenceIsSupported(
                  self.preferredPlaybackBufferFramesV2));
         BOOL playbackReopened = NO;
@@ -5038,6 +5153,11 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     }
     if (success) {
         self.currentAudioRouteIntentV2 = intent;
+        if (session.sampleRate > 1000.0) {
+            self.iosObservedPlaybackSampleRateV2 = session.sampleRate;
+        }
+        self.iosInputStatusFingerprintV2 =
+            MixroomIOSInputStatusFingerprint(session);
         if ([intent isEqualToString:@"playbackOnly"] &&
             self.iosInterruptionRecoveryPendingV2) {
             self.iosInterruptionRecoveryPendingV2 = NO;
@@ -5224,6 +5344,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 }
 
 - (void)startIOSCaptureV2:(NSDictionary *)args result:(FlutterResult)result {
+    // The current iOS V2 capture policy is exactly System Default, Input 1
+    // mono. Reject a mismatched direct start request before lifecycle state or
+    // the active AVAudioSession route can be changed.
+    if ([args[@"channelStart"] integerValue] != 0 ||
+        [args[@"channelCount"] integerValue] != 1) {
+        result(@NO);
+        return;
+    }
     const BOOL monitor = [self isIOSMonitorOwnedV2];
     const BOOL admittedIntent = monitor
         ? [self.currentAudioRouteIntentV2 isEqualToString:@"monitoring"]
@@ -5412,6 +5540,41 @@ static NSString *MixroomFlutterAssetRootPath(void) {
 #endif
 }
 
+#if TARGET_OS_OSX
+- (void)observeMacInputCapabilitiesV2:(AudioDeviceID)deviceID {
+    if (self.macCapabilitiesInputDeviceV2 == deviceID) return;
+    AudioObjectPropertyAddress addresses[] = {
+        { kAudioDevicePropertyDeviceIsAlive, kAudioObjectPropertyScopeGlobal, kMixroomCoreAudioElement },
+        { kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyScopeInput, kMixroomCoreAudioElement },
+        { kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kMixroomCoreAudioElement },
+    };
+    for (NSUInteger i = 0; i < sizeof(addresses) / sizeof(addresses[0]); i++) {
+        if (self.macCapabilitiesInputDeviceV2 != kAudioObjectUnknown)
+            AudioObjectRemovePropertyListener(self.macCapabilitiesInputDeviceV2,
+                &addresses[i], MixroomInputCapabilitiesPropertyListenerV2, self);
+        if (deviceID != kAudioObjectUnknown)
+            AudioObjectAddPropertyListener(deviceID, &addresses[i],
+                MixroomInputCapabilitiesPropertyListenerV2, self);
+    }
+    self.macCapabilitiesInputDeviceV2 = deviceID;
+}
+
+- (void)refreshMacInputCapabilitiesV2 {
+    if (!self.audioRouteMonitoringV2) return;
+    NSArray *inventory = MixroomCoreAudioDeviceInventory() ?: @[];
+    NSDictionary *input = [self currentMacRecordingInputV2:inventory];
+    [self observeMacInputCapabilitiesV2:input == nil ? kAudioObjectUnknown
+        : [input[@"deviceID"] unsignedIntValue]];
+    NSArray *infos = MixroomMacV2InputDeviceInfos(self.macSelectedInputUIDV2);
+    if (![infos isEqual:self.macInputCapabilitiesV2]) {
+        self.macInputCapabilitiesV2 = infos;
+        if (self.eventSink != nil) self.eventSink(@{
+            @"event": @"macV2InputCapabilitiesChanged",
+        });
+    }
+}
+#endif
+
 - (void)updateObservedOutputDeviceV2:(uint32_t)deviceID {
 #if TARGET_OS_OSX
     AudioObjectPropertyAddress aliveAddress = {
@@ -5506,6 +5669,13 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosInterruptionReasonV2 = nil;
     self.iosInterruptionRecoveryOutcomeV2 = nil;
     self.iosForegroundRecoveryPendingV2 = NO;
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    self.iosInputStatusFingerprintV2 =
+        MixroomIOSInputStatusFingerprint(session);
+    if (self.iosObservedPlaybackSampleRateV2 <= 1000.0 &&
+        session.sampleRate > 1000.0) {
+        self.iosObservedPlaybackSampleRateV2 = session.sampleRate;
+    }
     NSString *currentFingerprint = MixroomIOSOutputFingerprint(route);
     self.audioRouteFingerprintV2 =
         self.iosVerifiedPlaybackOutputFingerprintV2.length > 0
@@ -5576,6 +5746,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     self.iosObservedOutputWasBluetoothV2 = NO;
     self.iosVerifiedPlaybackOutputFingerprintV2 = nil;
     self.iosVerifiedPlaybackOutputWasBluetoothV2 = NO;
+    self.iosObservedPlaybackSampleRateV2 = 0.0;
+    self.iosInputStatusFingerprintV2 = nil;
     self.iosLastObservedRouteCauseV2 = nil;
     self.iosIntentOperationCancelledV2 = self.iosIntentOperationActiveV2;
     self.iosIntentTerminalCauseV2 = @"shutdown";
@@ -5684,8 +5856,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             self.iosForegroundRecoveryPendingV2 = NO;
             return;
         }
-        AVAudioSessionRouteDescription *route =
-            [AVAudioSession sharedInstance].currentRoute;
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        AVAudioSessionRouteDescription *route = session.currentRoute;
         if (route == nil && !interruptionNotification &&
             !foregroundRecovery &&
             !self.iosIntentOperationActiveV2) {
@@ -5695,6 +5867,24 @@ static NSString *MixroomFlutterAssetRootPath(void) {
             ? @"" : MixroomIOSOutputFingerprint(route);
         NSString *completeFingerprint = route == nil
             ? @"" : MixroomIOSRouteFingerprint(route);
+        NSString *inputStatusFingerprint =
+            MixroomIOSInputStatusFingerprint(session);
+        const BOOL inputStatusChanged =
+            ![inputStatusFingerprint isEqualToString:
+                self.iosInputStatusFingerprintV2 ?: @""];
+        self.iosInputStatusFingerprintV2 = inputStatusFingerprint;
+        const double sessionRate = session.sampleRate;
+        const BOOL playbackRateChanged = routeNotification &&
+            !self.iosIntentOperationActiveV2 && sessionRate > 1000.0 &&
+            self.iosObservedPlaybackSampleRateV2 > 1000.0 &&
+            fabs(sessionRate - self.iosObservedPlaybackSampleRateV2) >= 1.0;
+        if (inputStatusChanged && !interruptionNotification &&
+            !foregroundRecovery && !terminalRouteNotification &&
+            !self.iosIntentOperationActiveV2 && self.eventSink != nil) {
+            self.eventSink(@{
+                @"event": @"iosV2InputStatusChanged",
+            });
+        }
         NSString *interruptionCause = nil;
         if (interruptionBegan) {
             self.iosIntentOperationCancelledV2 = YES;
@@ -5781,6 +5971,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         if (!interruptionNotification && !foregroundRecovery &&
             !terminalRouteNotification &&
             !self.iosIntentOperationActiveV2 &&
+            !playbackRateChanged &&
             [fingerprint isEqualToString:self.audioRouteFingerprintV2]) {
             return;
         }
@@ -5864,6 +6055,14 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         self.audioRouteFingerprintV2 =
             [self currentMacPlaybackOutputFingerprintV2];
         self.audioRouteMonitoringV2 = YES;
+        AudioObjectPropertyAddress defaultInputAddress = {
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioObjectPropertyScopeGlobal, kMixroomCoreAudioElement,
+        };
+        AudioObjectAddPropertyListener(kAudioObjectSystemObject, &defaultInputAddress,
+            MixroomInputCapabilitiesPropertyListenerV2, self);
+        [self refreshMacInputCapabilitiesV2];
+
 
         AudioObjectPropertyAddress defaultOutputAddress = {
             kAudioHardwarePropertyDefaultOutputDevice,
@@ -5950,6 +6149,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         ![[JuceBridge getAudioRouteImplementationObjC] isEqualToString:@"v2"]) {
         return;
     }
+    [self refreshMacInputCapabilitiesV2];
     if (self.macIntentOperationActiveV2) {
         NSArray<NSDictionary<NSString *, id> *> *inventory =
             MixroomCoreAudioDeviceInventory() ?: @[];
@@ -6094,19 +6294,6 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     }
     NSArray<NSDictionary<NSString *, id> *> *inventory =
         MixroomCoreAudioDeviceInventory() ?: @[];
-    if (self.macSelectedInputUIDV2.length > 0) {
-        NSDictionary *selectedInput =
-            MixroomInputForUID(inventory, self.macSelectedInputUIDV2);
-        if (!MixroomMacInputIsUsable(inventory, selectedInput)) {
-            self.macSelectedInputUIDV2 = nil;
-            if (self.eventSink != nil) {
-                self.eventSink(@{
-                    @"event": @"macV2InputPreferenceChanged",
-                    @"followsSystemInput": @YES,
-                });
-            }
-        }
-    }
     if (self.macSelectedOutputUIDV2.length > 0) {
         NSDictionary *selected =
             MixroomOutputForUID(inventory, self.macSelectedOutputUIDV2);
@@ -6410,6 +6597,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
     transitionID:(uint64_t)transitionID {
 #if !TARGET_OS_OSX
     const double requestedRate = [args[@"preferredSampleRateHz"] doubleValue];
+    const BOOL followOutputSampleRate = requestedRate == 0.0;
     const NSInteger requestedBuffer =
         [args[@"preferredBufferFrames"] integerValue];
     AVAudioSession *session = [AVAudioSession sharedInstance];
@@ -6417,7 +6605,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         MixroomIOSSingleOutputEndpoint(session.currentRoute);
     NSDictionary *sourceSnapshot = [self buildAudioRouteSnapshotV2];
     NSString *diagnosticCode = @"ok";
-    if (!MixroomHardwareSampleRatePreferenceIsSupported(requestedRate) ||
+    if (!isfinite(requestedRate) || requestedRate < 0.0 ||
+        (!followOutputSampleRate &&
+         !MixroomHardwareSampleRatePreferenceIsSupported(requestedRate)) ||
         !MixroomHardwareBufferPreferenceIsSupported(requestedBuffer)) {
         diagnosticCode = @"unsupported_hardware_settings";
     } else if (generation != self.audioRouteGenerationV2) {
@@ -6436,7 +6626,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         sourceOutput != nil && MixroomIOSOutputIsBluetooth(sourceOutput);
     const double sourceRate = session.sampleRate;
     const NSInteger sourceBuffer = MixroomIOSSessionBufferFrames(session);
-    const double effectiveRate = bluetoothRoute ? sourceRate : requestedRate;
+    const double effectiveRate =
+        (followOutputSampleRate || bluetoothRoute) ? sourceRate : requestedRate;
     const NSInteger effectiveBuffer = bluetoothRoute
         ? sourceBuffer : requestedBuffer;
     NSDictionary *sourceJuce =
@@ -6474,7 +6665,8 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         const double settledRate = session.sampleRate;
         const NSInteger settledBuffer = MixroomIOSSessionBufferFrames(session);
         const BOOL settledPreferenceSupported = bluetoothRoute ||
-            (MixroomHardwareSampleRatePreferenceIsSupported(settledRate) &&
+            ((followOutputSampleRate ||
+              MixroomHardwareSampleRatePreferenceIsSupported(settledRate)) &&
              MixroomHardwareBufferPreferenceIsSupported(settledBuffer));
         success = generation == self.audioRouteGenerationV2 && callbackReady &&
             settledPreferenceSupported &&
@@ -6537,8 +6729,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         snapshot = [self buildAudioRouteSnapshotV2];
     }
     if (success) {
-        self.preferredPlaybackSampleRateV2 = bluetoothRoute
-            ? requestedRate : session.sampleRate;
+        // A positive compatibility request applies only to this transition.
+        // Future output changes must follow the newly active system route.
+        self.preferredPlaybackSampleRateV2 = 0.0;
         self.preferredPlaybackBufferFramesV2 = bluetoothRoute
             ? requestedBuffer : MixroomIOSSessionBufferFrames(session);
         self.audioRouteFingerprintV2 =
@@ -6546,6 +6739,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         self.iosVerifiedPlaybackOutputFingerprintV2 =
             self.audioRouteFingerprintV2;
         self.iosVerifiedPlaybackOutputWasBluetoothV2 = bluetoothRoute;
+        self.iosObservedPlaybackSampleRateV2 = session.sampleRate;
     }
     return @{
         @"status": success ? @"success" : @"failure",
@@ -6678,6 +6872,7 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         if (selectionSucceeded) {
             self.macSelectedInputUIDV2 = followSystemInput
                 ? nil : selectedInput[@"uid"];
+            [self refreshMacInputCapabilitiesV2];
         }
         const NSInteger elapsedMs = (NSInteger)(
             MixroomMonotonicMilliseconds() - startedAtMs + 0.5);
@@ -7016,6 +7211,9 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         self.iosVerifiedPlaybackOutputFingerprintV2 = actualFingerprint;
         self.iosVerifiedPlaybackOutputWasBluetoothV2 =
             MixroomIOSOutputIsBluetooth(actualOutput);
+        self.iosObservedPlaybackSampleRateV2 = session.sampleRate;
+        self.iosInputStatusFingerprintV2 =
+            MixroomIOSInputStatusFingerprint(session);
     }
     const NSInteger elapsedMs = (NSInteger)(
         MixroomIOSMonotonicMilliseconds() - startedAtMs + 0.5);
@@ -7045,6 +7243,15 @@ static NSString *MixroomFlutterAssetRootPath(void) {
         [self signalMacIntentRouteConditionV2];
     }
     self.audioRouteMonitoringV2 = NO;
+    AudioObjectPropertyAddress defaultInputAddress = {
+        kAudioHardwarePropertyDefaultInputDevice,
+        kAudioObjectPropertyScopeGlobal, kMixroomCoreAudioElement,
+    };
+    AudioObjectRemovePropertyListener(kAudioObjectSystemObject, &defaultInputAddress,
+        MixroomInputCapabilitiesPropertyListenerV2, self);
+    [self observeMacInputCapabilitiesV2:kAudioObjectUnknown];
+    self.macInputCapabilitiesV2 = nil;
+
     [JuceBridge cancelMacOutputCallbackProofV2ObjC];
     [self signalMacIntentRouteConditionV2];
     [self signalMacHardwareSettingsConditionV2];
@@ -8516,7 +8723,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSString *implementation =
             [JuceBridge getAudioRouteImplementationObjC] ?: @"none";
         result([implementation isEqualToString:@"v2"]
-            ? MixroomMacV2InputDeviceInfos()
+            ? MixroomMacV2InputDeviceInfos(self.macSelectedInputUIDV2)
             : MixroomMacInputDeviceInfos());
 #else
         AVAudioSession *session = [AVAudioSession sharedInstance];
@@ -8552,6 +8759,14 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
             }];
         }
         result(infos);
+#endif
+    }
+    else if ([call.method isEqualToString:@"getIOSRecordingInputConfigurationV2"]) {
+#if TARGET_OS_OSX
+        result(nil);
+#else
+        result(MixroomIOSRecordingInputConfiguration(
+            [AVAudioSession sharedInstance]));
 #endif
     }
     else if ([call.method isEqualToString:@"selectInputDevice"]) {

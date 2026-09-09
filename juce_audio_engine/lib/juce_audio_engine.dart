@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'android_recording_input_v2.dart';
 import 'audio_route_coordinator_v2.dart';
 import 'audio_route_snapshot_provider_v2.dart';
 import 'audio_route_v2.dart';
+import 'ios_recording_input_v2.dart';
 
 class JuceEngineCapabilities {
   final bool externalPluginHosting;
@@ -337,6 +339,7 @@ class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
     this.uid = '',
     this.channelCount = 0,
+    this.channelNames = const [],
     this.clockDomain,
     required this.name,
     required this.isBluetoothInput,
@@ -347,6 +350,7 @@ class AudioInputDeviceInfo {
 
   final String uid;
   final int channelCount;
+  final List<String> channelNames;
   final int? clockDomain;
   final String name;
   final bool isBluetoothInput;
@@ -358,6 +362,10 @@ class AudioInputDeviceInfo {
     return AudioInputDeviceInfo(
       uid: map['uid']?.toString() ?? '',
       channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+      channelNames: map['channelNames'] is List
+          ? List.unmodifiable((map['channelNames'] as List)
+              .map((name) => name is String ? name : ''))
+          : const [],
       clockDomain: (map['clockDomain'] as num?)?.toInt(),
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
@@ -531,8 +539,8 @@ class JuceAudioEngine {
     }
   }
 
-  /// For macOS hardware updates, a sample rate of zero preserves the selected
-  /// output clock. Positive values request an explicit supported rate edit.
+  /// On macOS and iOS, a sample rate of zero follows the current output clock.
+  /// Positive values request an explicit supported rate at the native boundary.
   static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
     int generation, {
     String? outputDeviceName,
@@ -3169,7 +3177,23 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<AudioInputDeviceInfo>> getInputDeviceInfos() async {
+  static Future<AndroidRecordingInputV2?>
+      getAndroidRecordingInputConfigurationV2() async {
+    final result = await _ch.invokeMapMethod<String, dynamic>(
+        'getAndroidRecordingInputConfigurationV2');
+    return result == null ? null : AndroidRecordingInputV2.fromMap(result);
+  }
+
+  static Future<IOSRecordingInputV2?>
+      getIOSRecordingInputConfigurationV2() async {
+    final result = await _ch.invokeMapMethod<String, dynamic>(
+      'getIOSRecordingInputConfigurationV2',
+    );
+    return result == null ? null : IOSRecordingInputV2.fromMap(result);
+  }
+
+  static Future<List<AudioInputDeviceInfo>> getInputDeviceInfos(
+      {bool throwOnError = false}) async {
     try {
       final res = await _ch.invokeMethod<List>('getInputDeviceInfos');
       return (res ?? const [])
@@ -3180,9 +3204,11 @@ class JuceAudioEngine {
           .where((info) => info.name.trim().isNotEmpty)
           .toList(growable: false);
     } on MissingPluginException {
+      if (throwOnError) rethrow;
       return const [];
     } on PlatformException catch (e) {
       _logError('getInputDeviceInfos', e);
+      if (throwOnError) rethrow;
       return const [];
     }
   }

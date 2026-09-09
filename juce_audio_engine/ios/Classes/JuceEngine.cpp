@@ -15058,6 +15058,10 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     if (v2Recording)
     {
         const int requiredInputs = channelStart + channelCount;
+#if JUCE_IOS
+        if (channelStart != 0 || channelCount != 1)
+            return false;
+#endif
         if (!validateRecordingRouteV2() || channelStart < 0 ||
             (channelCount != 1 && channelCount != 2) ||
             requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed))
@@ -15107,9 +15111,18 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     if (numInputs <= 0)
         return false;
 
-    channelStart = juce::jlimit(0, numInputs - 1, channelStart);
-    const int maxCount = juce::jmax(1, numInputs - channelStart);
-    channelCount = juce::jlimit(1, juce::jmin(2, maxCount), channelCount);
+    if (v2Recording)
+    {
+        if (channelStart < 0 || channelCount <= 0 ||
+            channelStart + channelCount > numInputs)
+            return false;
+    }
+    else
+    {
+        channelStart = juce::jlimit(0, numInputs - 1, channelStart);
+        const int maxCount = juce::jmax(1, numInputs - channelStart);
+        channelCount = juce::jlimit(1, juce::jmin(2, maxCount), channelCount);
+    }
 
     const double acceptedSampleRate = getKnownDeviceSampleRate(
         deviceManager,

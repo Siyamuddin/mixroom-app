@@ -1,4 +1,4 @@
-# PRO-69 — macOS output sample rate
+# PRO-69 — system output sample rate
 
 On macOS, opening a project, changing outputs, returning from capture, and
 buffer-only changes follow the active output's current CoreAudio clock. Saved
@@ -6,11 +6,21 @@ buffer-only changes follow the active output's current CoreAudio clock. Saved
 request. Explicit manual rate edits still use the existing serialized route
 configuration and native recovery. Detected rates are not limited to UI presets.
 
-The existing configuration API accepts `preferredSampleRateHz: 0` on macOS to
-preserve the output clock. Automatic operations, including buffer rollback, do
-not call the CoreAudio sample-rate setter. Native reopens use fresh inventory;
+On iOS, the active `AVAudioSession` route owns the playback rate. Project open,
+buffer-only changes, route changes, interruption recovery, and returns from
+capture all keep automatic mode active. The compact mobile Audio Routing UI
+remains system-oriented and does not add sample-rate or buffer controls. Where
+the existing wide settings layout exposes the engine rate, it is read-only and
+appears only after the session, JUCE device, graph, route, generation, and
+callback agree; otherwise it shows `Unavailable`.
+
+The existing configuration API accepts `preferredSampleRateHz: 0` on macOS and
+iOS to follow the current output clock. Positive values remain explicit requests
+for the current iOS transition at the native boundary; iOS returns to automatic
+mode afterward. Automatic operations, including buffer rollback, do not write a
+previous route's rate to the next output. Native reopens use fresh route state;
 route generations and callback/graph verification continue to govern admission.
-Other platforms retain their existing rate policy.
+Android retains its existing system-managed rate policy.
 
 ## Verification
 
@@ -43,18 +53,24 @@ Manual acceptance checks:
   at its interface's 48 kHz rate and produces sound. This remains pending until
   studio confirmation; local tests do not substitute for that check.
 
-## Separate input-channel follow-up
+## Input-channel follow-up (implemented locally)
 
 Use actual selected/default input capacity for mono and adjacent stereo choices;
 handle input-only device changes and saved selections unavailable on a smaller
 interface. The existing capacity calculation can inflate the menu using saved
 routing. Changing only that calculation would leave device lifecycle and
-unavailable-selection behavior unresolved. No input-menu changes belong to this
-PR.
+unavailable-selection behavior unresolved. The separately authorized local implementation is described in
+[macOS input channels](macos-input-channels.md).
+
+iOS and Android expose the mono System Default format their current native V2
+capture paths actually support. Saved incompatible channel ranges stay visible
+until the user explicitly replaces the selected track's route. The iOS details
+are recorded in [iOS input channels](ios-input-channels.md).
 
 ## Implementation check results
 
-- Focused Dart/native-contract regression suite: 203 passed.
+- Focused Dart/native-contract regression suite after rebasing onto current
+  `origin/main`: 286 passed.
 - macOS debug build: passed (existing native compiler warnings).
 - Changed helper/coordinator/test analysis: no issues. Editor analysis: no errors
   and no diagnostics on changed lines; existing warnings and lints remain.
@@ -65,6 +81,10 @@ PR.
 - Human checks confirmed normal speaker playback, live 44.1-to-48 kHz changes,
   Bluetooth playback, and built-in microphone recording/playback. Logs verified
   earbuds at 44.1 kHz and recovery to speakers at 48 kHz, with no reported overruns.
+- Physical iPad checks verified built-in playback and mono capture at 48 kHz,
+  Bluetooth media playback at 44.1 kHz, Bluetooth HFP mono capture at 16 kHz,
+  return to 44.1 kHz stereo after capture, and return to the iPad's 48 kHz stereo
+  output after disconnection.
 - Recording exposed a missing UI update after native recovery. The real editor
   regression reproduced it before the fix and passed afterward; accepted
   recording/monitoring transitions now publish their verified rate to settings.
@@ -108,7 +128,9 @@ callbacks, and zero reported callback overruns (2026-09-08).
   are identical to current `origin/main`; PRO-69 changes neither. The six host
   export matrix tests are explicitly skipped by their existing configuration.
   The focused PRO-69 suite remains 203 passing checks.
-- Latest main adds unrelated track-header interaction changes; no overlapping
-  files with this fix. No further PRO-69 implementation blockers found.
-- Input-channel discovery is specified above but has no separate tracker issue
-  yet. Studio acceptance remains pending after merge.
+- Rebased onto `origin/main` at `317feb08`, including PRO-72's continuous
+  recording/monitoring lifecycle. The overlapping Android and iOS native paths
+  preserve that lifecycle while enforcing PRO-69's exact input-channel policy.
+  No further PRO-69 implementation blockers were found in the focused suite.
+- The later input-channel implementation remains local and uncommitted. No
+  separate tracker issue was created. Studio acceptance remains pending.

@@ -39,6 +39,12 @@ import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_output_sample_rate.dart';
+import 'package:mixroom/helpers/mac_input_channel_policy.dart';
+import 'package:juce_audio_engine/android_recording_input_v2.dart';
+import 'package:juce_audio_engine/ios_recording_input_v2.dart';
+import 'package:mixroom/widgets/android_input_channel_selector.dart';
+import 'package:mixroom/widgets/mac_input_channel_selector.dart';
+import 'package:mixroom/widgets/system_default_mono_input_channel_selector.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_midi_key_state.dart';
 import 'package:mixroom/helpers/desktop_editor_prefs.dart';
@@ -5972,8 +5978,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   TimelineGridMode _timelineGridMode = TimelineGridMode.adaptive;
   int _timelineFixedQuantizeDivisionsPerBar = 4;
   final ValueNotifier<({String clipId, int divisionsPerBar})?>
-      _activePianoRollGridResolution =
-          ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
+  _activePianoRollGridResolution =
+      ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
 
   bool _loopEnabled = false;
   int _loopStartMs = 0;
@@ -6068,6 +6074,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String? _androidOutputRouteName;
   List<AudioInputDeviceInfo> _macInputDevices = const <AudioInputDeviceInfo>[];
   String? _macInputDeviceUID;
+  String? _macInputDeviceLastName;
+  AudioInputDeviceInfo? _macResolvedInput;
+  bool _macInputCapabilitiesFailed = false;
+  bool _macInputCapabilitiesLoaded = false;
+  int _macInputRefreshRevision = 0;
+  Future<void>? _macInputRefreshFuture;
+  AndroidRecordingInputV2? _androidRecordingInput;
+  Future<void>? _androidInputRefreshFuture;
+  int _androidInputRefreshRevision = 0;
+  IOSRecordingInputV2? _iosRecordingInput;
+  Future<void>? _iosInputRefreshFuture;
+  int _iosInputRefreshRevision = 0;
   List<String> _macOutputDevices = const <String>[];
   String? _macOutputDeviceName;
   bool _macV2InputSelectionInFlight = false;
@@ -6232,6 +6250,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   final Map<String, _HostedPluginRestoreEntry> _hostedPluginRestoreEntries =
       <String, _HostedPluginRestoreEntry>{};
   StateSetter? _projectSettingsStateSetter;
+  StateSetter? _audioRoutingSheetStateSetter;
   final GlobalKey _feedbackScreenshotBoundaryKey = GlobalKey(
     debugLabel: 'audio_editor_feedback_screenshot_boundary',
   );
@@ -7654,7 +7673,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _setStateAndRefreshProjectSettings(VoidCallback updater) {
     if (!mounted) return;
-    final dialogSetState = _projectSettingsStateSetter;
+    final dialogSetState =
+        _audioRoutingSheetStateSetter ?? _projectSettingsStateSetter;
     if (dialogSetState != null) {
       // While the settings dialog is open, avoid rebuilding the whole editor
       // tree for each control change. Refresh only the dialog subtree.
@@ -10965,107 +10985,110 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       L10n.translate(context, sectionTitle),
                                     ),
                                   Container(
-                                  margin: const EdgeInsets.only(bottom: 10),
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    12,
-                                    14,
-                                    12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: active
-                                        ? Colors.white.withValues(alpha: 0.11)
-                                        : Colors.white.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: active
-                                          ? const Color(0xFF66B5FF)
-                                          : conflict != null
-                                          ? const Color(0xFFF57272)
-                                          : Colors.white.withValues(
-                                              alpha: 0.08,
-                                            ),
+                                    margin: const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14,
+                                      12,
+                                      14,
+                                      12,
                                     ),
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              L10n.translate(
-                                                context,
-                                                entry.value,
-                                              ),
-                                              style: const TextStyle(
-                                                color: Color(0xFFF4F4F4),
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                              ),
+                                    decoration: BoxDecoration(
+                                      color: active
+                                          ? Colors.white.withValues(alpha: 0.11)
+                                          : Colors.white.withValues(
+                                              alpha: 0.05,
                                             ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withValues(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: active
+                                            ? const Color(0xFF66B5FF)
+                                            : conflict != null
+                                            ? const Color(0xFFF57272)
+                                            : Colors.white.withValues(
                                                 alpha: 0.08,
                                               ),
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              active
-                                                  ? 'Press keys...'
-                                                  : _desktopShortcutLabel(
-                                                      binding,
-                                                    ),
-                                              style: TextStyle(
-                                                color: const Color(
-                                                  0xFFF4F4F4,
-                                                ).withValues(alpha: 0.86),
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 12.5,
-                                                fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                L10n.translate(
+                                                  context,
+                                                  entry.value,
+                                                ),
+                                                style: const TextStyle(
+                                                  color: Color(0xFFF4F4F4),
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          TextButton(
-                                            onPressed: () {
-                                              setModalState(() {
-                                                capturingActionId = active
-                                                    ? null
-                                                    : entry.key;
-                                              });
-                                            },
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.08,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                active
+                                                    ? 'Press keys...'
+                                                    : _desktopShortcutLabel(
+                                                        binding,
+                                                      ),
+                                                style: TextStyle(
+                                                  color: const Color(
+                                                    0xFFF4F4F4,
+                                                  ).withValues(alpha: 0.86),
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 12.5,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            TextButton(
+                                              onPressed: () {
+                                                setModalState(() {
+                                                  capturingActionId = active
+                                                      ? null
+                                                      : entry.key;
+                                                });
+                                              },
+                                              child: Text(
+                                                active ? 'Cancel' : 'Change',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (conflict != null) ...[
+                                          const SizedBox(height: 8),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
                                             child: Text(
-                                              active ? 'Cancel' : 'Change',
+                                              conflict,
+                                              style: const TextStyle(
+                                                color: Color(0xFFF58A8A),
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
                                           ),
                                         ],
-                                      ),
-                                      if (conflict != null) ...[
-                                        const SizedBox(height: 8),
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Text(
-                                            conflict,
-                                            style: const TextStyle(
-                                              color: Color(0xFFF58A8A),
-                                              fontFamily: 'Pretendard',
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ),
                                       ],
-                                    ],
+                                    ),
                                   ),
-                                ),
                                 ];
                               }),
                               const SizedBox(height: 4),
@@ -13295,6 +13318,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleAudioRouteIntentInvalidatedV2(AudioRouteChangeEventV2 event) {
+    if (Platform.isAndroid && mounted) {
+      ++_androidInputRefreshRevision;
+      _setStateAndRefreshProjectSettings(_clearAndroidVerifiedInputName);
+    }
+    if (Platform.isIOS && mounted) {
+      ++_iosInputRefreshRevision;
+      unawaited(_refreshIOSRecordingInput());
+    }
     if (!mounted || !_supportsV2AudioRecording || !_isBluetoothV2Session) {
       return;
     }
@@ -13575,7 +13606,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _transportTicker?.stop();
     setState(() {
       _isPlaying = false;
-      if (Platform.isMacOS) _hasVerifiedDawSampleRate = false;
+      if (Platform.isMacOS || Platform.isIOS) {
+        _hasVerifiedDawSampleRate = false;
+      }
       _syncTransportClock(pausedPosition, playing: false);
     });
     _stopMeterPolling();
@@ -13588,6 +13621,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   void _handleAudioRouteTransitionV2(AudioRouteTransitionResultV2 result) {
     if (!mounted) return;
+    if (Platform.isAndroid) unawaited(_refreshAndroidRecordingInput());
+    if (Platform.isIOS) unawaited(_refreshIOSRecordingInput());
     if (!result.succeeded) {
       _syncDawSampleRateFromRoute(result.snapshot);
       _showSmallNotice(
@@ -14111,9 +14146,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             0.0,
             1.0,
           );
-      // The macOS output was admitted at its native clock before project load.
-      // Keep that value even if applying the saved buffer size later fails.
-      if (!Platform.isMacOS) {
+      // Apple output routes are admitted at their native clock before project
+      // load. A saved rate remains metadata and must not change the route.
+      if (!Platform.isMacOS && !Platform.isIOS) {
         _preferredDawSampleRate = _normalizeDawSampleRate(
           uiSettings?["sampleRate"],
         );
@@ -22869,6 +22904,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
+    if (Platform.isMacOS && !await _validateMacRecordingChannels())
+      return false;
+    if (Platform.isAndroid &&
+        _isBluetoothV2Session &&
+        !await _validateAndroidRecordingChannels())
+      return false;
+    if (Platform.isIOS &&
+        _isBluetoothV2Session &&
+        !await _validateIOSRecordingChannels()) {
+      return false;
+    }
+    final macRequestedInputUID = _macResolvedInput?.uid;
     if (_v2LiveMonitoringActive) {
       if (Platform.isMacOS || Platform.isAndroid || Platform.isIOS) {
         // The native input session already owns these channels. Capture can
@@ -22947,7 +22994,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _syncTransportClock(_globalAudioClock, playing: false);
         });
       }
-      if (_numInputChannels > 0) {
+      if (!Platform.isMacOS &&
+          !Platform.isAndroid &&
+          !Platform.isIOS &&
+          _numInputChannels > 0) {
         final normalized = RecordingChannelSelectionV2(
           channelStart: _selectedChannelStart,
           channelCount: _selectedChannelCount,
@@ -23005,17 +23055,64 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         advertisedInputChannels,
       );
       if (activeInputChannels <= 0 && availableInputChannels <= 0) return false;
-      final preparedSelection = RecordingChannelSelectionV2(
+      final requestedSelection = RecordingChannelSelectionV2(
         channelStart: _selectedChannelStart,
         channelCount: _selectedChannelCount,
-      ).normalizeForCapacity(availableInputChannels);
+      );
+      if (Platform.isMacOS &&
+          (!macInputChannelSelectionIsValid(
+                advertisedInputChannels,
+                requestedSelection.channelStart,
+                requestedSelection.channelCount,
+              ) ||
+              verifiedInput?.uid != macRequestedInputUID)) {
+        await _restoreV2PlaybackOnlyAfterRecording();
+        await _refreshSystemSelectedRouteInfoV2();
+        _showSmallNotice(
+          'The input changed. Choose an available input before recording.',
+        );
+        return false;
+      }
+      if (Platform.isAndroid &&
+          activeInputChannels != _androidRecordingInput?.channelCount) {
+        await _restoreV2PlaybackOnlyAfterRecording();
+        await _refreshSystemSelectedRouteInfoV2();
+        _showSmallNotice(
+          'The microphone could not prepare the supported recording format.',
+        );
+        return false;
+      }
+      if (Platform.isIOS) await _refreshIOSRecordingInput();
+      if (Platform.isIOS &&
+          (activeInputChannels != _iosRecordingInput?.channelCount ||
+              !(_iosRecordingInput?.accepts(
+                    requestedSelection.channelStart,
+                    requestedSelection.channelCount,
+                  ) ??
+                  false))) {
+        await _restoreV2PlaybackOnlyAfterRecording();
+        await _refreshSystemSelectedRouteInfoV2();
+        _showSmallNotice(
+          'The microphone could not prepare the supported recording format.',
+        );
+        return false;
+      }
+      if (Platform.isAndroid) await _refreshAndroidRecordingInput();
+      final preparedSelection =
+          (Platform.isMacOS || Platform.isAndroid || Platform.isIOS)
+          ? requestedSelection
+          : requestedSelection.normalizeForCapacity(availableInputChannels);
       _preparedRecordingChannelStart = preparedSelection.channelStart;
       _preparedRecordingChannelCount = preparedSelection.channelCount;
       _setStateAndRefreshProjectSettings(() {
-        _numInputChannels = availableInputChannels;
+        _numInputChannels = Platform.isMacOS
+            ? advertisedInputChannels
+            : availableInputChannels;
         _selectedChannelStart = preparedSelection.channelStart;
         _selectedChannelCount = preparedSelection.channelCount;
-        if (_isValidRowIndex(_selectedRow)) {
+        if (!Platform.isAndroid &&
+            !Platform.isIOS &&
+            _isValidRowIndex(_selectedRow)) {
           _rows[_selectedRow] = _rows[_selectedRow].copyWith(
             inputChannelStart: preparedSelection.channelStart,
             inputChannelCount: preparedSelection.channelCount,
@@ -23196,6 +23293,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       _claimPendingUnpublishedRecordingPath(filePath);
 
+      if ((Platform.isAndroid || Platform.isIOS) &&
+          _isBluetoothV2Session &&
+          (!_isValidRowIndex(_selectedRow) ||
+              _rowIdAt(_selectedRow) != targetRowId ||
+              !(Platform.isAndroid
+                  ? (_androidRecordingInput?.accepts(
+                          _rows[_selectedRow].inputChannelStart,
+                          _rows[_selectedRow].inputChannelCount,
+                        ) ??
+                        false)
+                  : (_iosRecordingInput?.accepts(
+                          _rows[_selectedRow].inputChannelStart,
+                          _rows[_selectedRow].inputChannelCount,
+                        ) ??
+                        false)))) {
+        await _discardPendingUnpublishedRecordingFile(expectedPath: filePath);
+        await _restoreV2RouteAfterAudioRecording();
+        _showSmallNotice(
+          'The recording track changed. Select the track and try again.',
+        );
+        return;
+      }
+
       // 5) Arm the native recorder.
       final ok = await JuceAudioEngine.startRecording(
         filePath,
@@ -23342,6 +23462,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _restoreV2PlaybackOnlyAfterRecording() async {
+    if (Platform.isAndroid && mounted)
+      _setStateAndRefreshProjectSettings(_clearAndroidVerifiedInputName);
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null || _v2AudioSessionInvalidated) return false;
     final result = await coordinator.transitionIntent(
@@ -26377,8 +26499,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final attackOverrideMs = params['attackMs'];
     final attackOverrideSec =
         attackOverrideMs != null && attackOverrideMs.isFinite
-            ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
-            : null;
+        ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
+        : null;
     final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
       0.0,
       2.0,
@@ -26389,8 +26511,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final releaseOverrideMs = params['releaseMs'];
     final releaseOverrideSec =
         releaseOverrideMs != null && releaseOverrideMs.isFinite
-            ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
-            : null;
+        ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
+        : null;
     final sampleStartNorm = (params['sampleStartNorm'] ?? 0.0)
         .clamp(0.0, 0.98)
         .toDouble();
@@ -30541,25 +30663,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               '$normalizedPath|${stat.size}|${stat.modified.millisecondsSinceEpoch}',
           durationMs: durationMs,
         );
-        final sourceRange =
-            waveformDetailSourceRangeForTimelineIntersection(
-              clipStartMs: clipStartMs,
-              timelineDurationMs: timelineDurationMs,
-              trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
-              trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
-              sourceDurationMs: durationMs,
-              isReversed: clip.isReversed,
-              viewportStartMs: viewport.timelineStartMs,
-              viewportEndMs: viewport.timelineEndMs,
-            );
+        final sourceRange = waveformDetailSourceRangeForTimelineIntersection(
+          clipStartMs: clipStartMs,
+          timelineDurationMs: timelineDurationMs,
+          trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
+          trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
+          sourceDurationMs: durationMs,
+          isReversed: clip.isReversed,
+          viewportStartMs: viewport.timelineStartMs,
+          viewportEndMs: viewport.timelineEndMs,
+        );
         if (sourceRange == null) {
           return const <WaveformDetailTileRequest>[];
         }
         return waveformDetailTileIndicesForRange(
-          sourceStartMs: sourceRange.startMs,
-          sourceEndMs: sourceRange.endMs,
-          sourceDurationMs: durationMs,
-        )
+              sourceStartMs: sourceRange.startMs,
+              sourceEndMs: sourceRange.endMs,
+              sourceDurationMs: durationMs,
+            )
             .map(
               (tileIndex) => WaveformDetailTileRequest(
                 source: source,
@@ -40433,8 +40554,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, _) {
         final controls = _timelineController.topControlsState;
         final pianoRollGrid = _activePianoRollGridResolution.value;
-        final pianoRollDivisions = _showPianoRoll &&
-                controls.gridMode == TimelineGridMode.adaptive
+        final pianoRollDivisions =
+            _showPianoRoll && controls.gridMode == TimelineGridMode.adaptive
             ? pianoRollGrid?.divisionsPerBar
             : null;
         final rawQuantizeLabel = pianoRollDivisions != null
@@ -43019,40 +43140,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             : scannedCandidateCount;
                                         currentScannedPlugin =
                                             event['currentPlugin']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                currentScannedPlugin;
+                                                ?.toString()
+                                                .trim() ??
+                                            currentScannedPlugin;
                                         currentScannedPluginFormat =
                                             event['format']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                currentScannedPluginFormat;
+                                                ?.toString()
+                                                .trim() ??
+                                            currentScannedPluginFormat;
                                         if (rawPlugin is Map) {
-                                          final plugin = JuceAudioEngine
-                                              .normalizeScannedPlugin(
-                                            rawPlugin,
-                                          );
+                                          final plugin =
+                                              JuceAudioEngine.normalizeScannedPlugin(
+                                                rawPlugin,
+                                              );
                                           if (plugin != null) {
                                             currentScannedPlugin =
                                                 plugin['name'] as String;
                                             final rawFormat =
                                                 (plugin['format'] as String?)
-                                                        ?.trim() ??
-                                                    '';
+                                                    ?.trim() ??
+                                                '';
                                             currentScannedPluginFormat =
                                                 rawFormat == 'AudioUnit'
-                                                    ? 'AU'
-                                                    : rawFormat;
+                                                ? 'AU'
+                                                : rawFormat;
                                             final id = plugin['id'] as String;
                                             currentPlugins =
-                                                _applyDesktopPluginPreferences(<
-                                              Map<String, dynamic>
-                                            >[
-                                              ...currentPlugins.where(
-                                                (entry) => entry['id'] != id,
-                                              ),
-                                              plugin,
-                                            ]);
+                                                _applyDesktopPluginPreferences(
+                                                  <Map<String, dynamic>>[
+                                                    ...currentPlugins.where(
+                                                      (entry) =>
+                                                          entry['id'] != id,
+                                                    ),
+                                                    plugin,
+                                                  ],
+                                                );
                                           }
                                         }
                                       });
@@ -44604,6 +44726,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return;
       }
       _setStateAndRefreshProjectSettings(() {
+        _macInputDeviceLastName = device?.name;
+        ++_macInputRefreshRevision;
         _macInputDeviceUID = selectionUID == null || selectionUID.isEmpty
             ? null
             : selectionUID;
@@ -44645,6 +44769,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _normalizeInputChannelSelection() {
+    if ((Platform.isMacOS || Platform.isAndroid || Platform.isIOS) &&
+        _isBluetoothV2Session) {
+      return;
+    }
     if (_numInputChannels <= 0) {
       _selectedChannelStart = 0;
       _selectedChannelCount = 1;
@@ -44688,6 +44816,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   int _effectiveInputChannelCountForSettings() {
+    if ((Platform.isMacOS || Platform.isAndroid || Platform.isIOS) &&
+        _isBluetoothV2Session) {
+      return _numInputChannels;
+    }
     var count = _numInputChannels;
     if (_isValidRowIndex(_selectedRow)) {
       final row = _rows[_selectedRow];
@@ -44698,7 +44830,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool _shouldShowInputChannelRouteSelector() {
-    return _effectiveInputChannelCountForSettings() > 1;
+    return ((Platform.isMacOS || Platform.isAndroid || Platform.isIOS) &&
+            _isBluetoothV2Session) ||
+        _effectiveInputChannelCountForSettings() > 1;
   }
 
   bool _recordingInputsPreparedFor({
@@ -44971,103 +45105,218 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
+  Future<void> _refreshAndroidRecordingInput() {
+    ++_androidInputRefreshRevision;
+    if (mounted) _setStateAndRefreshProjectSettings(() {});
+    return _androidInputRefreshFuture ??= _drainAndroidRecordingInputRefresh();
+  }
+
+  Future<void> _drainAndroidRecordingInputRefresh() async {
+    try {
+      while (mounted) {
+        final revision = _androidInputRefreshRevision;
+        final refresh = await readAndroidRecordingInputRefreshV2(
+          readConfiguration:
+              JuceAudioEngine.getAndroidRecordingInputConfigurationV2,
+          readSnapshot: JuceAudioEngine.getAudioRouteSnapshotV2,
+        );
+        if (!mounted) return;
+        if (revision != _androidInputRefreshRevision) continue;
+        final configuration = refresh.configuration;
+        final snapshot = refresh.snapshot;
+        final inputName = snapshot == null
+            ? ''
+            : verifiedAndroidInputNameV2(
+                configuration,
+                snapshot,
+                _audioRouteCoordinatorV2?.generation,
+              );
+        final input = inputName.isNotEmpty ? snapshot!.inputs.single : null;
+        final output = snapshot?.outputs.length == 1
+            ? snapshot!.outputs.single
+            : null;
+        _setStateAndRefreshProjectSettings(() {
+          _androidRecordingInput = configuration;
+          _numInputChannels = configuration?.channelCount ?? 0;
+          if (snapshot == null) {
+            _clearAndroidVerifiedInputName();
+          } else {
+            _androidOutputRouteName = output?.name;
+            _audioRouteInfo = AudioRouteInfo(
+              outputRouteKind: switch (output?.normalizedKind) {
+                AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
+                AudioRouteKindV2.wired => AudioRouteKind.wired,
+                AudioRouteKindV2.external => AudioRouteKind.usb,
+                AudioRouteKindV2.bluetooth ||
+                AudioRouteKindV2.bluetoothMedia ||
+                AudioRouteKindV2.bluetoothDuplex ||
+                AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
+                _ => AudioRouteKind.unknown,
+              },
+              outputRouteName: output?.name ?? '',
+              inputDeviceName: inputName,
+              inputIsBluetoothHeadset:
+                  input?.normalizedKind == AudioRouteKindV2.bluetoothDuplex,
+            );
+          }
+        });
+        if (revision == _androidInputRefreshRevision) break;
+      }
+    } finally {
+      _androidInputRefreshFuture = null;
+      if (mounted) _setStateAndRefreshProjectSettings(() {});
+    }
+  }
+
+  void _clearAndroidVerifiedInputName() {
+    _audioRouteInfo = AudioRouteInfo(
+      outputRouteKind: _audioRouteInfo.outputRouteKind,
+      outputRouteName: _audioRouteInfo.outputRouteName,
+      inputDeviceName: '',
+      inputIsBluetoothHeadset: false,
+    );
+  }
+
+  Future<bool> _validateAndroidRecordingChannels({
+    int? start,
+    int? count,
+  }) async {
+    await _refreshAndroidRecordingInput();
+    if (!mounted) return false;
+    final row = _isValidRowIndex(_selectedRow) ? _rows[_selectedRow] : null;
+    final requestedStart = start ?? row?.inputChannelStart ?? 0;
+    final requestedCount = count ?? row?.inputChannelCount ?? 1;
+    final configuration = _androidRecordingInput;
+    if (configuration == null ||
+        !configuration.accepts(requestedStart, requestedCount) ||
+        configuration.inputAvailable == false) {
+      _showSmallNotice(
+        configuration == null
+            ? 'Input information unavailable. Refresh audio devices and try again.'
+            : configuration.inputAvailable == false
+            ? 'No input device available.'
+            : 'This input selection is unavailable. Use ${configuration.label} in Audio Routing before recording or monitoring.',
+      );
+      return false;
+    }
+    if (start == null) {
+      _selectedChannelStart = requestedStart;
+      _selectedChannelCount = requestedCount;
+    }
+    return true;
+  }
+
+  Future<void> _refreshIOSRecordingInput() {
+    ++_iosInputRefreshRevision;
+    if (mounted) _setStateAndRefreshProjectSettings(() {});
+    return _iosInputRefreshFuture ??= _drainIOSRecordingInputRefresh();
+  }
+
+  Future<void> _drainIOSRecordingInputRefresh() async {
+    try {
+      while (mounted) {
+        final revision = _iosInputRefreshRevision;
+        final refresh = await readIOSRecordingInputRefreshV2(
+          readConfiguration:
+              JuceAudioEngine.getIOSRecordingInputConfigurationV2,
+          readSnapshot: JuceAudioEngine.getAudioRouteSnapshotV2,
+        );
+        if (!mounted) return;
+        if (revision != _iosInputRefreshRevision) continue;
+        final configuration = refresh.configuration;
+        final snapshot = refresh.snapshot;
+        final output = snapshot?.outputs.length == 1
+            ? snapshot!.outputs.single
+            : null;
+        final inputName = resolvedIOSInputNameV2(
+          configuration,
+          snapshot,
+          _audioRouteCoordinatorV2?.generation,
+        );
+        final input = snapshot?.inputs.length == 1
+            ? snapshot!.inputs.single
+            : null;
+        _setStateAndRefreshProjectSettings(() {
+          _iosRecordingInput = configuration;
+          _numInputChannels = configuration?.channelCount ?? 0;
+          if (snapshot != null) {
+            _audioRouteInfo = AudioRouteInfo(
+              outputRouteKind: switch (output?.normalizedKind) {
+                AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
+                AudioRouteKindV2.wired => AudioRouteKind.wired,
+                AudioRouteKindV2.external => AudioRouteKind.usb,
+                AudioRouteKindV2.bluetooth ||
+                AudioRouteKindV2.bluetoothMedia ||
+                AudioRouteKindV2.bluetoothDuplex ||
+                AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
+                _ => AudioRouteKind.unknown,
+              },
+              outputRouteName: output?.name ?? '',
+              inputDeviceName: inputName,
+              inputIsBluetoothHeadset:
+                  input?.normalizedKind == AudioRouteKindV2.bluetoothDuplex,
+            );
+          }
+        });
+        if (snapshot != null) _syncDawSampleRateFromRoute(snapshot);
+        if (revision == _iosInputRefreshRevision) break;
+      }
+    } finally {
+      _iosInputRefreshFuture = null;
+      if (mounted) _setStateAndRefreshProjectSettings(() {});
+    }
+  }
+
+  Future<bool> _validateIOSRecordingChannels({int? start, int? count}) async {
+    await _refreshIOSRecordingInput();
+    if (!mounted) return false;
+    final row = _isValidRowIndex(_selectedRow) ? _rows[_selectedRow] : null;
+    final requestedStart = start ?? row?.inputChannelStart ?? 0;
+    final requestedCount = count ?? row?.inputChannelCount ?? 1;
+    final configuration = _iosRecordingInput;
+    if (configuration == null) {
+      // Passive discovery may be inconclusive. Native preparation remains the
+      // authority and will reject anything other than the supported mono range.
+      if (requestedStart == 0 && requestedCount == 1) {
+        _selectedChannelStart = requestedStart;
+        _selectedChannelCount = requestedCount;
+        return true;
+      }
+      _showSmallNotice(
+        'This input selection is unavailable. Use Input 1 (Mono) in Audio Routing before recording or monitoring.',
+      );
+      return false;
+    }
+    if (!configuration.accepts(requestedStart, requestedCount) ||
+        configuration.inputAvailable == false) {
+      _showSmallNotice(
+        configuration.inputAvailable == false
+            ? 'No input device available.'
+            : 'This input selection is unavailable. Use ${configuration.label} in Audio Routing before recording or monitoring.',
+      );
+      return false;
+    }
+    if (start == null) {
+      _selectedChannelStart = requestedStart;
+      _selectedChannelCount = requestedCount;
+    }
+    return true;
+  }
+
   Future<void> _refreshSystemSelectedRouteInfoV2() async {
     if (!_isBluetoothV2Session ||
         !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       return;
     }
-    final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
-    _syncDawSampleRateFromRoute(snapshot);
-    final advertisedInputs = await JuceAudioEngine.getInputDeviceInfos();
-    if (!mounted) return;
-
-    final output = snapshot.outputs.length == 1
-        ? snapshot.outputs.single
-        : null;
-    final input = snapshot.inputs.length == 1 ? snapshot.inputs.single : null;
-    final outputName = (output?.name ?? '').trim();
-    final outputKind = switch (output?.normalizedKind) {
-      AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
-      AudioRouteKindV2.wired => AudioRouteKind.wired,
-      AudioRouteKindV2.external => AudioRouteKind.usb,
-      AudioRouteKindV2.bluetooth ||
-      AudioRouteKindV2.bluetoothMedia ||
-      AudioRouteKindV2.bluetoothDuplex ||
-      AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
-      _ => AudioRouteKind.unknown,
-    };
-    AudioInputDeviceInfo? advertisedInput;
-    if (Platform.isMacOS && _macInputDeviceUID != null) {
-      for (final candidate in advertisedInputs) {
-        if (candidate.uid == _macInputDeviceUID) {
-          advertisedInput = candidate;
-          break;
-        }
-      }
+    if (Platform.isMacOS) {
+      await _loadMacV2AudioDevices();
+      return;
     }
-    advertisedInput ??= advertisedInputs
-        .where((candidate) => candidate.isDefault)
-        .firstOrNull;
-    if (advertisedInput == null) {
-      final expectedTransport = switch (outputKind) {
-        AudioRouteKind.speaker || AudioRouteKind.earpiece => 'builtIn',
-        AudioRouteKind.wired => 'wired',
-        AudioRouteKind.usb => 'external',
-        AudioRouteKind.bluetoothOutput => 'bluetooth',
-        _ => '',
-      };
-      final matching = advertisedInputs
-          .where((candidate) {
-            if (expectedTransport == 'bluetooth') {
-              return candidate.isBluetoothInput;
-            }
-            return candidate.transport == expectedTransport;
-          })
-          .toList(growable: false);
-      if (matching.length == 1) advertisedInput = matching.single;
+    if (Platform.isAndroid) {
+      await _refreshAndroidRecordingInput();
+      return;
     }
-    final inputName = (input?.name ?? advertisedInput?.name ?? '').trim();
-    final inputChannelCapacity =
-        input?.channelCount ??
-        (outputKind == AudioRouteKind.bluetoothOutput
-            ? (advertisedInput == null ? 0 : 1)
-            : advertisedInput?.channelCount ?? 0);
-    final monitoringClockCompatible =
-        !Platform.isMacOS ||
-        (advertisedInput != null &&
-            output != null &&
-            ((advertisedInput.uid.isNotEmpty &&
-                    advertisedInput.uid == output.uid) ||
-                (advertisedInput.clockDomain != null &&
-                    advertisedInput.clockDomain! > 0 &&
-                    advertisedInput.clockDomain == output.clockDomain)));
-    final inputIsBluetooth = switch (input?.normalizedKind) {
-      AudioRouteKindV2.bluetooth ||
-      AudioRouteKindV2.bluetoothDuplex ||
-      AudioRouteKindV2.bluetoothLe => true,
-      _ => false,
-    };
-    final info = AudioRouteInfo(
-      outputRouteKind: outputKind,
-      outputRouteName: outputName,
-      inputDeviceName: inputName,
-      inputIsBluetoothHeadset: inputIsBluetooth,
-    );
-    _setStateAndRefreshProjectSettings(() {
-      _audioRouteInfo = info;
-      _inputDeviceInfos = advertisedInputs;
-      _v2MonitoringClockCompatible = monitoringClockCompatible;
-      if (Platform.isAndroid) {
-        _androidOutputRouteName = outputName.isEmpty ? null : outputName;
-      }
-      if (inputChannelCapacity > 0) {
-        _numInputChannels = inputChannelCapacity;
-        _normalizeInputChannelSelection();
-      } else if (snapshot.intent == AudioRouteIntentV2.playbackOnly) {
-        _numInputChannels = 0;
-        _normalizeInputChannelSelection();
-      }
-    });
+    await _refreshIOSRecordingInput();
   }
 
   Future<void> _refreshAndroidOutputRouteLabel({
@@ -45240,7 +45489,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _syncDawSampleRateFromRoute(AudioRouteSnapshotV2 snapshot) {
-    if (!mounted || !Platform.isMacOS) return;
+    if (!mounted || !(Platform.isMacOS || Platform.isIOS)) return;
     final rate = verifiedDawOutputSampleRate(snapshot);
     if (snapshot.generation != _audioRouteCoordinatorV2?.generation) return;
     if (rate == null) {
@@ -45252,11 +45501,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       return;
     }
-    final availableRates = selectableDawOutputSampleRates(
-      snapshot, commonRates: _dawSampleRateOptions,
-    );
-    if (_hasVerifiedDawSampleRate && rate == _preferredDawSampleRate &&
-        listEquals(availableRates, _availableDawSampleRates)) return;
+    final availableRates = Platform.isMacOS
+        ? selectableDawOutputSampleRates(
+            snapshot,
+            commonRates: _dawSampleRateOptions,
+          )
+        : const <int>[];
+    if (_hasVerifiedDawSampleRate &&
+        rate == _preferredDawSampleRate &&
+        listEquals(availableRates, _availableDawSampleRates)) {
+      return;
+    }
     _setStateAndRefreshProjectSettings(() {
       _availableDawSampleRates = availableRates;
       _preferredDawSampleRate = rate;
@@ -45311,10 +45566,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           return true;
         }
         final result = await coordinator.configurePlaybackHardware(
-          // Only an explicit sample-rate edit may change the macOS clock.
-          preferredSampleRateHz:
-              requestedSampleRate ??
-              (Platform.isMacOS ? 0 : _preferredDawSampleRate),
+          // Apple platforms follow the active output for automatic changes.
+          // Only an explicit macOS sample-rate edit requests a hardware clock.
+          preferredSampleRateHz: Platform.isIOS ? 0 : requestedSampleRate ?? 0,
           preferredBufferFrames: _preferredDawBufferSize,
         );
         if (result.diagnosticCode != 'stale_generation') {
@@ -45348,10 +45602,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (_dawBufferSizeOptions.contains(actualBufferSize) &&
                   actualBufferSize != _preferredDawBufferSize)) {
             _setStateAndRefreshProjectSettings(() {
-              if (!Platform.isMacOS &&
-                  _dawSampleRateOptions.contains(actualSampleRate)) {
-                _preferredDawSampleRate = actualSampleRate;
-              }
               if (_dawBufferSizeOptions.contains(actualBufferSize)) {
                 _preferredDawBufferSize = actualBufferSize;
               }
@@ -45691,6 +45941,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!Platform.isMacOS || !_isBluetoothV2Session) return false;
     final coordinator = _audioRouteCoordinatorV2;
     return !_loadingDevices &&
+        !_recordTransitionInFlight &&
+        !_v2LiveMonitoringTransitionInFlight &&
         !_macV2InputSelectionInFlight &&
         !_v2AudioSessionInvalidated &&
         !_isRecording &&
@@ -45700,45 +45952,137 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         coordinator.state == AudioRouteCoordinatorStateV2.stable;
   }
 
-  Future<void> _loadMacV2AudioDevices() async {
-    if (!Platform.isMacOS || !_isBluetoothV2Session || _loadingDevices) return;
+  Future<void> _loadMacV2AudioDevices() {
+    if (!Platform.isMacOS || !_isBluetoothV2Session || !mounted) {
+      return Future.value();
+    }
+    ++_macInputRefreshRevision;
+    return _macInputRefreshFuture ??= _drainMacInputRefresh();
+  }
+
+  Future<void> _drainMacInputRefresh() async {
     _setStateAndRefreshProjectSettings(() => _loadingDevices = true);
     try {
-      final inputDevicesByUID = <String, AudioInputDeviceInfo>{};
-      for (final info in await JuceAudioEngine.getInputDeviceInfos()) {
-        final uid = info.uid.trim();
-        final name = info.name.trim();
-        if (uid.isEmpty || name.isEmpty) continue;
-        inputDevicesByUID.putIfAbsent(uid, () => info);
-      }
-      final inputDevices = inputDevicesByUID.values.toList(growable: false);
-      final outputDevices = <String>[];
-      for (final rawName in await JuceAudioEngine.getOutputDevices()) {
-        final name = rawName.trim();
-        if (name.isNotEmpty && !outputDevices.contains(name)) {
-          outputDevices.add(name);
+      while (mounted) {
+        final revision = _macInputRefreshRevision;
+        final selectedUID = _macInputDeviceUID;
+        try {
+          final inputDevicesByUID = <String, AudioInputDeviceInfo>{};
+          for (final info in await JuceAudioEngine.getInputDeviceInfos(
+            throwOnError: true,
+          )) {
+            final uid = info.uid.trim();
+            if (uid.isNotEmpty && info.name.trim().isNotEmpty) {
+              inputDevicesByUID.putIfAbsent(uid, () => info);
+            }
+          }
+          final inputs = inputDevicesByUID.values.toList();
+          final outputs = await JuceAudioEngine.getOutputDevices();
+          final snapshot = await JuceAudioEngine.getAudioRouteSnapshotV2();
+          if (!mounted) return;
+          if (revision != _macInputRefreshRevision ||
+              selectedUID != _macInputDeviceUID) {
+            continue;
+          }
+          final input = resolveMacInputDevice(inputs, selectedUID);
+          final output = snapshot.outputs.length == 1
+              ? snapshot.outputs.single
+              : null;
+          final outputName = (output?.name ?? '').trim();
+          _setStateAndRefreshProjectSettings(() {
+            _macInputDevices = inputs
+                .where((item) => item.uid.isNotEmpty)
+                .toList();
+            _inputDeviceInfos = inputs;
+            _macResolvedInput = input;
+            if (input != null && selectedUID != null) {
+              _macInputDeviceLastName = input.name;
+            }
+            _numInputChannels = input?.channelCount ?? 0;
+            _macInputCapabilitiesLoaded = true;
+            _macInputCapabilitiesFailed = false;
+            _macOutputDevices = outputs
+                .map((name) => name.trim())
+                .where((name) => name.isNotEmpty)
+                .toSet()
+                .toList();
+            if (outputName.isNotEmpty) _macOutputDeviceName = outputName;
+            _v2MonitoringClockCompatible =
+                input != null &&
+                output != null &&
+                (input.uid == output.uid ||
+                    (input.clockDomain != null &&
+                        input.clockDomain! > 0 &&
+                        input.clockDomain == output.clockDomain));
+            _audioRouteInfo = AudioRouteInfo(
+              outputRouteKind: switch (output?.normalizedKind) {
+                AudioRouteKindV2.builtIn => AudioRouteKind.speaker,
+                AudioRouteKindV2.wired => AudioRouteKind.wired,
+                AudioRouteKindV2.external => AudioRouteKind.usb,
+                AudioRouteKindV2.bluetooth ||
+                AudioRouteKindV2.bluetoothMedia ||
+                AudioRouteKindV2.bluetoothDuplex ||
+                AudioRouteKindV2.bluetoothLe => AudioRouteKind.bluetoothOutput,
+                _ => AudioRouteKind.unknown,
+              },
+              outputRouteName: outputName,
+              inputDeviceName: input?.name ?? '',
+              inputIsBluetoothHeadset: input?.isBluetoothInput ?? false,
+            );
+          });
+          _syncDawSampleRateFromRoute(snapshot);
+        } catch (_) {
+          if (!mounted) return;
+          if (revision != _macInputRefreshRevision) continue;
+          _setStateAndRefreshProjectSettings(() {
+            _macInputCapabilitiesFailed = true;
+            _macInputCapabilitiesLoaded = true;
+            _macResolvedInput = null;
+            _numInputChannels = 0;
+            _v2MonitoringClockCompatible = false;
+          });
         }
+        if (revision == _macInputRefreshRevision) break;
       }
-      final currentOutput = (await JuceAudioEngine.getCurrentOutputDeviceName())
-          .trim();
-      if (!mounted) return;
-      _setStateAndRefreshProjectSettings(() {
-        _macInputDevices = inputDevices;
-        if (_macInputDeviceUID != null &&
-            !inputDevicesByUID.containsKey(_macInputDeviceUID)) {
-          _macInputDeviceUID = null;
-        }
-        _macOutputDevices = outputDevices;
-        _macOutputDeviceName = currentOutput.isEmpty
-            ? _macOutputDeviceName
-            : currentOutput;
-        _loadingDevices = false;
-      });
-      _syncDawSampleRateFromRoute(await JuceAudioEngine.getAudioRouteSnapshotV2());
-    } catch (_) {
-      if (!mounted) return;
-      _setStateAndRefreshProjectSettings(() => _loadingDevices = false);
+    } finally {
+      _macInputRefreshFuture = null;
+      if (mounted) {
+        _setStateAndRefreshProjectSettings(() => _loadingDevices = false);
+      }
     }
+  }
+
+  MacInputChannelOption get _macSelectedInputChannels {
+    final row = _isValidRowIndex(_selectedRow) ? _rows[_selectedRow] : null;
+    return MacInputChannelOption(
+      row?.inputChannelStart ?? 0,
+      row?.inputChannelCount ?? 1,
+    );
+  }
+
+  bool _macInputChannelsValid(MacInputChannelOption selection) =>
+      _macInputCapabilitiesLoaded &&
+      !_macInputCapabilitiesFailed &&
+      _macResolvedInput != null &&
+      macInputChannelSelectionIsValid(
+        _numInputChannels,
+        selection.start,
+        selection.count,
+      );
+
+  Future<bool> _validateMacRecordingChannels() async {
+    await _loadMacV2AudioDevices();
+    if (!mounted) return false;
+    final selection = _macSelectedInputChannels;
+    if (!_macInputChannelsValid(selection)) {
+      _showSmallNotice(
+        'Choose an available input device and channel in Audio Routing before recording or monitoring.',
+      );
+      return false;
+    }
+    _selectedChannelStart = selection.start;
+    _selectedChannelCount = selection.count;
+    return true;
   }
 
   Widget _buildMicrophonePermissionNotice() {
@@ -45852,6 +46196,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final routeLabel = _audioRouteInfo.inputDeviceName.trim();
       final effectiveLabel = routeLabel.isEmpty
           ? L10n.translate(context, 'System Default')
+          : Platform.isAndroid || Platform.isIOS
+          ? 'System Default — $routeLabel'
           : routeLabel;
       return Semantics(
         identifier: 'daw.input_device',
@@ -45886,14 +46232,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _macInputDevices,
       );
       final selectedUID = _macInputDeviceUID?.trim();
-      final selectedValue =
-          selectedUID != null && devicesByUID.containsKey(selectedUID)
-          ? selectedUID
-          : systemDefaultValue;
-      final values = <String>[systemDefaultValue, ...devicesByUID.keys];
+      final selectedValue = selectedUID ?? systemDefaultValue;
+      final values = <String>{
+        systemDefaultValue,
+        if (selectedUID != null) selectedUID,
+        ...devicesByUID.keys,
+      }.toList();
       String labelFor(String value) => value.isEmpty
-          ? L10n.translate(context, 'System Default')
-          : labelsByUID[value] ?? devicesByUID[value]?.name ?? '';
+          ? '${L10n.translate(context, 'System Default')}${_macInputDeviceUID == null && _macResolvedInput != null ? ' — ${_macResolvedInput!.name}' : ''}'
+          : labelsByUID[value] ??
+                '${_macInputDeviceLastName ?? 'Selected input'} — Unavailable';
       return Semantics(
         identifier: 'daw.input_device',
         label: L10n.translate(context, 'Input Device'),
@@ -45930,6 +46278,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               .map(
                 (value) => DropdownMenuItem<String>(
                   value: value,
+                  enabled: value.isEmpty || devicesByUID.containsKey(value),
                   child: Text(
                     labelFor(value),
                     maxLines: 1,
@@ -46079,7 +46428,141 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  bool get _monoSystemInputReplacementEnabled {
+    final routeState = _audioRouteCoordinatorV2?.state;
+    return !_isRecording &&
+        !_recordTransitionInFlight &&
+        !_v2LiveMonitoringActive &&
+        !_v2LiveMonitoringTransitionInFlight &&
+        !_v2AudioSessionRecoveryInProgress &&
+        routeState != AudioRouteCoordinatorStateV2.preparingInput &&
+        routeState != AudioRouteCoordinatorStateV2.reconfiguring;
+  }
+
   Widget _buildInputChannelRouteSelector() {
+    if (Platform.isAndroid && _isBluetoothV2Session) {
+      final row = _isValidRowIndex(_selectedRow) ? _rows[_selectedRow] : null;
+      final enabled = _monoSystemInputReplacementEnabled;
+      return Semantics(
+        identifier: 'daw.input_channel',
+        label: 'Input Channel',
+        child: AndroidInputChannelSelector(
+          configuration: _androidRecordingInput,
+          start: row?.inputChannelStart ?? 0,
+          count: row?.inputChannelCount ?? 1,
+          enabled: enabled,
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Channel'),
+          ),
+          onUseSupportedInput: () {
+            final configuration = _androidRecordingInput;
+            if (!_monoSystemInputReplacementEnabled ||
+                configuration == null ||
+                !_isValidRowIndex(_selectedRow)) {
+              return;
+            }
+            _setStateAndRefreshProjectSettings(() {
+              _selectedChannelStart = configuration.channelStart;
+              _selectedChannelCount = configuration.channelCount;
+              _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+                inputChannelStart: configuration.channelStart,
+                inputChannelCount: configuration.channelCount,
+              );
+            });
+            _scheduleProjectAutosave();
+          },
+        ),
+      );
+    }
+    if (Platform.isIOS && _isBluetoothV2Session) {
+      final row = _isValidRowIndex(_selectedRow) ? _rows[_selectedRow] : null;
+      final configuration = _iosRecordingInput;
+      return Semantics(
+        identifier: 'daw.input_channel',
+        label: 'Input Channel',
+        child: SystemDefaultMonoInputChannelSelector(
+          configurationKnown: configuration != null,
+          loading: configuration == null && _iosInputRefreshFuture != null,
+          inputAvailable: configuration?.inputAvailable,
+          supportedStart: configuration?.channelStart ?? 0,
+          supportedCount: configuration?.channelCount ?? 1,
+          start: row?.inputChannelStart ?? 0,
+          count: row?.inputChannelCount ?? 1,
+          enabled: _monoSystemInputReplacementEnabled,
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Channel'),
+          ),
+          onUseSupportedInput: () {
+            final currentConfiguration = _iosRecordingInput;
+            if (!_monoSystemInputReplacementEnabled ||
+                currentConfiguration == null ||
+                !_isValidRowIndex(_selectedRow)) {
+              return;
+            }
+            _setStateAndRefreshProjectSettings(() {
+              _selectedChannelStart = currentConfiguration.channelStart;
+              _selectedChannelCount = currentConfiguration.channelCount;
+              _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+                inputChannelStart: currentConfiguration.channelStart,
+                inputChannelCount: currentConfiguration.channelCount,
+              );
+            });
+            _scheduleProjectAutosave();
+          },
+        ),
+      );
+    }
+    if (Platform.isMacOS && _isBluetoothV2Session) {
+      final selection = _macSelectedInputChannels;
+      final status = _loadingDevices || !_macInputCapabilitiesLoaded
+          ? 'Loading input channels…'
+          : _macInputCapabilitiesFailed
+          ? 'Input channel information unavailable'
+          : _macResolvedInput == null
+          ? (_macInputDeviceUID == null
+                ? 'No input device available'
+                : 'Selected input device unavailable')
+          : _numInputChannels <= 0
+          ? 'Input channel information unavailable'
+          : null;
+      return Semantics(
+        identifier: 'daw.input_channel',
+        label: 'Input Channel',
+        child: MacInputChannelSelector(
+          capacity: _numInputChannels,
+          names: _macResolvedInput?.channelNames ?? const [],
+          selection: selection,
+          status: status,
+          enabled:
+              _macV2InputSelectionEnabled &&
+              !_v2LiveMonitoringActive &&
+              !_v2LiveMonitoringTransitionInFlight,
+          dropdownColor: kMixroomGlassDropdownMenuColor,
+          decoration: _projectSettingsFieldDecoration(
+            labelText: L10n.translate(context, 'Input Channel'),
+          ),
+          onChanged: (option) {
+            if (!_macInputChannelsValid(option) ||
+                !_macV2InputSelectionEnabled) {
+              return;
+            }
+            _setStateAndRefreshProjectSettings(() {
+              _selectedChannelStart = option.start;
+              _selectedChannelCount = option.count;
+              if (_isValidRowIndex(_selectedRow)) {
+                _rows[_selectedRow] = _rows[_selectedRow].copyWith(
+                  inputDeviceName: _macResolvedInput?.name ?? '',
+                  inputChannelStart: option.start,
+                  inputChannelCount: option.count,
+                );
+              }
+            });
+            _scheduleProjectAutosave();
+          },
+        ),
+      );
+    }
+
     final options = _buildInputChannelRouteOptions(
       _effectiveInputChannelCountForSettings(),
     );
@@ -46171,10 +46654,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (Platform.isMacOS && _availableDawSampleRates.isEmpty)
+        if (Platform.isIOS ||
+            (Platform.isMacOS && _availableDawSampleRates.isEmpty))
           InputDecorator(
             key: ValueKey(
-              'daw-sample-rate:${_hasVerifiedDawSampleRate ? _preferredDawSampleRate : 'unavailable'}',
+              '${Platform.isIOS ? 'ios' : 'macos'}-daw-sample-rate:${_hasVerifiedDawSampleRate ? _preferredDawSampleRate : 'unavailable'}',
             ),
             decoration: _projectSettingsFieldDecoration(
               labelText: L10n.translate(context, 'Sample Rate'),
@@ -46839,6 +47323,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required int channelCount,
     bool notifyOnUnavailable = true,
   }) async {
+    if (Platform.isMacOS) {
+      await _loadMacV2AudioDevices();
+      if (!mounted ||
+          !_macInputChannelsValid(
+            MacInputChannelOption(channelStart, channelCount),
+          )) {
+        return false;
+      }
+    }
+    if (Platform.isAndroid &&
+        !await _validateAndroidRecordingChannels(
+          start: channelStart,
+          count: channelCount,
+        )) {
+      return false;
+    }
+    if (Platform.isIOS &&
+        !await _validateIOSRecordingChannels(
+          start: channelStart,
+          count: channelCount,
+        )) {
+      return false;
+    }
+    final expectedInputUID = _macResolvedInput?.uid;
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null) return false;
     final source = await JuceAudioEngine.getAudioRouteSnapshotV2();
@@ -46885,6 +47393,51 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       return false;
     }
+    if (Platform.isAndroid &&
+        result.snapshot.juce.activeInputChannels !=
+            _androidRecordingInput?.channelCount) {
+      _clearV2LiveMonitoringState();
+      await _restoreV2PlaybackOnlyAfterRecording();
+      if (notifyOnUnavailable) {
+        _showSmallNotice(
+          'The microphone could not prepare the supported monitoring format.',
+        );
+      }
+      return false;
+    }
+    if (Platform.isIOS &&
+        (result.snapshot.juce.activeInputChannels !=
+                _iosRecordingInput?.channelCount ||
+            !(_iosRecordingInput?.accepts(channelStart, channelCount) ??
+                false))) {
+      _clearV2LiveMonitoringState();
+      await _restoreV2PlaybackOnlyAfterRecording();
+      await _refreshSystemSelectedRouteInfoV2();
+      if (notifyOnUnavailable) {
+        _showSmallNotice(
+          'The microphone could not prepare the supported monitoring format.',
+        );
+      }
+      return false;
+    }
+    if (Platform.isMacOS &&
+        (result.snapshot.inputs.length != 1 ||
+            result.snapshot.inputs.single.uid != expectedInputUID ||
+            !macInputChannelSelectionIsValid(
+              result.snapshot.inputs.single.channelCount ?? 0,
+              channelStart,
+              channelCount,
+            ))) {
+      _clearV2LiveMonitoringState();
+      await _restoreV2PlaybackOnlyAfterRecording();
+      await _refreshSystemSelectedRouteInfoV2();
+      if (notifyOnUnavailable) {
+        _showSmallNotice(
+          'The input changed. Choose an available input before monitoring.',
+        );
+      }
+      return false;
+    }
     JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(result);
     _syncDawSampleRateFromRoute(result.snapshot);
     _v2LiveMonitoringRequested = true;
@@ -46918,6 +47471,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (coordinator == null ||
         !_isBluetoothV2Session ||
         !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      return;
+    }
+    if (enabled &&
+        Platform.isMacOS &&
+        !await _validateMacRecordingChannels()) {
+      return;
+    }
+    if (enabled &&
+        Platform.isAndroid &&
+        !await _validateAndroidRecordingChannels()) {
+      return;
+    }
+    if (enabled && Platform.isIOS && !await _validateIOSRecordingChannels()) {
       return;
     }
     if (enabled && !_v2LiveMonitoringAvailable) {
@@ -46968,12 +47534,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final selection = RecordingChannelSelectionV2(
         channelStart: row.inputChannelStart,
         channelCount: row.inputChannelCount,
-      ).normalizeForCapacity(_effectiveInputChannelCountForSettings());
+      );
+      final validatedSelection =
+          (Platform.isMacOS || Platform.isAndroid || Platform.isIOS)
+          ? selection
+          : selection.normalizeForCapacity(
+              _effectiveInputChannelCountForSettings(),
+            );
       await _activateV2LiveMonitoringTarget(
         rowIndex: rowIndex,
         rowId: rowId,
-        channelStart: selection.channelStart,
-        channelCount: selection.channelCount,
+        channelStart: validatedSelection.channelStart,
+        channelCount: validatedSelection.channelCount,
       );
     } finally {
       _v2LiveMonitoringTransitionInFlight = false;
@@ -47024,6 +47596,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
+            _audioRoutingSheetStateSetter = setSheetState;
             final monitoringAvailable =
                 !_isBluetoothV2Session || _v2LiveMonitoringAvailable;
             final monitoringEnabled = _isBluetoothV2Session
@@ -47147,9 +47720,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           },
         );
       },
-    ).whenComplete(
-      () => _setNativeMeteringEnabled(_shouldPollMetersDuringPlayback),
-    );
+    ).whenComplete(() {
+      _audioRoutingSheetStateSetter = null;
+      return _setNativeMeteringEnabled(_shouldPollMetersDuringPlayback);
+    });
   }
 
   Widget _buildAudioRoutingLauncher() {
@@ -48443,11 +49017,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final rawCurrent = parameter['value'];
       final currentNormalized = switch (rawCurrent) {
         bool value => value ? 1.0 : 0.0,
-        _ => (_toActionDouble(parameter['valueNormalized']) ??
-                _toActionDouble(rawCurrent) ??
-                0.0)
-            .clamp(0.0, 1.0)
-            .toDouble(),
+        _ =>
+          (_toActionDouble(parameter['valueNormalized']) ??
+                  _toActionDouble(rawCurrent) ??
+                  0.0)
+              .clamp(0.0, 1.0)
+              .toDouble(),
       };
       double nextNormalized;
       if (mode == 'set') {
@@ -48513,8 +49088,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mode == 'set') {
       final normalized = _toActionDouble(action['value_norm']);
       if (normalized != null && minimum != null && maximum != null) {
-        next = minimum +
-            (maximum - minimum) * normalized.clamp(0.0, 1.0);
+        next = minimum + (maximum - minimum) * normalized.clamp(0.0, 1.0);
       } else {
         final value = _toActionDouble(action['value']);
         if (value == null) {
@@ -61342,11 +61916,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   void _handleJuceEngineEvent(Map<String, dynamic> event) {
     final eventType = (event['event'] ?? '').toString().trim();
     switch (eventType) {
-      case 'macV2InputPreferenceChanged':
+      case 'androidV2InputStatusChanged':
+        if (Platform.isAndroid && _isBluetoothV2Session && mounted) {
+          _setStateAndRefreshProjectSettings(_clearAndroidVerifiedInputName);
+          unawaited(_refreshAndroidRecordingInput());
+        }
+        return;
+      case 'iosV2InputStatusChanged':
+        if (Platform.isIOS && _isBluetoothV2Session && mounted) {
+          unawaited(_refreshIOSRecordingInput());
+        }
+        return;
+      case 'macV2InputCapabilitiesChanged':
         if (Platform.isMacOS && _isBluetoothV2Session && mounted) {
-          _setStateAndRefreshProjectSettings(() {
-            _macInputDeviceUID = null;
-          });
           unawaited(_loadMacV2AudioDevices());
         }
         return;
@@ -67206,12 +67788,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
               final parameterApplied = adjustment.usesNormalizedVerification
                   ? normalizedValue != null &&
-                        (normalizedValue -
-                                    adjustment.expectedNormalizedValue!)
+                        (normalizedValue - adjustment.expectedNormalizedValue!)
                                 .abs() <=
                             normalizedTolerance
                   : appliedValue != null &&
-                        (appliedValue - (adjustment.newValue as double)).abs() <=
+                        (appliedValue - (adjustment.newValue as double))
+                                .abs() <=
                             math.max(
                               0.0001,
                               adjustment.rawInterval / 2.0 + 0.000001,
@@ -83618,11 +84200,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _removeDuplicatedRows(List<int> rowIds) async {
-    final indices = rowIds
-        .map(_rowIndexForId)
-        .where((index) => index >= 0 && index < _rowCount)
-        .toList()
-      ..sort();
+    final indices =
+        rowIds
+            .map(_rowIndexForId)
+            .where((index) => index >= 0 && index < _rowCount)
+            .toList()
+          ..sort();
     if (indices.isEmpty) return;
     // Bottom-up so the indices we have not deleted yet stay valid.
     for (final index in indices.reversed) {

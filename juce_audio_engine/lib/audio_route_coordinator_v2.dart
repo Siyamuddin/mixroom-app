@@ -536,7 +536,8 @@ class AudioRouteCoordinatorV2 {
     }
   }
 
-  /// On macOS, zero follows the selected output's current sample rate.
+  /// On macOS and iOS, zero follows the current output's sample rate.
+  /// Positive values request an explicit rate at the native boundary.
   /// Applies the existing project hardware preferences through the same
   /// serialized playback owner. This command intentionally leaves the
   /// coordinator in [AudioRouteCoordinatorStateV2.stable]: an explicit

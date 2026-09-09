@@ -11,6 +11,71 @@ String _between(String source, String start, String end) {
 }
 
 void main() {
+  const pluginPath = 'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m';
+
+  test(
+    'input capability observation is independent of capture listener ownership',
+    () {
+      final plugin = File(pluginPath).readAsStringSync();
+      final refresh = _between(
+        plugin,
+        '- (void)refreshMacInputCapabilitiesV2 {',
+        '#endif',
+      );
+      expect(refresh, contains('macV2InputCapabilitiesChanged'));
+      expect(refresh, isNot(contains('reconfigureMacPlaybackRoute')));
+      final observer = _between(
+        plugin,
+        '- (void)observeMacInputCapabilitiesV2:(AudioDeviceID)deviceID {',
+        '- (void)refreshMacInputCapabilitiesV2 {',
+      );
+      expect(observer, contains('AudioObjectRemovePropertyListener'));
+      expect(observer, contains('AudioObjectAddPropertyListener'));
+      expect(observer, contains('MixroomInputCapabilitiesPropertyListenerV2'));
+      expect(observer, isNot(contains('MixroomAudioRoutePropertyListenerV2')));
+      final stop = _between(
+        plugin,
+        '- (void)stopAudioRouteMonitoringV2 {',
+        '#else',
+      );
+      expect(
+        stop,
+        contains('observeMacInputCapabilitiesV2:kAudioObjectUnknown'),
+      );
+      expect(stop, contains('&defaultInputAddress'));
+    },
+  );
+
+  test(
+    'explicit input loss never becomes System Default and channel capacity is revalidated',
+    () {
+      final plugin = File(pluginPath).readAsStringSync();
+      const resolverStart =
+          '- (NSDictionary<NSString *, id> *)currentMacRecordingInputV2:';
+      final implementationStart = plugin.lastIndexOf(resolverStart);
+      expect(implementationStart, greaterThanOrEqualTo(0));
+      final resolver = _between(
+        plugin.substring(implementationStart),
+        resolverStart,
+        '- (NSString *)currentMacPlaybackOutputFingerprintV2',
+      );
+      expect(resolver, isNot(contains('macSelectedInputUIDV2 = nil')));
+      expect(resolver, contains('return nil;'));
+      final intent = _between(
+        plugin,
+        '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+        '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+      );
+      expect(
+        intent,
+        contains(
+          '[settledInput[@"inputChannels"] integerValue] >= requiredInputChannels',
+        ),
+      );
+      expect(intent, isNot(contains('requiredInputChannels <= 32')));
+    },
+  );
+
   test('macOS monitoring requires a proven shared CoreAudio clock', () {
     final plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
@@ -27,7 +92,6 @@ void main() {
     );
   });
 
-  const pluginPath = 'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m';
   const bridgePath = 'juce_audio_engine/ios/Classes/JuceBridge.mm';
   const enginePath = 'juce_audio_engine/ios/Classes/JuceEngine.cpp';
   const editorPath = 'lib/screens/audio_editor.dart';
@@ -411,7 +475,10 @@ void main() {
       contains('outputSnapshotIsValid(snapshot, restoredOutput ?: candidate)'),
     );
     expect(restore, contains('MixroomMonotonicMilliseconds() + 2000.0'));
-    expect(restore, contains('NSMutableSet<NSString *> *attemptedFingerprints'));
+    expect(
+      restore,
+      contains('NSMutableSet<NSString *> *attemptedFingerprints'),
+    );
     expect(restore, contains('macIntentRouteConditionSignalledV2'));
     expect(restore, contains('[condition waitUntilDate:'));
     expect(restore, contains('remainingMilliseconds(restoreDeadline)'));
@@ -426,7 +493,10 @@ void main() {
       restore,
       contains('[attemptedFingerprints containsObject:observedFingerprint]'),
     );
-    expect(restore, contains('[JuceBridge cancelMacOutputCallbackProofV2ObjC]'));
+    expect(
+      restore,
+      contains('[JuceBridge cancelMacOutputCallbackProofV2ObjC]'),
+    );
     expect(restore, contains('sourceProfileRestored'));
     expect(
       restore,
@@ -434,7 +504,10 @@ void main() {
     );
     expect(restore, isNot(contains('MixroomOutputFingerprint(candidatePlan)')));
     expect(restore, isNot(contains('currentProfileValid')));
-    expect(restore, isNot(contains('sampleRate:[source[@"sampleRateHz"] doubleValue]')));
+    expect(
+      restore,
+      isNot(contains('sampleRate:[source[@"sampleRateHz"] doubleValue]')),
+    );
     expect(restore, isNot(contains('sleep')));
     expect(restore, isNot(contains('dispatch_after')));
   });
@@ -921,7 +994,7 @@ void main() {
       );
       final v2Refresh = _between(
         editor,
-        'Future<void> _loadMacV2AudioDevices() async {',
+        'Future<void> _loadMacV2AudioDevices() {',
         'Widget _buildMicrophonePermissionNotice()',
       );
 
@@ -932,10 +1005,12 @@ void main() {
         lessThan(selector.lastIndexOf('JuceAudioEngine.selectOutputDevice')),
       );
       expect(v2Refresh, contains('JuceAudioEngine.getOutputDevices()'));
-      expect(v2Refresh, contains('JuceAudioEngine.getInputDeviceInfos()'));
-      expect(v2Refresh, contains('getCurrentOutputDeviceName()'));
-      expect(v2Refresh, contains('final name = rawName.trim()'));
-      expect(v2Refresh, contains('!outputDevices.contains(name)'));
+      expect(v2Refresh, contains('JuceAudioEngine.getInputDeviceInfos('));
+      expect(v2Refresh, contains('throwOnError: true'));
+      expect(v2Refresh, contains('getAudioRouteSnapshotV2()'));
+      expect(v2Refresh, contains('name.trim()'));
+      expect(v2Refresh, contains('.toSet()'));
+      expect(v2Refresh, contains('.toList()'));
       expect(v2Refresh, isNot(contains('getInputDevices')));
       expect(v2Refresh, isNot(contains('selectInputDevice')));
       expect(v2Refresh, isNot(contains('requestMicrophone')));
@@ -981,7 +1056,7 @@ void main() {
     final plugin = File(pluginPath).readAsStringSync();
     final enumeration = _between(
       plugin,
-      'MixroomMacV2InputDeviceInfos(void) {',
+      'MixroomMacV2InputDeviceInfos(NSString *selectedUID) {',
       '- (NSDictionary<NSString *, id> *)currentMacPlaybackOutputV2:',
     );
 
@@ -994,12 +1069,13 @@ void main() {
     final editor = File(editorPath).readAsStringSync();
     final refresh = _between(
       editor,
-      'Future<void> _loadMacV2AudioDevices() async {',
+      'Future<void> _loadMacV2AudioDevices() {',
       'Widget _buildMicrophonePermissionNotice()',
     );
 
     expect(refresh, contains('inputDevicesByUID.putIfAbsent(uid'));
-    expect(refresh, contains('containsKey(_macInputDeviceUID)'));
+    expect(refresh, contains('resolveMacInputDevice(inputs, selectedUID)'));
+    expect(refresh, isNot(contains('_macInputDeviceUID = null')));
     expect(refresh, isNot(contains('inputDevices.contains(name)')));
   });
 
@@ -1011,7 +1087,7 @@ void main() {
         plugin,
         'static BOOL MixroomMacInputIsUsable(',
         'static NSArray<NSDictionary<NSString *, id> *> *\n'
-            'MixroomMacV2InputDeviceInfos(void)',
+            'MixroomMacV2InputDeviceInfos(NSString *selectedUID)',
       );
 
       expect(

@@ -697,8 +697,8 @@ void main() {
       AudioRouteIntentV2.preparingRecording,
       generation: 10,
       operation: AudioRouteIntentOperationV2.systemSelectedRecording,
-      recordingChannelStart: 2,
-      recordingChannelCount: 2,
+      recordingChannelStart: 0,
+      recordingChannelCount: 1,
       platformOverride: TargetPlatform.iOS,
     );
 
@@ -709,8 +709,8 @@ void main() {
         'generation': 10,
         'intent': 'preparingRecording',
         'intentOperation': 'systemSelectedRecording',
-        'recordingChannelStart': 2,
-        'recordingChannelCount': 2,
+        'recordingChannelStart': 0,
+        'recordingChannelCount': 1,
       },
     );
   });
@@ -796,8 +796,7 @@ void main() {
     expect(calls.single.method, 'getAudioRouteSnapshotV2');
   });
 
-  test('iOS V2 readiness accepts its verified stereo recording route',
-      () async {
+  test('route snapshot parser retains physical iOS stereo metadata', () {
     final stereo = _v2Snapshot(sessionInputChannels: 2);
     stereo['intent'] = 'recording';
     stereo['inputs'] = <Map<String, dynamic>>[
@@ -815,30 +814,10 @@ void main() {
     final juce = stereo['juce']! as Map<String, dynamic>;
     juce['activeInputChannels'] = 2;
 
-    JuceAudioEngine.acceptVerifiedAudioRouteTransitionV2(
-      AudioRouteTransitionResultV2.fromMap(<String, dynamic>{
-        'status': 'success',
-        'generation': 0,
-        'transitionId': 2,
-        'diagnosticCode': 'ok',
-        'elapsedMs': 1,
-        'transportWasPlaying': false,
-        'snapshot': stereo,
-      }),
-    );
-    calls.clear();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-      calls.add(methodCall);
-      return stereo;
-    });
-
-    expect(
-      await JuceAudioEngine.validatePlaybackV2(
-        platformOverride: TargetPlatform.iOS,
-      ),
-      isTrue,
-    );
+    final parsed = AudioRouteSnapshotV2.fromMap(stereo);
+    expect(parsed.inputs.single.channelCount, 2);
+    expect(parsed.juce.activeInputChannels, 2);
+    expect(parsed.session.inputChannelCount, 2);
   });
 
   test('iOS V2 readiness accepts only its exact verified HFP recording route',
