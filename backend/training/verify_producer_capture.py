@@ -82,7 +82,7 @@ def audit_document(document: dict[str, Any]) -> dict[str, Any]:
         "eligible_magnitude": sum(row["eligibility"]["mix_magnitude"] for row in examples),
         "eligible_plugin_apply": sum(r["eligibility"]["mix_apply"] and r.get("final_plugin_target") is not None for r in examples),
         "eligible_plugin_magnitude": sum(r["eligibility"]["mix_magnitude"] and r.get("final_plugin_target") is not None for r in examples),
-        "explicit_outcomes": sum(e.get("producer_outcome") in {"accepted", "rejected"} for e in episodes),
+        "explicit_outcomes": sum(e.get("producer_outcome") in {"accepted", "rejected", "partial"} for e in episodes),
         "inference_traces": sum(len(e.get("inference_traces") or []) for e in episodes),
         "online_feature_parity": "passed" if eligible else "no_eligible_examples",
         "audio_pairs": len(document.get("media_manifest") or []),

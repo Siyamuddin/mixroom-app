@@ -6,6 +6,8 @@ import json
 import tempfile
 import unittest
 import os
+import subprocess
+import sys
 from unittest.mock import patch
 from pathlib import Path
 
@@ -19,6 +21,46 @@ from train_mix_refine_models import train
 
 @unittest.skipUnless(all(importlib.util.find_spec(name) for name in ("sklearn", "skl2onnx", "onnxruntime")), "Install training requirements for ONNX integration test")
 class ProducerModelExportTests(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("pandas"), "Install training requirements for historical preprocessing")
+    def test_original_v3_capture_to_csv_to_new_trainer_to_existing_runtime(self):
+        from import_legacy_training import run as import_legacy
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); captures = root / 'old'; captures.mkdir()
+            counts = {"train": 0, "validation": 0, "test": 0}
+            index = 0
+            while min(counts.values()) < 3:
+                group = f'old-reviewed-song-{index}'; index += 1
+                split = _split(_sha256(group))
+                if counts[split] >= 3:
+                    continue
+                counts[split] += 1
+                cycles = []
+                for accepted in (True, False):
+                    e = _bundle()['episodes'][0]
+                    before = copy.deepcopy(e['state_before'])
+                    ai = copy.deepcopy(before); ai['project_state']['rows'][0]['mix']['gain_0to3'] = 2
+                    final = copy.deepcopy(before); final['project_state']['rows'][0]['mix']['gain_0to3'] = 1.5 if accepted else 1
+                    cycles.append({'cycle_id': str(accepted), 'status': 'complete',
+                        'before_prompt_snapshot': before, 'ai_after_snapshot': ai,
+                        'producer_final_snapshot': final, 'resolved_ai_actions': e['inference_traces'][0]['actions']})
+                (captures / f'{index}.json').write_text(json.dumps({
+                    'schema_version': 3, 'project_id': group, 'session_id': f'old-{index}', 'prompt_cycles': cycles}))
+            script = Path(__file__).resolve().parents[3] / 'tools/ai_mixing/prepare_dataset.py'
+            prepared = subprocess.run([sys.executable, str(script), '--sessions-dir', str(captures),
+                                       '--out-csv', str(root / 'old.csv')], capture_output=True, text=True)
+            self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
+            imported = import_legacy(root / 'old.csv', root / 'dataset')
+            self.assertEqual(imported['historical_examples'], 18)
+            report = train(root / 'dataset', root / 'models', feature_contract='mix_refine_v1',
+                           minimum_apply=2, minimum_magnitude=2)
+            self.assertEqual(report['onnx_runtime_parity'], 'passed')
+            runner = CandidateRunner(root / 'models')
+            trace = _bundle()['episodes'][0]['inference_traces'][0]
+            response = MixResolveService(runner=runner).resolve(project=trace['project_state'],
+                goal=trace['goal'], actions=trace['actions'], strict=True)
+            self.assertFalse(response['fallback_used'], response)
+            self.assertEqual(runner.feature_contract(), 'mix_refine_v1')
+
     def test_capture_to_training_to_production_onnx_decoder(self):
         # Synthetic fixtures prove format/runtime compatibility, not audio quality.
         with tempfile.TemporaryDirectory() as temporary:
@@ -52,6 +94,14 @@ class ProducerModelExportTests(unittest.TestCase):
             self.assertIn("apply_test_auc", report)
             self.assertIn("magnitude_test_unchanged_mae", report)
             self.assertEqual(report["feature_count"], 141)
+            self.assertEqual(report["magnitude_estimator"], "gradient_boosting")
+            compatible = train(root / "dataset", root / "models77", minimum_apply=3, minimum_magnitude=3,
+                               feature_contract="mix_refine_v1")
+            self.assertEqual(compatible["feature_count"], 77)
+            self.assertEqual(compatible["runtime_targets"], ["remote", "local_dart"])
+            self.assertEqual(compatible["onnx_runtime_parity"], "passed")
+            compatible_runner = CandidateRunner(root / "models77")
+            self.assertEqual(compatible_runner.feature_contract(), "mix_refine_v1")
             with patch.dict(os.environ, {
                 "MIX_APPLY_MODEL_PATH": str(root / "models" / report["models"]["apply"]),
                 "MIX_MAGNITUDE_MODEL_PATH": str(root / "models" / report["models"]["magnitude"]),

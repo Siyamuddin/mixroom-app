@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -23,7 +24,7 @@ if str(LLM_PROXY_SRC) not in sys.path:
     sys.path.insert(0, str(LLM_PROXY_SRC))
 
 from common.mix_resolve import MixResolveService, contract_version  # noqa: E402
-from common.mix_plugin_contract import CONTRACT as PLUGIN_CONTRACT, extra_features, plugin_supervision, bus_target
+from common.mix_plugin_contract import CONTRACT as PLUGIN_CONTRACT, extra_features, plugin_supervision, bus_target, chain, parameter_target, PARAM_ACTIONS, parameter_recreated
 
 CAPTURE_SCHEMA = "producer_training_capture_v4"
 DATASET_SCHEMA = "producer_training_examples_v2"
@@ -348,8 +349,8 @@ def _final_scalar(project: dict[str, Any], action: dict[str, Any]) -> float | No
 
 
 def _final_scale(project: dict[str, Any], after: dict[str, Any], action: dict[str, Any]) -> float | None:
-    # Only emit ratios with an actual final value. EQ/FX and structural edits
-    # remain archived until an instance-aware target extractor is implemented.
+    # Preserve direction and out-of-range ratios for apply/reject supervision.
+    # Only the magnitude objective is restricted to the runtime's scalar range.
     final = _final_scalar(after, action)
     if final is None:
         return None
@@ -359,8 +360,39 @@ def _final_scale(project: dict[str, Any], after: dict[str, Any], action: dict[st
     if proposal is None or delta is None or abs(proposal) < 1e-9:
         return None
     ratio = delta / proposal
-    # Do not clip incompatible supervision into plausible-looking labels.
-    return ratio if 0 <= ratio <= 3 else None
+    return ratio
+
+
+def supervision_project(episode: dict, trace: dict, action: dict) -> dict:
+    """Use execution-time metadata only for labels, never inference features.
+
+    An ensure followed by a parameter adjustment needs the actual newly created
+    instance's initial value, which the pre-inference snapshot cannot contain.
+    """
+    project = trace["project_state"]
+    position = trace["actions"].index(action)
+    recreated = parameter_recreated(trace["actions"], position)
+    if action["type"] not in PARAM_ACTIONS or (parameter_target(project, action) is not None and not recreated):
+        return project
+    effects = chain(project, action)
+    token = str(action["data"].get("effect_name_contains") or "").lower()
+    if effects is None or (not recreated and any(token in str(e.get("name", "")).lower() for e in effects)):
+        return project
+    executions = [e for e in episode.get("parameter_executions", [])
+                  if isinstance(e, dict) and _same_target(action, _mapping(e.get("action")))]
+    if len(executions) != 1:
+        return project
+    expected = "ensure_master_effect" if "master" in action["type"] else "ensure_effect"
+    insertions = [a for a in trace["actions"][:position] if a["type"] == expected and
+                  all(a["data"].get(k) == action["data"].get(k)
+                      for k in ("row", "force_individual_row", "effect_name_contains"))]
+    if len(insertions) != 1:
+        return project
+    enriched = copy.deepcopy(project)
+    target_chain = chain(enriched, action)
+    target_chain[:] = [e for e in target_chain if token not in str(e.get("name", "")).lower()]
+    target_chain.append(copy.deepcopy(executions[0]["effect"]))
+    return enriched
 
 
 def convert_bundle(
@@ -389,7 +421,7 @@ def convert_bundle(
             raise ConversionError("episode_not_object")
         project = _project(episode)
         after = _mapping(_mapping(episode.get("state_after")).get("project_state"))
-        apply_label, weight, label_source = _outcome(episode)
+        episode_label, episode_weight, episode_label_source = _outcome(episode)
         traces = episode.get("inference_traces") or []
         if not isinstance(traces, list):
             raise ConversionError("invalid_inference_traces")
@@ -411,6 +443,7 @@ def convert_bundle(
         raw_candidates = _candidate_actions(episode, after or project)
         candidates.extend((action, source, None) for action, source in raw_candidates if source == "manual" or not traces)
         for index, (action, source, trace) in enumerate(candidates):
+            apply_label, weight, label_source = episode_label, episode_weight, episode_label_source
             reasons: list[str] = []
             features = None
             goal = None
@@ -428,12 +461,10 @@ def convert_bundle(
                 resolved = trace.get("resolved_actions") or []
                 if not any(isinstance(item, dict) and _same_target(action, item) for item in resolved):
                     reasons.append("candidate_not_auditioned")
-                if sum(_same_target(action, item) for item in trace["actions"]) != 1 or len(traces) != 1:
+                if sum(_same_target(action, item) for t in traces for item in t["actions"]) != 1:
                     reasons.append("ambiguous_proposal_target")
             if not stable_group:
                 reasons.append("missing_stable_source_group")
-            if apply_label is None:
-                reasons.append("outcome_not_confirmed")
             if episode.get("status") != "complete":
                 reasons.append("episode_not_complete")
             if "row" in action["data"] and trace is not None:
@@ -461,20 +492,33 @@ def convert_bundle(
                 reasons.append("ambiguous_history_change")
             if action["type"] not in SUPPORTED_MODEL_ACTIONS:
                 reasons.append("unsupported_model_action")
-            plugin_target, plugin_reasons = plugin_supervision(trace["project_state"], after, action) if trace and after else (None, [])
+            label_project = supervision_project(episode, trace, action) if trace else project
+            plugin_target, plugin_reasons = plugin_supervision(label_project, after, action) if trace and after else (None, [])
+            if plugin_target is not None and trace and label_project is not trace["project_state"]:
+                plugin_target["initial_value_source"] = "verified_parameter_execution"
             reasons.extend(plugin_reasons)
-            if apply_label == 1 and plugin_target is not None and not plugin_target.get("preserved"):
-                reasons.append("plugin_proposal_not_preserved")
-            # The v2 questionnaire explicitly distinguishes rejecting ALL
-            # changes from partial success; partial remains unlabelled.
             scale = _final_scale(trace["project_state"], after, action) if trace and after else None
             if plugin_target is not None:
                 scale = plugin_target.get("magnitude_scale")
-            # A kept result may completely reverse or eliminate an individual proposal.
-            if apply_label == 1 and _final_scalar(after, action) is not None and (scale is None or scale == 0):
-                reasons.append("proposal_not_preserved")
+            # Confirmed final states provide per-action labels even when only
+            # part of a batch helped. Never extend this inference to skipped or
+            # still-experimenting sessions. Whole-batch rejection stays explicit.
+            if episode.get("producer_outcome") in {"accepted", "partial"}:
+                if plugin_target is not None and not plugin_reasons:
+                    if plugin_target.get("kind") != "continuous_parameter" or "direction_ratio" in plugin_target:
+                        apply_label = int(plugin_target["preserved"])
+                    else:
+                        apply_label = None
+                elif scale is not None:
+                    apply_label = int(scale > 0.05)
+                else:
+                    apply_label = None
+                weight = 1.0 if apply_label is not None else 0.0
+                label_source = "producer_final_per_action"
+            if apply_label is None:
+                reasons.append("outcome_not_confirmed")
             eligible = not reasons
-            magnitude = scale if eligible and apply_label == 1 else None
+            magnitude = scale if eligible and apply_label == 1 and scale is not None and 0 <= scale <= 3 else None
             if magnitude is None:
                 magnitude_reasons = [*reasons, "no_confirmed_scalar_target"]
             else:
@@ -488,6 +532,7 @@ def convert_bundle(
                     "capture_schema_version": CAPTURE_SCHEMA, "consent_version": consent_version,
                     "session_id": session_id, "episode_id": episode.get("episode_id", str(episode_index)),
                     "action_source": source, "label_source": label_source,
+                    "inference_trace_index": next((i for i, t in enumerate(traces) if t is trace), None),
                     "model_context": trace.get("model_context", {}) if trace else {},
                 },
                 "candidate_action": action, "goal": goal, "feature_vector": features,

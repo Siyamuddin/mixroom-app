@@ -75,6 +75,24 @@ def is_continuous(parameter: dict) -> bool:
     return parameter.get("type") == "float"
 
 
+def parameter_recreated(actions: list[dict], index: int) -> bool:
+    """A reset/delete earlier in this batch invalidates pre-inference values."""
+    action = actions[index]
+    if action["type"] not in PARAM_ACTIONS:
+        return False
+    data = action["data"]
+    for previous in actions[:index]:
+        if ("master" in previous["type"]) != ("master" in action["type"]):
+            continue
+        if any(previous["data"].get(k) != data.get(k) for k in ("row", "force_individual_row")):
+            continue
+        if previous["type"].startswith("hard_reset"):
+            return True
+        if previous["type"].startswith("delete") and str(previous["data"].get("effect_name_contains", "")).lower() == str(data.get("effect_name_contains", "")).lower():
+            return True
+    return False
+
+
 def proposed_value(parameter: dict, data: dict) -> Any:
     if parameter.get("type") in {"bool", "choice"}:
         current = (1.0 if parameter.get("value") else 0.0) if parameter["type"] == "bool" else number(parameter.get("valueNormalized"))
@@ -116,6 +134,16 @@ def proposed_value(parameter: dict, data: dict) -> Any:
     interval = number(parameter.get("interval"))
     if interval is not None and interval > 0:
         result = max(low, min(high, low + math.floor((result - low) / interval + 0.5) * interval))
+    scale = number(data.get("refinement_scale"))
+    if scale is not None:
+        result = max(low, min(high, initial + (result - initial) * max(0.0, min(3.0, scale))))
+        if hard_low is not None:
+            result = max(hard_low, result)
+        if hard_high is not None:
+            result = min(hard_high, result)
+        result = max(low, min(high, result))
+        if interval is not None and interval > 0:
+            result = max(low, min(high, low + math.floor((result - low) / interval + 0.5) * interval))
     return result
 
 
@@ -168,14 +196,22 @@ def plugin_supervision(before: dict, after: dict, action: dict) -> tuple[dict | 
             delta = proposal - start
             if abs(delta) > 1e-9:
                 ratio = (end - start) / delta
+                target["preserved"] = ratio > 0.05
+                target["direction_ratio"] = ratio
                 if 0 <= ratio <= 3:
                     target["magnitude_scale"] = ratio
-                    target["preserved"] = ratio > 0
         return target, []
     if kind.startswith("hard_reset"):
-        return {"kind": "chain_reset", "preserved": bool(initial_chain) and not final_chain}, []
+        if final_chain and any(not e.get("instanceId") for e in [*initial_chain, *final_chain]):
+            return None, ["missing_plugin_identity"]
+        surviving = {e.get("instanceId") for e in initial_chain} & {e.get("instanceId") for e in final_chain}
+        return {"kind": "chain_reset", "preserved": bool(initial_chain) and not surviving}, []
     initial, final = effect_target(before, action), effect_target(after, action)
     if kind.startswith("ensure"):
+        token = str(action["data"].get("effect_name_contains") or "").strip().lower()
+        matches = [e for e in final_chain if token and token in str(e.get("name", "")).lower()]
+        if token and not matches:
+            return {"kind": "plugin_insert", "preserved": False}, []
         if final is None or not final.get("instanceId") or not final.get("effectId"):
             return None, ["missing_or_ambiguous_final_plugin"]
         return {"kind": "plugin_insert", "plugin_id": final["effectId"],
@@ -183,7 +219,7 @@ def plugin_supervision(before: dict, after: dict, action: dict) -> tuple[dict | 
     if initial is None or not initial.get("instanceId"):
         return None, ["missing_plugin_identity"]
     return {"kind": "plugin_remove", "instance_id": initial["instanceId"],
-            "preserved": not any(e.get("instanceId") == initial["instanceId"] for e in final_chain)}, []
+            "preserved": not any(str(action["data"].get("effect_name_contains", "")).lower() in str(e.get("name", "")).lower() for e in final_chain)}, []
 
 
 def _hash_tokens(text: str, count: int) -> list[float]:

@@ -172,12 +172,17 @@ def train(
     *,
     minimum_apply: int = 100,
     minimum_magnitude: int = 100,
+    feature_contract: str = PLUGIN_CONTRACT,
+    magnitude_estimator: str = "gradient_boosting",
 ) -> dict[str, Any]:
     try:
         import numpy as np
         import onnx
         import onnxruntime as ort
         from sklearn.linear_model import LogisticRegression, Ridge
+        from sklearn.ensemble import GradientBoostingRegressor
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import StandardScaler
         from sklearn.metrics import accuracy_score, mean_absolute_error, roc_auc_score
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
@@ -186,34 +191,42 @@ def train(
             "Install backend/training/requirements.txt before training."
         ) from exc
 
-    apply = load_objective(dataset_dir, "mix_apply", plugins=True)
-    magnitude = load_objective(dataset_dir, "mix_magnitude", plugins=True)
+    if feature_contract not in {FEATURE_CONTRACT, PLUGIN_CONTRACT}:
+        raise ValueError("Unknown export feature contract")
+    if magnitude_estimator not in {"gradient_boosting", "ridge"}:
+        raise ValueError("Unknown magnitude estimator")
+    plugins = feature_contract == PLUGIN_CONTRACT
+    feature_count = PLUGIN_FEATURE_COUNT if plugins else FEATURE_COUNT
+    apply = load_objective(dataset_dir, "mix_apply", plugins=plugins)
+    magnitude = load_objective(dataset_dir, "mix_magnitude", plugins=plugins)
     validate_readiness(
         apply,
         magnitude,
         minimum_apply=minimum_apply,
         minimum_magnitude=minimum_magnitude,
     )
-    validate_plugin_coverage(dataset_dir)
+    if plugins:
+        validate_plugin_coverage(dataset_dir)
     apply_x, apply_y, apply_w = _arrays(apply, "train", np)
     magnitude_x, magnitude_y, magnitude_w = _arrays(magnitude, "train", np)
-    apply_model = LogisticRegression(
-        max_iter=1000,
-        class_weight="balanced",
-        random_state=42,
-    ).fit(apply_x, apply_y.astype(np.int64), sample_weight=apply_w)
-    magnitude_model = Ridge(alpha=1.0).fit(
-        magnitude_x,
-        magnitude_y,
-        sample_weight=magnitude_w,
-    )
+    # Preserve the historical model family and preprocessing by default.
+    apply_model = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(max_iter=1000, class_weight="balanced",
+                                   solver="liblinear", random_state=42)),
+    ]).fit(apply_x, apply_y.astype(np.int64), clf__sample_weight=apply_w)
+    estimator = (GradientBoostingRegressor(random_state=42)
+                 if magnitude_estimator == "gradient_boosting" else Ridge(alpha=1.0))
+    magnitude_model = Pipeline([
+        ("scaler", StandardScaler()), ("reg", estimator),
+    ]).fit(magnitude_x, magnitude_y, reg__sample_weight=magnitude_w)
 
     output_dir.mkdir(parents=True, exist_ok=False)
-    input_type = [("features", FloatTensorType([None, PLUGIN_FEATURE_COUNT]))]
+    input_type = [("features", FloatTensorType([None, feature_count]))]
     apply_path = output_dir / "mix_apply_classifier_producer_capture.onnx"
     magnitude_path = output_dir / "mix_magnitude_regressor_producer_capture.onnx"
     apply_path.write_bytes(
-        convert_sklearn(apply_model, initial_types=input_type, target_opset=17, options={id(apply_model): {"zipmap": False}}).SerializeToString()
+        convert_sklearn(apply_model, initial_types=input_type, target_opset=17, options={id(apply_model.named_steps["clf"]): {"zipmap": False}}).SerializeToString()
     )
     magnitude_path.write_bytes(
         convert_sklearn(
@@ -223,14 +236,17 @@ def train(
 
     for path in (apply_path, magnitude_path):
         model = onnx.load(str(path))
-        onnx.helper.set_model_props(model, {"mix_feature_contract_version": PLUGIN_CONTRACT})
+        onnx.helper.set_model_props(model, {"mix_feature_contract_version": feature_contract})
         onnx.save(model, str(path))
 
     eligible_examples = [e for e in _examples(dataset_dir) if e["eligibility"].get("mix_apply") or e["eligibility"].get("mix_magnitude")]
     from collections import Counter
     metrics: dict[str, Any] = {
-        "feature_contract": PLUGIN_CONTRACT,
-        "feature_count": PLUGIN_FEATURE_COUNT,
+        "feature_contract": feature_contract,
+        "feature_count": feature_count,
+        "magnitude_estimator": magnitude_estimator,
+        "preprocessing": "standard_scaler",
+        "runtime_targets": ["remote"] if plugins else ["remote", "local_dart"],
         "training_group_ids": sorted({e["group_id"] for e in eligible_examples if e["split"] == "train"}),
         "action_coverage": dict(Counter(e["candidate_action"]["type"] for e in eligible_examples)),
         "plugin_parameter_coverage": dict(Counter(str((e.get("final_plugin_target") or {}).get("parameter_name")) for e in eligible_examples if e.get("final_plugin_target"))),
@@ -285,23 +301,28 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--minimum-apply", type=int, default=100)
     parser.add_argument("--minimum-magnitude", type=int, default=100)
+    parser.add_argument("--feature-contract", choices=(FEATURE_CONTRACT, PLUGIN_CONTRACT), default=PLUGIN_CONTRACT,
+                        help="mix_refine_v1 exports the existing 77-feature remote/local model contract")
+    parser.add_argument("--magnitude-estimator", choices=("gradient_boosting", "ridge"), default="gradient_boosting")
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--require-ready", action="store_true", help="Also enforce sample and split readiness during validation")
     args = parser.parse_args()
     dataset = Path(args.dataset)
-    apply = load_objective(dataset, "mix_apply", plugins=True)
-    magnitude = load_objective(dataset, "mix_magnitude", plugins=True)
+    plugins = args.feature_contract == PLUGIN_CONTRACT
+    apply = load_objective(dataset, "mix_apply", plugins=plugins)
+    magnitude = load_objective(dataset, "mix_magnitude", plugins=plugins)
     if args.validate_only:
         if args.require_ready:
             validate_readiness(apply, magnitude, minimum_apply=args.minimum_apply, minimum_magnitude=args.minimum_magnitude)
-            validate_plugin_coverage(dataset)
+            if plugins:
+                validate_plugin_coverage(dataset)
         print(
             json.dumps(
                 {
                     "format_validation": "passed",
                     "readiness_checked": args.require_ready,
-                    "feature_contract": PLUGIN_CONTRACT,
-                    "feature_count": PLUGIN_FEATURE_COUNT,
+                    "feature_contract": args.feature_contract,
+                    "feature_count": PLUGIN_FEATURE_COUNT if plugins else FEATURE_COUNT,
                     "apply_examples": len(apply.labels),
                     "magnitude_examples": len(magnitude.labels),
                     "apply_classes": sorted(set(apply.labels)),
@@ -315,6 +336,8 @@ def main() -> int:
         Path(args.output),
         minimum_apply=args.minimum_apply,
         minimum_magnitude=args.minimum_magnitude,
+        feature_contract=args.feature_contract,
+        magnitude_estimator=args.magnitude_estimator,
     )
     print(json.dumps(metrics, indent=2, sort_keys=True))
     return 0

@@ -15,7 +15,7 @@ from urllib.request import urlopen
 
 from .mix_plugin_contract import (
     CONTRACT as PLUGIN_CONTRACT, FEATURE_COUNT as PLUGIN_FEATURE_COUNT,
-    extra_features, parameter_target, is_continuous, proposed_value, bus_target, STRUCTURAL_ACTIONS,
+    extra_features, parameter_target, is_continuous, proposed_value, bus_target, STRUCTURAL_ACTIONS, parameter_recreated,
 )
 
 _DEFAULT_APPLY_MODEL_FILENAME = (
@@ -534,6 +534,7 @@ class MixResolveService:
                     action,
                     predicted_scale,
                     plugin_contract=model_contract == PLUGIN_CONTRACT,
+                    defer_parameter=model_contract == PLUGIN_CONTRACT and parameter_recreated(normalized_actions, index),
                 )
                 refined_actions.append(refined_action)
                 debug_entries.append(
@@ -1278,7 +1279,7 @@ def _scale_action(
     project: dict[str, Any],
     action: dict[str, Any],
     scale: float,
-    *, plugin_contract: bool = False,
+    *, plugin_contract: bool = False, defer_parameter: bool = False,
 ) -> dict[str, Any]:
     if abs(scale - 1.0) < 0.03:
         return action
@@ -1287,6 +1288,12 @@ def _scale_action(
     if target is not None and not is_continuous(target[1]):
         return action
     data = dict(action["data"])
+    if plugin_contract and (target is None or defer_parameter) and action["type"] in {"adjust_effect_param_by_name", "adjust_master_effect_param_by_name"}:
+        # A preceding ensure action can create this plugin during execution.
+        # Apply the scalar there, once the engine exposes its real coordinates.
+        # Never assume a zero/default parameter value or multiply raw Hz/dB.
+        data["refinement_scale"] = max(0.0, min(3.0, scale))
+        return {"type": action["type"], "data": data}
     bus = bus_target(project, action) if plugin_contract else None
     if bus is not None and action["type"] in {"set_row_gain", "set_row_pan"}:
         key = "gain" if action["type"].endswith("gain") else "pan"
@@ -1309,7 +1316,7 @@ def _scale_action(
         current = float(parameter["value"])
         data["value"] = max(parameter["min"], min(parameter["max"], current + (proposal - current) * scale))
         data["mode"] = "set"
-        for key in ("value_norm", "delta_norm", "delta"):
+        for key in ("value_norm", "delta_norm", "delta", "refinement_scale"):
             data.pop(key, None)
         return {"type": action["type"], "data": data}
     mode = str(data.get("mode") or "delta").strip().lower()

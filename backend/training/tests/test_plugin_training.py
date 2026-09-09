@@ -96,7 +96,9 @@ class PluginTrainingTests(unittest.TestCase):
         self.assertFalse(row["eligibility"]["mix_magnitude"])
         self.assertEqual(_scale_action(before, action, 0.2), action)
         after["rows"][0]["effects"][0]["parameters"][0]["value"] = "Soft"
-        self.assertFalse(convert_bundle(bundle)[0]["eligibility"]["mix_apply"])
+        rejected = convert_bundle(bundle)[0]
+        self.assertTrue(rejected["eligibility"]["mix_apply"])
+        self.assertEqual(rejected["labels"]["apply"], 0)
 
     def test_normalized_values_clamps_and_quantization_follow_editor(self):
         parameter = {"type": "float", "value": -12, "min": -60, "max": 0, "interval": 0.1}

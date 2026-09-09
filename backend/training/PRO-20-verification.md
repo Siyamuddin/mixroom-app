@@ -18,7 +18,10 @@ New models use `mix_refine_plugins_v2`: the unchanged 77 production features plu
 64 plugin/parameter/context features. The same Python implementation builds these
 features offline and during server inference. The server validates ONNX contract
 metadata and dimensions for both models. Existing 77-feature models still load.
-Deploy the new models to the server resolver, not the legacy local Dart ONNX path.
+Default 141-feature exports target the server resolver. The trainer also exports
+77-feature models for the existing remote/local predictor using
+`--feature-contract mix_refine_v1`. It preserves the historical gradient-boosting
+model family. See [historical-data compatibility](PRO-20-compatibility.md).
 
 Capture preserves plugin instances, chain positions, bypass, parameter metadata,
 normalized/display values, final control changes, group state and free text.
@@ -31,8 +34,11 @@ The converter also writes checksummed `episodes-*.jsonl` archives containing who
 episodes. These preserve manual-only edits, bypass/reorder, automation, notes and
 unsupported operations for future training. The current models refine proposed
 actions; they do not train an autonomous action-planning model from these archives.
-An inserted plugin's parameter correction needs a recorded initial parameter
-state. Missing defaults, ambiguous instances or unsupported targets are excluded,
+An inserted plugin's parameter correction uses `parameter_executions`, captured
+after a verified parameter application, to recover its initial engine value.
+`state_after_ai` preserves the auditioned state separately from the final state.
+The plugin-aware resolver defers scaling to execution for newly created targets.
+Missing execution metadata, ambiguous instances or unsupported targets are excluded,
 not guessed. Opaque plugin binary chunks remain outside training uploads.
 
 ## Quick employee review
@@ -102,8 +108,9 @@ project's `exports/producer_sessions` directory.
    helped, leave the auditioned result in place until closing capture, select
    “None of these changes helped,” and explain why. Restore the disposable
    project afterwards. Do not manufacture rejection merely to fill a class. If
-   only part was useful, select “Partly achieved”; it must not become a confident
-   positive or negative training label.
+   only part was useful, select “Partly achieved”; retained corrections must become
+   positive per-action examples and reverted/reversed controls negative examples.
+   The episode must not assign the same label indiscriminately to every action.
 3. **Unknown outcome:** Make a manual pan or EQ change. Skip the questionnaire.
    It must appear in the archive without an eligible current-model apply or
    magnitude label. Taxonomy answers alone also must not count as acceptance.

@@ -153,9 +153,14 @@ void main() {
     },
   );
 
-  for (final master in [false, true]) {
+  for (final (master, inserted) in [
+    (false, false),
+    (true, false),
+    (false, true),
+    (true, true),
+  ]) {
     test(
-      'plugin capture survives Dart serialization and offline conversion master=$master',
+      'plugin capture survives Dart serialization and offline conversion master=$master inserted=$inserted',
       () async {
         final dir = await Directory.systemTemp.createTemp('producer_plugin_');
         addTearDown(() => dir.delete(recursive: true));
@@ -190,6 +195,17 @@ void main() {
         }
 
         var state = snapshot(-12);
+        final executionEffect = master
+            ? state['master_effects'][0]
+            : state['rows'][0]['effects'][0];
+        if (inserted) {
+          if (master) {
+            state['master_effects'] = [];
+          } else {
+            state['rows'][0]['effects'] = [];
+          }
+        }
+        final beforeState = jsonDecode(jsonEncode(state));
         final collector = ProducerDataCollector(
           snapshotProvider: () async => {'project_state': state},
         );
@@ -212,22 +228,38 @@ void main() {
             'value': -24.0,
           },
         };
+        final actions = [
+          if (inserted)
+            {
+              'type': master ? 'ensure_master_effect' : 'ensure_effect',
+              'data': {
+                if (!master) 'row': 0,
+                'effect_name_contains': 'Compressor',
+              },
+            },
+          action,
+        ];
+        if (inserted)
+          collector.recordParameterExecution({
+            'action': action,
+            'effect': executionEffect,
+          });
         collector.recordInferenceTrace({
           'mix_feature_contract_version': 'mix_refine_v1',
           'row_identities': {'0': 17},
           'project_state': state,
           'goal': {'intensity': 0.4},
           'strict': true,
-          'actions': [action],
-          'resolved_actions': [action],
+          'actions': actions,
+          'resolved_actions': actions,
           'fallback_used': false,
         });
         state = snapshot(-24);
         await collector.recordAiStep(
           prompt: 'Control the vocal dynamics',
-          preSnapshot: {'project_state': snapshot(-12)},
+          preSnapshot: {'project_state': beforeState},
           postSnapshot: {'project_state': state},
-          resolvedActions: [action],
+          resolvedActions: actions,
         );
         if (master) await collector.finalizeActiveEpisode();
         state = snapshot(-18);
@@ -272,11 +304,16 @@ void main() {
           0,
           reason: '${converted.stdout} ${converted.stderr}',
         );
-        final row = jsonDecode(
-          (await File(
-            '${dir.path}/dataset/examples-00000.jsonl',
-          ).readAsLines()).first,
-        );
+        final row =
+            (await File(
+                  '${dir.path}/dataset/examples-00000.jsonl',
+                ).readAsLines())
+                .map((line) => jsonDecode(line))
+                .firstWhere(
+                  (row) =>
+                      row['candidate_action']['type'] == action['type'] &&
+                      row['source']['action_source'] == 'ai',
+                );
         expect(
           row['eligibility']['mix_magnitude'],
           true,
@@ -288,7 +325,7 @@ void main() {
         final export = Platform.environment['PRODUCER_FIXTURE_DIR'];
         if (export != null) {
           await Directory(export).create(recursive: true);
-          await wire.copy('$export/plugin-capture-$master.json');
+          await wire.copy('$export/plugin-capture-$master-$inserted.json');
         }
       },
     );

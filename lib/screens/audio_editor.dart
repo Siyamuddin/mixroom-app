@@ -111,6 +111,7 @@ import 'package:mixroom/helpers/cloud_project_service.dart';
 import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/effect_parameter_exposure.dart';
+import 'package:mixroom/ai/effect_parameter_refinement.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_undo_history_store.dart';
@@ -48543,6 +48544,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       maximum: maximum,
       interval: rawInterval,
     );
+    next = applyDeferredParameterRefinement(
+      current: current,
+      proposal: next,
+      parameter: parameter,
+      action: action,
+    );
     return _EffectParameterAdjustment(
       oldValue: current,
       newValue: next,
@@ -67224,6 +67231,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (!parameterApplied || normalizedValue == null) {
                 throw StateError('mix_effect_parameter_apply_failed');
               }
+              if (_producerDataMode) {
+                _producerCollector.recordParameterExecution({
+                  'action': {'type': a.type, 'data': a.data},
+                  'effect': {
+                    'name': resolved.effectName,
+                    'effectId': resolved.effectId,
+                    'instanceId': resolved.effectInstanceId,
+                    'parameters': [EffectParameterState.fromMap(picked).toJson()],
+                  },
+                });
+              }
               appliedMutations.add(<String, dynamic>{
                 'kind': 'effect_parameter_value',
                 'row': row,
@@ -67350,6 +67368,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           );
             if (!parameterApplied || normalizedValue == null) {
               throw StateError('mix_master_parameter_apply_failed');
+            }
+            if (_producerDataMode) {
+              _producerCollector.recordParameterExecution({
+                'action': {'type': a.type, 'data': a.data},
+                'effect': {
+                  'name': resolved.effectName,
+                  'effectId': resolved.effectId,
+                  'instanceId': resolved.effectInstanceId ?? '',
+                  'parameters': [EffectParameterState.fromMap(picked).toJson()],
+                },
+              });
             }
             appliedMutations.add(<String, dynamic>{
               'kind': 'effect_parameter_value',
@@ -68325,9 +68354,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final values = await Future.wait<dynamic>(<Future<dynamic>>[
           JuceAudioEngine.getMasterEffects(),
           JuceAudioEngine.getMasterEffectIds(),
+          if (_producerDataMode) JuceAudioEngine.getMasterEffectInstanceIds(),
         ]).timeout(_kAiMixEffectProbeTimeout);
         final effects = (values[0] as List).cast<String>();
         final effectIds = (values[1] as List).cast<String>();
+        final instances = values.length > 2
+            ? (values[2] as List).cast<String>()
+            : const <String>[];
         final effectIndex = effects.indexWhere(
           (name) => name.toLowerCase().contains(effectNameContains),
         );
@@ -68351,6 +68384,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               effectIndex: effectIndex,
               effectId: effectIds[effectIndex],
               effectName: effects[effectIndex],
+              effectInstanceId: instances.length == effects.length
+                  ? instances[effectIndex]
+                  : null,
               parameter: parameter,
             );
           }

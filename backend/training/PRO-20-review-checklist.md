@@ -7,6 +7,10 @@
   30 seconds, then correct one parameter. Note the original, AI and final values.
 - [ ] Stop capture. Confirm the questionnaire shows the right changes, choose an
   honest outcome, and add a note. Repeat with a master plugin and a group-bus plugin.
+- [ ] Also add an effect through AI and correct its parameter, including after a
+  chain reset/rebuild. Keep one change,
+  revert another and choose partial: the retained/reverted actions must train as
+  positive/negative examples, with the correct continuous correction scale.
 - [ ] Try a native plugin window, a bool/choice control, plugin bypass/reorder,
   undo/redo, and skipping feedback. Confirm the captured changes match your work.
 - [ ] Close capture offline and reconnect. Confirm upload retries. Check ordinary
@@ -46,6 +50,10 @@ python backend/training/evaluate_producer_models.py --candidate-directory /tmp/p
 - [ ] Training exports both models and reports `onnx_runtime_parity: passed`.
   A tiny smoke dataset should fail readiness; do not duplicate samples to pass.
   Each split needs real accepted/rejected plugin examples and continuous corrections.
+- [ ] Follow the [compatibility guide](PRO-20-compatibility.md) to export/test the
+  existing 77-feature model and import historical captures. Compare against the
+  current model and the same-data 77-feature baseline; check per-action coverage
+  and warm inference latency before choosing a candidate.
 - [ ] Replay uses held-out groups, reports the intended candidate/current model
   versions, and improves relevant metrics without material regressions.
 - [ ] On a local/staging backend, set `MIX_APPLY_MODEL_PATH` and

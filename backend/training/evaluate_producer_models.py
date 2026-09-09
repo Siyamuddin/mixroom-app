@@ -9,12 +9,14 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 import json
+import time
+import statistics
 from pathlib import Path
 
 from producer_capture_converter import CAPTURE_SCHEMA, convert_bundle
 from common.mix_resolve import MixResolveService, OnnxMixModelRunner, _ResolvedModelBundle
 from common.mix_plugin_contract import PARAM_ACTIONS, parameter_target, proposed_value
-from producer_capture_converter import _action_delta
+from producer_capture_converter import _action_delta, supervision_project
 
 
 class CandidateRunner(OnnxMixModelRunner):
@@ -41,6 +43,7 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
     values = defaultdict(list)
     groups = set()
     seen = set()
+    timings = defaultdict(list)
     for bundle in bundles:
         examples = convert_bundle(bundle)
         episodes = bundle["episodes"]
@@ -49,13 +52,22 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
                         and r["split"] == split and r["eligibility"]["mix_apply"]]
             if not eligible:
                 continue
-            # Converter eligibility requires one unambiguous inference trace.
-            trace = episode["inference_traces"][0]
-            responses = {name: service.resolve(project=trace["project_state"], goal=trace["goal"],
-                         actions=trace["actions"], strict=trace["strict"]) for name, service in services.items()}
-            if any(response["fallback_used"] for response in responses.values()):
-                raise ValueError("Model replay fell back; verify model paths and feature contracts")
+            responses_by_trace = {}
+            for trace_index in sorted({r["source"]["inference_trace_index"] for r in eligible}):
+                trace = episode["inference_traces"][trace_index]
+                responses = {}
+                for name, service in services.items():
+                    started = time.perf_counter()
+                    responses[name] = service.resolve(project=trace["project_state"], goal=trace["goal"],
+                        actions=trace["actions"], strict=trace["strict"])
+                    timings[name].append((time.perf_counter() - started) * 1000)
+                if any(response["fallback_used"] for response in responses.values()):
+                    raise ValueError("Model replay fell back; verify model paths and feature contracts")
+                responses_by_trace[trace_index] = responses
             for row in eligible:
+                trace_index = row["source"]["inference_trace_index"]
+                trace = episode["inference_traces"][trace_index]
+                responses = responses_by_trace[trace_index]
                 if row["example_id"] in seen:
                     continue
                 seen.add(row["example_id"])
@@ -75,7 +87,7 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
                             if entry["dropped"]:
                                 effective_scale = 0.0
                             elif row["candidate_action"]["type"] in PARAM_ACTIONS:
-                                parameter = parameter_target(trace["project_state"], row["candidate_action"])[1]
+                                parameter = parameter_target(supervision_project(episode, trace, row["candidate_action"]), row["candidate_action"])[1]
                                 start = parameter["value"]
                                 original = proposed_value(parameter, row["candidate_action"]["data"])
                                 actual = proposed_value(parameter, entry["after"]["data"])
@@ -93,6 +105,9 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
         "split": split, "examples": len(seen), "source_groups": len(groups),
         "models": {"candidate": candidate.observability_context(), "baseline": baseline.observability_context()},
         "metrics": {key: {"count": len(items), "mean": sum(items) / len(items)} for key, items in sorted(values.items())},
+        "resolver_latency_ms": {name: {"first_call": times[0], "warm_calls": len(times) - 1,
+            "warm_median": statistics.median(times[1:]) if len(times) > 1 else None,
+            "warm_max": max(times[1:]) if len(times) > 1 else None} for name, times in timings.items()},
         "listening_quality_verified": False, "publication_approved": False,
     }
 

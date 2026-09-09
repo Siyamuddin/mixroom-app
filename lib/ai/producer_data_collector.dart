@@ -63,6 +63,7 @@ class ProducerDataCollector {
   Directory? _projectDir;
   String _sessionSalt = '';
   final List<Map<String, dynamic>> _inferenceTraces = [];
+  final List<Map<String, dynamic>> _parameterExecutions = [];
   int _traceGeneration = 0;
   String lastPrompt = '';
   final Map<String, String> _historyEpisodes = {};
@@ -97,7 +98,14 @@ class ProducerDataCollector {
     _inferenceTraces.add(safe);
   }
 
-  void clearInferenceTraces() => _inferenceTraces.clear();
+  void recordParameterExecution(Map<String, dynamic> execution) {
+    if (_enabled) _parameterExecutions.add(_sanitizeMap(execution));
+  }
+
+  void clearInferenceTraces() {
+    _inferenceTraces.clear();
+    _parameterExecutions.clear();
+  }
 
   Future<void> _write(Future<void> Function() operation) {
     final next = _ioTail.then((_) => operation());
@@ -181,6 +189,10 @@ class ProducerDataCollector {
         _inferenceTraces,
       );
       _inferenceTraces.clear();
+      _activeEpisode!['parameter_executions'] = List<Map<String, dynamic>>.from(
+        _parameterExecutions,
+      );
+      _parameterExecutions.clear();
       if (undoTransactionId != null) {
         _historyEpisodes[undoTransactionId] = _activeEpisode!['episode_id']
             .toString();
@@ -190,6 +202,9 @@ class ProducerDataCollector {
           .map(_relationalAction)
           .toList();
       _activeEpisode!['state_after'] = after;
+      // Preserve the auditioned state separately from the producer's final state.
+      // In particular, newly inserted plugins do not exist in state_before.
+      _activeEpisode!['state_after_ai'] = after;
       _inferLabels(_activeEpisode!);
       _attachDiagnostics(_activeEpisode!, before: before, after: after);
       _checkpoint = after;
@@ -210,7 +225,7 @@ class ProducerDataCollector {
     return _serialize(() async {
       if (!_enabled) return;
       await _ensureSession();
-      _inferenceTraces.clear();
+      clearInferenceTraces();
       lastPrompt = prompt.trim();
       _traceGeneration++;
       await _appendEvent('ai_request', <String, dynamic>{
@@ -543,6 +558,7 @@ class ProducerDataCollector {
       if (_session == null) return null;
       _enabled = false;
       _traceGeneration++;
+      clearInferenceTraces();
       await finalizeActiveEpisode(disposition: reason);
       _session!['ended_at'] = DateTime.now().toUtc().toIso8601String();
       _session!['close_reason'] = reason;
