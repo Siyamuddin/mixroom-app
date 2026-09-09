@@ -5978,8 +5978,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   TimelineGridMode _timelineGridMode = TimelineGridMode.adaptive;
   int _timelineFixedQuantizeDivisionsPerBar = 4;
   final ValueNotifier<({String clipId, int divisionsPerBar})?>
-  _activePianoRollGridResolution =
-      ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
+      _activePianoRollGridResolution =
+          ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
 
   bool _loopEnabled = false;
   int _loopStartMs = 0;
@@ -10985,110 +10985,107 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       L10n.translate(context, sectionTitle),
                                     ),
                                   Container(
-                                    margin: const EdgeInsets.only(bottom: 10),
-                                    padding: const EdgeInsets.fromLTRB(
-                                      14,
-                                      12,
-                                      14,
-                                      12,
-                                    ),
-                                    decoration: BoxDecoration(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    14,
+                                    12,
+                                    14,
+                                    12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: active
+                                        ? Colors.white.withValues(alpha: 0.11)
+                                        : Colors.white.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
                                       color: active
-                                          ? Colors.white.withValues(alpha: 0.11)
+                                          ? const Color(0xFF66B5FF)
+                                          : conflict != null
+                                          ? const Color(0xFFF57272)
                                           : Colors.white.withValues(
-                                              alpha: 0.05,
+                                              alpha: 0.08,
                                             ),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: active
-                                            ? const Color(0xFF66B5FF)
-                                            : conflict != null
-                                            ? const Color(0xFFF57272)
-                                            : Colors.white.withValues(
-                                                alpha: 0.08,
-                                              ),
-                                      ),
                                     ),
-                                    child: Column(
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                L10n.translate(
-                                                  context,
-                                                  entry.value,
-                                                ),
-                                                style: const TextStyle(
-                                                  color: Color(0xFFF4F4F4),
-                                                  fontFamily: 'Pretendard',
-                                                  fontSize: 14,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: Colors.white.withValues(
-                                                  alpha: 0.08,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: Text(
-                                                active
-                                                    ? 'Press keys...'
-                                                    : _desktopShortcutLabel(
-                                                        binding,
-                                                      ),
-                                                style: TextStyle(
-                                                  color: const Color(
-                                                    0xFFF4F4F4,
-                                                  ).withValues(alpha: 0.86),
-                                                  fontFamily: 'Pretendard',
-                                                  fontSize: 12.5,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            TextButton(
-                                              onPressed: () {
-                                                setModalState(() {
-                                                  capturingActionId = active
-                                                      ? null
-                                                      : entry.key;
-                                                });
-                                              },
-                                              child: Text(
-                                                active ? 'Cancel' : 'Change',
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        if (conflict != null) ...[
-                                          const SizedBox(height: 8),
-                                          Align(
-                                            alignment: Alignment.centerLeft,
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Expanded(
                                             child: Text(
-                                              conflict,
+                                              L10n.translate(
+                                                context,
+                                                entry.value,
+                                              ),
                                               style: const TextStyle(
-                                                color: Color(0xFFF58A8A),
+                                                color: Color(0xFFF4F4F4),
                                                 fontFamily: 'Pretendard',
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w500,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
                                               ),
                                             ),
                                           ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 8,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(
+                                                alpha: 0.08,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              active
+                                                  ? 'Press keys...'
+                                                  : _desktopShortcutLabel(
+                                                      binding,
+                                                    ),
+                                              style: TextStyle(
+                                                color: const Color(
+                                                  0xFFF4F4F4,
+                                                ).withValues(alpha: 0.86),
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          TextButton(
+                                            onPressed: () {
+                                              setModalState(() {
+                                                capturingActionId = active
+                                                    ? null
+                                                    : entry.key;
+                                              });
+                                            },
+                                            child: Text(
+                                              active ? 'Cancel' : 'Change',
+                                            ),
+                                          ),
                                         ],
+                                      ),
+                                      if (conflict != null) ...[
+                                        const SizedBox(height: 8),
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: Text(
+                                            conflict,
+                                            style: const TextStyle(
+                                              color: Color(0xFFF58A8A),
+                                              fontFamily: 'Pretendard',
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
                                       ],
-                                    ),
+                                    ],
                                   ),
+                                ),
                                 ];
                               }),
                               const SizedBox(height: 4),
@@ -22904,12 +22901,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _prepareAudioRecordingStartPreflight() async {
-    if (Platform.isMacOS && !await _validateMacRecordingChannels())
+    if (Platform.isMacOS && !await _validateMacRecordingChannels()) {
       return false;
+    }
     if (Platform.isAndroid &&
         _isBluetoothV2Session &&
-        !await _validateAndroidRecordingChannels())
+        !await _validateAndroidRecordingChannels()) {
       return false;
+    }
     if (Platform.isIOS &&
         _isBluetoothV2Session &&
         !await _validateIOSRecordingChannels()) {
@@ -23462,8 +23461,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _restoreV2PlaybackOnlyAfterRecording() async {
-    if (Platform.isAndroid && mounted)
+    if (Platform.isAndroid && mounted) {
       _setStateAndRefreshProjectSettings(_clearAndroidVerifiedInputName);
+    }
     final coordinator = _audioRouteCoordinatorV2;
     if (coordinator == null || _v2AudioSessionInvalidated) return false;
     final result = await coordinator.transitionIntent(
@@ -26499,8 +26499,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final attackOverrideMs = params['attackMs'];
     final attackOverrideSec =
         attackOverrideMs != null && attackOverrideMs.isFinite
-        ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
-        : null;
+            ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
+            : null;
     final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
       0.0,
       2.0,
@@ -26511,8 +26511,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final releaseOverrideMs = params['releaseMs'];
     final releaseOverrideSec =
         releaseOverrideMs != null && releaseOverrideMs.isFinite
-        ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
-        : null;
+            ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
+            : null;
     final sampleStartNorm = (params['sampleStartNorm'] ?? 0.0)
         .clamp(0.0, 0.98)
         .toDouble();
@@ -30663,24 +30663,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               '$normalizedPath|${stat.size}|${stat.modified.millisecondsSinceEpoch}',
           durationMs: durationMs,
         );
-        final sourceRange = waveformDetailSourceRangeForTimelineIntersection(
-          clipStartMs: clipStartMs,
-          timelineDurationMs: timelineDurationMs,
-          trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
-          trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
-          sourceDurationMs: durationMs,
-          isReversed: clip.isReversed,
-          viewportStartMs: viewport.timelineStartMs,
-          viewportEndMs: viewport.timelineEndMs,
-        );
+        final sourceRange =
+            waveformDetailSourceRangeForTimelineIntersection(
+              clipStartMs: clipStartMs,
+              timelineDurationMs: timelineDurationMs,
+              trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
+              trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
+              sourceDurationMs: durationMs,
+              isReversed: clip.isReversed,
+              viewportStartMs: viewport.timelineStartMs,
+              viewportEndMs: viewport.timelineEndMs,
+            );
         if (sourceRange == null) {
           return const <WaveformDetailTileRequest>[];
         }
         return waveformDetailTileIndicesForRange(
-              sourceStartMs: sourceRange.startMs,
-              sourceEndMs: sourceRange.endMs,
-              sourceDurationMs: durationMs,
-            )
+          sourceStartMs: sourceRange.startMs,
+          sourceEndMs: sourceRange.endMs,
+          sourceDurationMs: durationMs,
+        )
             .map(
               (tileIndex) => WaveformDetailTileRequest(
                 source: source,
@@ -40554,8 +40555,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, _) {
         final controls = _timelineController.topControlsState;
         final pianoRollGrid = _activePianoRollGridResolution.value;
-        final pianoRollDivisions =
-            _showPianoRoll && controls.gridMode == TimelineGridMode.adaptive
+        final pianoRollDivisions = _showPianoRoll &&
+                controls.gridMode == TimelineGridMode.adaptive
             ? pianoRollGrid?.divisionsPerBar
             : null;
         final rawQuantizeLabel = pianoRollDivisions != null
@@ -43140,41 +43141,40 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             : scannedCandidateCount;
                                         currentScannedPlugin =
                                             event['currentPlugin']
-                                                ?.toString()
-                                                .trim() ??
-                                            currentScannedPlugin;
+                                                    ?.toString()
+                                                    .trim() ??
+                                                currentScannedPlugin;
                                         currentScannedPluginFormat =
                                             event['format']
-                                                ?.toString()
-                                                .trim() ??
-                                            currentScannedPluginFormat;
+                                                    ?.toString()
+                                                    .trim() ??
+                                                currentScannedPluginFormat;
                                         if (rawPlugin is Map) {
-                                          final plugin =
-                                              JuceAudioEngine.normalizeScannedPlugin(
-                                                rawPlugin,
-                                              );
+                                          final plugin = JuceAudioEngine
+                                              .normalizeScannedPlugin(
+                                            rawPlugin,
+                                          );
                                           if (plugin != null) {
                                             currentScannedPlugin =
                                                 plugin['name'] as String;
                                             final rawFormat =
                                                 (plugin['format'] as String?)
-                                                    ?.trim() ??
-                                                '';
+                                                        ?.trim() ??
+                                                    '';
                                             currentScannedPluginFormat =
                                                 rawFormat == 'AudioUnit'
-                                                ? 'AU'
-                                                : rawFormat;
+                                                    ? 'AU'
+                                                    : rawFormat;
                                             final id = plugin['id'] as String;
                                             currentPlugins =
-                                                _applyDesktopPluginPreferences(
-                                                  <Map<String, dynamic>>[
-                                                    ...currentPlugins.where(
-                                                      (entry) =>
-                                                          entry['id'] != id,
-                                                    ),
-                                                    plugin,
-                                                  ],
-                                                );
+                                                _applyDesktopPluginPreferences(<
+                                              Map<String, dynamic>
+                                            >[
+                                              ...currentPlugins.where(
+                                                (entry) => entry['id'] != id,
+                                              ),
+                                              plugin,
+                                            ]);
                                           }
                                         }
                                       });
@@ -49017,12 +49017,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final rawCurrent = parameter['value'];
       final currentNormalized = switch (rawCurrent) {
         bool value => value ? 1.0 : 0.0,
-        _ =>
-          (_toActionDouble(parameter['valueNormalized']) ??
-                  _toActionDouble(rawCurrent) ??
-                  0.0)
-              .clamp(0.0, 1.0)
-              .toDouble(),
+        _ => (_toActionDouble(parameter['valueNormalized']) ??
+                _toActionDouble(rawCurrent) ??
+                0.0)
+            .clamp(0.0, 1.0)
+            .toDouble(),
       };
       double nextNormalized;
       if (mode == 'set') {
@@ -49088,7 +49087,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mode == 'set') {
       final normalized = _toActionDouble(action['value_norm']);
       if (normalized != null && minimum != null && maximum != null) {
-        next = minimum + (maximum - minimum) * normalized.clamp(0.0, 1.0);
+        next = minimum +
+            (maximum - minimum) * normalized.clamp(0.0, 1.0);
       } else {
         final value = _toActionDouble(action['value']);
         if (value == null) {
@@ -67788,12 +67788,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
               final parameterApplied = adjustment.usesNormalizedVerification
                   ? normalizedValue != null &&
-                        (normalizedValue - adjustment.expectedNormalizedValue!)
+                        (normalizedValue -
+                                    adjustment.expectedNormalizedValue!)
                                 .abs() <=
                             normalizedTolerance
                   : appliedValue != null &&
-                        (appliedValue - (adjustment.newValue as double))
-                                .abs() <=
+                        (appliedValue - (adjustment.newValue as double)).abs() <=
                             math.max(
                               0.0001,
                               adjustment.rawInterval / 2.0 + 0.000001,
@@ -84200,12 +84200,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _removeDuplicatedRows(List<int> rowIds) async {
-    final indices =
-        rowIds
-            .map(_rowIndexForId)
-            .where((index) => index >= 0 && index < _rowCount)
-            .toList()
-          ..sort();
+    final indices = rowIds
+        .map(_rowIndexForId)
+        .where((index) => index >= 0 && index < _rowCount)
+        .toList()
+      ..sort();
     if (indices.isEmpty) return;
     // Bottom-up so the indices we have not deleted yet stay valid.
     for (final index in indices.reversed) {
