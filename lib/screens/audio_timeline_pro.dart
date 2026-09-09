@@ -599,6 +599,7 @@ class AudioCanvasTimeline extends StatefulWidget {
   final VoidCallback? onCancelRowGroupingPressed;
   final Future<void> Function(int row) onInsertRowAbove;
   final Future<void> Function(int row) onInsertRowBelow;
+  final Future<void> Function(int row)? onAddAudioToRow;
   final Future<void> Function(int row)? onInsertInstrumentLaneAbove;
   final Future<void> Function(int row)? onInsertInstrumentLaneBelow;
   final Future<void> Function(int row)? onChangeInstrumentLane;
@@ -877,6 +878,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onCancelRowGroupingPressed,
     required this.onInsertRowAbove,
     required this.onInsertRowBelow,
+    this.onAddAudioToRow,
     this.onInsertInstrumentLaneAbove,
     this.onInsertInstrumentLaneBelow,
     this.onChangeInstrumentLane,
@@ -1049,6 +1051,7 @@ class AudioCanvasTimelineController {
   _placementForExternalSampleDrop;
   void Function(double deltaMs)? _panByMs;
   VoidCallback? _ensurePlayheadVisible;
+  void Function(int row)? _ensureRowVisible;
   final ValueNotifier<TimelineTopControlsState> _topControls =
       ValueNotifier<TimelineTopControlsState>(TimelineTopControlsState.initial);
   final ValueNotifier<TimelineHorizontalScrollbarState> _horizontalScrollbar =
@@ -1092,6 +1095,7 @@ class AudioCanvasTimelineController {
     placementForExternalSampleDrop,
     required void Function(double deltaMs) panByMs,
     required VoidCallback ensurePlayheadVisible,
+    required void Function(int row) ensureRowVisible,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
     _showMasterAutomationLane = showMasterAutomationLane;
@@ -1112,6 +1116,7 @@ class AudioCanvasTimelineController {
     _placementForExternalSampleDrop = placementForExternalSampleDrop;
     _panByMs = panByMs;
     _ensurePlayheadVisible = ensurePlayheadVisible;
+    _ensureRowVisible = ensureRowVisible;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _publishTopControlsState?.call();
     });
@@ -1142,6 +1147,7 @@ class AudioCanvasTimelineController {
     placementForExternalSampleDrop,
     required void Function(double deltaMs) panByMs,
     required VoidCallback ensurePlayheadVisible,
+    required void Function(int row) ensureRowVisible,
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
       _ensureRowExpanded = null;
@@ -1214,6 +1220,9 @@ class AudioCanvasTimelineController {
     }
     if (identical(_ensurePlayheadVisible, ensurePlayheadVisible)) {
       _ensurePlayheadVisible = null;
+    }
+    if (identical(_ensureRowVisible, ensureRowVisible)) {
+      _ensureRowVisible = null;
     }
   }
 
@@ -1300,6 +1309,11 @@ class AudioCanvasTimelineController {
   /// Nudges the view if the playhead would otherwise leave the viewport.
   void ensurePlayheadVisible() {
     _ensurePlayheadVisible?.call();
+  }
+
+  /// Scrolls vertically so [row] is on-screen when it is not hidden.
+  void ensureRowVisible(int row) {
+    _ensureRowVisible?.call(row);
   }
 
   void _setHorizontalScrollbarState(TimelineHorizontalScrollbarState state) {
@@ -6251,6 +6265,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       panByMs: _panTimelineByMs,
       ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+      ensureRowVisible: _ensureRowVisibleInViewport,
     );
     _syncRowUiState();
     _verticalScrollController.addListener(() {
@@ -6314,6 +6329,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
         panByMs: _panTimelineByMs,
         ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+        ensureRowVisible: _ensureRowVisibleInViewport,
       );
       widget.controller?._bind(
         ensureRowExpanded: ensureRowExpanded,
@@ -6336,6 +6352,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
         panByMs: _panTimelineByMs,
         ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+        ensureRowVisible: _ensureRowVisibleInViewport,
       );
     }
     final clipTopologyChanged =
@@ -6478,6 +6495,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       panByMs: _panTimelineByMs,
       ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+      ensureRowVisible: _ensureRowVisibleInViewport,
     );
     widget.controller?._setHorizontalScrollbarState(
       TimelineHorizontalScrollbarState.hidden,
@@ -7379,6 +7397,36 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       viewportWidth: viewportWidth,
       targetScrollMs: targetScrollMs,
     );
+  }
+
+  void _ensureRowVisibleInViewport(int row) {
+    if (row < 0 || row >= _rowCount) return;
+    if (!_verticalScrollController.hasClients) return;
+    if (!_isSourceRowVisible(row)) return;
+
+    final position = _verticalScrollController.position;
+    final viewport = position.viewportDimension;
+    if (viewport <= 0) return;
+    final top = _rowTopForIndex(row);
+    final height = math.max(1.0, _rowBlockHeightForIndex(row));
+    final bottom = top + height;
+    final visibleStart = position.pixels;
+    final visibleEnd = visibleStart + viewport;
+    const padding = 8.0;
+
+    double? target;
+    if (top < visibleStart + padding) {
+      target = top - padding;
+    } else if (bottom > visibleEnd - padding) {
+      target = bottom + padding - viewport;
+    }
+    if (target == null) return;
+    final clamped = target
+        .clamp(position.minScrollExtent, position.maxScrollExtent)
+        .toDouble();
+    if ((clamped - position.pixels).abs() <= 0.5) return;
+    _verticalScrollController.jumpTo(clamped);
+    _syncVerticalScrollOffsetFromController();
   }
 
   void _beginHorizontalScrollbarDrag(double localX) {
@@ -14272,6 +14320,21 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                     ),
                     onTap: () => Navigator.pop(ctx, 'insert_below'),
                   ),
+                  if (!isInstrumentLane && widget.onAddAudioToRow != null)
+                    ListTile(
+                      leading: const Icon(
+                        Icons.audio_file_outlined,
+                        color: _kTimelineShellText,
+                      ),
+                      title: Text(
+                        L10n.translate(ctx, 'Add audio to this track'),
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: _kTimelineShellText,
+                        ),
+                      ),
+                      onTap: () => Navigator.pop(ctx, 'add_audio'),
+                    ),
                   if (widget.onInsertInstrumentLaneAbove != null)
                     ListTile(
                       leading: const Icon(
@@ -14480,6 +14543,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     }
     if (action == 'insert_above') return widget.onInsertRowAbove(row);
     if (action == 'insert_below') return widget.onInsertRowBelow(row);
+    if (action == 'add_audio') return widget.onAddAudioToRow?.call(row);
     if (action == 'insert_instrument_above') {
       return widget.onInsertInstrumentLaneAbove?.call(row);
     }

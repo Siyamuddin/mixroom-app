@@ -431,6 +431,7 @@ Widget _buildHarness({
   Future<void> Function()? onOpenCaptureDeck,
   Future<void> Function()? onGroupRowsPressed,
   Future<void> Function(int row)? onChangeInstrumentLane,
+  Future<void> Function(int row)? onAddAudioToRow,
   Future<void> Function(int row, double timeMs)?
       onCreateMidiClipInInstrumentLane,
   Future<void> Function(int row)? onOpenInstrumentUi,
@@ -600,6 +601,7 @@ Widget _buildHarness({
           onGroupRowsPressed: onGroupRowsPressed,
           onInsertRowAbove: (_) async {},
           onInsertRowBelow: (_) async {},
+          onAddAudioToRow: onAddAudioToRow,
           onChangeInstrumentLane: onChangeInstrumentLane,
           onDeleteRow: onDeleteRow ?? (_) async {},
           onMoveRow: onMoveRow ?? (_, __) async {},
@@ -3166,6 +3168,52 @@ void main() {
     expect(find.text('Move Down'), findsOneWidget);
     expect(find.text('Duplicate Row'), findsOneWidget);
     expect(find.text('Delete Row'), findsOneWidget);
+  });
+
+  testWidgets('audio row menu can add audio to this track', (tester) async {
+    final addedRows = <int>[];
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: _namedTrackRows(2),
+        onAddAudioToRow: (row) async => addedRows.add(row),
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 1);
+    expect(find.text('Add audio to this track'), findsOneWidget);
+    await tester.tap(find.text('Add audio to this track'));
+    await tester.pumpAndSettle();
+
+    expect(addedRows, <int>[1]);
+  });
+
+  testWidgets('instrument lane menu hides add audio to this track',
+      (tester) async {
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Track 1', iconId: 0),
+          TimelineRow(
+            rowId: 2,
+            name: 'Keys',
+            iconId: 1,
+            kind: TimelineRowKind.instrument,
+            instrumentId: 'piano',
+            instrumentName: 'Piano',
+          ),
+        ],
+        onAddAudioToRow: (_) async {},
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 1);
+    expect(find.text('Add audio to this track'), findsNothing);
   });
 
   testWidgets('row menu moves the range-selected tracks as one block',
