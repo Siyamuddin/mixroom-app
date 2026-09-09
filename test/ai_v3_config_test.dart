@@ -49,7 +49,7 @@ void main() {
     expect(effectiveRoute.usesLongPath, expectedUseLongPath);
     expect(
       effectiveRoute.requestTimeoutSeconds,
-      expectedUseLongPath ? 70 : expectedAiV3RequestTimeoutSeconds,
+      expectedUseLongPath ? 130 : expectedAiV3RequestTimeoutSeconds,
     );
     if (!expectedUseLongPath) {
       expect(
@@ -78,7 +78,7 @@ void main() {
     }
   });
 
-  test('V3 long route is isolated and uses the 70-second client window', () {
+  test('V3 long route is isolated and uses the 130-second client window', () {
     final route = LlmConfig.resolveAiV3RequestRoute(
       standardApiBaseUrl: 'https://standard.example/prod',
       standardTimeoutSeconds: 35,
@@ -88,7 +88,7 @@ void main() {
 
     expect(route.usesLongPath, isTrue);
     expect(route.proxyApiBaseUrl, 'https://long.example/prod/');
-    expect(route.requestTimeoutSeconds, 70);
+    expect(route.requestTimeoutSeconds, 130);
   });
 
   test('global proxy disablement cannot be bypassed by the V3 long route', () {
@@ -170,7 +170,7 @@ void main() {
           expected,
           reason: '${entry.url}, $allowLoopback',
         );
-        expect(route.requestTimeoutSeconds, expected ? 70 : 35);
+        expect(route.requestTimeoutSeconds, expected ? 130 : 35);
         expect(
           route.proxyApiBaseUrl,
           expected ? entry.url : 'https://standard.example/prod',
@@ -191,6 +191,6 @@ void main() {
       route.proxyApiBaseUrl,
       'https://abc123.execute-api.ap-northeast-2.amazonaws.com/prod',
     );
-    expect(route.requestTimeoutSeconds, 70);
+    expect(route.requestTimeoutSeconds, 130);
   });
 }

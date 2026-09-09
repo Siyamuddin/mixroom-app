@@ -1,4 +1,5 @@
 from __future__ import annotations
+from . import midi_boundary
 
 import copy
 import hashlib
@@ -102,6 +103,34 @@ MAX_EFFECT_CAPABILITIES = 64
 MAX_EFFECT_PARAMETERS = 16
 MAX_RUNTIME_TOOL_BYTES = 400_000
 MAX_ACCEPTED_PROVIDER_PLAN_BYTES = 24_000
+DYNAMIC_MAX_REQUEST_BYTES = 4_500_000
+DYNAMIC_MAX_CORE_CONTEXT_BYTES = 4_000_000
+DYNAMIC_MAX_CONTEXT_NODES = 250_000
+DYNAMIC_MAX_COLLECTION_ITEMS = 250_000
+DYNAMIC_MAX_CONTEXT_TOTAL_STRING_CHARS = 3_500_000
+MAX_PROVIDER_WIRE_BYTES = 4_500_000
+PROJECT_CAPACITY_POLICY = "unbounded_rows_clips_v1"
+GENERATED_MIDI_POLICY = "notes_512_v1"
+PLAN_COMMAND_POLICY = "commands_32_v1"
+_EXPLICIT_MIDI_COMMANDS = frozenset({"midi.create_clip", "midi.replace_notes", "midi.append_notes"})
+
+
+@dataclass(frozen=True)
+class V3OutputBudget:
+    notes: int = 256
+    plan_bytes: int = MAX_ACCEPTED_PROVIDER_PLAN_BYTES
+    output_tokens: int = 8192
+
+
+def output_budget(surface: "V3CapabilitySurface") -> V3OutputBudget:
+    if surface.generated_midi_policy == GENERATED_MIDI_POLICY:
+        return V3OutputBudget(512, 64_000, 16384)
+    return V3OutputBudget()
+
+
+def command_limit(surface: "V3CapabilitySurface") -> int:
+    return 32 if surface.plan_command_policy == PLAN_COMMAND_POLICY else 16
+
 
 _EFFECT_STATE_POLICY_VERSION = "ordered_semantic_effect_chain_v1"
 _MIX_SCOPE_POLICY_VERSION = "contained_local_mix_generation_v1"
@@ -109,6 +138,28 @@ _PHONE_CLEANUP_CONFLICT_POLICY_VERSION = "phone_cleanup_sound_conflict_v1"
 _TYPED_CLIP_STATE_POLICY_VERSION = "ordered_typed_clip_reference_v1"
 _GROUP_STATE_POLICY_VERSION = "ordered_group_lifecycle_v1"
 _USER_VISIBLE_TEXT_POLICY_VERSION = "current_request_language_anchor_v2"
+_LEGACY_ROW_CAPACITY_INSTRUCTION = (
+    "Plan commands against the evolving project state, not just the starting snapshot. "
+    "After every command, at least one row must remain and the row count must not exceed "
+    "a known max_rows. Starting can_create does not describe capacity after deletions. "
+    "For a complete rebuild, retain one old row, delete only other rows the user authorized "
+    "removing, create a replacement when capacity permits, then delete the retained old row. "
+    "Continue creating replacements only within the remaining capacity. Preserve protected "
+    "rows and clips, reference new resources through documented producer outputs, and provide "
+    "the requested MIDI parts for replacement instrument rows within the command budget. If "
+    "no valid sequence exists, reuse an existing row only when permitted; otherwise clarify."
+)
+_DYNAMIC_ROW_CAPACITY_INSTRUCTION = (
+    "Plan commands against the evolving project state, not just the starting snapshot. "
+    "After every command, at least one row must remain. When row_capacity.creation_limit is "
+    "an integer, never exceed it; null means there is no product-defined row creation limit. "
+    "Starting can_create does not describe capacity after deletions. For a complete rebuild, "
+    "retain one old row, delete only other rows the user authorized removing, create a "
+    "replacement when permitted, then delete the retained old row. Preserve protected rows "
+    "and clips, reference new resources through documented producer outputs, and create only "
+    "the rows and MIDI parts the request needs within the command budget. If no valid sequence "
+    "exists, reuse an existing row only when permitted; otherwise clarify."
+)
 
 _PRIVATE_PROMPT_MARKERS = frozenset(
     {
@@ -138,6 +189,7 @@ class V3ContractError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+        self.repair_details: dict[str, Any] | None = None
 
 
 def _contract_error(code: str, message: str) -> V3ContractError:
@@ -220,7 +272,12 @@ class V3CapabilitySurface:
     effect_instance_ids: frozenset[str]
     library_asset_ids: frozenset[str]
     current_rows: int
-    maximum_rows: int
+    maximum_rows: int | None
+    maximum_created_midi_clip_beats: float = 32.0
+    midi_boundary_bpm: float = 0.0
+    generated_midi_policy: str = ""
+    plan_command_policy: str = ""
+    project_capacity_policy: str = ""
 
     @property
     def effect_by_id(self) -> dict[str, V3EffectCapability]:
@@ -331,7 +388,11 @@ def _optional_bool(value: Any, *, field: str) -> bool | None:
     return value
 
 
-def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilitySurface:
+def extract_capability_surface(
+    core_context: Mapping[str, Any],
+    *,
+    authenticated_subscription_tier: str = "",
+) -> V3CapabilitySurface:
     effects: list[V3EffectCapability] = []
     seen_effect_ids: set[str] = set()
     raw_effects = _capability_list(core_context, "effects")
@@ -666,7 +727,33 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
     project = core_context.get("project", {})
     if not isinstance(project, dict):
         raise _contract_error("v3_capability_context_invalid", "'project' must be an object.")
+    beats_per_bar = project.get("beats_per_bar")
+    if beats_per_bar is None:
+        beats_per_bar = 4.0
+    try:
+        if isinstance(beats_per_bar, bool) or not isinstance(beats_per_bar, (int, float)):
+            raise ValueError
+        maximum_created_midi_clip_beats = float(beats_per_bar) * 8.0
+        if not math.isfinite(maximum_created_midi_clip_beats) or maximum_created_midi_clip_beats <= 0:
+            raise ValueError
+    except (ValueError, OverflowError):
+        raise _contract_error(
+            "v3_capability_context_invalid", "'beats_per_bar' must be a positive finite number."
+        ) from None
+    project_capacity_policy = (
+        PROJECT_CAPACITY_POLICY
+        if project.get("project_capacity_policy") == PROJECT_CAPACITY_POLICY
+        else ""
+    )
     row_capacity = project.get("row_capacity")
+    boundary_bpm = project.get("bpm")
+    if not (
+        project.get("midi_boundary_policy") == midi_boundary.POLICY
+        and isinstance(boundary_bpm, (int, float))
+        and not isinstance(boundary_bpm, bool)
+        and 0 < boundary_bpm <= 999
+    ):
+        boundary_bpm = 0.0
     if row_capacity is None:
         current_rows = len(row_ids)
         maximum_rows = current_rows
@@ -674,18 +761,53 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
         if not isinstance(row_capacity, dict):
             raise _contract_error("v3_capability_context_invalid", "'row_capacity' must be an object.")
         current_rows = row_capacity.get("current_rows")
-        maximum_rows = row_capacity.get("max_rows")
         can_create = row_capacity.get("can_create")
+        if project_capacity_policy:
+            if "creation_limit" not in row_capacity:
+                raise _contract_error(
+                    "v3_capability_context_invalid",
+                    "'row_capacity.creation_limit' is required for this policy.",
+                )
+            client_creation_limit = row_capacity.get("creation_limit")
+            if client_creation_limit is not None and (
+                not isinstance(client_creation_limit, int)
+                or isinstance(client_creation_limit, bool)
+                or client_creation_limit != 5
+            ):
+                raise _contract_error(
+                    "v3_capability_context_invalid",
+                    "'row_capacity.creation_limit' is invalid for this policy.",
+                )
+            maximum_rows = (
+                5
+                if authenticated_subscription_tier.strip().lower() == "free"
+                or client_creation_limit == 5
+                else None
+            )
+            client_can_create = (
+                client_creation_limit is None or current_rows < client_creation_limit
+                if isinstance(current_rows, int) and not isinstance(current_rows, bool)
+                else False
+            )
+            capacity_consistent = can_create is client_can_create
+        else:
+            maximum_rows = row_capacity.get("max_rows")
+            capacity_consistent = (
+                isinstance(maximum_rows, int)
+                and not isinstance(maximum_rows, bool)
+                and can_create is (current_rows < maximum_rows)
+                if isinstance(current_rows, int) and not isinstance(current_rows, bool)
+                else False
+            )
         if (
             not isinstance(current_rows, int)
             or isinstance(current_rows, bool)
-            or not isinstance(maximum_rows, int)
-            or isinstance(maximum_rows, bool)
             or current_rows != len(row_ids)
             or current_rows < 0
-            or maximum_rows < 0
-            or can_create is not (current_rows < maximum_rows)
+            or not capacity_consistent
         ):
+            raise _contract_error("v3_capability_context_invalid", "'row_capacity' is inconsistent.")
+        if maximum_rows is not None and maximum_rows < 0:
             raise _contract_error("v3_capability_context_invalid", "'row_capacity' is inconsistent.")
 
     return V3CapabilitySurface(
@@ -699,6 +821,17 @@ def extract_capability_surface(core_context: Mapping[str, Any]) -> V3CapabilityS
         library_asset_ids=frozenset(library_asset_ids),
         current_rows=current_rows,
         maximum_rows=maximum_rows,
+        maximum_created_midi_clip_beats=maximum_created_midi_clip_beats,
+        midi_boundary_bpm=float(boundary_bpm),
+        generated_midi_policy=(
+            GENERATED_MIDI_POLICY
+            if project.get("generated_midi_policy") == GENERATED_MIDI_POLICY else ""
+        ),
+        plan_command_policy=(
+            PLAN_COMMAND_POLICY
+            if project.get("plan_command_policy") == PLAN_COMMAND_POLICY else ""
+        ),
+        project_capacity_policy=project_capacity_policy,
     )
 
 
@@ -717,12 +850,21 @@ def _bounded_string(value: Any, *, field: str, maximum: int, allow_empty: bool =
     return normalized
 
 
-def _validate_context_value(value: Any) -> None:
+def _validate_context_value(value: Any, *, expanded_capacity: bool = False) -> None:
     state = {"nodes": 0, "string_chars": 0}
+    maximum_nodes = DYNAMIC_MAX_CONTEXT_NODES if expanded_capacity else MAX_CONTEXT_NODES
+    maximum_collection_items = (
+        DYNAMIC_MAX_COLLECTION_ITEMS if expanded_capacity else MAX_COLLECTION_ITEMS
+    )
+    maximum_total_string_chars = (
+        DYNAMIC_MAX_CONTEXT_TOTAL_STRING_CHARS
+        if expanded_capacity
+        else MAX_CONTEXT_TOTAL_STRING_CHARS
+    )
 
-    def visit(current: Any, depth: int) -> None:
+    def visit(current: Any, depth: int, path: tuple = ()) -> None:
         state["nodes"] += 1
-        if state["nodes"] > MAX_CONTEXT_NODES or depth > MAX_CONTEXT_DEPTH:
+        if state["nodes"] > maximum_nodes or depth > MAX_CONTEXT_DEPTH:
             raise _contract_error("v3_context_request_limit", "'core_context' is too complex.")
         if current is None or isinstance(current, bool):
             return
@@ -734,22 +876,25 @@ def _validate_context_value(value: Any) -> None:
             if len(current) > MAX_CONTEXT_STRING_CHARS:
                 raise _contract_error("v3_context_request_limit", "'core_context' contains an oversized string.")
             state["string_chars"] += len(current)
-            if state["string_chars"] > MAX_CONTEXT_TOTAL_STRING_CHARS:
+            if state["string_chars"] > maximum_total_string_chars:
                 raise _contract_error("v3_context_request_limit", "'core_context' contains too much text.")
             return
         if isinstance(current, list):
-            if len(current) > MAX_COLLECTION_ITEMS:
+            # Existing clip notes are bounded by context bytes/complexity, not
+            # the generated-note budget or the generic catalog collection cap.
+            is_clip_notes = path == ("clips", "[]", "midi_notes")
+            if len(current) > maximum_collection_items and not is_clip_notes:
                 raise _contract_error("v3_context_request_limit", "'core_context' contains an oversized list.")
             for item in current:
-                visit(item, depth + 1)
+                visit(item, depth + 1, path + ("[]",))
             return
         if isinstance(current, dict):
-            if len(current) > MAX_COLLECTION_ITEMS:
+            if len(current) > maximum_collection_items:
                 raise _contract_error("v3_context_request_limit", "'core_context' contains an oversized object.")
             for key, item in current.items():
                 if not isinstance(key, str) or not key or len(key) > MAX_IDENTIFIER_CHARS:
                     raise _contract_error("invalid_v3_context_request", "'core_context' contains an invalid key.")
-                visit(item, depth + 1)
+                visit(item, depth + 1, path + (key,))
             return
         raise _contract_error("invalid_v3_context_request", "'core_context' contains an unsupported value.")
 
@@ -781,8 +926,13 @@ def _validate_conversation(value: Any) -> list[dict[str, str]]:
     return result
 
 
-def validate_context_request(body: Mapping[str, Any], *, raw_body_bytes: int) -> dict[str, Any]:
-    if raw_body_bytes > MAX_REQUEST_BYTES:
+def validate_context_request(
+    body: Mapping[str, Any],
+    *,
+    raw_body_bytes: int,
+    authenticated_subscription_tier: str = "",
+) -> dict[str, Any]:
+    if raw_body_bytes > DYNAMIC_MAX_REQUEST_BYTES:
         raise _contract_error("v3_context_request_limit", "V3 context request is too large.")
     actual_fields = set(body)
     prohibited = actual_fields & _PROHIBITED_AI_FIELDS
@@ -811,8 +961,18 @@ def validate_context_request(body: Mapping[str, Any], *, raw_body_bytes: int) ->
     core_context = body.get("core_context")
     if not isinstance(core_context, dict):
         raise _contract_error("invalid_v3_context_request", "'core_context' must be an object.")
-    _validate_context_value(core_context)
-    if len(_canonical_json(core_context).encode("utf-8")) > MAX_CORE_CONTEXT_BYTES:
+    project = core_context.get("project")
+    expanded_capacity = (
+        isinstance(project, dict)
+        and project.get("project_capacity_policy") == PROJECT_CAPACITY_POLICY
+    )
+    if not expanded_capacity and raw_body_bytes > MAX_REQUEST_BYTES:
+        raise _contract_error("v3_context_request_limit", "V3 context request is too large.")
+    _validate_context_value(core_context, expanded_capacity=expanded_capacity)
+    maximum_core_context_bytes = (
+        DYNAMIC_MAX_CORE_CONTEXT_BYTES if expanded_capacity else MAX_CORE_CONTEXT_BYTES
+    )
+    if len(_canonical_json(core_context).encode("utf-8")) > maximum_core_context_bytes:
         raise _contract_error("v3_context_request_limit", "'core_context' exceeds its size limit.")
 
     raw_command_types = body.get("supported_command_types")
@@ -849,11 +1009,22 @@ def validate_context_request(body: Mapping[str, Any], *, raw_body_bytes: int) ->
     prompt_trace_id = _bounded_string(
         body.get("prompt_trace_id", ""), field="prompt_trace_id", maximum=MAX_TRACE_ID_CHARS, allow_empty=True
     )
-    capability_surface = extract_capability_surface(core_context)
+    capability_surface = extract_capability_surface(
+        core_context,
+        authenticated_subscription_tier=authenticated_subscription_tier,
+    )
+    normalized_core_context = copy.deepcopy(core_context)
+    if capability_surface.project_capacity_policy:
+        normalized_capacity = normalized_core_context["project"]["row_capacity"]
+        normalized_capacity["creation_limit"] = capability_surface.maximum_rows
+        normalized_capacity["can_create"] = (
+            capability_surface.maximum_rows is None
+            or capability_surface.current_rows < capability_surface.maximum_rows
+        )
     return {
         "original_request": original_request,
         "conversation": conversation,
-        "core_context": copy.deepcopy(core_context),
+        "core_context": normalized_core_context,
         "supported_command_types": effective_types,
         "resource_refs_enabled": resource_refs_enabled,
         "project_id": project_id,
@@ -1178,6 +1349,18 @@ def _constrain_mix_goal_targets(
     variant["properties"]["arguments"]["properties"]["target"]["anyOf"] = constrained
 
 
+def _set_note_array_limit(schema: Any, limit: int) -> None:
+    if isinstance(schema, list):
+        for child in schema:
+            _set_note_array_limit(child, limit)
+    elif isinstance(schema, dict):
+        notes = schema.get("properties", {}).get("notes")
+        if isinstance(notes, dict) and notes.get("type") == "array":
+            notes["maxItems"] = limit
+        for child in schema.values():
+            _set_note_array_limit(child, limit)
+
+
 def build_submit_plan_tool(
     *,
     command_types: Sequence[str],
@@ -1188,6 +1371,7 @@ def build_submit_plan_tool(
     if not effective_types:
         raise _contract_error("v3_command_surface_empty", "The effective V3 command surface is empty.")
     tool = copy.deepcopy(_TOOLS[resource_refs_enabled])
+    tool["parameters"]["properties"]["commands"]["maxItems"] = command_limit(capability_surface)
     command_items = tool["parameters"]["properties"]["commands"]["items"]
     variants: list[dict[str, Any]] = []
     for variant in command_items["anyOf"]:
@@ -1204,6 +1388,8 @@ def build_submit_plan_tool(
                     variants.append(effect_variant)
         else:
             constrained_variant = copy.deepcopy(variant)
+            if command_type in _EXPLICIT_MIDI_COMMANDS:
+                _set_note_array_limit(constrained_variant, output_budget(capability_surface).notes)
             if command_type == "mix.apply_goal":
                 _constrain_mix_goal_intents(constrained_variant, capability_surface)
                 _constrain_mix_goal_targets(constrained_variant, capability_surface)
@@ -1247,16 +1433,39 @@ def build_submit_plan_tool(
     return tool
 
 
+def _budgeted_instructions(surface: V3CapabilitySurface, resource_refs_enabled: bool) -> str:
+    instructions = _RESOURCE_REF_INSTRUCTIONS if resource_refs_enabled else _INSTRUCTIONS
+    if surface.project_capacity_policy:
+        if _LEGACY_ROW_CAPACITY_INSTRUCTION not in instructions:
+            raise _contract_error(
+                "v3_contract_asset_invalid",
+                "The row-capacity instruction could not be selected.",
+            )
+        instructions = instructions.replace(
+            _LEGACY_ROW_CAPACITY_INSTRUCTION,
+            _DYNAMIC_ROW_CAPACITY_INSTRUCTION,
+            1,
+        )
+    return (
+        "Across midi.create_clip, midi.replace_notes, and midi.append_notes, "
+        f"include at most {output_budget(surface).notes} explicit notes in total per plan. "
+        "This is a shared ceiling, not a target.\n\n"
+        + instructions
+    )
+
+
 def build_provider_request(
     request: Mapping[str, Any],
     *,
     model: str,
     reasoning_effort: str,
-    max_output_tokens: int = 8192,
+    max_output_tokens: int | None = None,
     prompt_cache_retention: str = "24h",
     store: bool = True,
 ) -> dict[str, Any]:
-    bounded_output_tokens = max(1, min(int(max_output_tokens), 8192))
+    budget = output_budget(request["capability_surface"])
+    requested_output_tokens = budget.output_tokens if max_output_tokens is None else int(max_output_tokens)
+    bounded_output_tokens = max(1, min(requested_output_tokens, budget.output_tokens))
     resource_refs_enabled = request["resource_refs_enabled"] is True
     tool = build_submit_plan_tool(
         command_types=request["supported_command_types"],
@@ -1272,7 +1481,7 @@ def build_provider_request(
         metadata["prompt_trace_id"] = prompt_trace_id[:MAX_TRACE_ID_CHARS]
     return {
         "model": model.strip(),
-        "instructions": _RESOURCE_REF_INSTRUCTIONS if resource_refs_enabled else _INSTRUCTIONS,
+        "instructions": _budgeted_instructions(request["capability_surface"], resource_refs_enabled),
         "messages": [
             {
                 "role": "user",
@@ -1301,54 +1510,60 @@ def contract_fingerprint(
     capability_surface: V3CapabilitySurface,
     max_output_tokens: int = 8192,
 ) -> str:
+    capability_policy = {
+        "effects": [
+            {
+                "effect_id": effect.effect_id,
+                "parameters": [
+                    [parameter.parameter_id, parameter.minimum, parameter.maximum]
+                    for parameter in effect.parameters
+                ],
+            }
+            for effect in capability_surface.effects
+        ],
+        "instruments": [
+            {
+                "instrument_id": instrument.instrument_id,
+                "playable_pitch_ranges": [
+                    [item.low, item.high]
+                    for item in instrument.playable_pitch_ranges
+                ],
+            }
+            for instrument in capability_surface.instruments
+        ],
+        "selectable_instrument_ids": sorted(
+            capability_surface.selectable_instrument_ids
+        ),
+        "rows": [
+            [row.row_id, row.lane_kind, row.instrument_id]
+            for row in capability_surface.rows
+        ],
+        "clips": [
+            [
+                clip.clip_id,
+                clip.row_id,
+                clip.kind,
+                clip.instrument_id,
+                clip.length_beats,
+            ]
+            for clip in capability_surface.clips
+        ],
+        "groups": [
+            [group.group_id, list(group.member_row_ids)]
+            for group in capability_surface.groups
+        ],
+        "current_rows": capability_surface.current_rows,
+        "maximum_rows": capability_surface.maximum_rows,
+        "maximum_created_midi_clip_beats": capability_surface.maximum_created_midi_clip_beats,
+    }
+    if capability_surface.project_capacity_policy:
+        capability_policy.pop("maximum_rows")
+        capability_policy["project_capacity_policy"] = capability_surface.project_capacity_policy
+        capability_policy["row_creation_limit"] = capability_surface.maximum_rows
     policy = {
         "contract_version": CONTRACT_VERSION,
-        "instructions": _RESOURCE_REF_INSTRUCTIONS if resource_refs_enabled else _INSTRUCTIONS,
-        "capability_surface": {
-            "effects": [
-                {
-                    "effect_id": effect.effect_id,
-                    "parameters": [
-                        [parameter.parameter_id, parameter.minimum, parameter.maximum]
-                        for parameter in effect.parameters
-                    ],
-                }
-                for effect in capability_surface.effects
-            ],
-            "instruments": [
-                {
-                    "instrument_id": instrument.instrument_id,
-                    "playable_pitch_ranges": [
-                        [item.low, item.high]
-                        for item in instrument.playable_pitch_ranges
-                    ],
-                }
-                for instrument in capability_surface.instruments
-            ],
-            "selectable_instrument_ids": sorted(
-                capability_surface.selectable_instrument_ids
-            ),
-            "rows": [
-                [row.row_id, row.lane_kind, row.instrument_id]
-                for row in capability_surface.rows
-            ],
-            "clips": [
-                [
-                    clip.clip_id,
-                    clip.row_id,
-                    clip.kind,
-                    clip.instrument_id,
-                    clip.length_beats,
-                ]
-                for clip in capability_surface.clips
-            ],
-            "groups": [
-                [group.group_id, list(group.member_row_ids)]
-                for group in capability_surface.groups
-            ],
-            "current_rows": capability_surface.current_rows,
-            "maximum_rows": capability_surface.maximum_rows,
-        },
+        "instructions": _budgeted_instructions(capability_surface, resource_refs_enabled),
+        "capability_surface": capability_policy,
         "tool": build_submit_plan_tool(
             command_types=command_types,
             resource_refs_enabled=resource_refs_enabled,
@@ -1362,9 +1577,19 @@ def contract_fingerprint(
         "typed_clip_state_policy": _TYPED_CLIP_STATE_POLICY_VERSION,
         "group_state_policy": _GROUP_STATE_POLICY_VERSION,
         "user_visible_text_policy": _USER_VISIBLE_TEXT_POLICY_VERSION,
+        "midi_creation_policy": "client_eight_bar_and_strict_note_end_v1",
         "max_output_tokens": max_output_tokens,
-        "max_accepted_plan_bytes": MAX_ACCEPTED_PROVIDER_PLAN_BYTES,
+        "max_accepted_plan_bytes": output_budget(capability_surface).plan_bytes,
+        "generated_midi_policy": capability_surface.generated_midi_policy,
+        "generated_midi_note_limit": output_budget(capability_surface).notes,
+        "output_token_ceiling": output_budget(capability_surface).output_tokens,
     }
+    if capability_surface.plan_command_policy:
+        policy["plan_command_policy"] = capability_surface.plan_command_policy
+        policy["plan_command_limit"] = command_limit(capability_surface)
+    if capability_surface.midi_boundary_bpm:
+        policy["midi_boundary_policy"] = midi_boundary.POLICY
+        policy["midi_boundary_bpm"] = capability_surface.midi_boundary_bpm
     return hashlib.sha256(_canonical_json(policy).encode("utf-8")).hexdigest()[:16]
 
 
@@ -1604,6 +1829,9 @@ def _validate_playable_notes(
     instruments: Mapping[str, V3InstrumentCapability],
     *,
     maximum_end_beat: float | None = None,
+    command_index: int | None = None,
+    command_type: str = "",
+    pitch_violations: list[dict[str, Any]] | None = None,
 ) -> None:
     instrument = instruments.get(instrument_id)
     if instrument is None:
@@ -1611,10 +1839,30 @@ def _validate_playable_notes(
             "v3_plan_capability_invalid", "A MIDI command has no available instrument."
         )
     if any(not instrument.can_play(note.pitch) for note in notes):
-        raise _contract_error(
+        error = _contract_error(
             "v3_plan_midi_pitch_unavailable",
             "The provider plan contains a note unavailable to its effective instrument.",
         )
+        if command_index is not None:
+            error.repair_details = {
+                "command_index": command_index,
+                "command_type": command_type,
+                "effective_instrument_id": instrument_id,
+                "rejected_pitches": sorted({note.pitch for note in notes if not instrument.can_play(note.pitch)}),
+                "playable_pitch_ranges": [{"low": item.low, "high": item.high}
+                                          for item in instrument.playable_pitch_ranges],
+            }
+        if pitch_violations is None:
+            raise error
+        if command_type not in {"midi.create_clip", "midi.replace_notes", "midi.append_notes"}:
+            raise error
+        for note_index, note in enumerate(notes):
+            if not instrument.can_play(note.pitch):
+                pitch_violations.append({
+                    **(error.repair_details or {}),
+                    "note_index": note_index,
+                    "original_pitch": note.pitch,
+                })
     if maximum_end_beat is not None and any(
         note.start_beat + note.length_beats > maximum_end_beat + 0.000001
         for note in notes
@@ -1726,10 +1974,26 @@ def _validate_phone_cleanup_sound_conflicts(
 
 
 def validate_plan_capabilities(
-    plan: Mapping[str, Any], capability_surface: V3CapabilitySurface
+    plan: Mapping[str, Any], capability_surface: V3CapabilitySurface,
+    *, _pitch_violations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    if len(plan.get("commands", [])) > command_limit(capability_surface):
+        raise _contract_error("v3_plan_schema_invalid", "Plan exceeds the command budget.")
+    generated_notes = sum(
+        len(command.get("arguments", {}).get("notes", []))
+        for command in plan.get("commands", [])
+        if command.get("type") in _EXPLICIT_MIDI_COMMANDS
+    )
+    if generated_notes > output_budget(capability_surface).notes:
+        raise _contract_error("v3_generated_midi_limit", "Plan exceeds the shared generated MIDI note budget.")
+    # Evaluation-only analysis may collect explicit-note pitch failures. It must
+    # still run every other check; callers must never execute an analyzed plan.
     effect_by_id = capability_surface.effect_by_id
     instrument_by_id = capability_surface.instrument_by_id
+    boundary_tempo_stable = not any(
+        command.get("type") in {"project.set_tempo", "project.set_tempo_from_clip"}
+        for command in plan.get("commands", [])
+    )
     active_rows = {
         row.row_id: _V3MutableRowState(
             row.lane_kind, row.instrument_id, row.mix_processing_supported
@@ -1979,9 +2243,20 @@ def validate_plan_capabilities(
             )
         return False
 
-    for command in plan.get("commands", []):
+    for command_index, command in enumerate(plan.get("commands", [])):
         command_id = str(command.get("command_id") or "").strip()
         command_type = str(command.get("type") or "").strip()
+        if _pitch_violations and command_type not in {
+            "midi.create_clip", "midi.replace_notes", "midi.append_notes",
+            "row.create", "mix.apply_goal", "row.rename",
+            "effect.ensure_configured", "effect.remove", "effect.set_bypassed",
+        }:
+            # Deliberately conservative: do not solve downstream pitch/identity
+            # dependencies, even on an apparently unrelated target.
+            raise _contract_error(
+                "v3_pitch_repair_dependency_unsupported",
+                "Pitch analysis cannot resolve a downstream operation safely.",
+            )
         arguments = command.get("arguments")
         if not command_id or command_id in command_ids or not isinstance(arguments, dict):
             raise _contract_error(
@@ -2104,11 +2379,35 @@ def validate_plan_capabilities(
                 )
             if command_type in {"midi.replace_notes", "midi.append_notes"}:
                 notes = _plan_midi_notes(arguments.get("notes"))
+                if _pitch_violations is not None and not clip.instrument_id:
+                    raise _contract_error(
+                        "v3_pitch_repair_instrument_unknown",
+                        "Pitch analysis requires a resolved instrument.",
+                    )
+                original_clip = capability_surface.clip_by_id.get(arguments.get("clip_id"))
+                if (
+                    command_type == "midi.replace_notes"
+                    and capability_surface.midi_boundary_bpm
+                    and boundary_tempo_stable
+                    and original_clip is not None
+                    and original_clip.kind == "midi"
+                    and original_clip.length_beats is not None
+                    and clip.length_beats is not None
+                    and notes
+                ):
+                    clip.length_beats = midi_boundary.extended_length(
+                        original_clip.length_beats, clip.length_beats,
+                        max(note.start_beat + note.length_beats for note in notes),
+                        capability_surface.midi_boundary_bpm,
+                    )
                 if clip.instrument_id:
                     _validate_playable_notes(
                         notes,
                         clip.instrument_id,
                         instrument_by_id,
+                        command_index=command_index,
+                        command_type=command_type,
+                        pitch_violations=_pitch_violations,
                         maximum_end_beat=(
                             clip.length_beats
                             if command_type == "midi.replace_notes"
@@ -2171,7 +2470,8 @@ def validate_plan_capabilities(
                     ]
                     if clip.instrument_id:
                         _validate_playable_notes(
-                            transposed, clip.instrument_id, instrument_by_id
+                            transposed, clip.instrument_id, instrument_by_id,
+                            command_index=command_index, command_type=command_type,
                         )
                     clip.midi_notes = transposed
 
@@ -2186,6 +2486,18 @@ def validate_plan_capabilities(
 
         if command_type == "midi.create_clip":
             notes = _plan_midi_notes(arguments.get("notes"))
+            clip_length = float(arguments["length_beats"])
+            if clip_length > capability_surface.maximum_created_midi_clip_beats:
+                raise _contract_error(
+                    "v3_plan_midi_arrangement_limit",
+                    "A generated MIDI clip exceeds the client's eight-bar limit.",
+                )
+            # Match the client's strict clip-relative check; no rounding tolerance.
+            if any(note.start_beat + note.length_beats > clip_length for note in notes):
+                raise _contract_error(
+                    "v3_plan_midi_note_out_of_bounds",
+                    "A generated MIDI note extends beyond its new clip.",
+                )
             destination = arguments.get("destination")
             instrument_id = ""
             _, row = destination_row_state(destination)
@@ -2195,12 +2507,20 @@ def validate_plan_capabilities(
                     "A MIDI clip destination is not an instrument row.",
                 )
             instrument_id = row.instrument_id
+            if _pitch_violations is not None and not instrument_id:
+                raise _contract_error(
+                    "v3_pitch_repair_instrument_unknown",
+                    "Pitch analysis requires a resolved instrument.",
+                )
             if instrument_id:
-                _validate_playable_notes(notes, instrument_id, instrument_by_id)
+                _validate_playable_notes(notes, instrument_id, instrument_by_id,
+                    command_index=command_index, command_type=command_type,
+                    pitch_violations=_pitch_violations)
 
         creation_count = _row_creation_count(command_type, arguments)
         if (
             creation_count > 0
+            and capability_surface.maximum_rows is not None
             and simulated_rows + creation_count > capability_surface.maximum_rows
         ):
             raise _contract_error(
@@ -2509,7 +2829,7 @@ def validate_plan_capabilities(
     }
 
 
-def parse_and_validate_provider_plan(
+def parse_provider_plan_structure(
     payload: Mapping[str, Any],
     *,
     command_types: Sequence[str],
@@ -2517,6 +2837,7 @@ def parse_and_validate_provider_plan(
     capability_surface: V3CapabilitySurface,
     original_request: str = "",
 ) -> dict[str, Any]:
+    """Parse the envelope and structural rules, but do NOT authorize execution."""
     status = str(payload.get("status") or "").strip().lower()
     incomplete = payload.get("incomplete_details")
     incomplete_reason = (
@@ -2551,7 +2872,7 @@ def parse_and_validate_provider_plan(
         raise _contract_error("v3_provider_arguments_missing", "Provider arguments are invalid.")
     if not isinstance(plan, dict):
         raise _contract_error("v3_provider_plan_not_object", "Provider plan must be an object.")
-    if len(_canonical_json(plan).encode("utf-8")) > MAX_ACCEPTED_PROVIDER_PLAN_BYTES:
+    if len(_canonical_json(plan).encode("utf-8")) > output_budget(capability_surface).plan_bytes:
         raise _contract_error("v3_provider_plan_too_large", "Provider plan exceeds the accepted output budget.")
     tool = build_submit_plan_tool(
         command_types=command_types,
@@ -2568,6 +2889,22 @@ def parse_and_validate_provider_plan(
     outcome = plan.get("outcome")
     if bool(commands) != (outcome == "plan"):
         raise _contract_error("v3_plan_outcome_invalid", "Provider plan outcome does not match its commands.")
+    return plan
+
+
+def parse_and_validate_provider_plan(
+    payload: Mapping[str, Any],
+    *,
+    command_types: Sequence[str],
+    resource_refs_enabled: bool,
+    capability_surface: V3CapabilitySurface,
+    original_request: str = "",
+) -> dict[str, Any]:
+    plan = parse_provider_plan_structure(
+        payload, command_types=command_types,
+        resource_refs_enabled=resource_refs_enabled,
+        capability_surface=capability_surface, original_request=original_request,
+    )
     validate_plan_capabilities(plan, capability_surface)
     return plan
 

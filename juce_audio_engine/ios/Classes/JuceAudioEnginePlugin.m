@@ -7488,6 +7488,18 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         [JuceBridge endProjectClipLoadObjC];
         result(nil);
 #endif
+    } else if ([call.method isEqualToString:@"endProjectClipLoadDetailed"]) {
+#if TARGET_OS_OSX
+        FlutterResult endResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            NSInteger status = [JuceBridge endProjectClipLoadDetailedObjC];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                endResult(@(status));
+            });
+        });
+#else
+        result(@([JuceBridge endProjectClipLoadDetailedObjC]));
+#endif
     } else if ([call.method isEqualToString:@"beginGraphMutationBatch"]) {
 #if TARGET_OS_OSX
         FlutterResult beginResult = [result copy];
@@ -7532,6 +7544,26 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
                                inFileOffsetSec:inFileOffsetSec];
             dispatch_async(dispatch_get_main_queue(), ^{
                 loadResult(@(ok));
+            });
+        });
+    } else if ([call.method isEqualToString:@"loadClipDetailed"]) {
+        NSInteger clip = [args[@"clip"] integerValue];
+        NSInteger rowId = [args[@"rowId"] integerValue];
+        if (args[@"row"] != nil) rowId = [args[@"row"] integerValue];
+        NSString *path = [args[@"path"] ?: @"" copy];
+        double startSec = [args[@"startSec"] doubleValue];
+        double lengthSec = [args[@"lengthSec"] doubleValue];
+        double inFileOffsetSec = [args[@"inFileOffsetSec"] doubleValue];
+        FlutterResult loadResult = [result copy];
+        dispatch_async(MixroomMidiClipLoadQueue(), ^{
+            NSInteger status = [JuceBridge loadClipDetailedObjC:clip
+                                                          rowId:rowId
+                                                           path:path
+                                                       startSec:startSec
+                                                      lengthSec:lengthSec
+                                                inFileOffsetSec:inFileOffsetSec];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                loadResult(@(status));
             });
         });
     } else if ([call.method isEqualToString:@"unloadClip"]) {

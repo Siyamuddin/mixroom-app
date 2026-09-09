@@ -184,6 +184,7 @@ def _context(
     library_asset_count: int | None = None,
     midi_note_count: int = 0,
     include_library_asset_metadata: bool = False,
+    dynamic_capacity: bool = False,
 ) -> dict[str, Any]:
     instrument_ids = [f"synthetic-instrument-{index}" for index in range(1, 5)]
     rows: list[dict[str, Any]] = []
@@ -273,17 +274,31 @@ def _context(
             )
         library_assets.append(asset)
 
-    return {
-        "schema_version": "core_context_v3_prototype_1",
-        "project": {
-            "project_id": "synthetic-project",
-            "bpm": 120,
-            "row_capacity": {
+    project = {
+        "project_id": "synthetic-project",
+        "generated_midi_policy": v3_server_contract.GENERATED_MIDI_POLICY,
+        "plan_command_policy": v3_server_contract.PLAN_COMMAND_POLICY,
+        "bpm": 120,
+        "row_capacity": (
+            {
+                "current_rows": row_count,
+                "creation_limit": None,
+                "can_create": True,
+            }
+            if dynamic_capacity
+            else {
                 "current_rows": row_count,
                 "max_rows": row_count + 8,
                 "can_create": True,
-            },
-        },
+            }
+        ),
+    }
+    if dynamic_capacity:
+        project["project_capacity_policy"] = v3_server_contract.PROJECT_CAPACITY_POLICY
+
+    return {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": project,
         "rows": rows,
         "clips": clips,
         "groups": groups,
@@ -311,6 +326,7 @@ def _request(
     library_asset_count: int | None = None,
     midi_note_count: int = 0,
     include_library_asset_metadata: bool = False,
+    dynamic_capacity: bool = False,
 ) -> dict[str, Any]:
     return {
         "request_contract": v3_server_contract.REQUEST_CONTRACT,
@@ -322,6 +338,7 @@ def _request(
             library_asset_count=library_asset_count,
             midi_note_count=midi_note_count,
             include_library_asset_metadata=include_library_asset_metadata,
+            dynamic_capacity=dynamic_capacity,
         ),
         "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
         "supported_command_types": (
@@ -349,7 +366,6 @@ def _build_provider_request(body: dict[str, Any]) -> dict[str, Any]:
         validated,
         model="gpt-5.6-luna",
         reasoning_effort="low",
-        max_output_tokens=8192,
         prompt_cache_retention="24h",
         store=True,
     )
@@ -423,6 +439,17 @@ def scenarios() -> dict[str, dict[str, Any]]:
             include_library_asset_metadata=True,
         ),
         "boundary": _boundary_request(),
+        "large_project": _request(
+            row_count=120,
+            clip_count=600,
+            library_asset_count=250,
+            midi_note_count=512,
+            turn_count=8,
+            full_command_surface=True,
+            padded_conversation=True,
+            include_library_asset_metadata=True,
+            dynamic_capacity=True,
+        ),
     }
 
 

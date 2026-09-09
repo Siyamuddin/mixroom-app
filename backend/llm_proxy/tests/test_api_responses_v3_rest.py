@@ -202,7 +202,7 @@ class _Context:
     aws_request_id = "paired-request-id"
 
     def get_remaining_time_in_millis(self) -> int:
-        return 60_000
+        return 115_000
 
 
 class V3RestAdapterTests(unittest.TestCase):
@@ -542,8 +542,8 @@ class V3RestAdapterTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS": "55",
-                "AI_V3_TIMEOUT_SECONDS": "55",
+                "AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS": "105",
+                "AI_V3_TIMEOUT_SECONDS": "105",
             },
             clear=False,
         ):
@@ -551,7 +551,9 @@ class V3RestAdapterTests(unittest.TestCase):
                 (27_000, 25),
                 (42_000, 40),
                 (56_000, 54),
-                (60_000, 55),
+                (60_000, 58),
+                (107_000, 105),
+                (115_000, 105),
             ):
                 with self.subTest(remaining_ms=remaining_ms):
                     context = _Context()
@@ -561,18 +563,18 @@ class V3RestAdapterTests(unittest.TestCase):
                         expected,
                     )
 
-    def test_long_rest_handler_passes_55_second_deadline_to_provider(self) -> None:
+    def test_long_rest_handler_passes_105_second_deadline_to_provider(self) -> None:
         result, provider, usage = self._invoke(
             api_responses_v3_rest.handler,
             _rest_event(_body()),
             environment={
-                "AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS": "55",
-                "AI_V3_TIMEOUT_SECONDS": "55",
+                "AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS": "105",
+                "AI_V3_TIMEOUT_SECONDS": "105",
             },
         )
 
         self.assertEqual(result["statusCode"], 200)
-        self.assertEqual(provider.timeout_seconds, 55)
+        self.assertEqual(provider.timeout_seconds, 105)
         self.assertEqual(len(usage.reserve_calls), 1)
         self.assertEqual(len(usage.finalize_calls), 1)
         self.assertEqual(usage.release_calls, [])
@@ -588,7 +590,7 @@ class V3RestAdapterTests(unittest.TestCase):
         ):
             self.assertEqual(
                 api_responses._v3_request_timeout_seconds(_Context()),
-                55,
+                105,
             )
 
 

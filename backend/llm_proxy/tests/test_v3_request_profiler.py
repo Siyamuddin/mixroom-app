@@ -17,6 +17,36 @@ SPEC.loader.exec_module(profile_v3_requests)
 
 
 class V3RequestProfilerTests(unittest.TestCase):
+    def test_language_check_is_final_in_both_instruction_variants(self) -> None:
+        final_check = (
+            "Before submitting the plan, check that user_message and every "
+            "question_options entry use the current ORIGINAL_REQUEST_VERBATIM "
+            "request's language. This also applies when explaining a limitation "
+            "or asking for clarification. Ignore earlier conversation and project "
+            "context when choosing that language. Do not translate command "
+            "identifiers or resource names."
+        )
+        for resource_refs_enabled in (False, True):
+            with self.subTest(resource_refs_enabled=resource_refs_enabled):
+                body = profile_v3_requests.scenarios()["small"].copy()
+                body["resource_refs_enabled"] = resource_refs_enabled
+                request = profile_v3_requests._build_provider_request(body)
+                self.assertTrue(request["instructions"].rstrip().endswith(final_check))
+                self.assertEqual(request["instructions"].count(final_check), 1)
+                self.assertNotIn(
+                    "Choose the language of every user-visible message",
+                    request["instructions"],
+                )
+                content = request["messages"][0]["content"]
+                self.assertEqual(len(content), 3)
+                self.assertEqual(
+                    content[-1]["text"],
+                    "ORIGINAL_REQUEST_VERBATIM:\n" + body["original_request"],
+                )
+                self.assertNotIn(
+                    "response_language", request["tools"][0]["parameters"]["properties"]
+                )
+
     def test_profiles_are_deterministic_and_match_the_approved_baseline(self) -> None:
         first = profile_v3_requests.run_profiles(iterations=1)
         second = profile_v3_requests.run_profiles(iterations=1)
@@ -53,6 +83,7 @@ class V3RequestProfilerTests(unittest.TestCase):
         medium = profiles["medium"]
         product_max = profiles["product_max"]
         boundary = profiles["boundary"]
+        large_project = profiles["large_project"]
         self.assertGreater(
             medium["tool_schema_bytes"],
             medium["provider_request_bytes"] * 0.85,
@@ -78,6 +109,19 @@ class V3RequestProfilerTests(unittest.TestCase):
         self.assertEqual(product_max["tool_command_variant_count"], 54)
         self.assertTrue(
             profile_v3_requests.scenarios()["product_max"]["resource_refs_enabled"]
+        )
+        self.assertEqual(large_project["row_count"], 120)
+        self.assertEqual(large_project["clip_count"], 600)
+        self.assertEqual(large_project["midi_note_count"], 512)
+        self.assertEqual(large_project["library_asset_count"], 250)
+        self.assertEqual(large_project["effective_command_type_count"], 54)
+        self.assertLess(
+            large_project["tool_schema_bytes"],
+            profile_v3_requests.v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+        )
+        self.assertLess(
+            large_project["wire_request_bytes"],
+            profile_v3_requests.v3_server_contract.MAX_PROVIDER_WIRE_BYTES,
         )
 
     def test_boundary_profile_is_the_largest_current_valid_context(self) -> None:

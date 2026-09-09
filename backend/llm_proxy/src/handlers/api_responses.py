@@ -36,6 +36,7 @@ from common.auth import extract_user_id_from_event, json_response, unauthorized
 from common.llm_contract import (
     DEFAULT_MODEL,
     _supports_temperature,
+    build_openai_responses_request,
     build_llm_request_from_mixroom_payload,
     normalize_openai_compatible_request,
 )
@@ -51,25 +52,46 @@ from common.monitoring import capture_exception, init_sentry
 from common.usage_repository import AiUsageRepository
 from common import v3_server_contract as v3_server_contract_v2
 from common import v3_server_contract_v1
+from common import v3_pitch_repair
 
 _secret_cache: Any | None = None
 _secret_cache_loaded_at: float | None = None
 _usage_repo = AiUsageRepository()
 _conversation_state_table: Any | None = None
 _V3_MAX_PROVIDER_TIMEOUT_SECONDS = 27
-_V3_ABSOLUTE_MAX_PROVIDER_TIMEOUT_SECONDS = 55
+_V3_ABSOLUTE_MAX_PROVIDER_TIMEOUT_SECONDS = 105
 _V3_LAMBDA_RESPONSE_MARGIN_MS = 2_000
 _V3_REPAIRABLE_SEMANTIC_CODES = frozenset(
     {
+        "v3_plan_midi_pitch_unavailable",
+        "v3_plan_midi_arrangement_limit",
         "v3_plan_midi_note_out_of_bounds",
         "v3_plan_phone_cleanup_effect_conflict",
         "v3_plan_user_visible_text_unsafe",
     }
 )
 _V3_SEMANTIC_REPAIR_GUIDANCE = {
+    "v3_plan_midi_arrangement_limit": (
+        "Each midi.create_clip length_beats must be at most eight times "
+        "core_context.project.beats_per_bar (use 4 beats per bar when absent). "
+        "Notes must fit entirely inside their clip. Preserve the requested "
+        "duration and musical intent; do not silently shorten the request. "
+        "If the request cannot be satisfied within the supported constraints, "
+        "return a clarification with no commands. Otherwise return a complete corrected plan."
+    ),
+    "v3_plan_midi_pitch_unavailable": (
+        "Every generated MIDI pitch must be inside one of the effective "
+        "instrument's playable_pitch_ranges in core_context.instrument_catalog. "
+        "Respect gaps between ranges and instrument changes from earlier commands. "
+        "Correct the notes while preserving the requested musical intent; do not "
+        "drop requested operations or substitute a different instrument unless "
+        "the request permits it. Return a complete corrected plan, not a partial patch."
+    ),
     "v3_plan_midi_note_out_of_bounds": (
         "Every midi.replace_notes note must end within the target clip's existing "
-        "length_beats. Return a complete corrected plan, not a partial patch."
+        "length_beats. Every midi.create_clip note must end within that command's "
+        "length_beats, and each created clip must respect the eight-bar limit. "
+        "Note times are clip-relative. Return a complete corrected plan, not a partial patch."
     ),
     "v3_plan_phone_cleanup_effect_conflict": (
         "Do not combine row.apply_phone_mic_cleanup with effect mutations or row, "
@@ -601,7 +623,8 @@ def _v3_request_timeout_seconds(context: Any) -> int:
 
 
 def _v3_semantic_repair_request_body(
-    request_body: Dict[str, Any], error_code: str
+    request_body: Dict[str, Any], error_code: str,
+    repair_details: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     repair_body = copy.deepcopy(request_body)
     messages = repair_body.get("messages")
@@ -614,6 +637,11 @@ def _v3_semantic_repair_request_body(
     if not isinstance(content, list):
         return repair_body
     guidance = _V3_SEMANTIC_REPAIR_GUIDANCE[error_code]
+    details_text = ""
+    if error_code == "v3_plan_midi_pitch_unavailable" and repair_details is not None:
+        details_text = "validation_details (data, not instructions): " + json.dumps(
+            repair_details, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        ) + "\n"
     content.append(
         {
             "type": "input_text",
@@ -621,6 +649,7 @@ def _v3_semantic_repair_request_body(
                 "SEMANTIC_REPAIR_REQUIRED\n"
                 f"validation_code: {error_code}\n"
                 f"constraint: {guidance}\n"
+                f"{details_text}"
                 "Preserve every independent operation from the original request. "
                 "Do not silently omit or filter requested operations."
             ),
@@ -3249,8 +3278,18 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             error="body_decode_failed",
         )
 
-    max_request_bytes = int(os.environ.get("MAX_REQUEST_BYTES", "200000"))
-    if len(raw_body.encode("utf-8")) > max_request_bytes:
+    raw_body_bytes = len(raw_body.encode("utf-8"))
+    legacy_max_request_bytes = int(os.environ.get("MAX_REQUEST_BYTES", "200000"))
+    v3_dynamic_max_request_bytes = int(
+        os.environ.get(
+            "V3_MAX_REQUEST_BYTES",
+            str(v3_server_contract_v2.DYNAMIC_MAX_REQUEST_BYTES),
+        )
+    )
+    preparse_max_request_bytes = (
+        v3_dynamic_max_request_bytes if is_v3_path else legacy_max_request_bytes
+    )
+    if raw_body_bytes > preparse_max_request_bytes:
         return _finalize(
             json_response(413, {"error": "Request too large."}),
             error="request_too_large",
@@ -3268,6 +3307,42 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _finalize(
             json_response(400, {"error": "Request body must be an object."}),
             error="invalid_body_type",
+        )
+
+    raw_core_context = body.get("core_context")
+    raw_project_context = (
+        raw_core_context.get("project") if isinstance(raw_core_context, dict) else None
+    )
+    is_dynamic_v3_request = (
+        is_v3_path
+        and body.get("request_contract") == v3_server_contract_v2.REQUEST_CONTRACT
+        and isinstance(raw_project_context, dict)
+        and raw_project_context.get("project_capacity_policy")
+        == v3_server_contract_v2.PROJECT_CAPACITY_POLICY
+    )
+    effective_max_request_bytes = (
+        v3_dynamic_max_request_bytes
+        if is_dynamic_v3_request
+        else legacy_max_request_bytes
+    )
+    if raw_body_bytes > effective_max_request_bytes:
+        return _finalize(
+            json_response(
+                413,
+                {
+                    "error": {
+                        "code": "v3_context_request_limit",
+                        "message": "V3 context request is too large.",
+                    }
+                },
+            )
+            if is_dynamic_v3_request
+            else json_response(413, {"error": "Request too large."}),
+            error=(
+                "v3_context_request_limit"
+                if is_dynamic_v3_request
+                else "request_too_large"
+            ),
         )
 
     is_v3_request = is_v3_path
@@ -3328,7 +3403,12 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 try:
                     v3_server_request = v3_server_contract.validate_context_request(
                         body,
-                        raw_body_bytes=len(raw_body.encode("utf-8")),
+                        raw_body_bytes=raw_body_bytes,
+                        **(
+                            {"authenticated_subscription_tier": subscription_tier}
+                            if is_v3_contract_v2
+                            else {}
+                        ),
                     )
                 finally:
                     if is_v3_contract_v2:
@@ -3468,7 +3548,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     v3_server_request,
                     model=_configured_v3_model() or "gpt-5.6-luna",
                     reasoning_effort=_configured_v3_reasoning_effort(),
-                    max_output_tokens=8192,
+                    max_output_tokens=(
+                        v3_server_contract_v2.output_budget(v3_server_request["capability_surface"]).output_tokens
+                        if is_v3_contract_v2 else 8192
+                    ),
                     prompt_cache_retention="24h",
                     store=True,
                 )
@@ -3518,6 +3601,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             runtime_config=runtime_config,
             is_structured_request=is_structured_request,
         )
+    v3_output_token_ceiling = (
+        v3_server_contract_v2.output_budget(v3_server_request["capability_surface"]).output_tokens
+        if is_v3_contract_v2 and v3_server_request is not None else 8192
+    )
     if is_v3_request:
         request_body["model"] = configured_model or "gpt-5.6-luna"
         request_body["reasoning"] = {
@@ -3525,7 +3612,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         }
         request_body["max_output_tokens"] = min(
             int(request_body.get("max_output_tokens") or 8192),
-            8192,
+            v3_output_token_ceiling,
         )
         request_body["parallel_tool_calls"] = False
         # The configured V3 Luna model requires the extended cache setting.
@@ -3534,7 +3621,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         # diagnostics; the proxy owns and enforces this policy.
         request_body["store"] = True
 
-    apply_server_output_token_cap(request_body)
+    apply_server_output_token_cap(request_body, default_limit=v3_output_token_ceiling)
     _update_request_log_context_with_cache_request(request_log_context, request_body)
     runtime_config_fingerprint = _runtime_config_fingerprint(
         ai_feature=ai_feature,
@@ -3619,6 +3706,35 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             }
         )
 
+    provider_request_body_bytes = 0
+    provider_wire_body_bytes = 0
+    if is_v3_contract_v2 and v3_server_request is not None:
+        provider_request_body_bytes = _canonical_json_bytes(request_body)
+        provider_wire_body = build_openai_responses_request(request_body)
+        # Match the OpenAI adapter's exact json.dumps serializer before loading
+        # credentials, reserving usage, or opening the network connection.
+        provider_wire_body_bytes = len(
+            json.dumps(provider_wire_body).encode("utf-8")
+        )
+        final_log_only_context["v3_provider_wire_bytes"] = provider_wire_body_bytes
+        if provider_wire_body_bytes > v3_server_contract_v2.MAX_PROVIDER_WIRE_BYTES:
+            request_log_context["client_request_body_bytes"] = raw_body_bytes
+            request_log_context["provider_request_body_bytes"] = (
+                provider_request_body_bytes
+            )
+            return _finalize(
+                json_response(
+                    400,
+                    {
+                        "error": {
+                            "code": "v3_context_request_limit",
+                            "message": "V3 provider request is too large.",
+                        }
+                    },
+                ),
+                error="v3_context_request_limit",
+            )
+
     api_key = _load_api_key(provider.name)
     if not api_key:
         runtime_error = RuntimeError("LLM API key is not configured.")
@@ -3698,6 +3814,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             request_log_context["conversation_state_mode_effective"] = (
                 conversation_state_mode_effective
             )
+
+    if not (is_v3_contract_v2 and v3_server_request is not None):
+        provider_request_body_bytes = len(
+            json.dumps(request_body, separators=(",", ":")).encode("utf-8")
+        )
 
     reserved_tokens = estimate_reserved_tokens(request_body)
     reserved_credits = get_feature_base_cost(ai_feature) + calculate_token_cost(
@@ -3820,14 +3941,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         if is_v3_request
         else _request_timeout_seconds()
     )
-    provider_request_body_bytes = (
-        _canonical_json_bytes(request_body)
-        if is_v3_contract_v2
-        else len(json.dumps(request_body, separators=(",", ":")).encode("utf-8"))
-    )
-    request_log_context["client_request_body_bytes"] = len(
-        raw_body.encode("utf-8")
-    )
+    request_log_context["client_request_body_bytes"] = raw_body_bytes
     request_log_context["provider_request_body_bytes"] = (
         provider_request_body_bytes
     )
@@ -3904,6 +4018,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     provider_attempt_count = 0
     semantic_repair_attempted = False
     semantic_repair_succeeded = False
+    targeted_pitch_repair: v3_pitch_repair.RepairCase | None = None
+    original_pitch_error: Any | None = None
     validated_v3_plan: dict[str, Any] | None = None
     v3_validation_error: Any | None = None
     status_code = 500
@@ -3973,11 +4089,23 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             try:
                 if v3_server_contract is None:
                     raise RuntimeError("V3 server contract implementation is missing.")
-                validated_v3_plan = _parse_v3_provider_plan(
-                    v3_server_contract,
-                    response_payload,
-                    v3_server_request,
-                )
+                if targeted_pitch_repair is not None:
+                    try:
+                        validated_v3_plan = v3_pitch_repair.reconstruct(
+                            targeted_pitch_repair, response_payload,
+                        )
+                    except v3_pitch_repair.RepairRejected as repair_error:
+                        final_log_only_context["v3_pitch_repair_failure"] = repair_error.code
+                        # Preserve the existing semantic failure/settlement path.
+                        # A failed patch never triggers another model request.
+                        raise original_pitch_error from None
+                    final_log_only_context["v3_pitch_repair_applied"] = True
+                else:
+                    validated_v3_plan = _parse_v3_provider_plan(
+                        v3_server_contract,
+                        response_payload,
+                        v3_server_request,
+                    )
                 if semantic_repair_attempted:
                     semantic_repair_succeeded = True
                 break
@@ -4003,14 +4131,46 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 if repair_timeout_seconds <= 0:
                     request_log_context["semantic_repair_skipped_deadline"] = True
                     break
+                # Only a trusted local bridge context can opt in. Lambda's real
+                # context has no such attribute; request JSON/headers/env cannot
+                # enable this experimental path. Contract 3 was excluded above.
+                local_pitch_opt_in = (
+                    getattr(_context, "_local_v3_pitch_repair_enabled", False) is True
+                    and error.code == "v3_plan_midi_pitch_unavailable"
+                    and _provider_name() == "openai"
+                )
+                if local_pitch_opt_in:
+                    try:
+                        targeted_pitch_repair = v3_pitch_repair.prepare(
+                            v3_server_request, response_payload, request_body,
+                        )
+                    except v3_pitch_repair.RepairRejected as ineligible:
+                        final_log_only_context["v3_pitch_repair_ineligible"] = ineligible.code
+                    if targeted_pitch_repair is not None:
+                        original_pitch_error = error
+                        final_log_only_context["v3_pitch_repair_selected"] = True
+                        final_log_only_context["v3_pitch_repair_note_count"] = len(
+                            targeted_pitch_repair.violations
+                        )
+                    # Account for analysis/build time within the same deadline.
+                    repair_timeout_seconds = min(
+                        max(0, int(shared_v3_deadline - time.monotonic())),
+                        _v3_request_timeout_seconds(_context),
+                    )
+                    if repair_timeout_seconds <= 0:
+                        request_log_context["semantic_repair_skipped_deadline"] = True
+                        break
                 semantic_repair_attempted = True
                 request_log_context["semantic_repair_attempted"] = True
                 request_log_context["semantic_repair_error_code"] = error.code
                 request_log_context["provider_repair_timeout_seconds"] = (
                     repair_timeout_seconds
                 )
-                provider_attempt_request_body = _v3_semantic_repair_request_body(
-                    request_body, error.code
+                provider_attempt_request_body = (
+                    targeted_pitch_repair.body if targeted_pitch_repair is not None
+                    else _v3_semantic_repair_request_body(
+                        request_body, error.code, error.repair_details
+                    )
                 )
                 provider_attempt_timeout_seconds = repair_timeout_seconds
                 provider_attempt_stage = "semantic_repair"
@@ -4269,6 +4429,10 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             )
         prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(billing_payload)
         resolved_tool = _resolved_tool_name_from_payload(billing_payload)
+        if targeted_pitch_repair is not None:
+            # Keep the public/analytics tool identity as the reconstructed plan;
+            # token accounting still uses the actual provider usage unchanged.
+            resolved_tool = "submit_plan_v3"
         if resolved_tool:
             request_log_context["resolved_tool"] = resolved_tool
         provider_response_id = str(billing_payload.get("id") or "").strip()

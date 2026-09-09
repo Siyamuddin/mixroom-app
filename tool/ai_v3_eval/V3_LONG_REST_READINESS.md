@@ -7,6 +7,29 @@ Each external step requires explicit approval. Do not use the dirty
 
 ## What is already deployed
 
+**September 8 local update:** the owner confirmed that no distributed build
+depends on the unreleased 55s long path. The local replacement now uses 105s
+provider, 115s Lambda, 120s REST integration, and 130s opt-in client. No deadline
+negotiation was added. The original HTTP path and public opt-in defaults remain
+unchanged. AWS quota approval for 120,000 ms was separately verified, but no
+endpoint configuration or code was deployed. The September 6 snapshot below is
+historical deployed state, not the current local candidate.
+
+The new long-path maximum envelope at rate 1/s and burst 20 is 135 simultaneous
+requests; allowing 20 slots for other work requires at least 155 available slots.
+This is a conservative planning check, not a reservation or a live capacity claim.
+Preserve applied throttles and review actual headroom before activation.
+
+Local replacement verification: 340 AI-backend tests, 66 selected client
+configuration/planner/action-flow tests, and the real 75-second fake-provider
+loopback test passed. The loopback test now uses the normal 130-second route
+configuration and unmodified handler deadline logic, not candidate overrides.
+Shared-deadline tests verify 105s exhaustion, repair using only the remaining
+budget, Lambda response margins, and single settlement. SAM lint and
+`git diff --check` passed. Frozen original HTTP resource hashes still match.
+The running manual app/bridge must be rebuilt/restarted together to use these
+source changes; they are not hot-applied to an existing session.
+
 Read-only inspection on September 6, 2026 KST confirmed the long REST API and
 Lambda already exist in `mixroom-llm-proxy-prod`, `ap-northeast-2`. The stack
 was last updated September 4. This is not a first dormant deployment.
@@ -58,9 +81,10 @@ authentication, entitlements, and usage behavior.
 
 ## Gate B — shared-backend update, separately approved
 
-The deployed package already contains the long timeout path. The remaining
-source delta is language anchoring/instructions and handler validation/measurement
-fixes. Both response Lambdas share `src/`; an ordinary stack package also
+The deployed package already contains the earlier long timeout path. The current
+source delta also includes the local 105/115/120/130 deadline replacement and
+capability-gated 512-note support, alongside language and validation changes.
+Both response Lambdas share `src/`; an ordinary stack package also
 updates the mix-resolve Lambda's code artifact. Do not describe this as affecting
 only an unused endpoint. Old clients already on contract 6 receive the new
 server instructions too; frozen V1 files remain identical.

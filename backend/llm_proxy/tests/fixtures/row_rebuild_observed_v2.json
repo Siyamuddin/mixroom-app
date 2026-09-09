@@ -1,0 +1,5003 @@
+{
+  "provenance": "Retained synthetic outputs from the 2026-09-08 row rebuild evaluation; not historical user-project plans.",
+  "cases": [
+    {
+      "name": "spare_capacity_0",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Remove all existing rows and their clips. Build a new instrumental arrangement from scratch, with new rows and new MIDI parts. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 8,
+              "can_create": true
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Bass",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_bass",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Chords",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_chords",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Melody",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_melody",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_old0",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_old1",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_old2",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_old3",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_old4",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 105
+            },
+            "command_id": "delete_old5",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_bass",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 2,
+                  "pitch": 40,
+                  "start_beat": 0,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 40,
+                  "start_beat": 4,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 43,
+                  "start_beat": 8,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 43,
+                  "start_beat": 12,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 45,
+                  "start_beat": 16,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 45,
+                  "start_beat": 20,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 43,
+                  "start_beat": 24,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 40,
+                  "start_beat": 28,
+                  "velocity": 0.7
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "bass_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_chords",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 0,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 0,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 0,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 4,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 4,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 4,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 8,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 8,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 8,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 12,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 12,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 12,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 45,
+                  "start_beat": 16,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 16,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 16,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 47,
+                  "start_beat": 20,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 20,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 20,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 24,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 47,
+                  "start_beat": 24,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 24,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 47,
+                  "start_beat": 28,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 28,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 28,
+                  "velocity": 0.55
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "chord_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_melody",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 0,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 1,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 2,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 4,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 5,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 64,
+                  "start_beat": 6,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 66,
+                  "start_beat": 8,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 9,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 10,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 12,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 66,
+                  "start_beat": 13,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 62,
+                  "start_beat": 14,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 16,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 17,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 69,
+                  "start_beat": 18,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 20,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 21,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 60,
+                  "start_beat": 22,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 62,
+                  "start_beat": 24,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 25,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 67,
+                  "start_beat": 26,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 28,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 62,
+                  "start_beat": 29,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 60,
+                  "start_beat": 30,
+                  "velocity": 0.7
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "melody_part",
+            "type": "midi.create_clip"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "A new eight-bar instrumental arrangement was created in a bright, relaxed piano-trio style, with separate bass, chord, and melody parts. The previous rows and their clips were removed."
+      },
+      "expected_error": "v3_plan_row_capacity_exceeded",
+      "expected_scope_ok": true
+    },
+    {
+      "name": "partial_rebuild_0",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Replace rows 100 through 104 and their clips with new instrument rows and new MIDI parts. Preserve row 105 and its clip exactly as they are. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 6,
+              "can_create": false
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_row_100",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_row_101",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_row_102",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_row_103",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_row_104",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Bass",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_bass_row",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_bass_row",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 40,
+                  "start_beat": 0,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 40,
+                  "start_beat": 4,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 8,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 12,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 36,
+                  "start_beat": 16,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 36,
+                  "start_beat": 20,
+                  "velocity": 0.75
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 38,
+                  "start_beat": 24,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 38,
+                  "start_beat": 28,
+                  "velocity": 0.75
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "create_bass_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Pads",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_pad_row",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_pad_row",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 8,
+                  "pitch": 52,
+                  "start_beat": 0,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 55,
+                  "start_beat": 0,
+                  "velocity": 0.42
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 59,
+                  "start_beat": 0,
+                  "velocity": 0.4
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 50,
+                  "start_beat": 8,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 54,
+                  "start_beat": 8,
+                  "velocity": 0.42
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 57,
+                  "start_beat": 8,
+                  "velocity": 0.4
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 48,
+                  "start_beat": 16,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 52,
+                  "start_beat": 16,
+                  "velocity": 0.42
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 55,
+                  "start_beat": 16,
+                  "velocity": 0.4
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 50,
+                  "start_beat": 24,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 54,
+                  "start_beat": 24,
+                  "velocity": 0.42
+                },
+                {
+                  "length_beats": 8,
+                  "pitch": 57,
+                  "start_beat": 24,
+                  "velocity": 0.4
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "create_pad_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Ostinato",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_ostinato_row",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_ostinato_row",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 0,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 1,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 71,
+                  "start_beat": 2,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 3,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 62,
+                  "start_beat": 8,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 66,
+                  "start_beat": 9,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 10,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 66,
+                  "start_beat": 11,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 60,
+                  "start_beat": 16,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 17,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 18,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 64,
+                  "start_beat": 19,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 62,
+                  "start_beat": 24,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 66,
+                  "start_beat": 25,
+                  "velocity": 0.45
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 26,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 66,
+                  "start_beat": 27,
+                  "velocity": 0.45
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "create_ostinato_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Melody",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_melody_row",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_melody_row",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 4,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 6,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 12,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 14,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 20,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 69,
+                  "start_beat": 22,
+                  "velocity": 0.6
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 67,
+                  "start_beat": 28,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 30,
+                  "velocity": 0.7
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "create_melody_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Highlights",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_highlight_row",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_highlight_row",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 0,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 8,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 81,
+                  "start_beat": 16,
+                  "velocity": 0.58
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 24,
+                  "velocity": 0.52
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "create_highlight_part",
+            "type": "midi.create_clip"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "Five replacement instrument rows were created with new eight-bar MIDI parts in a cohesive cinematic arrangement, while row 105 and its clip remained unchanged."
+      },
+      "expected_error": "v3_plan_midi_pitch_unavailable",
+      "expected_scope_ok": true
+    },
+    {
+      "name": "spare_capacity_1",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Remove all existing rows and their clips. Build a new instrumental arrangement from scratch, with new rows and new MIDI parts. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 8,
+              "can_create": true
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_old_0",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_old_1",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_old_2",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_old_3",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_old_4",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 105
+            },
+            "command_id": "delete_old_5",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Bass",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_bass",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Chords",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_chords",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Melody",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_melody",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_bass",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 2,
+                  "pitch": 40,
+                  "start_beat": 0,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 40,
+                  "start_beat": 4,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 43,
+                  "start_beat": 8,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 43,
+                  "start_beat": 12,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 36,
+                  "start_beat": 16,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 36,
+                  "start_beat": 20,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 38,
+                  "start_beat": 24,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 38,
+                  "start_beat": 28,
+                  "velocity": 0.72
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "bass_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_chords",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 66,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 8,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 8,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 8,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 8,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 12,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 12,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 12,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 12,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 66,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 24,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 24,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 24,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 24,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 28,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 28,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 28,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 28,
+                  "velocity": 0.64
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "chords_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_melody",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 1,
+                  "pitch": 71,
+                  "start_beat": 0,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 1,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 2,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 4,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 78,
+                  "start_beat": 5,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 6,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 8,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 9,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 10,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 12,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 72,
+                  "start_beat": 13,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 14,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 71,
+                  "start_beat": 16,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 17,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 18,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 20,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 78,
+                  "start_beat": 21,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 22,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 24,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 25,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 26,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 28,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 72,
+                  "start_beat": 29,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 30,
+                  "velocity": 0.8
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "melody_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "playing": false
+            },
+            "command_id": "stop_transport",
+            "type": "transport.set_playing"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "The old rows were removed and replaced with a new eight-bar piano instrumental: steady bass, rich chord changes, and a simple melodic hook."
+      },
+      "expected_error": "v3_plan_capability_invalid",
+      "expected_scope_ok": true
+    },
+    {
+      "name": "spare_capacity_2",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Remove all existing rows and their clips. Build a new instrumental arrangement from scratch, with new rows and new MIDI parts. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 8,
+              "can_create": true
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_old_0",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_old_1",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_old_2",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_old_3",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_old_4",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 105
+            },
+            "command_id": "delete_old_5",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Bass",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_bass",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Chords",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_chords",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Melody",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_melody",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_bass",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 0,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 4,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 45,
+                  "start_beat": 8,
+                  "velocity": 0.68
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 41,
+                  "start_beat": 12,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 16,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 20,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 45,
+                  "start_beat": 24,
+                  "velocity": 0.68
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 41,
+                  "start_beat": 28,
+                  "velocity": 0.65
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "bass_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_chords",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 0,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 67,
+                  "start_beat": 0,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 4,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 4,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 4,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 8,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 8,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 8,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 53,
+                  "start_beat": 12,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 12,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 12,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 16,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 16,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 67,
+                  "start_beat": 16,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 20,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 20,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 20,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 24,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 24,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 24,
+                  "velocity": 0.5
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 53,
+                  "start_beat": 28,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 28,
+                  "velocity": 0.48
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 28,
+                  "velocity": 0.48
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "chord_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_melody",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 1,
+                  "pitch": 72,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 1,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 2,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 4,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 5,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 6,
+                  "velocity": 0.6
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 69,
+                  "start_beat": 8,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 72,
+                  "start_beat": 10,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 11,
+                  "velocity": 0.68
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 12,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 72,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 17,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 18,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 81,
+                  "start_beat": 20,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 24,
+                  "velocity": 0.68
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 76,
+                  "start_beat": 26,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 27,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 72,
+                  "start_beat": 28,
+                  "velocity": 0.68
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "melody_part",
+            "type": "midi.create_clip"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "The old rows and clips were cleared, and a new eight-bar instrumental arrangement was built with piano bass, chord, and melody parts in a relaxed cinematic style."
+      },
+      "expected_error": "v3_plan_capability_invalid",
+      "expected_scope_ok": true
+    },
+    {
+      "name": "full_capacity_2",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Remove all existing rows and their clips. Build a new instrumental arrangement from scratch, with new rows and new MIDI parts. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 6,
+              "can_create": false
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_old0",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_old1",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_old2",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_old3",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_old4",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Driving Bass",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_bass",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Warm Chords",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_chords",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Bright Hook",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_melody",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "row_id": 105
+            },
+            "command_id": "delete_old5",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_bass",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 1,
+                  "pitch": 40,
+                  "start_beat": 0,
+                  "velocity": 0.85
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 40,
+                  "start_beat": 2,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 43,
+                  "start_beat": 4,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 43,
+                  "start_beat": 6,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 36,
+                  "start_beat": 8,
+                  "velocity": 0.88
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 36,
+                  "start_beat": 10,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 40,
+                  "start_beat": 12,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 43,
+                  "start_beat": 14,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 40,
+                  "start_beat": 16,
+                  "velocity": 0.85
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 40,
+                  "start_beat": 18,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 43,
+                  "start_beat": 20,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 43,
+                  "start_beat": 22,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 36,
+                  "start_beat": 24,
+                  "velocity": 0.88
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 36,
+                  "start_beat": 26,
+                  "velocity": 0.8
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 40,
+                  "start_beat": 28,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 43,
+                  "start_beat": 30,
+                  "velocity": 0.8
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "bass_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_chords",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 4,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 8,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 47,
+                  "start_beat": 8,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 8,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 12,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 12,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 12,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 16,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 52,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 20,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 24,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 47,
+                  "start_beat": 24,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 24,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 50,
+                  "start_beat": 28,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 54,
+                  "start_beat": 28,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 28,
+                  "velocity": 0.62
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "chords_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_melody",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 0,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 1,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 2,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 4,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 5,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 64,
+                  "start_beat": 6,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 8,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 9,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 71,
+                  "start_beat": 10,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 11,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 72,
+                  "start_beat": 12,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 14,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 16,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 17,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 18,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 20,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 21,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 64,
+                  "start_beat": 22,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 67,
+                  "start_beat": 24,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 69,
+                  "start_beat": 25,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 71,
+                  "start_beat": 26,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 1,
+                  "pitch": 74,
+                  "start_beat": 27,
+                  "velocity": 0.82
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 72,
+                  "start_beat": 28,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 30,
+                  "velocity": 0.72
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "melody_part",
+            "type": "midi.create_clip"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "Created an eight-bar instrumental arrangement from scratch with a driving bassline, warm chord progression, and a bright melodic hook across three new MIDI parts."
+      },
+      "expected_error": "v3_plan_midi_pitch_unavailable",
+      "expected_scope_ok": true
+    },
+    {
+      "name": "partial_rebuild_2",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Replace rows 100 through 104 and their clips with new instrument rows and new MIDI parts. Preserve row 105 and its clip exactly as they are. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 6,
+              "can_create": false
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "clip_id": "old0"
+            },
+            "command_id": "delete_clip_100",
+            "type": "clip.delete"
+          },
+          {
+            "arguments": {
+              "clip_id": "old1"
+            },
+            "command_id": "delete_clip_101",
+            "type": "clip.delete"
+          },
+          {
+            "arguments": {
+              "clip_id": "old2"
+            },
+            "command_id": "delete_clip_102",
+            "type": "clip.delete"
+          },
+          {
+            "arguments": {
+              "clip_id": "old3"
+            },
+            "command_id": "delete_clip_103",
+            "type": "clip.delete"
+          },
+          {
+            "arguments": {
+              "clip_id": "old4"
+            },
+            "command_id": "delete_clip_104",
+            "type": "clip.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_row_100",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_row_101",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_row_102",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_row_103",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_row_104",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Syncopated Rhythm",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_rhythm",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Warm Bass",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_bass",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Soft Chords",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_chords",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Counter Melody",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_counter",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Piano Lead",
+              "position": {
+                "kind": "after",
+                "row_id": 105
+              }
+            },
+            "command_id": "create_lead",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_rhythm",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 0.5,
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 67,
+                  "start_beat": 1.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 60,
+                  "start_beat": 4,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 67,
+                  "start_beat": 5.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 62,
+                  "start_beat": 8,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 69,
+                  "start_beat": 9.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 62,
+                  "start_beat": 12,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 69,
+                  "start_beat": 13.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 59,
+                  "start_beat": 16,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 67,
+                  "start_beat": 17.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 59,
+                  "start_beat": 20,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 67,
+                  "start_beat": 21.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 57,
+                  "start_beat": 24,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 65,
+                  "start_beat": 25.5,
+                  "velocity": 0.55
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 57,
+                  "start_beat": 28,
+                  "velocity": 0.65
+                },
+                {
+                  "length_beats": 0.5,
+                  "pitch": 65,
+                  "start_beat": 29.5,
+                  "velocity": 0.55
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "part_rhythm",
+            "type": "midi.create_clip"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "The five replaceable rows were rebuilt with new eight-bar piano parts in a cohesive, gently syncopated ensemble, while row 105 and its clip were left untouched."
+      },
+      "expected_error": null,
+      "expected_scope_ok": false
+    },
+    {
+      "name": "spare_capacity_3",
+      "request": {
+        "request_contract": "mixroom_v3_context_v2",
+        "plan_schema_version": "plan_v3_prototype_2",
+        "original_request": "Remove all existing rows and their clips. Build a new instrumental arrangement from scratch, with new rows and new MIDI parts. Choose the musical style yourself.",
+        "conversation": [],
+        "core_context": {
+          "schema_version": "core_context_v3_prototype_1",
+          "project": {
+            "bpm": 120,
+            "beats_per_bar": 4,
+            "row_capacity": {
+              "current_rows": 6,
+              "max_rows": 8,
+              "can_create": true
+            },
+            "generated_midi_policy": "notes_512_v1",
+            "midi_boundary_policy": "extend_1ms_v1"
+          },
+          "selection": {
+            "selected_row_id": 100,
+            "selected_clip_ids": []
+          },
+          "rows": [
+            {
+              "row_id": 100,
+              "display_index": 0,
+              "name": "Old 0",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 101,
+              "display_index": 1,
+              "name": "Old 1",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 102,
+              "display_index": 2,
+              "name": "Old 2",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 103,
+              "display_index": 3,
+              "name": "Old 3",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 104,
+              "display_index": 4,
+              "name": "Old 4",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            },
+            {
+              "row_id": 105,
+              "display_index": 5,
+              "name": "Old 5",
+              "lane_kind": "instrument",
+              "instrument_id": "free-piano",
+              "effects": [],
+              "mix_processing_supported": true,
+              "has_usable_signal": true
+            }
+          ],
+          "clips": [
+            {
+              "clip_id": "old0",
+              "row_id": 100,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old1",
+              "row_id": 101,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old2",
+              "row_id": 102,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old3",
+              "row_id": 103,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old4",
+              "row_id": 104,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            },
+            {
+              "clip_id": "old5",
+              "row_id": 105,
+              "kind": "midi",
+              "instrument_id": "free-piano",
+              "start_beat": 0,
+              "length_beats": 8,
+              "midi_notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          ],
+          "groups": [],
+          "library_assets": [],
+          "effects": [],
+          "instruments": [
+            "free-piano"
+          ],
+          "instrument_catalog": [
+            {
+              "instrument_id": "free-piano",
+              "name": "Free Piano",
+              "playable_pitch_ranges": [
+                {
+                  "low": 40,
+                  "high": 84
+                }
+              ]
+            }
+          ]
+        },
+        "resource_refs_enabled": true,
+        "supported_command_types": [
+          "automation.clear",
+          "automation.gain_fade",
+          "automation.set_points",
+          "clip.adjust_pitch_semitones",
+          "clip.align_first_sound",
+          "clip.align_tempo_to_project",
+          "clip.convert_to_midi",
+          "clip.delete",
+          "clip.duplicate_to",
+          "clip.glue",
+          "clip.move_by_beats",
+          "clip.scale_timeline_length",
+          "clip.separate_stems",
+          "clip.set_pitch_semitones",
+          "clip.set_source_tempo_bpm",
+          "clip.set_tempo_follow_mode",
+          "clip.set_timeline_length_beats",
+          "clip.split_at",
+          "clip.trim_silence",
+          "clip.trim_to_range",
+          "effect.ensure_configured",
+          "effect.remove",
+          "effect.set_bypassed",
+          "group.create",
+          "group.remove_row",
+          "group.set_collapsed",
+          "midi.append_notes",
+          "midi.chop_notes",
+          "midi.create_clip",
+          "midi.replace_notes",
+          "midi.transpose",
+          "mix.apply_goal",
+          "project.set_tempo",
+          "project.set_tempo_from_clip",
+          "row.adjust_gain_db",
+          "row.adjust_pan",
+          "row.apply_phone_mic_cleanup",
+          "row.create",
+          "row.delete",
+          "row.rename",
+          "row.select",
+          "row.set_color",
+          "row.set_gain_db",
+          "row.set_instrument",
+          "row.set_muted",
+          "row.set_pan",
+          "row.set_role_override",
+          "row.set_soloed",
+          "sample.place",
+          "sample.replace",
+          "transport.restart",
+          "transport.set_loop_enabled",
+          "transport.set_metronome_enabled",
+          "transport.set_playing"
+        ]
+      },
+      "plan": {
+        "commands": [
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Bass",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_bass",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Chords",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_chords",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "lane": {
+                "instrument_id": "free-piano",
+                "kind": "midi"
+              },
+              "name": "Cinematic Melody",
+              "position": {
+                "kind": "end"
+              }
+            },
+            "command_id": "create_melody",
+            "type": "row.create"
+          },
+          {
+            "arguments": {
+              "row_id": 100
+            },
+            "command_id": "delete_old0",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 101
+            },
+            "command_id": "delete_old1",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 102
+            },
+            "command_id": "delete_old2",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 103
+            },
+            "command_id": "delete_old3",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 104
+            },
+            "command_id": "delete_old4",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "row_id": 105
+            },
+            "command_id": "delete_old5",
+            "type": "row.delete"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_bass",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 0,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 48,
+                  "start_beat": 4,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 45,
+                  "start_beat": 8,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 45,
+                  "start_beat": 12,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 41,
+                  "start_beat": 16,
+                  "velocity": 0.78
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 41,
+                  "start_beat": 20,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 24,
+                  "velocity": 0.76
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 43,
+                  "start_beat": 28,
+                  "velocity": 0.8
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "bass_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_chords",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "velocity": 0.52
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 0,
+                  "velocity": 0.52
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 67,
+                  "start_beat": 0,
+                  "velocity": 0.52
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 4,
+                  "velocity": 0.52
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 4,
+                  "velocity": 0.52
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 67,
+                  "start_beat": 4,
+                  "velocity": 0.52
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 8,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 8,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 8,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 12,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 12,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 64,
+                  "start_beat": 12,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 53,
+                  "start_beat": 16,
+                  "velocity": 0.56
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 16,
+                  "velocity": 0.56
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 16,
+                  "velocity": 0.56
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 53,
+                  "start_beat": 20,
+                  "velocity": 0.56
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 57,
+                  "start_beat": 20,
+                  "velocity": 0.56
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 60,
+                  "start_beat": 20,
+                  "velocity": 0.56
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 24,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 24,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 24,
+                  "velocity": 0.54
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 55,
+                  "start_beat": 28,
+                  "velocity": 0.58
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 59,
+                  "start_beat": 28,
+                  "velocity": 0.58
+                },
+                {
+                  "length_beats": 4,
+                  "pitch": 62,
+                  "start_beat": 28,
+                  "velocity": 0.58
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "chord_part",
+            "type": "midi.create_clip"
+          },
+          {
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "create_melody",
+                  "output": "row"
+                }
+              },
+              "length_beats": 32,
+              "notes": [
+                {
+                  "length_beats": 2,
+                  "pitch": 72,
+                  "start_beat": 0,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 2,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 4,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 6,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 72,
+                  "start_beat": 8,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 10,
+                  "velocity": 0.66
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 12,
+                  "velocity": 0.7
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 14,
+                  "velocity": 0.62
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 69,
+                  "start_beat": 16,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 72,
+                  "start_beat": 18,
+                  "velocity": 0.68
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 20,
+                  "velocity": 0.72
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 72,
+                  "start_beat": 22,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 71,
+                  "start_beat": 24,
+                  "velocity": 0.64
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 74,
+                  "start_beat": 26,
+                  "velocity": 0.68
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 79,
+                  "start_beat": 28,
+                  "velocity": 0.74
+                },
+                {
+                  "length_beats": 2,
+                  "pitch": 76,
+                  "start_beat": 30,
+                  "velocity": 0.68
+                }
+              ],
+              "start_beat": 0
+            },
+            "command_id": "melody_part",
+            "type": "midi.create_clip"
+          }
+        ],
+        "outcome": "plan",
+        "question_options": [],
+        "schema_version": "plan_v3_prototype_2",
+        "user_message": "Built a fresh eight-bar instrumental arrangement with separate bass, chord, and melody MIDI parts in a restrained cinematic style."
+      },
+      "expected_error": "v3_plan_row_capacity_exceeded",
+      "expected_scope_ok": true
+    }
+  ]
+}

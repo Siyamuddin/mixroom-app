@@ -1418,7 +1418,29 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
-    if (method_call.method_name() == "loadClip") {
+    if (method_call.method_name() == "beginProjectClipLoad") {
+      CallOnMessageThreadSync(
+          [] { JuceEngine::get().beginProjectClipLoad(); });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "endProjectClipLoad") {
+      CallOnMessageThreadSync([] { JuceEngine::get().endProjectClipLoad(); });
+      result->Success(flutter::EncodableValue());
+      return;
+    }
+
+    if (method_call.method_name() == "endProjectClipLoadDetailed") {
+      const auto status = CallOnMessageThreadSync(
+          [] { return JuceEngine::get().endProjectClipLoadDetailed(); });
+      result->Success(flutter::EncodableValue(
+          static_cast<int32_t>(status)));
+      return;
+    }
+
+    if (method_call.method_name() == "loadClip" ||
+        method_call.method_name() == "loadClipDetailed") {
       const int clip = FindInt(args, "clip", 0);
       const int row = ResolveRowId(args, 0);
       const std::string path = FindString(args, "path");
@@ -1426,11 +1448,22 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const double length_sec = FindDouble(args, "lengthSec", 0.0);
       const double offset_sec = FindDouble(args, "inFileOffsetSec", 0.0);
 
-      CallOnMessageThreadSync([=] {
-        JuceEngine::get().loadClip(clip, row, juce::File(ToJuceString(path)),
-                                   start_sec, length_sec, offset_sec);
-      });
-      result->Success(flutter::EncodableValue());
+      if (method_call.method_name() == "loadClipDetailed") {
+        const auto status = CallOnMessageThreadSync([=] {
+          return JuceEngine::get().loadClipDetailed(
+              clip, row, juce::File(ToJuceString(path)), start_sec,
+              length_sec, offset_sec);
+        });
+        result->Success(flutter::EncodableValue(
+            static_cast<int32_t>(status)));
+      } else {
+        const bool loaded = CallOnMessageThreadSync([=] {
+          return JuceEngine::get().loadClip(
+              clip, row, juce::File(ToJuceString(path)), start_sec,
+              length_sec, offset_sec);
+        });
+        result->Success(flutter::EncodableValue(loaded));
+      }
       return;
     }
 

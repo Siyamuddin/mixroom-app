@@ -4191,6 +4191,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.endProjectClipLoadTransactionJNI()
           result.success(null)
         }
+        "endProjectClipLoadDetailed" -> {
+          result.success(JuceBridge.endProjectClipLoadTransactionDetailedJNI())
+        }
         "beginGraphMutationBatch" -> {
           JuceBridge.beginGraphMutationBatchJNI()
           result.success(null)
@@ -4265,6 +4268,24 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             )
             mainHandler.post { emitPluginLoaded(clip, path, ok) }
             ok
+          }
+        }
+        "loadClipDetailed" -> {
+          val clip = args.intValue("clip")
+          val rowId = resolveRowId(args, 0)
+          val path = args.stringValue("path")
+          val startSec = args.doubleValue("startSec")
+          val lengthSec = args.doubleValue("lengthSec")
+          val inFileOffsetSec = args.doubleValue("inFileOffsetSec")
+          runHeavyTask("loadClipDetailed", result) {
+            JuceBridge.loadClipDetailedJNI(
+              clip,
+              rowId,
+              path,
+              startSec,
+              lengthSec,
+              inFileOffsetSec,
+            )
           }
         }
         "unloadClip" -> {

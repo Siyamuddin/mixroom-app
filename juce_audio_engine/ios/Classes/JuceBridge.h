@@ -165,8 +165,15 @@
             startSec:(double)startSec
            lengthSec:(double)lengthSec
      inFileOffsetSec:(double)inFileOffsetSec;
++ (NSInteger)loadClipDetailedObjC:(NSInteger)clipIndex
+                         rowId:(NSInteger)rowId
+                          path:(NSString *)path
+                      startSec:(double)startSec
+                     lengthSec:(double)lengthSec
+               inFileOffsetSec:(double)inFileOffsetSec;
 + (void)beginProjectClipLoadObjC;
 + (void)endProjectClipLoadObjC;
++ (NSInteger)endProjectClipLoadDetailedObjC;
 + (void)beginGraphMutationBatchObjC;
 + (void)endGraphMutationBatchObjC;
 + (BOOL)supportsLiveMidiClipPlaybackObjC;

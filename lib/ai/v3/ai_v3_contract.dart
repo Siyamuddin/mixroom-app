@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'ai_v3_resources.dart';
 
 const String aiV3PlanVersion = 'plan_v3_prototype_2';
-const int aiV3MaxCommands = 16;
-const int aiV3MaxGeneratedMidiNotes = 256;
+const int aiV3MaxCommands = 32;
+const String aiV3PlanCommandPolicy = 'commands_32_v1';
+const String aiV3GeneratedMidiPolicy = 'notes_512_v1';
+const int aiV3MaxGeneratedMidiNotes = 512;
 const int aiV3MaxRuntimeAuthoritativeMidiNotes = 1024;
 const int aiV3MaxAutomationPoints = 128;
 const String aiV3PhoneMicCleanupPreset = 'phone_mic_cleanup_v1';

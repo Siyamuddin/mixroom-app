@@ -269,8 +269,8 @@ def calculate_token_cost(total_tokens: int) -> int:
     return ceil(max(int(total_tokens or 0), 0) / tokens_per_credit)
 
 
-def server_max_output_tokens() -> int:
-    raw_value = os.environ.get("LLM_MAX_OUTPUT_TOKENS", "8192").strip() or "8192"
+def server_max_output_tokens(*, default_limit: int = 8192) -> int:
+    raw_value = os.environ.get("LLM_MAX_OUTPUT_TOKENS", str(default_limit)).strip() or str(default_limit)
     try:
         parsed = int(raw_value)
     except ValueError:
@@ -278,8 +278,8 @@ def server_max_output_tokens() -> int:
     return max(parsed, 1)
 
 
-def apply_server_output_token_cap(request_body: dict[str, Any]) -> None:
-    max_output_tokens = server_max_output_tokens()
+def apply_server_output_token_cap(request_body: dict[str, Any], *, default_limit: int = 8192) -> None:
+    max_output_tokens = server_max_output_tokens(default_limit=default_limit)
     requested = request_body.get("max_output_tokens")
     if not isinstance(requested, int) or requested <= 0:
         request_body["max_output_tokens"] = max_output_tokens

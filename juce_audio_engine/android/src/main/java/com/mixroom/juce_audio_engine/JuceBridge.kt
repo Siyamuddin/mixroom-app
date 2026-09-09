@@ -59,9 +59,19 @@ object JuceBridge {
         inFileOffsetSec: Double,
     ): Boolean
 
+    @JvmStatic external fun loadClipDetailedJNI(
+        clipIndex: Int,
+        rowId: Int,
+        filePath: String,
+        startSec: Double,
+        lengthSec: Double,
+        inFileOffsetSec: Double,
+    ): Int
+
     @JvmStatic external fun unloadClipJNI(clipIndex: Int)
     @JvmStatic external fun unloadClipsJNI(clipIndices: IntArray): Int
     @JvmStatic external fun endProjectClipLoadTransactionJNI()
+    @JvmStatic external fun endProjectClipLoadTransactionDetailedJNI(): Int
     @JvmStatic external fun setClipGainJNI(clipIndex: Int, gain: Float)
     @JvmStatic external fun setClipExtraGainLinearJNI(clipIndex: Int, gain: Float)
     @JvmStatic external fun muteClipJNI(clipIndex: Int, mute: Boolean)

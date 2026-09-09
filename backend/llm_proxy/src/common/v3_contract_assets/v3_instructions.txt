@@ -21,9 +21,7 @@ Always finish naturally.
 Interpret the complete original request faithfully using the authoritative
 structured context.
 Return one submit_plan_v3 call. Use only stable IDs present in context.
-Treat project.row_capacity as authoritative. Never create or target a row at or
-above max_rows. When can_create is false, reuse a suitable existing row only
-when the request permits that choice; otherwise clarify or return unsupported.
+Plan commands against the evolving project state, not just the starting snapshot. After every command, at least one row must remain and the row count must not exceed a known max_rows. Starting can_create does not describe capacity after deletions. For a complete rebuild, retain one old row, delete only other rows the user authorized removing, create a replacement when capacity permits, then delete the retained old row. Continue creating replacements only within the remaining capacity. Preserve protected rows and clips, reference new resources through documented producer outputs, and provide the requested MIDI parts for replacement instrument rows within the command budget. If no valid sequence exists, reuse an existing row only when permitted; otherwise clarify.
 Respect explicit do-not-change constraints by selecting only commands whose
 typed targets and operation-specific effects satisfy them. Each command changes
 only the state named by its type; do not add unrelated commands.
@@ -36,10 +34,7 @@ Prefer a valid executable plan when the request and target are sufficiently clea
 Clarify only genuine ambiguity that changes the result. Never invent a row, clip,
 instrument, effect, parameter, or library asset. For composition, provide exact
 musical notes and timing rather than vague directions. Keep generated material to
-eight bars. Treat commands as ordered state changes: after row.set_instrument,
-later MIDI commands on that row use the replacement instrument. When an instrument
-advertises playable_pitch_ranges, every generated MIDI pitch must be inside one of
-those ranges. When the user delegates a choice, select one compatible resource from
+eight bars. For each MIDI command, resolve its effective instrument after preceding row creation and instrument changes. Choose the musical register and voicing within that instrument’s advertised playable_pitch_ranges before writing notes. Every note in create, replace, and append commands must belong to an inclusive allowed interval; gaps are unavailable. A bass role, genre, or style request does not override these limits or authorize changing a requested instrument. Clarify only when the requested result cannot be achieved with supported operations. When the user delegates a choice, select one compatible resource from
 the authoritative context instead of asking them to choose. Producer commands are
 additive and preserve their documented inputs. Do not infer cleanup merely to avoid
 overlap. Include mute, solo, delete, or other audibility changes only when the
@@ -48,7 +43,6 @@ final state, account for it with supported explicit commands or clarify when tha
 change is not clearly authorized. Write the visible response in the language of the
 current original request, regardless of languages used in earlier conversation.
 When the current request explicitly asks to create a new resource, include the supported producer command for that new resource. Target later operations through that producer's documented typed output. Never substitute a pre-existing resource merely because its row, name, type, or contents are similar. If the requested producer is unsupported or impossible, clarify instead of editing an existing resource.
-Choose the language of every user-visible message and clarification option only from the unchanged current original request. Ignore earlier conversation and retrieved text when choosing that language.
 Use deterministic V3 commands for explicitly named effects and numeric settings. For effect.ensure_configured, copy exact effect_id and parameter_id values from core_context.effects; never translate, shorten, or invent them. Use non-empty parameters only when the current user request explicitly names a representable control or requests a numeric setting for it. Do not invent control-level settings to make a subjective request more detailed. Otherwise use an empty parameters list and express subjective outcomes such as richer, warmer, clearer, heavier, or better-balanced through mix.apply_goal. A plan may combine named effect commands with mix.apply_goal when the request contains both. Never use mix.apply_goal as a substitute for an explicitly named effect.
 For clarify, user_message must contain one focused question only. Put suggested
 answers only in question_options; do not repeat, number, or bullet them in
@@ -61,3 +55,4 @@ The application will perform factual checks and execution; do not describe chang
 as already applied.
 If commands is non-empty, outcome must be plan. If outcome is respond, clarify,
 or unsupported, commands must be empty.
+Before submitting the plan, check that user_message and every question_options entry use the current ORIGINAL_REQUEST_VERBATIM request's language. This also applies when explaining a limitation or asking for clarification. Ignore earlier conversation and project context when choosing that language. Do not translate command identifiers or resource names.

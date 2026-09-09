@@ -4761,6 +4761,45 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return ok;
 }
 
++ (NSInteger)loadClipDetailedObjC:(NSInteger)clipIndex
+                             rowId:(NSInteger)rowId
+                              path:(NSString *)path
+                          startSec:(double)startSec
+                         lengthSec:(double)lengthSec
+                   inFileOffsetSec:(double)inFileOffsetSec
+{
+    juce::String jucePath = juceStringFromNSString(path);
+    juce::File file(jucePath);
+    auto preparedAsset = JuceEngine::get().prepareClipAudioAsset(file);
+    if (preparedAsset == nullptr)
+        return (NSInteger)JuceEngine::MutationResult::missingMedia;
+
+    JuceEngine::MutationResult mutationResult = JuceEngine::MutationResult::internalFailure;
+    auto installPreparedClip = [&]
+    {
+        mutationResult = JuceEngine::get().loadClipWithPreparedAudioAssetDetailed(
+            (int)clipIndex,
+            (int)rowId,
+            file,
+            preparedAsset,
+            startSec,
+            lengthSec,
+            inFileOffsetSec);
+    };
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            installPreparedClip();
+        else
+            mm->callSync(installPreparedClip);
+    }
+    else
+    {
+        installPreparedClip();
+    }
+    return (NSInteger)mutationResult;
+}
+
 + (void)beginProjectClipLoadObjC
 {
     JuceEngine::get().beginProjectClipLoad();
@@ -4769,6 +4808,11 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 + (void)endProjectClipLoadObjC
 {
     JuceEngine::get().endProjectClipLoad();
+}
+
++ (NSInteger)endProjectClipLoadDetailedObjC
+{
+    return (NSInteger)JuceEngine::get().endProjectClipLoadDetailed();
 }
 
 + (void)beginGraphMutationBatchObjC

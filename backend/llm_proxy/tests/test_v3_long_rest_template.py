@@ -43,7 +43,7 @@ class V3LongRestTemplateTests(unittest.TestCase):
         self.assertIn("Type: AWS::Serverless::Api", api)
         self.assertIn("Type: REGIONAL", api)
         self.assertIn("/v1/llm/v3/responses:", api)
-        self.assertIn("timeoutInMillis: 65000", api)
+        self.assertIn("timeoutInMillis: 120000", api)
         self.assertNotIn("/v1/llm/responses:", api)
         self.assertNotIn("/v1/llm/limits:", api)
         self.assertNotIn("/v1/llm/conversation-events:", api)
@@ -76,15 +76,15 @@ class V3LongRestTemplateTests(unittest.TestCase):
             r"    MaxValue: 1$",
         )
 
-        lambda_timeout_seconds = 60
+        lambda_timeout_seconds = 115
         maximum_rate_per_second = 1
         maximum_burst = 20
-        minimum_rollout_account_concurrency = 100
+        minimum_rollout_account_concurrency = 155
         maximum_long_path_in_flight = (
             lambda_timeout_seconds * maximum_rate_per_second
             + maximum_burst
         )
-        self.assertLessEqual(maximum_long_path_in_flight, 80)
+        self.assertLessEqual(maximum_long_path_in_flight, 135)
         self.assertGreaterEqual(
             minimum_rollout_account_concurrency - maximum_long_path_in_flight,
             20,
@@ -93,11 +93,18 @@ class V3LongRestTemplateTests(unittest.TestCase):
     def test_long_lambda_is_isolated_and_uses_staggered_deadlines(self) -> None:
         function = _resource_block(self.template, "V3LongResponsesFunction")
         self.assertIn("Handler: handlers/api_responses_v3_rest.handler", function)
-        self.assertIn("Timeout: 60", function)
-        self.assertIn("AI_V3_TIMEOUT_SECONDS: 55", function)
-        self.assertIn("AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 55", function)
+        self.assertIn("Timeout: 115", function)
+        self.assertIn("AI_V3_TIMEOUT_SECONDS: 105", function)
+        self.assertIn("AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 105", function)
         self.assertNotIn("Type: HttpApi", function)
         self.assertNotIn("mixroom_v3_context_v1", function)
+        self.assertRegex(
+            self.template,
+            r"(?ms)^  V3MaxRequestBytes:\n"
+            r"    Type: Number\n"
+            r"    Default: 4500000$",
+        )
+        self.assertIn("V3_MAX_REQUEST_BYTES: !Ref V3MaxRequestBytes", self.template)
 
         permission = _resource_block(
             self.template,

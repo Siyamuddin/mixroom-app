@@ -109,6 +109,9 @@ Parameters:
   MaxRequestBytes:
     Type: Number
     Default: 200000
+  V3MaxRequestBytes:
+    Type: Number
+    Default: 4500000
   LlmMaxOutputTokens:
     Type: Number
     Default: 8192
@@ -205,6 +208,7 @@ Globals:
         ALLOW_CLIENT_MODEL_OVERRIDE: !Ref AllowClientModelOverride
         OPENAI_SECRET_CACHE_TTL_SECONDS: !Ref OpenAiSecretCacheTtlSeconds
         MAX_REQUEST_BYTES: !Ref MaxRequestBytes
+        V3_MAX_REQUEST_BYTES: !Ref V3MaxRequestBytes
         OPENAI_TIMEOUT_SECONDS: 30
         POSTHOG_API_KEY: !Ref PostHogApiKey
         POSTHOG_HOST: !Ref PostHogHost
@@ -501,18 +505,18 @@ Resources:
                 type: aws_proxy
                 httpMethod: POST
                 uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${V3LongResponsesFunction.Arn}/invocations
-                timeoutInMillis: 65000
+                timeoutInMillis: 120000
 
   V3LongResponsesFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: handlers/api_responses_v3_rest.handler
-      Timeout: 60
+      Timeout: 115
       Environment:
         Variables:
-          AI_V3_TIMEOUT_SECONDS: 55
-          AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 55
+          AI_V3_TIMEOUT_SECONDS: 105
+          AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 105
       Policies:
         - Statement:
             - Effect: Allow

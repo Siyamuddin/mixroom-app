@@ -1012,6 +1012,60 @@ void main() {
     );
   });
 
+  test('detailed mutation results map every native status', () async {
+    for (final status in JuceMutationResult.values) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        calls.add(methodCall);
+        return status.index;
+      });
+      calls.clear();
+
+      final clipResult = await JuceAudioEngine.loadClipDetailed(
+        5,
+        99,
+        '/tmp/clip.wav',
+        startSec: 1.25,
+        lengthSec: 4.5,
+        inFileOffsetSec: 0.4,
+      );
+      expect(clipResult, status);
+      expect(calls.single.method, 'loadClipDetailed');
+
+      calls.clear();
+      final finalizeResult = await JuceAudioEngine.endProjectClipLoadDetailed();
+      expect(finalizeResult, status);
+      expect(calls.single.method, 'endProjectClipLoadDetailed');
+    }
+  });
+
+  test('malformed detailed mutation results fail closed', () async {
+    for (final value in <Object?>[null, true, '0', -1, 99, 1.0]) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => value);
+
+      expect(
+        await JuceAudioEngine.loadClipDetailed(1, 7, '/tmp/clip.wav'),
+        JuceMutationResult.internalFailure,
+      );
+      expect(
+        await JuceAudioEngine.endProjectClipLoadDetailed(),
+        JuceMutationResult.internalFailure,
+      );
+    }
+  });
+
+  test('legacy loadClip retains its boolean contract', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      return methodCall.method == 'loadClip';
+    });
+
+    expect(await JuceAudioEngine.loadClip(1, 7, '/tmp/clip.wav'), isTrue);
+    expect(calls.single.method, 'loadClip');
+  });
+
   test('clip mutations stay batched across the platform channel', () async {
     await JuceAudioEngine.updateClipTimelineBatch(
       <Map<String, dynamic>>[

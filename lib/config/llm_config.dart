@@ -98,7 +98,7 @@ class LlmConfig {
     defaultValue: '',
   );
 
-  static const int _aiV3LongRequestTimeoutSeconds = 70;
+  static const int _aiV3LongRequestTimeoutSeconds = 130;
 
   static const bool disableProxyInDebug = bool.fromEnvironment(
     'LLM_DISABLE_PROXY_IN_DEBUG',

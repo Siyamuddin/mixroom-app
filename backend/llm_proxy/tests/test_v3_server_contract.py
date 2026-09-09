@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import sys
@@ -20,6 +21,46 @@ from common import v3_server_contract  # noqa: E402
 
 
 class V3ServerContractTests(unittest.TestCase):
+    def test_existing_notes_use_context_budget_not_output_budget(self):
+        for count in (300, 512, 513, 600, 1024):
+            context = self._core_context()
+            notes = [{"pitch": 60, "start_beat": 0, "length_beats": 1,
+                      "velocity": 0.8} for _ in range(count)]
+            context["clips"][0]["midi_notes"] = notes
+            body = {
+                "request_contract": "mixroom_v3_context_v2",
+                "original_request": "Rebalance without changing notes.",
+                "conversation": [], "core_context": context,
+                "plan_schema_version": "plan_v3_prototype_2",
+                "supported_command_types": ["transport.restart"],
+                "resource_refs_enabled": False,
+            }
+            validated = v3_server_contract.validate_context_request(
+                body, raw_body_bytes=len(json.dumps(body).encode()))
+            self.assertEqual(validated["core_context"]["clips"][0]["midi_notes"], notes)
+            self.assertEqual(len(validated["capability_surface"].clips[0].midi_notes), count)
+            self.assertEqual(v3_server_contract.output_budget(validated["capability_surface"]).notes, 256)
+            self.assertEqual(v3_server_contract.command_limit(validated["capability_surface"]), 16)
+
+        # The exemption is path-specific, not based on an arbitrary key name.
+        for context in ({"midi_notes": notes}, {"other": {"midi_notes": notes}}):
+            with self.assertRaises(v3_server_contract.V3ContractError):
+                v3_server_contract._validate_context_value(context)
+
+        # Notes beyond the former ceiling still undergo normal validation.
+        notes[-1]["pitch"] = 128
+        with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+            v3_server_contract.validate_context_request(body, raw_body_bytes=100000)
+        self.assertEqual(caught.exception.code, "v3_capability_context_invalid")
+        notes[-1]["pitch"] = 60
+
+        body["core_context"]["padding"] = ["x" * 30000] * 3
+        with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+            v3_server_contract.validate_context_request(body, raw_body_bytes=170000)
+        self.assertEqual(caught.exception.code, "v3_context_request_limit")
+        with self.assertRaises(v3_server_contract.V3ContractError):
+            v3_server_contract.validate_context_request(body, raw_body_bytes=180001)
+
     def _core_context(self) -> dict:
         return {
             "schema_version": "core_context_v3_prototype_1",
@@ -99,6 +140,33 @@ class V3ServerContractTests(unittest.TestCase):
 
     def _surface(self):
         return v3_server_contract.extract_capability_surface(self._core_context())
+
+    def _dynamic_context(self, *, row_count: int = 1, free: bool = False) -> dict:
+        context = self._core_context()
+        context["project"]["project_capacity_policy"] = (
+            v3_server_contract.PROJECT_CAPACITY_POLICY
+        )
+        context["project"]["row_capacity"] = {
+            "current_rows": row_count,
+            "creation_limit": 5 if free else None,
+            "can_create": row_count < 5 if free else True,
+        }
+        context["rows"] = [
+            {
+                "row_id": row_id,
+                "lane_kind": "audio",
+                "instrument_id": "",
+                "mix_processing_supported": True,
+                "has_usable_signal": False,
+                "effects": [],
+            }
+            for row_id in range(1, row_count + 1)
+        ]
+        context["clips"] = []
+        context["groups"] = []
+        context["instruments"] = []
+        context["instrument_catalog"] = []
+        return context
 
     def _group_surface(
         self,
@@ -461,8 +529,8 @@ class V3ServerContractTests(unittest.TestCase):
     def test_approved_v3_contract_assets_match_golden_hashes(self) -> None:
         expected = {
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
-            "v3_instructions.txt": "543e3f18c70727d28a7955561aa72e0839b31e36a39cd9e04d79f3d677fe2e87",
-            "v3_instructions_resource_refs.txt": "672654abaf7b3ae4a5db984df47388d92a580d31bfd09ca5629f8e0d69b1a84a",
+            "v3_instructions.txt": "db92912a052c1060ce668a55e4811948080cbf34071454b9cc05ba941be54dba",
+            "v3_instructions_resource_refs.txt": "ee2297a73120c0bef602fd97245b3aaeed51645db461851f2b63383ba5edb792",
             "v3_submit_plan_tool.json": "4376926c5add3526a1402aa9056d659457be8c479efa2675be743fdcb7c1a301",
             "v3_submit_plan_tool_resource_refs.json": "770858c5722b9aba83826773b4a48b98cf08f4f776718afecc0ce02236ac9775",
         }
@@ -473,6 +541,28 @@ class V3ServerContractTests(unittest.TestCase):
             if path.is_file()
         }
         self.assertEqual(actual, expected)
+
+    def test_playable_note_validation_preserves_range_edges_and_gaps(self) -> None:
+        instrument = v3_server_contract.V3InstrumentCapability(
+            "synthetic-instrument",
+            (
+                v3_server_contract.V3MidiPitchRange(40, 60),
+                v3_server_contract.V3MidiPitchRange(70, 84),
+            ),
+        )
+        for pitch in (39, 40, 60, 61, 69, 70, 84, 85):
+            with self.subTest(pitch=pitch):
+                notes = [v3_server_contract.V3MidiNote(pitch, 0.0, 1.0, 0.8)]
+                if pitch in (40, 60, 70, 84):
+                    v3_server_contract._validate_playable_notes(
+                        notes, instrument.instrument_id, {instrument.instrument_id: instrument}
+                    )
+                else:
+                    with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+                        v3_server_contract._validate_playable_notes(
+                            notes, instrument.instrument_id, {instrument.instrument_id: instrument}
+                        )
+                    self.assertEqual(caught.exception.code, "v3_plan_midi_pitch_unavailable")
 
     def test_capability_intersection_cannot_expand_server_surface(self) -> None:
         request = v3_server_contract.validate_context_request(
@@ -544,7 +634,7 @@ class V3ServerContractTests(unittest.TestCase):
             reasoning_effort="low",
         )
         self.assertIn(
-            "Treat project.row_capacity as authoritative",
+            "Plan commands against the evolving project state",
             provider_request["instructions"],
         )
         self.assertIn(
@@ -586,6 +676,280 @@ class V3ServerContractTests(unittest.TestCase):
             "row_creation_policy",
             provider_content[1]["text"],
         )
+
+    def test_dynamic_capacity_is_versioned_and_authenticated(self) -> None:
+        paid_context = self._dynamic_context(row_count=101)
+        paid = v3_server_contract.extract_capability_surface(
+            paid_context,
+            authenticated_subscription_tier="pro",
+        )
+        self.assertIsNone(paid.maximum_rows)
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Created another row.",
+            "commands": [{
+                "command_id": "row-102",
+                "type": "row.create",
+                "arguments": {
+                    "name": "Row 102",
+                    "lane": {"kind": "audio"},
+                    "position": {"kind": "end"},
+                },
+            }],
+            "question_options": [],
+        }
+        self.assertEqual(
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan),
+                command_types={"row.create"},
+                resource_refs_enabled=False,
+                capability_surface=paid,
+            ),
+            plan,
+        )
+
+        server_clamped_free = v3_server_contract.extract_capability_surface(
+            paid_context,
+            authenticated_subscription_tier="free",
+        )
+        self.assertEqual(server_clamped_free.maximum_rows, 5)
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan),
+                command_types={"row.create"},
+                resource_refs_enabled=False,
+                capability_surface=server_clamped_free,
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_row_capacity_exceeded")
+
+        request = {
+            "original_request": "Add a row.",
+            "conversation": [],
+            "core_context": paid_context,
+            "supported_command_types": {"row.create"},
+            "resource_refs_enabled": False,
+            "capability_surface": paid,
+        }
+        provider_request = v3_server_contract.build_provider_request(
+            request,
+            model="server-model",
+            reasoning_effort="low",
+        )
+        self.assertIn(
+            "null means there is no product-defined row creation limit",
+            provider_request["instructions"],
+        )
+        self.assertNotIn(
+            "must not exceed a known max_rows",
+            provider_request["instructions"],
+        )
+        self.assertNotEqual(
+            v3_server_contract.contract_fingerprint(
+                command_types={"row.create"},
+                resource_refs_enabled=False,
+                capability_surface=paid,
+            ),
+            v3_server_contract.contract_fingerprint(
+                command_types={"row.create"},
+                resource_refs_enabled=False,
+                capability_surface=server_clamped_free,
+            ),
+        )
+
+    def test_dynamic_free_capacity_follows_ordered_creation_policy(self) -> None:
+        create = {
+            "command_id": "create-row",
+            "type": "row.create",
+            "arguments": {
+                "name": "Replacement",
+                "lane": {"kind": "audio"},
+                "position": {"kind": "end"},
+            },
+        }
+
+        four_rows = v3_server_contract.extract_capability_surface(
+            self._dynamic_context(row_count=4, free=True),
+            authenticated_subscription_tier="free",
+        )
+        self.assertEqual(
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": [create]}, four_rows
+            )["row_count"],
+            5,
+        )
+
+        five_rows = v3_server_contract.extract_capability_surface(
+            self._dynamic_context(row_count=5, free=True),
+            authenticated_subscription_tier="free",
+        )
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": [create]}, five_rows
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_row_capacity_exceeded")
+
+        delete_then_create = [
+            {
+                "command_id": "delete-row",
+                "type": "row.delete",
+                "arguments": {"row_id": 1},
+            },
+            create,
+        ]
+        self.assertEqual(
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": delete_then_create}, five_rows
+            )["row_count"],
+            5,
+        )
+
+        oversized = v3_server_contract.extract_capability_surface(
+            self._dynamic_context(row_count=6, free=True),
+            authenticated_subscription_tier="free",
+        )
+        self.assertEqual(
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": self._transport_restart_plan()["commands"]},
+                oversized,
+            )["row_count"],
+            6,
+        )
+
+    def test_dynamic_context_uses_expanded_envelope_without_sampling(self) -> None:
+        context = self._dynamic_context(row_count=120)
+        context["clips"] = [
+            {
+                "clip_id": f"clip-{index:04d}",
+                "row_id": index % 120 + 1,
+                "kind": "audio",
+                "source_available": True,
+            }
+            for index in range(600)
+        ]
+        context["padding"] = ["x" * 30_000] * 7
+        body = {
+            "request_contract": v3_server_contract.REQUEST_CONTRACT,
+            "original_request": "Inspect the complete project.",
+            "conversation": [],
+            "core_context": context,
+            "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+            "supported_command_types": ["transport.restart"],
+            "resource_refs_enabled": False,
+        }
+        raw_bytes = len(json.dumps(body).encode("utf-8"))
+        self.assertGreater(raw_bytes, v3_server_contract.MAX_REQUEST_BYTES)
+        validated = v3_server_contract.validate_context_request(
+            body,
+            raw_body_bytes=raw_bytes,
+            authenticated_subscription_tier="pro",
+        )
+        self.assertEqual(len(validated["capability_surface"].rows), 120)
+        self.assertEqual(len(validated["capability_surface"].clips), 600)
+
+        legacy = copy.deepcopy(body)
+        project = legacy["core_context"]["project"]
+        project.pop("project_capacity_policy")
+        project["row_capacity"] = {
+            "current_rows": 120,
+            "max_rows": 120,
+            "can_create": False,
+        }
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_context_request(
+                legacy,
+                raw_body_bytes=len(json.dumps(legacy).encode("utf-8")),
+            )
+        self.assertEqual(raised.exception.code, "v3_context_request_limit")
+
+    def test_dynamic_envelope_boundaries_are_inclusive(self) -> None:
+        context = self._dynamic_context()
+        body = {
+            "request_contract": v3_server_contract.REQUEST_CONTRACT,
+            "original_request": "Inspect.",
+            "conversation": [],
+            "core_context": context,
+            "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+            "supported_command_types": ["transport.restart"],
+            "resource_refs_enabled": False,
+        }
+        raw_bytes = len(json.dumps(body).encode("utf-8"))
+        core_bytes = len(
+            json.dumps(
+                context,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        )
+        with mock.patch.object(
+            v3_server_contract, "DYNAMIC_MAX_REQUEST_BYTES", raw_bytes
+        ), mock.patch.object(
+            v3_server_contract, "DYNAMIC_MAX_CORE_CONTEXT_BYTES", core_bytes
+        ):
+            v3_server_contract.validate_context_request(
+                body,
+                raw_body_bytes=raw_bytes,
+                authenticated_subscription_tier="pro",
+            )
+            with self.assertRaises(v3_server_contract.V3ContractError):
+                v3_server_contract.validate_context_request(
+                    body,
+                    raw_body_bytes=raw_bytes + 1,
+                    authenticated_subscription_tier="pro",
+                )
+        with mock.patch.object(
+            v3_server_contract, "DYNAMIC_MAX_CORE_CONTEXT_BYTES", core_bytes - 1
+        ):
+            with self.assertRaises(v3_server_contract.V3ContractError):
+                v3_server_contract.validate_context_request(
+                    body,
+                    raw_body_bytes=raw_bytes,
+                    authenticated_subscription_tier="pro",
+                )
+
+        with mock.patch.object(
+            v3_server_contract, "DYNAMIC_MAX_CONTEXT_NODES", 5
+        ):
+            v3_server_contract._validate_context_value(
+                {"items": [None, None, None]}, expanded_capacity=True
+            )
+            with self.assertRaises(v3_server_contract.V3ContractError):
+                v3_server_contract._validate_context_value(
+                    {"items": [None, None, None, None]}, expanded_capacity=True
+                )
+        with mock.patch.object(
+            v3_server_contract, "DYNAMIC_MAX_COLLECTION_ITEMS", 3
+        ):
+            v3_server_contract._validate_context_value(
+                [None, None, None], expanded_capacity=True
+            )
+            with self.assertRaises(v3_server_contract.V3ContractError):
+                v3_server_contract._validate_context_value(
+                    [None, None, None, None], expanded_capacity=True
+                )
+        with mock.patch.object(
+            v3_server_contract, "DYNAMIC_MAX_CONTEXT_TOTAL_STRING_CHARS", 10
+        ):
+            v3_server_contract._validate_context_value(
+                {"a": "12345", "b": "67890"}, expanded_capacity=True
+            )
+            with self.assertRaises(v3_server_contract.V3ContractError):
+                v3_server_contract._validate_context_value(
+                    {"a": "12345", "b": "678901"}, expanded_capacity=True
+                )
+
+    def test_unknown_or_malformed_capacity_policy_never_unlocks_creation(self) -> None:
+        unknown = self._dynamic_context()
+        unknown["project"]["project_capacity_policy"] = "future-policy"
+        with self.assertRaises(v3_server_contract.V3ContractError):
+            v3_server_contract.extract_capability_surface(unknown)
+
+        malformed = self._dynamic_context()
+        malformed["project"]["row_capacity"]["creation_limit"] = 1000
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.extract_capability_surface(malformed)
+        self.assertEqual(raised.exception.code, "v3_capability_context_invalid")
 
     def test_provider_schema_rejects_unknown_plan_fields(self) -> None:
         plan = {
@@ -715,6 +1079,144 @@ class V3ServerContractTests(unittest.TestCase):
             )
 
         self.assertEqual(raised.exception.code, "v3_plan_midi_note_out_of_bounds")
+
+    def test_replacement_boundary_preserves_microsecond_context_precision(self) -> None:
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Replaced the notes.",
+            "question_options": [],
+            "commands": [{
+                "command_id": "replace", "type": "midi.replace_notes",
+                "arguments": {"clip_id": "clip-1", "notes": [{
+                    "pitch": 66, "start_beat": 31, "length_beats": 1,
+                    "velocity": 0.8,
+                }]},
+            }],
+        }
+        # At 108 BPM, whole-ms storage reproduces the observed 31.9986 boundary.
+        for length, accepted in (
+            (17777 / 1000 * 108 / 60, False),
+            (17777778 / 1000000 * 108 / 60, True),
+            (32 - 0.0014, False),
+            (31.75, False),
+        ):
+            with self.subTest(length=length):
+                context = self._core_context()
+                context["clips"][0]["length_beats"] = length
+                surface = v3_server_contract.extract_capability_surface(context)
+                def validate():
+                    return v3_server_contract.parse_and_validate_provider_plan(
+                        self._provider_payload(plan),
+                        command_types={"midi.replace_notes"},
+                        resource_refs_enabled=False,
+                        capability_surface=surface,
+                    )
+                if accepted:
+                    validate()
+                else:
+                    with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+                        validate()
+                    self.assertEqual(raised.exception.code, "v3_plan_midi_note_out_of_bounds")
+
+    def test_gated_midi_boundary_extension(self):
+        import copy
+        for marker in (None, 'unknown', 'extend_1ms_v1'):
+            for refs in (False, True):
+                context = self._core_context()
+                context['project'].update(bpm=108, midi_boundary_policy=marker)
+                context['clips'][0]['length_beats'] = 31.9986
+                plan = {
+                    'schema_version': 'plan_v3_prototype_2', 'outcome': 'plan',
+                    'user_message': 'Replaced notes.', 'question_options': [],
+                    'commands': [{'command_id': 'one', 'type': 'midi.replace_notes',
+                        'arguments': {'clip_id': 'clip-1', 'notes': [
+                            {'pitch': 60, 'start_beat': 31, 'length_beats': 1, 'velocity': .8}]}}],
+                }
+                def validate(p):
+                    return v3_server_contract.parse_and_validate_provider_plan(
+                        self._provider_payload(p), command_types={'midi.replace_notes'},
+                        resource_refs_enabled=refs,
+                        capability_surface=v3_server_contract.extract_capability_surface(context))
+                with self.subTest(marker=marker, refs=refs):
+                    if marker != 'extend_1ms_v1':
+                        with self.assertRaises(v3_server_contract.V3ContractError): validate(plan)
+                        continue
+                    original = copy.deepcopy(plan)
+                    validate(plan)
+                    self.assertEqual(plan, original)
+                    next_command = copy.deepcopy(plan['commands'][0])
+                    next_command['command_id'] = 'two'
+                    next_command['arguments']['notes'][0]['start_beat'] = 31.001
+                    plan['commands'].append(next_command)
+                    with self.assertRaises(v3_server_contract.V3ContractError): validate(plan)
+
+    def test_pitch_diagnostics_follow_ordered_instrument_changes(self):
+        context = self._core_context()
+        context['instruments'].append('limited-guitar')
+        context['instrument_catalog'].append({'instrument_id': 'limited-guitar',
+            'name': 'Guitar', 'playable_pitch_ranges': [{'low': 40, 'high': 86}]})
+        plan = {'schema_version': 'plan_v3_prototype_2', 'outcome': 'plan',
+            'user_message': 'Created music.', 'question_options': [], 'commands': [
+                {'command_id': 'switch', 'type': 'row.set_instrument',
+                 'arguments': {'row_id': 101, 'instrument_id': 'limited-guitar'}},
+                {'command_id': 'create', 'type': 'midi.create_clip',
+                 'arguments': {'destination': {'row_id': 101}, 'start_beat': 0,
+                    'length_beats': 32, 'notes': [
+                        {'pitch': p, 'start_beat': 0, 'length_beats': 1, 'velocity': .8}
+                        for p in (36, 38, 36)]}}]}
+        with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+            v3_server_contract.parse_and_validate_provider_plan(self._provider_payload(plan),
+                command_types={'row.set_instrument', 'midi.create_clip'},
+                resource_refs_enabled=True,
+                capability_surface=v3_server_contract.extract_capability_surface(context))
+        self.assertEqual(caught.exception.repair_details, {
+            'command_index': 1, 'command_type': 'midi.create_clip',
+            'effective_instrument_id': 'limited-guitar', 'rejected_pitches': [36, 38],
+            'playable_pitch_ranges': [{'low': 40, 'high': 86}]})
+
+    def test_pitch_feedback_preserves_range_gaps_and_endpoints(self):
+        for ranges, pitches, rejected in (
+            ([{'low': 40, 'high': 86}], [40, 86], []),
+            ([{'low': 40, 'high': 86}], [36, 38, 87, 36], [36, 38, 87]),
+            ([{'low': 36, 'high': 38}, {'low': 42, 'high': 42}], [36, 38, 42], []),
+            ([{'low': 36, 'high': 38}, {'low': 42, 'high': 42}], [39, 41], [39, 41]),
+            ([], [0, 127], []),
+        ):
+            for generated in (False, True):
+                with self.subTest(ranges=ranges, pitches=pitches, generated=generated):
+                    context = self._core_context()
+                    context['instrument_catalog'][0]['playable_pitch_ranges'] = ranges
+                    commands = []
+                    destination = {'row_id': 101}
+                    if generated:
+                        commands.append({'command_id': 'row', 'type': 'row.create',
+                            'arguments': {'name': 'Music', 'position': {'kind': 'end'},
+                                'lane': {'kind': 'midi', 'instrument_id': 'free-piano'}}})
+                        destination = {'row_ref': {'command_id': 'row', 'output': 'row'}}
+                    commands.append({'command_id': 'create', 'type': 'midi.create_clip',
+                        'arguments': {'destination': destination, 'start_beat': 0,
+                            'length_beats': 32, 'notes': [{'pitch': p, 'start_beat': 0,
+                                'length_beats': 1, 'velocity': .8} for p in pitches]}})
+                    plan = {'schema_version': 'plan_v3_prototype_2', 'outcome': 'plan',
+                        'user_message': 'Created music.', 'question_options': [],
+                        'commands': commands}
+                    def validate():
+                        return v3_server_contract.parse_and_validate_provider_plan(
+                            self._provider_payload(plan),
+                            command_types={'row.create', 'midi.create_clip'},
+                            resource_refs_enabled=True,
+                            capability_surface=v3_server_contract.extract_capability_surface(context))
+                    if not rejected:
+                        validate()
+                    else:
+                        with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+                            validate()
+                        self.assertEqual(caught.exception.code, 'v3_plan_midi_pitch_unavailable')
+                        self.assertEqual(caught.exception.repair_details, {
+                            'command_index': int(generated), 'command_type': 'midi.create_clip',
+                            'effective_instrument_id': 'free-piano', 'rejected_pitches': rejected,
+                            'playable_pitch_ranges': ranges})
 
     def test_semantic_validation_rejects_phone_cleanup_sound_conflicts(self) -> None:
         surface = v3_server_contract.extract_capability_surface(
@@ -2092,6 +2594,69 @@ class V3ServerContractTests(unittest.TestCase):
             capability_surface=surface,
         )
         self.assertEqual(validated, plan)
+
+    def test_created_midi_clip_matches_client_arrangement_limits(self) -> None:
+        for refs in (False, True):
+            for beats_per_bar in (None, 3, 4, 6):
+                limit = (beats_per_bar or 4) * 8
+                cases = [
+                    (limit, limit - 1, 1, None),
+                    (limit + 1, 0, 1, "v3_plan_midi_arrangement_limit"),
+                    (4, 3.5, 1, "v3_plan_midi_note_out_of_bounds"),
+                    (4, 3.0, 1.0000001, "v3_plan_midi_note_out_of_bounds"),
+                ]
+                for length, note_start, note_length, error in cases:
+                    with self.subTest(refs=refs, meter=beats_per_bar, length=length, error=error):
+                        context = self._core_context()
+                        if beats_per_bar is not None:
+                            context["project"]["beats_per_bar"] = beats_per_bar
+                        plan = {
+                            "schema_version": "plan_v3_prototype_2",
+                            "outcome": "plan",
+                            "user_message": "Created the MIDI part.",
+                            "question_options": [],
+                            "commands": [{
+                                "command_id": "create-midi",
+                                "type": "midi.create_clip",
+                                "arguments": {
+                                    "destination": {"row_id": 101},
+                                    "start_beat": 128,
+                                    "length_beats": length,
+                                    "notes": [{"pitch": 60, "start_beat": note_start,
+                                               "length_beats": note_length, "velocity": 0.8}],
+                                },
+                            }],
+                        }
+                        def validate():
+                            return v3_server_contract.parse_and_validate_provider_plan(
+                                self._provider_payload(plan), command_types={"midi.create_clip"},
+                                resource_refs_enabled=refs,
+                                capability_surface=v3_server_contract.extract_capability_surface(context),
+                            )
+                        if error is None:
+                            self.assertEqual(validate(), plan)
+                        else:
+                            with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+                                validate()
+                            self.assertEqual(caught.exception.code, error)
+
+    def test_midi_creation_meter_is_validated_and_fingerprinted(self) -> None:
+        for meter in (True, "4", 0, -1, float("nan"), float("inf"), 10 ** 400):
+            with self.subTest(meter=str(meter)):
+                context = self._core_context()
+                context["project"]["beats_per_bar"] = meter
+                with self.assertRaises(v3_server_contract.V3ContractError) as caught:
+                    v3_server_contract.extract_capability_surface(context)
+                self.assertEqual(caught.exception.code, "v3_capability_context_invalid")
+        fingerprints = []
+        for meter in (3, 4):
+            context = self._core_context()
+            context["project"]["beats_per_bar"] = meter
+            fingerprints.append(v3_server_contract.contract_fingerprint(
+                command_types={"midi.create_clip"}, resource_refs_enabled=True,
+                capability_surface=v3_server_contract.extract_capability_surface(context),
+            ))
+        self.assertNotEqual(*fingerprints)
 
     def test_generated_midi_clip_preserves_note_validation(self) -> None:
         context = self._core_context()

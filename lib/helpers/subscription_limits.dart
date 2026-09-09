@@ -58,8 +58,24 @@ class SubscriptionLimits {
     return isFreePlan(entitlement) ? freeLocalProjects : paidLocalProjects;
   }
 
+  static int? rowCreationLimitFor(EntitlementSnapshot? entitlement) {
+    return isFreePlan(entitlement) ? freeRowsPerProject : null;
+  }
+
+  static bool canCreateRows({
+    required int currentRows,
+    required int count,
+    required int? creationLimit,
+  }) {
+    if (count <= 0) return true;
+    if (currentRows < 0) return false;
+    return creationLimit == null || currentRows + count <= creationLimit;
+  }
+
+  /// Compatibility adapter for code that still serializes a finite policy.
+  /// New editor admission code must use [rowCreationLimitFor].
   static int rowLimitFor(EntitlementSnapshot? entitlement) {
-    return isFreePlan(entitlement) ? freeRowsPerProject : 0x3fffffff;
+    return rowCreationLimitFor(entitlement) ?? 0x3fffffff;
   }
 
   static bool canUseInstrument(
