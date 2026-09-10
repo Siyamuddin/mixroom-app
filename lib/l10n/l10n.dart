@@ -1334,6 +1334,10 @@ class L10n {
       'Insert output row': 'Insert output row',
       'Remove row from group': 'Remove row from group',
       'Add audio clip': 'Add audio clip',
+      'Add audio to this track': 'Add audio to this track',
+      'Added to {name}': 'Added to {name}',
+      'Added to {name} (silent because another track is soloed)':
+          'Added to {name} (silent because another track is soloed)',
       'Paste audio clip': 'Paste audio clip',
       'Add instrument clip': 'Add instrument clip',
       'Paste instrument clip': 'Paste instrument clip',
@@ -3431,6 +3435,10 @@ class L10n {
       'Insert output row': '출력 트랙 삽입',
       'Remove row from group': '그룹에서 트랙 제거',
       'Add audio clip': '오디오 클립 추가',
+      'Add audio to this track': '이 트랙에 오디오 추가',
+      'Added to {name}': '{name}에 추가됨',
+      'Added to {name} (silent because another track is soloed)':
+          '{name}에 추가됨 (다른 트랙이 솔로되어 들리지 않음)',
       'Paste audio clip': '오디오 클립 붙여넣기',
       'Add instrument clip': '악기 클립 추가',
       'Paste instrument clip': '악기 클립 붙여넣기',
@@ -4580,6 +4588,10 @@ class L10n {
       'Insert output row': '插入输出轨道',
       'Remove row from group': '从分组中移除轨道',
       'Add audio clip': '添加音频片段',
+      'Add audio to this track': '将音频添加到此轨道',
+      'Added to {name}': '已添加到{name}',
+      'Added to {name} (silent because another track is soloed)':
+          '已添加到{name}（因其他轨道独奏而无声）',
       'Paste audio clip': '粘贴音频片段',
       'Add instrument clip': '添加乐器片段',
       'Paste instrument clip': '粘贴乐器片段',
@@ -6374,6 +6386,10 @@ class L10n {
       'Insert output row': '出力トラックを挿入',
       'Remove row from group': 'グループからトラックを削除',
       'Add audio clip': 'オーディオクリップを追加',
+      'Add audio to this track': 'このトラックにオーディオを追加',
+      'Added to {name}': '{name}に追加しました',
+      'Added to {name} (silent because another track is soloed)':
+          '{name}に追加しました（他のトラックがソロのため無音）',
       'Paste audio clip': 'オーディオクリップを貼り付け',
       'Add instrument clip': 'インストゥルメントクリップを追加',
       'Paste instrument clip': 'インストゥルメントクリップを貼り付け',
