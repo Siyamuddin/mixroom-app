@@ -39,6 +39,7 @@ import 'package:mixroom/helpers/transport_loop.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
+import 'package:mixroom/helpers/audio_import_target.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_midi_key_state.dart';
@@ -31129,6 +31130,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool showLoadingOverlay = true,
     bool notifyUi = true,
     bool deferFadeSync = false,
+    bool confirmPlacement = false,
   }) async {
     if (enforceKnownAudioExtension && !_isSampleAudioFile(filePath)) {
       return false;
@@ -31141,6 +31143,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       return false;
+    }
+
+    var resolvedRow = row;
+    if (resolvedRow == null) {
+      resolvedRow = await _resolveAutoAudioImportRow();
+      if (resolvedRow == null) return false;
     }
 
     await _stopSampleAudition();
@@ -31167,7 +31175,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           tracks: _audioTracks,
           restoreTrack: _addClipFromUndoPayload,
           file: File(filePath),
-          row: row ?? _selectedRow,
+          row: resolvedRow,
           timeMs: timeMs ?? _globalAudioClock.inMilliseconds.toDouble(),
           onRemove: _syncRemovedClipFadesAfterUndo,
         ),
@@ -31182,15 +31190,127 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return false;
     }
-    return _audioTracks.length > beforeClipCount;
+    final inserted = _audioTracks.length > beforeClipCount;
+    if (inserted && confirmPlacement) {
+      await _confirmUserAudioImport(resolvedRow);
+    }
+    return inserted;
+  }
+
+  Future<int?> _resolveAutoAudioImportRow() async {
+    final hiddenRows = <int>{};
+    final visibility = buildTimelineRowVisibilityMap(
+      rows: _rows,
+      groups: _trackGroups,
+    );
+    for (int row = 0; row < _rowCount; row++) {
+      if (visibility.visibleIndexForSourceIndex(row) == null) {
+        hiddenRows.add(row);
+      }
+    }
+
+    final target = resolveAutoAudioImportTarget(
+      selectedRow: _selectedRow,
+      rowCount: _rowCount,
+      maxRows: _effectiveMaxRows,
+      isAudioRow: (row) =>
+          row >= 0 && row < _rows.length && !_rows[row].isInstrumentLane,
+      isOccupied: _rowHasTimelineClip,
+      isHiddenByCollapsedGroup: hiddenRows.contains,
+    );
+
+    switch (target.kind) {
+      case AudioImportTargetKind.existingRow:
+        return target.row;
+      case AudioImportTargetKind.createNewRow:
+        final insertBelow = target.insertBelowRow;
+        if (insertBelow == null || !_isValidRowIndex(insertBelow)) {
+          final added = await _addRowImpl();
+          if (!added || _rowCount <= 0) {
+            _showRowLimitReachedNotice();
+            return null;
+          }
+          return _rowCount - 1;
+        }
+        final inserted = await _insertRowBelowImpl(insertBelow);
+        if (!inserted) {
+          _showRowLimitReachedNotice();
+          return null;
+        }
+        return (insertBelow + 1).clamp(0, _rowCount - 1).toInt();
+      case AudioImportTargetKind.atLimit:
+        _showRowLimitReachedNotice();
+        return null;
+    }
+  }
+
+  Future<void> _expandCollapsedGroupContainingRow(int row) async {
+    if (!_isValidRowIndex(row)) return;
+    final groupId = _rows[row].groupId.trim();
+    if (groupId.isEmpty) return;
+    TrackGroup? group;
+    for (final candidate in _trackGroups) {
+      if (candidate.id == groupId) {
+        group = candidate;
+        break;
+      }
+    }
+    if (group == null || !group.collapsed) return;
+    await _toggleRowGroupCollapsedImpl(groupId);
+  }
+
+  Future<void> _confirmUserAudioImport(int row) async {
+    await _expandCollapsedGroupContainingRow(row);
+    if (_audioTracks.isNotEmpty) {
+      final inserted = _audioTracks.last;
+      if (inserted.rowIndex == row ||
+          (_isValidRowIndex(row) && inserted.rowId == _rowIdAt(row))) {
+        _focusInsertedClipsAfterPaste(<AudioTrack>[inserted]);
+      }
+    }
+    if (mounted && _isValidRowIndex(row)) {
+      setState(() {
+        _selectedRow = row;
+      });
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _timelineController.ensureRowVisible(row);
+      _timelineController.ensurePlayheadVisible();
+    });
+    if (!mounted || !_isValidRowIndex(row)) return;
+    final rawName = _rows[row].name.trim();
+    final name = rawName.isEmpty ? 'Track ${row + 1}' : rawName;
+    final destinationSilent =
+        _rowSoloed.any((soloed) => soloed) &&
+        (row >= _rowSoloed.length || !_rowSoloed[row]);
+    if (destinationSilent) {
+      _showSmallNotice(
+        L10n.translateWithParams(
+          context,
+          'Added to {name} (silent because another track is soloed)',
+          <String, String>{'name': name},
+        ),
+      );
+    } else {
+      _showSmallNotice(
+        L10n.translateWithParams(context, 'Added to {name}', <String, String>{
+          'name': name,
+        }),
+      );
+    }
   }
 
   /// Inserts from the File Browser + control without the full-window spinner.
   Future<void> _insertSampleFromFileBrowser(String filePath) {
-    return _insertAudioFileAtTimeline(filePath, showLoadingOverlay: false);
+    return _insertAudioFileAtTimeline(
+      filePath,
+      showLoadingOverlay: false,
+      confirmPlacement: true,
+    );
   }
 
-  Future<void> _pickAndInsertAudioTrack() async {
+  Future<void> _pickAndInsertAudioTrack({int? explicitRow}) async {
     if (!await _ensureAndroidMediaLibraryAccess()) {
       return;
     }
@@ -31209,6 +31329,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final pickedPath = result.files.single.path!;
     await _insertAudioFileAtTimeline(
       pickedPath,
+      row: explicitRow,
+      confirmPlacement: true,
       enforceKnownAudioExtension: false,
     );
   }
@@ -82209,10 +82331,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _showRowLimitReachedNotice();
       return;
     }
+    final beforeCount = _rowCount;
     await _runRowLayoutActionWithUndo(
       description: 'Add row',
       perform: _addRowImpl,
     );
+    if (!mounted || _rowCount <= beforeCount) return;
+    setState(() {
+      _selectedRow = _rowCount - 1;
+    });
   }
 
   Future<bool> _addInstrumentLaneImpl(
@@ -84544,6 +84671,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               _exitRowGroupingSelectionMode,
                                           onInsertRowAbove: _insertRowAbove,
                                           onInsertRowBelow: _insertRowBelow,
+                                          onAddAudioToRow: (row) =>
+                                              _pickAndInsertAudioTrack(
+                                                explicitRow: row,
+                                              ),
                                           onInsertInstrumentLaneAbove: (row) =>
                                               _insertInstrumentLaneFromPicker(
                                                 row,
