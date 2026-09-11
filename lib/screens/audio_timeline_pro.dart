@@ -1522,6 +1522,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   static const double _kTabletRowHeightDefaultScale = 1.0;
   static const double _kTabletRowHeightMaxScale = 1.5;
   static const double _kTabletRailWheelResizeSensitivity = 0.0015;
+  static const double _kTabletRailMaximumResizeHitExtent = 22.0;
+  static const double _kTabletRailMinimumScrollHitExtent = 20.0;
   static const double _kTabletHeaderLedgeX = 27.0;
   static const double _kTabletRailCenterX = _kTabletHeaderLedgeX / 2.0;
   static const Color _kTabletRailLaneColor = Color.fromRGBO(17, 64, 103, 0.84);
@@ -15184,7 +15186,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               .clamp(0.0, thumbTravel)
               .toDouble();
     final localY = details.localPosition.dy.clamp(0.0, railHeight).toDouble();
-    const edgeHitZone = 22.0;
+    // A large project drives the thumb to its 44 px minimum. Fixed 22 px
+    // resize zones would then meet in the middle and leave no draggable area
+    // for scrolling. Keep the resize targets aligned with their visible end
+    // caps while reserving an unambiguous centre grip at every thumb size.
+    final edgeHitZone = math.min(
+      _kTabletRailMaximumResizeHitExtent,
+      math.max(
+        0.0,
+        (thumbHeight - _kTabletRailMinimumScrollHitExtent) / 2.0,
+      ),
+    );
 
     if (localY >= thumbTop && localY <= thumbTop + thumbHeight) {
       if (localY - thumbTop <= edgeHitZone) {

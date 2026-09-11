@@ -1219,6 +1219,82 @@ void main() {
     }
   });
 
+  testWidgets(
+      'minimum tablet rail thumb keeps a centre grip for vertical scrolling',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final rows = _namedTrackRows(500);
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: rows,
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rail = find.bySemanticsLabel('Rows scrollbar and height');
+      final railRect = tester.getRect(rail);
+      final verticalController = _timelineVerticalScrollController(tester);
+      final initialRowHeightValue = tester.getSemantics(rail).value;
+
+      // With 500 rows the thumb is clamped to its 44 px minimum. Its centre
+      // must drag the viewport, not be claimed by either resize end cap.
+      final gesture = await tester.startGesture(
+        railRect.topLeft + Offset(railRect.width / 2.0, 22.0),
+      );
+      await gesture.moveBy(const Offset(0.0, 40.0));
+      await tester.pump();
+      await gesture.moveBy(const Offset(0.0, 40.0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(verticalController.offset, greaterThan(0.0));
+      expect(tester.getSemantics(rail).value, initialRowHeightValue);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('minimum tablet rail thumb keeps its resize end caps',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: _namedTrackRows(500),
+          useTabletDawLayout: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final rail = find.bySemanticsLabel('Rows scrollbar and height');
+      final railRect = tester.getRect(rail);
+      final verticalController = _timelineVerticalScrollController(tester);
+      final initialRowHeightValue = tester.getSemantics(rail).value;
+
+      final gesture = await tester.startGesture(
+        railRect.topLeft + Offset(railRect.width / 2.0, 6.0),
+      );
+      await gesture.moveBy(const Offset(0.0, 30.0));
+      await tester.pump();
+      await gesture.moveBy(const Offset(0.0, 30.0));
+      await tester.pump();
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(verticalController.offset, 0.0);
+      expect(tester.getSemantics(rail).value, isNot(initialRowHeightValue));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('swiping an unselected clip does not select or move it',
       (tester) async {
     final clips = <AudioTrack>[await _buildClip()];
