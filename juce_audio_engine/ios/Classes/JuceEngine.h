@@ -2918,10 +2918,6 @@ public:
             liveMidiEventQueue[i].sequence.store(i, std::memory_order_relaxed);
         liveMidiBlockEvents.fill({});
         activeLiveNotes.reserve(kMaxActiveLiveNotes);
-        blockNoteIndices.reserve(kMaxTimelineMidiNotes);
-        blockNotePitches.reserve(kMaxTimelineMidiNotes);
-        blockNoteEndSourceSecs.reserve(kMaxTimelineMidiNotes);
-        timelineRegions.reserve(kMaxTimelineMidiNotes);
     }
 
     void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) override
@@ -2994,6 +2990,18 @@ public:
             n.velocity = juce::jlimit(0.0, 1.0, note.velocity);
         next->renderNotes.push_back(n);
         }
+
+        // These vectors are reused by processBlock and must never grow on the
+        // realtime thread. Size them while this replacement processor is
+        // still being prepared, but only for the notes the clip can render.
+        // Reserving the global 16k safety ceiling for every MIDI clip made
+        // memory scale by gigabytes in projects containing many small clips.
+        const auto realtimeNoteCapacity = next->renderNotes.size();
+        blockNoteIndices.reserve(realtimeNoteCapacity);
+        blockNotePitches.reserve(realtimeNoteCapacity);
+        blockNoteEndSourceSecs.reserve(realtimeNoteCapacity);
+        timelineRegions.reserve(realtimeNoteCapacity);
+
         next->instrumentId = instrumentId;
         next->instrumentName = instrumentName;
         next->usesDrumKitSamplePitchMap =
@@ -7481,9 +7489,6 @@ private:
         juce::AudioProcessorGraph::UpdateKind updateKind);
     void compactRowFxChain(int row);
     void compactMasterFxChain();
-    bool isGraphConnectionPresent(juce::AudioProcessorGraph::NodeID src,
-                                  juce::AudioProcessorGraph::NodeID dst,
-                                  int ch) const;
     void ensureMasterOutputRouting();
     bool applyPreferredAudioDeviceSetup(int desiredInputChannels,
                                         bool forceReopen,

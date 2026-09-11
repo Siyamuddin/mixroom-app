@@ -1,5 +1,6 @@
 #include "JuceEngine.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_set>
 
@@ -6981,24 +6982,6 @@ void JuceEngine::compactMasterFxChain()
         masterEffectIds.removeRange(masterEffectIds.size() - 1, 1);
 }
 
-bool JuceEngine::isGraphConnectionPresent(juce::AudioProcessorGraph::NodeID src,
-                                          juce::AudioProcessorGraph::NodeID dst,
-                                          int ch) const
-{
-    for (const auto &connection : graph.getConnections())
-    {
-        if (connection.source.nodeID == src &&
-            connection.destination.nodeID == dst &&
-            connection.source.channelIndex == ch &&
-            connection.destination.channelIndex == ch)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 void JuceEngine::ensureMasterOutputRouting()
 {
     if (!busGraphInitialised)
@@ -7023,13 +7006,43 @@ void JuceEngine::ensureMasterOutputRouting()
         return;
     }
 
+    // getConnections() returns a vector by value. Take one snapshot instead of
+    // copying and scanning the complete graph for every row and channel.
+    std::array<std::unordered_set<juce::uint64>, 2> stereoConnections;
+    const auto connections = graph.getConnections();
+    for (auto &channelConnections : stereoConnections)
+        channelConnections.reserve(connections.size());
+    for (const auto &connection : connections)
+    {
+        const int sourceChannel = connection.source.channelIndex;
+        if (sourceChannel == connection.destination.channelIndex &&
+            juce::isPositiveAndBelow(sourceChannel, (int)stereoConnections.size()))
+        {
+            const auto key = (static_cast<juce::uint64>(connection.source.nodeID.uid) << 32) |
+                             static_cast<juce::uint64>(connection.destination.nodeID.uid);
+            stereoConnections[(size_t)sourceChannel].insert(key);
+        }
+    }
+    const auto isStereoConnectionPresent = [&stereoConnections](
+                                                juce::AudioProcessorGraph::NodeID src,
+                                                juce::AudioProcessorGraph::NodeID dst,
+                                                int channel)
+    {
+        if (!juce::isPositiveAndBelow(channel, (int)stereoConnections.size()))
+            return false;
+        const auto key = (static_cast<juce::uint64>(src.uid) << 32) |
+                         static_cast<juce::uint64>(dst.uid);
+        return stereoConnections[(size_t)channel].find(key) !=
+               stereoConnections[(size_t)channel].end();
+    };
+
     bool needsRepair = false;
 
     for (int ch = 0; ch < 2; ++ch)
     {
-        if (!isGraphConnectionPresent(masterInputNode->nodeID, entryNode->nodeID, ch) ||
-            !isGraphConnectionPresent(masterGainNode->nodeID, masterPanNode->nodeID, ch) ||
-            !isGraphConnectionPresent(masterPanNode->nodeID, outputNode->nodeID, ch))
+        if (!isStereoConnectionPresent(masterInputNode->nodeID, entryNode->nodeID, ch) ||
+            !isStereoConnectionPresent(masterGainNode->nodeID, masterPanNode->nodeID, ch) ||
+            !isStereoConnectionPresent(masterPanNode->nodeID, outputNode->nodeID, ch))
         {
             needsRepair = true;
             break;
@@ -7053,7 +7066,7 @@ void JuceEngine::ensureMasterOutputRouting()
 
             for (int ch = 0; ch < 2; ++ch)
             {
-                if (!isGraphConnectionPresent(row.postNode->nodeID, expectedDestination, ch))
+                if (!isStereoConnectionPresent(row.postNode->nodeID, expectedDestination, ch))
                 {
                     needsRepair = true;
                     break;

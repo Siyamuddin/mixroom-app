@@ -113,6 +113,26 @@ void main() {
       );
       expect(snapshot, contains('rowSnapshot.panTarget.embeddedProcessor'));
     });
+
+    test('playback routing validation takes one graph snapshot: $root', () {
+      final header = File('$root/JuceEngine.h').readAsStringSync();
+      final source = File('$root/JuceEngine.cpp').readAsStringSync();
+      final validation = _between(
+        source,
+        'void JuceEngine::ensureMasterOutputRouting()',
+        '\nnamespace\n{',
+      );
+
+      expect(
+        RegExp(r'graph\.getConnections\(\)').allMatches(validation),
+        hasLength(1),
+      );
+      expect(validation, contains('stereoConnections'));
+      expect(validation, contains('isStereoConnectionPresent'));
+      expect(validation, contains('rewireMasterFxChain'));
+      expect(source, isNot(contains('isGraphConnectionPresent')));
+      expect(header, isNot(contains('isGraphConnectionPresent')));
+    });
   }
 
   test('Apple and Android row post processor definitions stay aligned', () {
