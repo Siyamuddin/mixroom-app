@@ -53,25 +53,26 @@ changed. No public-client routing inventory was established by that inspection.
 
 ## Local review package
 
-The reviewed candidate is based on main
-`93b10e21c3f726c6062c4ef2837eb1d007b3e2a7`, with 18 allowlisted files.
-Keep the analyzer, local bridges, paid/native evaluation runners, their
-dependent tests, and deployment-local `samconfig.toml` changes out of scope.
+The current candidate combines PRO-4, PRO-66, and PRO-17. Review the complete
+diff against the current `origin/main`; do not rely on the earlier 18-file
+PRO-4-only allowlist. Evaluation tools, deterministic fixtures, native capacity
+work, and their tests are part of the combined review. Deployment-local
+`samconfig.toml` changes remain out of scope.
 
-Passing evidence: 260 backend tests and 306 AI-client tests; frozen V1,
-HTTP/REST parity, deadline/failure/settlement tests, deterministic four-profile
-hash/size/count checks, SAM lint, and whitespace checks. The complete Flutter
-suite has seven failures also reproduced on unmodified main and six existing
-host-export skips. Record their disposition separately; do not claim the whole
-app is green or suppress them to release PRO-4.
+Latest passing evidence: 378 AI-backend tests and 333 focused client/AI tests;
+frozen V1, HTTP/REST parity, deadline/failure/settlement tests, deterministic
+profilers, native integration coverage, SAM lint, and whitespace checks. The
+changed Dart files have no analyzer errors. The repository-wide analyzer still
+reports failures that are also present on `origin/main`; record those separately
+and do not describe the complete Flutter repository as warning-free.
 
-The 40-second fake-provider client check passed earlier using excluded local
-tooling. It is not a dependency of the release package. Native stall diagnosis
-and broad musical/language reliability are not certified by these tests.
+Local bridges and live-evaluation runners are review and test tooling. They are
+not Flutter assets and are not included in distributed app packages. No live
+provider check is required to merge the deterministic implementation.
 
 ## Gate A — code review and merge, only after approval
 
-Review only the allowlisted diff against its pinned base. If main advances,
+Review the complete diff against current `origin/main`. If main advances,
 reconcile and rerun relevant checks in an isolated worktree; do not overwrite
 new main changes. Verify both long-route build defaults remain false/empty.
 
@@ -96,9 +97,9 @@ Before any approved packaging/upload or change-set creation:
    Do not put credentials, secret values, or signed download URLs in the repo.
 2. Preserve ALL applied stack parameters, including long throttle rate 1/burst 2,
    HTTP throttles, models, reasoning, cache configuration, auth, quota, billing,
-   and telemetry. The candidate samconfig's explicit
-   `AiChatExtendedPromptCacheRetentionModels` differs from production; do not
-   use it to overwrite production incidentally.
+   and telemetry. Do not treat the repository's deployment-local `samconfig.toml`
+   as authoritative production state or use it to overwrite production
+   incidentally.
 3. For an approved CloudFormation UPDATE change set, explicitly use
    `UsePreviousValue: true` for existing parameters. Do not also provide
    `ParameterValue` for them. Reconcile every added/removed parameter explicitly;
