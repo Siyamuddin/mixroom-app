@@ -62,11 +62,9 @@ class PitchFixtureProvider:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8768)
-    parser.add_argument('--targeted-pitch-repair', action='store_true')
     args = parser.parse_args()
     bridge.DeterministicProvider = PitchFixtureProvider
-    server = bridge.create_server(port=args.port, transport_mode='long',
-        targeted_pitch_repair=args.targeted_pitch_repair)
+    server = bridge.create_server(port=args.port, transport_mode='long')
     print(json.dumps({'message': 'Pitch fixture bridge ready', 'url': f'http://127.0.0.1:{server.server_port}',
                       'external_calls': False}), flush=True)
     try:

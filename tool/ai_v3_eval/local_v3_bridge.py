@@ -232,9 +232,8 @@ class DeterministicProvider:
 
 
 class _LambdaContext:
-    def __init__(self, remaining_time_seconds: int, *, targeted_pitch_repair: bool = False) -> None:
+    def __init__(self, remaining_time_seconds: int) -> None:
         self._remaining_ms = remaining_time_seconds * 1_000
-        self._local_v3_pitch_repair_enabled = targeted_pitch_repair is True
 
     def get_remaining_time_in_millis(self) -> int:
         return self._remaining_ms
@@ -250,7 +249,6 @@ class LocalBackend:
         delay_ms: int,
         provider_timeout_seconds: int,
         transport_mode: str,
-        targeted_pitch_repair: bool = False,
     ) -> None:
         if transport_mode not in TRANSPORT_MODES:
             raise ValueError(f"Unsupported transport mode: {transport_mode}")
@@ -268,7 +266,6 @@ class LocalBackend:
         self.delay_ms = delay_ms
         self.provider_timeout_seconds = provider_timeout_seconds
         self.transport_mode = transport_mode
-        self.targeted_pitch_repair = targeted_pitch_repair
         self.pitch_repair_counts = dict(selected=0, applied=0, ineligible=0, failure=0)
         self.lambda_timeout_seconds = (
             115 if transport_mode == "long" else provider_timeout_seconds + 2
@@ -363,8 +360,7 @@ class LocalBackend:
             with redirect_stdout(output):
                 response = entrypoint(
                     event,
-                    _LambdaContext(self.lambda_timeout_seconds,
-                        targeted_pitch_repair=self.targeted_pitch_repair),
+                    _LambdaContext(self.lambda_timeout_seconds),
                 )
         finally:
             for name, original in originals.items():
@@ -455,7 +451,6 @@ class LocalV3BridgeHandler(BaseHTTPRequestHandler):
                     "usage_reserve_count": self.server.backend.usage.reserve_count,
                     "usage_finalize_count": self.server.backend.usage.finalize_count,
                     "usage_release_count": self.server.backend.usage.release_count,
-                    "targeted_pitch_repair": self.server.backend.targeted_pitch_repair,
                     "pitch_repair_counts": self.server.backend.pitch_repair_counts,
                 },
             )
@@ -558,7 +553,6 @@ def create_server(
     delay_ms: int = 0,
     provider_timeout_seconds: int | None = None,
     transport_mode: str = "standard",
-    targeted_pitch_repair: bool = False,
 ) -> LocalV3BridgeServer:
     if provider_timeout_seconds is None:
         provider_timeout_seconds = (
@@ -571,7 +565,6 @@ def create_server(
         delay_ms=delay_ms,
         provider_timeout_seconds=provider_timeout_seconds,
         transport_mode=transport_mode,
-        targeted_pitch_repair=targeted_pitch_repair,
     )
     return LocalV3BridgeServer(
         ("127.0.0.1", port),
@@ -587,8 +580,6 @@ def main() -> None:
     parser.add_argument("--transport", choices=TRANSPORT_MODES, default="standard")
     parser.add_argument("--delay-ms", type=int, default=0)
     parser.add_argument("--provider-timeout-seconds", type=int)
-    parser.add_argument("--targeted-pitch-repair", action="store_true",
-                        help="Enable experimental backend pitch repair locally only.")
     args = parser.parse_args()
     if args.port < 0 or args.port > 65_535:
         parser.error("--port must be between 0 and 65535")
@@ -614,7 +605,6 @@ def main() -> None:
         delay_ms=args.delay_ms,
         provider_timeout_seconds=provider_timeout_seconds,
         transport_mode=args.transport,
-        targeted_pitch_repair=args.targeted_pitch_repair,
     )
     print(
         json.dumps(

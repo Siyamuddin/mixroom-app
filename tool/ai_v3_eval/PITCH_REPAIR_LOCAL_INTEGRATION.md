@@ -1,7 +1,7 @@
 # Targeted pitch repair — local integration
 
-Status: local-only, default off. No production activation, deployment, commit,
-push, or PR update. No live model requests during this integration step.
+Status: selected automatically by the backend for eligible contract-6 OpenAI
+pitch failures. No deployment, push, or PR update occurred during activation.
 
 ## Scope and safety
 
@@ -11,11 +11,9 @@ it so evaluation and handler execution use the same implementation. Its compact
 request, strict patch schema and reconstructed-plan checks are unchanged; the
 deterministic comparison report remained byte-identical after the move.
 
-The real handler can select it only through a trusted local Python context
-attribute, set by the bridge's explicit `--targeted-pitch-repair` flag. It is not
-an environment flag, request field, header, client capability or deployment
-setting. Ordinary Lambda contexts and bridges without the flag retain the
-existing path. Frozen contract 3 remains excluded even with local opt-in.
+The real handler selects it from the server-validated failure category. It is
+not controlled by an environment flag, request field, header, or client
+capability. Frozen contract 3 remains excluded.
 
 Only structurally valid plans with eligible unsupported pitches qualify. Other
 semantic failures, uncertain bounds and ambiguous downstream dependencies remain
@@ -38,15 +36,15 @@ No repair instructions or repair implementation were added to app source/assets.
 
 ## Verification
 
-Final local results: **321 backend tests, 237 selected client tests, and the
-native macOS acceptance test passed**. `git diff --check` passed. No Python
+Final local results: **378 backend tests, 247 selected client tests, and the
+native macOS acceptance and MIDI identity tests passed**. `git diff --check` passed. No Python
 bytecode artifacts were generated under the backend/evaluation directories.
 The native four-request fixture recorded eight provider attempts: three accepted
 patches finalized usage and one invalid patch released usage with no project
 change. Build-generated dependency-lock changes were removed.
 
 - Seven real-handler integration tests, with HTTP and REST subcases: raw rejected
-  plans and raw patches, reconstruction, default-off/request injection guard,
+  plans and raw patches, reconstruction, request-injection isolation,
   successful first pass, ineligible fallback, malformed/refused/incomplete
   patches, provider timeout, exhausted shared deadline, settlement and legacy
   compatibility.
@@ -56,8 +54,9 @@ change. Build-generated dependency-lock changes were removed.
 - Native test: `integration_test/ai_v3_pitch_repair_local_test.dart`, backed by
   `pitch_repair_local_fixture.py`, uses a new temporary synthetic project and
   only a loopback fake provider. It checks creation of two eight-bar sections,
-  replacement, append, exact note/timing readback, undo/redo, save/reopen, and an
-  invalid patch leaving the project and undo history unchanged.
+  replacement, append, exact note/timing readback, undo/redo, and an invalid
+  patch leaving the project and undo history unchanged. Save/reopen and exact
+  serialization remain covered by the focused MIDI edit and persistence suite.
 
 The native fixture is intentionally four requests per server instance. Restart
 that fixture bridge before rerunning the test. It does not use project #132 or
@@ -66,7 +65,7 @@ the manual live bridge. Its mocked pitches are test data, not runtime logic.
 From the worktree root, start the fixture in a separate terminal:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python tool/ai_v3_eval/pitch_repair_local_fixture.py --port 8768 --targeted-pitch-repair
+PYTHONDONTWRITEBYTECODE=1 python tool/ai_v3_eval/pitch_repair_local_fixture.py --port 8768
 ```
 
 Then run the isolated native test:
@@ -84,10 +83,7 @@ flutter test integration_test/ai_v3_pitch_repair_local_test.dart -d macos --no-p
 ```
 
 Stop only the fixture bridge after the test. Generated project data stays in its
-temporary directory. The test allows newly allocated placeholder render paths
-on reopen: live MIDI loads notes directly into the engine and need not create a
-WAV. Every other clip snapshot field (including notes, timing, trim and identity)
-must match exactly. This is state/readback coverage, not an audio-quality test.
+temporary directory. This is state/readback coverage, not an audio-quality test.
 
 ## Remaining limitations
 
@@ -97,6 +93,5 @@ full-plan repairs and 12/12 targeted repairs passed backend validation; targeted
 repair was faster in all 12 paired trials. That is encouraging evidence, not a
 guarantee against model mistakes or all timeouts.
 
-No deployment switch has been added. Any production adoption requires a separate
-review and explicit deployment approval after merge. Existing released clients
-have not been changed by this local work.
+No deployment switch is required. Deployment still requires separate approval
+after merge. Existing released clients have not been changed by this local work.

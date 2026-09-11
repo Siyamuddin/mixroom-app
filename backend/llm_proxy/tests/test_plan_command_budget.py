@@ -103,16 +103,14 @@ class PlanCommandBudgetTests(unittest.TestCase):
         fixed = copy.deepcopy(rejected)
         fixed['commands'][-1]['arguments']['notes'][0]['pitch'] = 60
         self.assertEqual(v3_pitch_repair.reconstruct(case, patch), fixed)
-        for targeted in (False, True):
-            response, provider, usage, _, _ = integration.PitchRepairIntegrationTests().invoke(
-                enabled=targeted, body=raw_request, plan=rejected,
-                second=patch if targeted else v3_pitch_repair.plan_payload(fixed),
-                times=(100., 110., 110.) if targeted else (100., 110.))
-            self.assertEqual(response['statusCode'], 200)
-            self.assertEqual(json.loads(response['body'])['plan'], fixed)
-            self.assertEqual(provider.timeout_seconds, [105, 95])
-            self.assertEqual(len(usage.finalize_calls), 1)
-            self.assertEqual(usage.release_calls, [])
+        response, provider, usage, _, _ = integration.PitchRepairIntegrationTests().invoke(
+            body=raw_request, plan=rejected, second=patch,
+            times=(100., 110., 110.))
+        self.assertEqual(response['statusCode'], 200)
+        self.assertEqual(json.loads(response['body'])['plan'], fixed)
+        self.assertEqual(provider.timeout_seconds, [105, 95])
+        self.assertEqual(len(usage.finalize_calls), 1)
+        self.assertEqual(usage.release_calls, [])
         rejected['commands'].append(copy.deepcopy(rejected['commands'][0]))
         with self.assertRaises((v3_pitch_repair.RepairRejected, contract.V3ContractError)):
             v3_pitch_repair.prepare(request, v3_pitch_repair.plan_payload(rejected), body)

@@ -1,4 +1,4 @@
-"""Bounded contract-6 pitch repair, enabled only by an explicit local context.
+"""Bounded contract-6 pitch repair for eligible OpenAI provider plans.
 
 No network calls, public command changes, or application-side pitch correction.
 Analysis is not acceptance: only reconstruct() returns a fully validated plan.

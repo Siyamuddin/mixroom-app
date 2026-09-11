@@ -125,11 +125,10 @@ class LiveLocalBackend:
     provider_timeout_seconds = _MAX_PROVIDER_TIMEOUT_SECONDS
     lambda_timeout_seconds = 115
 
-    def __init__(self, *, api_key: str, targeted_pitch_repair: bool = False) -> None:
+    def __init__(self, *, api_key: str) -> None:
         if not api_key.strip():
             raise ValueError("A non-empty API key is required.")
         self._api_key = api_key
-        self.targeted_pitch_repair = targeted_pitch_repair
         self.pitch_repair_counts = dict(selected=0, applied=0, ineligible=0, failure=0)
         self.usage = InMemoryUsageRepository()
         self.providers: list[CountingLiveProvider] = []
@@ -194,8 +193,7 @@ class LiveLocalBackend:
             with redirect_stdout(output):
                 response = api_responses_v3_rest.handler(
                     event,
-                    _LambdaContext(self.lambda_timeout_seconds,
-                        targeted_pitch_repair=self.targeted_pitch_repair),
+                    _LambdaContext(self.lambda_timeout_seconds),
                 )
         finally:
             for name, original in originals.items():
@@ -273,7 +271,6 @@ class CappedLiveHandler(LocalV3BridgeHandler):
                         provider.attempt_count
                         for provider in self.server.backend.providers
                     ),
-                    "targeted_pitch_repair": self.server.backend.targeted_pitch_repair,
                     "pitch_repair_counts": self.server.backend.pitch_repair_counts,
                 },
             )
@@ -296,8 +293,6 @@ def main() -> None:
     )
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--max-requests", type=int, required=True)
-    parser.add_argument("--targeted-pitch-repair", action="store_true",
-                        help="Enable experimental backend pitch repair locally only.")
     args = parser.parse_args()
     if not args.execute_live:
         parser.error("refusing live requests without --execute-live")
@@ -319,7 +314,7 @@ def main() -> None:
     api_key = _load_configured_api_key()
     if not api_key:
         parser.error("No OpenAI API key is configured.")
-    backend = LiveLocalBackend(api_key=api_key, targeted_pitch_repair=args.targeted_pitch_repair)
+    backend = LiveLocalBackend(api_key=api_key)
     del api_key
     server = CappedLiveServer(
         ("127.0.0.1", args.port),

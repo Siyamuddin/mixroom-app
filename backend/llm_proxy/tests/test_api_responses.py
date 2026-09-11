@@ -1590,7 +1590,8 @@ class ApiResponsesTests(unittest.TestCase):
             self._v3_provider_plan_payload(corrected, response_id='corrected')])
         output = StringIO()
         with mock.patch.dict(os.environ, {'AI_V3_ENABLED': 'true',
-                'AI_V3_SERVER_CONTRACT_ENABLED': 'true'}, clear=False), \
+                'AI_V3_SERVER_CONTRACT_ENABLED': 'true',
+                'LLM_PROVIDER': 'fake'}, clear=False), \
                 mock.patch.object(api_responses, '_load_api_key', return_value='test'), \
                 mock.patch.object(api_responses, 'get_provider', return_value=provider), \
                 redirect_stdout(output):
@@ -1628,7 +1629,8 @@ class ApiResponsesTests(unittest.TestCase):
                     self._v3_provider_plan_payload(invalid, response_id='first'),
                     self._v3_provider_plan_payload(valid if repaired else invalid, response_id='second')])
                 with mock.patch.dict(os.environ, {'AI_V3_ENABLED': 'true',
-                    'AI_V3_SERVER_CONTRACT_ENABLED': 'true', 'LLM_MAX_OUTPUT_TOKENS': ''}), \
+                    'AI_V3_SERVER_CONTRACT_ENABLED': 'true', 'LLM_PROVIDER': 'fake',
+                    'LLM_MAX_OUTPUT_TOKENS': ''}), \
                     mock.patch.object(api_responses, '_load_api_key', return_value='test'), \
                     mock.patch.object(api_responses, 'get_provider', return_value=provider), \
                     redirect_stdout(StringIO()):
@@ -1735,6 +1737,7 @@ class ApiResponsesTests(unittest.TestCase):
                         "AI_V3_ENABLED": "true",
                         "AI_V3_SERVER_CONTRACT_ENABLED": "true",
                         "AI_V3_TIMEOUT_SECONDS": "27",
+                        "LLM_PROVIDER": "fake",
                     },
                     clear=False,
                 ), mock.patch.object(
@@ -1868,7 +1871,7 @@ class ApiResponsesTests(unittest.TestCase):
                 output = StringIO()
                 with mock.patch.dict(os.environ, {
                     "AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true",
-                    "AI_V3_TIMEOUT_SECONDS": "27",
+                    "AI_V3_TIMEOUT_SECONDS": "27", "LLM_PROVIDER": "fake",
                 }, clear=False), mock.patch.object(
                     api_responses, "_load_api_key", return_value="sk-test"
                 ), mock.patch.object(

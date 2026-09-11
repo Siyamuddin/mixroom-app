@@ -35,6 +35,20 @@ void main() {
       await ProjectManager.writeProjectJson(fixture.directory, project);
       final auth = _Auth();
       addTearDown(auth.dispose);
+      final previous = FlutterError.onError;
+      FlutterError.onError = (details) {
+        final text = details.exceptionAsString();
+        // Existing macOS integration-test semantics noise, not execution errors.
+        if (text.contains(
+              'A SemanticsNode with action "increase" needs to be annotated',
+            ) ||
+            (text.contains("'package:flutter/src/rendering/object.dart'") &&
+                text.contains("'node.built'"))) {
+          return;
+        }
+        previous?.call(details);
+      };
+      addTearDown(() => FlutterError.onError = previous);
       final controller = AudioEditorEvaluationController();
       await tester.pumpWidget(
         buildIntegrationTestApp(

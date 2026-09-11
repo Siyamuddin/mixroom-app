@@ -1,9 +1,9 @@
 # Bounded pitch repair — offline prototype
 
 Historical report: the original **offline, inactive prototype** phase. The
-subsequent local-only handler integration is described in
-`PITCH_REPAIR_LOCAL_INTEGRATION.md`. Production activation remains disabled.
-The results and boundaries below describe the original prototype phase only.
+subsequent handler integration and activation are described in
+`PITCH_REPAIR_LOCAL_INTEGRATION.md`. The results and boundaries below describe
+the original prototype phase only.
 
 ## What changed
 

@@ -126,11 +126,7 @@ def timing_report():
 
 
 class OfflineAdapter:
-    """Test-only interception of the real handler's existing single repair call.
-
-    No new handler switch/configuration. Malformed patches feed the original
-    rejected plan back to normal validation; there is never a third attempt.
-    """
+    """Test-only provider for the real handler's existing single repair call."""
     name = "offline-pitch-prototype"
 
     def __init__(self, request, initial, result=None):
@@ -148,11 +144,7 @@ class OfflineAdapter:
             self.repair_bodies.append(case.body)
             if isinstance(self.result, Exception):
                 raise self.result
-            try:
-                plan = repair.reconstruct(case, self.result or mocked_patch(case))
-                payload = repair.plan_payload(plan)
-            except repair.RepairRejected:
-                payload = self.initial
+            payload = self.result or mocked_patch(case)
         return {"statusCode": 200, "body": json.dumps(payload)}
 
 
@@ -394,11 +386,14 @@ class BoundedPitchRepairTests(unittest.TestCase):
                     provider = OfflineAdapter(request, repair.plan_payload(plan), result)
                     with mock.patch.dict(os.environ, {"AI_V3_ENABLED": "true",
                         "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                        "LLM_PROVIDER": "openai",
                         "AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS": "105" if mode == "long" else "27",
                         "AI_V3_TIMEOUT_SECONDS": "105" if mode == "long" else "27"}), mock.patch.object(
                         api_responses, "_load_api_key", return_value="synthetic"), mock.patch.object(
                         api_responses, "get_provider", return_value=provider), mock.patch.object(
-                        api_responses.time, "monotonic", side_effect=[100., 200. if mode == "exhausted" else 110.]), redirect_stdout(StringIO()):
+                        api_responses.time, "monotonic", side_effect=(
+                            [100., 200.] if mode == "exhausted" else [100., 110., 110.]
+                        )), redirect_stdout(StringIO()):
                         response = api_responses.handler(handler_tests._authed_event(
                             json.dumps(body), path="/v1/llm/v3/responses"),
                             handler_tests._LambdaContext(115_000 if mode == "long" else 30_000))

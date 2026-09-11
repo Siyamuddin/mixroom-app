@@ -16,7 +16,7 @@ from local_v3_bridge import _LambdaContext
 
 
 class PitchRepairIntegrationTests(unittest.TestCase):
-    def invoke(self, *, enabled=True, second=None, body=None, plan=None,
+    def invoke(self, *, second=None, body=None, plan=None,
                rest_route=False, times=(100., 110., 110.), mutate_event=None):
         default_body, default_plan = fixtures.fixture()
         body = body or default_body
@@ -48,7 +48,7 @@ class PitchRepairIntegrationTests(unittest.TestCase):
                 mock.patch.object(api_responses, 'capture_event') as analytics, \
                 mock.patch.object(api_responses, 'capture_exception'), redirect_stdout(output):
                 response = (api_responses_v3_rest.handler if rest_route else api_responses.handler)(
-                    event, _LambdaContext(115, targeted_pitch_repair=enabled))
+                    event, _LambdaContext(115))
             final_log = json.loads(output.getvalue().strip().splitlines()[-1])
             return response, provider, helper.fake_usage_repo, final_log, analytics.call_args_list
         finally:
@@ -75,21 +75,16 @@ class PitchRepairIntegrationTests(unittest.TestCase):
                 self.assertNotIn('v3_pitch_repair', response['body'])
                 self.assertNotIn('v3_pitch_repair', str(analytics) + str(usage.log_calls))
 
-    def test_default_request_headers_and_environment_cannot_opt_in(self):
-        body, original = fixtures.fixture()
-        for command in original['commands']:
-            for note in command['arguments']['notes']:
-                note['pitch'] = 48
+    def test_request_fields_cannot_control_server_selected_repair(self):
         def injected(event):
             event['_local_v3_pitch_repair_enabled'] = True
             event['requestContext']['_local_v3_pitch_repair_enabled'] = True
             event['headers']['X-Targeted-Pitch-Repair'] = 'true'
-        with mock.patch.object(repair, 'prepare', side_effect=AssertionError('must remain off')):
-            response, provider, _, log, _ = self.invoke(enabled=False,
-                second=repair.plan_payload(original), mutate_event=injected)
+        response, provider, _, log, _ = self.invoke(mutate_event=injected)
         self.assertEqual(response['statusCode'], 200)
-        self.assertEqual(provider.request_bodies[1]['tools'][0]['name'], 'submit_plan_v3')
-        self.assertFalse(any(key.startswith('v3_pitch_repair') for key in log))
+        self.assertEqual(provider.request_bodies[1]['tools'][0]['name'], repair.TOOL_NAME)
+        self.assertTrue(log['v3_pitch_repair_selected'])
+        self.assertTrue(log['v3_pitch_repair_applied'])
 
     def test_valid_first_response_remains_one_attempt(self):
         body, plan = fixtures.fixture()
@@ -140,18 +135,17 @@ class PitchRepairIntegrationTests(unittest.TestCase):
         self.assertTrue(log['semantic_repair_skipped_deadline'])
         self.assertEqual(len(usage.release_calls), 1)
 
-    def test_frozen_contract_3_is_identical_even_with_local_opt_in(self):
+    def test_frozen_contract_3_does_not_use_pitch_repair(self):
         body = base.ApiResponsesTests()._v3_context_body(request_contract='mixroom_v3_context_v1')
         plan = base.ApiResponsesTests()._v3_respond_plan()
         results = []
         with mock.patch.object(repair, 'prepare', side_effect=AssertionError('legacy must not use repair')):
-            for enabled in (False, True):
-                response, provider, _, log, _ = self.invoke(enabled=enabled, body=body,
-                    plan=plan, second={}, times=(100.,))
-                self.assertEqual(response['statusCode'], 200)
-                self.assertFalse(any(key.startswith('v3_pitch_repair') for key in log))
-                results.append((json.loads(response['body']), provider.request_bodies))
-        self.assertEqual(results[0], results[1])
+            response, provider, _, log, _ = self.invoke(body=body,
+                plan=plan, second={}, times=(100.,))
+            self.assertEqual(response['statusCode'], 200)
+            self.assertFalse(any(key.startswith('v3_pitch_repair') for key in log))
+            results.append((json.loads(response['body']), provider.request_bodies))
+        self.assertEqual(len(results), 1)
 
 
 if __name__ == '__main__':

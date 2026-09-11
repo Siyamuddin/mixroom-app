@@ -4131,15 +4131,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 if repair_timeout_seconds <= 0:
                     request_log_context["semantic_repair_skipped_deadline"] = True
                     break
-                # Only a trusted local bridge context can opt in. Lambda's real
-                # context has no such attribute; request JSON/headers/env cannot
-                # enable this experimental path. Contract 3 was excluded above.
-                local_pitch_opt_in = (
-                    getattr(_context, "_local_v3_pitch_repair_enabled", False) is True
-                    and error.code == "v3_plan_midi_pitch_unavailable"
+                # Contract-6 pitch failures use the bounded repair contract.
+                # Request fields cannot enable or disable this server-owned path.
+                targeted_pitch_repair_allowed = (
+                    error.code == "v3_plan_midi_pitch_unavailable"
                     and _provider_name() == "openai"
                 )
-                if local_pitch_opt_in:
+                if targeted_pitch_repair_allowed:
                     try:
                         targeted_pitch_repair = v3_pitch_repair.prepare(
                             v3_server_request, response_payload, request_body,
