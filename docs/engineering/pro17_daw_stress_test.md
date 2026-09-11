@@ -89,8 +89,14 @@ The probe reports:
 - `operation_start`, `operation_phase`, and `operation_end` for add/remove/move
   row and add/delete clip actions;
 - `operation_visible_frame`, measuring through the first rendered UI frame;
+- `operation_end.frame_already_scheduled` and `operation_event_loop_yield`,
+  distinguishing application-frame scheduling from continued UI-isolate work;
 - `slow_frame` for Flutter frames over 32 ms;
 - `event_loop_stall` when the UI isolate fails to tick for at least 150 ms.
+
+The integration benchmark waits for the frame scheduled by the editor mutation
+itself. It does not inject an additional test-driven frame into the measured
+interval.
 
 The same operations appear as `PRO17 ...` timeline tasks in Flutter DevTools.
 Each test creates its own temporary project root, never the user's project

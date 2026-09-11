@@ -39,14 +39,18 @@ void main() {
 
     test('rows and groups both supply shared meter ownership: $root', () {
       final source = File('$root/JuceEngine.cpp').readAsStringSync();
-      final constructors = RegExp(
-        r'make_unique<MeterTapProcessor>\(\s*(r|group)\.meter,\s*&rowMetersEnabled\)',
-      ).allMatches(source);
-      expect(constructors.map((match) => match.group(1)).toSet(), {
-        'r',
-        'group',
-      });
-      expect(constructors, hasLength(2));
+      expect(
+        RegExp(
+          r'make_unique<RowPostProcessor>\(\s*r\.meter,\s*&rowMetersEnabled\)',
+        ).allMatches(source),
+        hasLength(1),
+      );
+      expect(
+        RegExp(
+          r'make_unique<MeterTapProcessor>\(\s*group\.meter,\s*&rowMetersEnabled\)',
+        ).allMatches(source),
+        hasLength(1),
+      );
     });
   }
 
@@ -63,5 +67,18 @@ void main() {
         meterClass(File('${roots[1]}/JuceEngine.h').readAsStringSync()),
       ),
     );
+  });
+
+  test('row post processor retains the shared meter owner', () {
+    for (final root in roots) {
+      final header = File('$root/JuceEngine.h').readAsStringSync();
+      final start = header.indexOf('class RowPostProcessor final');
+      final end = header.indexOf('// dummy node before a track/row', start);
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      final rowPost = header.substring(start, end);
+      expect(rowPost, contains('MeterTapProcessor meterTap;'));
+      expect(rowPost, contains('meterTap(meterState, meterEnabled)'));
+    }
   });
 }

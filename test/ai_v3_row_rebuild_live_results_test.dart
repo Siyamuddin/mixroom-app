@@ -18,8 +18,9 @@ void main() {
           .map((line) => Map<String, dynamic>.from(jsonDecode(line) as Map));
       var checked = 0;
       for (final record in records) {
-        if (record['backend_valid'] != true || record['outcome'] != 'plan')
+        if (record['backend_valid'] != true || record['outcome'] != 'plan') {
           continue;
+        }
         final context = AiV3CoreContext(
           profile: AiV3ContextProfile.essential,
           stateDigest: 'synthetic-rebuild',
@@ -52,6 +53,8 @@ void main() {
         checked++;
       }
       expect(checked, greaterThan(0));
+      // This opt-in evaluator intentionally emits its aggregate result.
+      // ignore: avoid_print
       print('REBUILD_CLIENT_PLANS_CHECKED=$checked');
     },
     skip: input == null

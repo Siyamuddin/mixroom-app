@@ -2950,7 +2950,7 @@ bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
 
 bool JuceEngine::pausePlaybackForRouteChangeV2()
 {
-#if JUCE_IOS
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession())
         return false;
 
@@ -3515,31 +3515,23 @@ void JuceEngine::attachRowBusNodes(RowState &r,
     r.inputProc = ti.get();
     r.inputNode = graph.addNode(std::move(ti), std::nullopt, updateKind);
 
-    auto ap = std::make_unique<VolumeAutomationProcessor>();
-    r.automationProc = ap.get();
-    r.automationNode = graph.addNode(std::move(ap), std::nullopt, updateKind);
-
-    auto tg = std::make_unique<SimpleGainProcessor>();
-    r.gainProc = tg.get();
-    r.gainNode = graph.addNode(std::move(tg), std::nullopt, updateKind);
-    r.gainProc->gain->setValueNotifyingHost(
-        juce::jlimit(kGainUiMin, kGainUiMax, r.gainUi) / kGainUiMax);
-    r.gainProc->setMuted(r.muted);
-
-    auto tp = std::make_unique<StereoPanProcessor>();
-    r.panProc = tp.get();
-    r.panNode = graph.addNode(std::move(tp), std::nullopt, updateKind);
-    r.panProc->pan->setValueNotifyingHost(panUIToNormalized(r.panUi));
-
     if (r.meter == nullptr)
         r.meter = std::make_shared<StereoMeterState>();
 
-    auto mt = std::make_unique<MeterTapProcessor>(
+    auto post = std::make_unique<RowPostProcessor>(
         r.meter,
         &rowMetersEnabled);
+    r.postProc = post.get();
+    r.automationProc = &post->automationProcessor();
+    r.gainProc = &post->gainProcessor();
+    r.panProc = &post->panProcessor();
+    r.meterTapProc = &post->meterProcessor();
+    r.postNode = graph.addNode(std::move(post), std::nullopt, updateKind);
 
-    r.meterTapProc = mt.get();
-    r.meterTapNode = graph.addNode(std::move(mt), std::nullopt, updateKind);
+    r.gainProc->gain->setValueNotifyingHost(
+        juce::jlimit(kGainUiMin, kGainUiMax, r.gainUi) / kGainUiMax);
+    r.gainProc->setMuted(r.muted);
+    r.panProc->pan->setValueNotifyingHost(panUIToNormalized(r.panUi));
 
     if (r.automationProc != nullptr)
     {
@@ -3553,12 +3545,7 @@ void JuceEngine::attachRowBusNodes(RowState &r,
     }
 
     for (int ch = 0; ch < 2; ++ch)
-    {
-        graph.addConnection({{r.inputNode->nodeID, ch}, {r.automationNode->nodeID, ch}}, updateKind);
-        graph.addConnection({{r.automationNode->nodeID, ch}, {r.gainNode->nodeID, ch}}, updateKind);
-        graph.addConnection({{r.gainNode->nodeID, ch}, {r.panNode->nodeID, ch}}, updateKind);
-        graph.addConnection({{r.panNode->nodeID, ch}, {r.meterTapNode->nodeID, ch}}, updateKind);
-    }
+        graph.addConnection({{r.inputNode->nodeID, ch}, {r.postNode->nodeID, ch}}, updateKind);
 
     reconnectAllRowOutputsToBuses(updateKind);
 }
@@ -3577,8 +3564,7 @@ void JuceEngine::ensureRowBusNodesAttached(int rowIndex,
         return;
 
     auto &r = rows[(size_t)rowIndex];
-    if (r.inputNode != nullptr && r.automationNode != nullptr &&
-        r.gainNode != nullptr && r.panNode != nullptr && r.meterTapNode != nullptr)
+    if (r.inputNode != nullptr && r.postNode != nullptr)
         return;
 
     attachRowBusNodes(r, updateKind);
@@ -4624,7 +4610,10 @@ void JuceEngine::beginProjectClipLoad()
     }
     if (shouldDetachAudioCallback)
         deviceManager.removeAudioCallback(metronomeCallback.get());
-    juceLogToFlutter(("ProjectClipLoad begin depth=" + juce::String(depth)).toRawUTF8());
+    juceLogToFlutter(("ProjectClipLoad begin depth=" + juce::String(depth) +
+                      " callbackDetachCount=" +
+                      juce::String(shouldDetachAudioCallback ? 1 : 0))
+                         .toRawUTF8());
 }
 
 void JuceEngine::endProjectClipLoad()
@@ -4640,6 +4629,7 @@ JuceEngine::MutationResult JuceEngine::endProjectClipLoadDetailed()
     bool publishedRoutes = false;
     bool completed = false;
     bool shouldRestoreAudioCallback = false;
+    bool callbackRestored = false;
     bool routedPublicationFailed = false;
     try
     {
@@ -4700,14 +4690,18 @@ JuceEngine::MutationResult JuceEngine::endProjectClipLoadDetailed()
     }
     if (shouldRestoreAudioCallback && engineInitialized &&
         !isApplicationTerminating() && metronomeCallback != nullptr)
-        attachAudioCallbackIfAllowed(metronomeCallback.get());
+        callbackRestored = attachAudioCallbackIfAllowed(metronomeCallback.get());
     if (completed)
         juceLogToFlutter(("ProjectClipLoad end done rebuilt=" +
                           juce::String(rebuiltGraph ? "true" : "false") +
                           " outputSafety=" +
                           juce::String(armedOutputSafety ? "true" : "false") +
                           " routes=" +
-                          juce::String(publishedRoutes ? "true" : "false"))
+                          juce::String(publishedRoutes ? "true" : "false") +
+                          " graphPublicationCount=" +
+                          juce::String(rebuiltGraph ? 1 : 0) +
+                          " callbackAttachCount=" +
+                          juce::String(callbackRestored ? 1 : 0))
                              .toRawUTF8());
     return routedPublicationFailed
                ? MutationResult::resourceExhausted
@@ -5730,25 +5724,41 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
     if (clipIds.isEmpty())
         return 0;
 
+    juce::Array<int> uniqueClipIds;
     std::vector<std::shared_ptr<juce::AudioProcessor>> detachedProcessors;
+    try
+    {
+        uniqueClipIds.ensureStorageAllocated(clipIds.size());
+        for (const int clipId : clipIds)
+            uniqueClipIds.addIfNotAlreadyThere(clipId);
+        detachedProcessors.reserve((size_t)uniqueClipIds.size());
+    }
+    catch (...)
+    {
+        return -1;
+    }
     int removed = 0;
+    bool routedPublicationSucceeded = true;
 
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
         if (clips.empty())
-            return 0;
+            return -1;
+
+        // Validate the complete batch before changing any clip. This keeps a
+        // bad/stale ID from producing a partially applied deletion.
+        for (const int clipId : uniqueClipIds)
+        {
+            if (clipId < 0 || clipId >= (int)clips.size() ||
+                !clips[(size_t)clipId].alive)
+                return -1;
+        }
 
         bool graphChanged = false;
         beginRoutedClipScheduleMutationLocked();
-        for (const int clipId : clipIds)
+        for (const int clipId : uniqueClipIds)
         {
-            if (clipId < 0 || clipId >= (int)clips.size())
-                continue;
-
             ClipState &clip = clips[(size_t)clipId];
-            if (!clip.alive)
-                continue;
-
             midiClipPluginAutomationLanes.erase(
                 std::remove_if(
                     midiClipPluginAutomationLanes.begin(),
@@ -5764,7 +5774,7 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
                 detachedProcessors.push_back(std::move(processor));
             ++removed;
         }
-        endRoutedClipScheduleMutationLocked();
+        routedPublicationSucceeded = endRoutedClipScheduleMutationLocked();
 
         if (removed > 0)
             publishAutomationSnapshotLocked();
@@ -5781,7 +5791,7 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
         drainRetiredLiveClipProcessorsLocked();
     }
 
-    return removed;
+    return routedPublicationSucceeded ? removed : -1;
 }
 
 std::shared_ptr<juce::AudioProcessor> JuceEngine::clearClipGraphNodes(
@@ -6493,6 +6503,14 @@ struct OfflineClipRenderState
     juce::AudioProcessorGraph::Node::Ptr playerNode;
 };
 
+struct OfflineStereoMeterState
+{
+    std::atomic<float> peakL{0.0f};
+    std::atomic<float> peakR{0.0f};
+    std::atomic<float> rmsL{0.0f};
+    std::atomic<float> rmsR{0.0f};
+};
+
 struct OfflineRowRenderState
 {
     int rowId = 0;
@@ -6503,6 +6521,7 @@ struct OfflineRowRenderState
     SimpleGainProcessor *gainProc = nullptr;
     StereoPanProcessor *panProc = nullptr;
     juce::AudioProcessorGraph::Node::Ptr inputNode;
+    juce::AudioProcessorGraph::Node::Ptr postNode;
     std::vector<AutomationPoint> automationPoints;
     std::vector<AutomationPoint> gainAutomationPoints;
     std::vector<AutomationPoint> panAutomationPoints;
@@ -7401,28 +7420,17 @@ bool buildOfflineExportContext(
             std::nullopt,
             kBatchGraphUpdate);
 
-        auto automationProcessor = std::make_unique<VolumeAutomationProcessor>();
-        row.automationProc = automationProcessor.get();
-        auto automationNode = context.graph.addNode(
-            std::move(automationProcessor),
+        auto meter = std::make_shared<OfflineStereoMeterState>();
+        auto postProcessor = std::make_unique<RowPostProcessor>(meter, nullptr);
+        row.automationProc = &postProcessor->automationProcessor();
+        row.gainProc = &postProcessor->gainProcessor();
+        row.panProc = &postProcessor->panProcessor();
+        row.postNode = context.graph.addNode(
+            std::move(postProcessor),
             std::nullopt,
             kBatchGraphUpdate);
 
-        auto gainProcessor = std::make_unique<SimpleGainProcessor>();
-        row.gainProc = gainProcessor.get();
-        auto gainNode = context.graph.addNode(
-            std::move(gainProcessor),
-            std::nullopt,
-            kBatchGraphUpdate);
-
-        auto panProcessor = std::make_unique<StereoPanProcessor>();
-        row.panProc = panProcessor.get();
-        auto panNode = context.graph.addNode(
-            std::move(panProcessor),
-            std::nullopt,
-            kBatchGraphUpdate);
-
-        if (row.inputNode == nullptr || automationNode == nullptr || gainNode == nullptr || panNode == nullptr)
+        if (row.inputNode == nullptr || row.postNode == nullptr)
         {
             error = "Offline export graph could not create row bus nodes.";
             return false;
@@ -7470,9 +7478,7 @@ bool buildOfflineExportContext(
             previousNodeId = node->nodeID;
         }
 
-        connectStereo(context.graph, previousNodeId, automationNode->nodeID, kBatchGraphUpdate);
-        connectStereo(context.graph, automationNode->nodeID, gainNode->nodeID, kBatchGraphUpdate);
-        connectStereo(context.graph, gainNode->nodeID, panNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, previousNodeId, row.postNode->nodeID, kBatchGraphUpdate);
         auto groupIt = context.rowIdToGroupIndex.find(row.rowId);
         if (groupIt != context.rowIdToGroupIndex.end() &&
             groupIt->second >= 0 &&
@@ -7481,13 +7487,13 @@ bool buildOfflineExportContext(
         {
             connectStereo(
                 context.graph,
-                panNode->nodeID,
+                row.postNode->nodeID,
                 context.groups[(size_t)groupIt->second].inputNode->nodeID,
                 kBatchGraphUpdate);
         }
         else
         {
-            connectStereo(context.graph, panNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
+            connectStereo(context.graph, row.postNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
         }
 
         context.rowIdToIndex[row.rowId] = (int)context.rows.size();
@@ -9835,17 +9841,17 @@ void JuceEngine::rewireTrackBusFxChain(
     compactRowFxChain(row);
 
     auto *inputNode = rows[(size_t)row].inputNode.get();
-    auto *automationNode = rows[(size_t)row].automationNode.get();
+    auto *postNode = rows[(size_t)row].postNode.get();
     auto &chain = rows[(size_t)row].fxChain;
 
-    if (!inputNode || !automationNode)
+    if (!inputNode || !postNode)
         return;
 
     const auto inputNodeId = inputNode->nodeID;
-    const auto automationNodeId = automationNode->nodeID;
+    const auto postNodeId = postNode->nodeID;
     juce::Array<AudioProcessorGraph::NodeID> localNodes;
     localNodes.add(inputNodeId);
-    localNodes.add(automationNodeId);
+    localNodes.add(postNodeId);
     for (auto nodeID : chain)
         localNodes.addIfNotAlreadyThere(nodeID);
     clearStereoConnectionsBetweenNodes(graph, localNodes, updateKind);
@@ -9862,7 +9868,7 @@ void JuceEngine::rewireTrackBusFxChain(
         }
     }
 
-    connectStereo(graph, prevNodeId, automationNodeId, updateKind);
+    connectStereo(graph, prevNodeId, postNodeId, updateKind);
 
     if (callerHoldsGraphLock)
         armOutputSafetyForCurrentRouteLocked();
@@ -9951,20 +9957,20 @@ void JuceEngine::reconnectAllRowOutputsToBuses(
 
     for (auto &row : rows)
     {
-        if (row.meterTapNode == nullptr)
+        if (row.postNode == nullptr)
             continue;
 
         for (auto destination : destinations)
-            disconnectStereo(graph, row.meterTapNode->nodeID, destination, updateKind);
+            disconnectStereo(graph, row.postNode->nodeID, destination, updateKind);
 
         if (auto *group = trackGroupForMemberRowId(row.rowId);
             group != nullptr && group->inputNode != nullptr)
         {
-            connectStereo(graph, row.meterTapNode->nodeID, group->inputNode->nodeID, updateKind);
+            connectStereo(graph, row.postNode->nodeID, group->inputNode->nodeID, updateKind);
         }
         else
         {
-            connectStereo(graph, row.meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
+            connectStereo(graph, row.postNode->nodeID, masterInputNode->nodeID, updateKind);
         }
     }
 }
@@ -10132,7 +10138,7 @@ void JuceEngine::ensureMasterOutputRouting()
     {
         for (auto &row : rows)
         {
-            if (row.meterTapNode == nullptr)
+            if (row.postNode == nullptr)
                 continue;
 
             for (int ch = 0; ch < 2; ++ch)
@@ -10142,7 +10148,7 @@ void JuceEngine::ensureMasterOutputRouting()
                     (group != nullptr && group->inputNode != nullptr)
                         ? group->inputNode->nodeID
                         : masterInputNode->nodeID;
-                if (!isGraphConnectionPresent(row.meterTapNode->nodeID, destination, ch))
+                if (!isGraphConnectionPresent(row.postNode->nodeID, destination, ch))
                 {
                     needsRepair = true;
                     break;
@@ -11776,15 +11782,17 @@ void JuceEngine::publishAutomationSnapshotLocked()
             rowState.gainProc->clearAutomationGainOverride();
         if (rowState.panProc != nullptr && rowState.panAutomationPoints.empty())
             rowState.panProc->clearAutomationPanOverride();
-        if (rowState.gainNode != nullptr && rowState.gainProc != nullptr && rowState.gainProc->gain != nullptr)
+        if (rowState.postNode != nullptr && rowState.gainProc != nullptr && rowState.gainProc->gain != nullptr)
         {
-            rowSnapshot.gainTarget.node = rowState.gainNode;
+            rowSnapshot.gainTarget.node = rowState.postNode;
+            rowSnapshot.gainTarget.embeddedProcessor = rowState.gainProc;
             rowSnapshot.gainTarget.parameter =
                 static_cast<juce::AudioProcessorParameter *>(rowState.gainProc->gain);
         }
-        if (rowState.panNode != nullptr && rowState.panProc != nullptr && rowState.panProc->pan != nullptr)
+        if (rowState.postNode != nullptr && rowState.panProc != nullptr && rowState.panProc->pan != nullptr)
         {
-            rowSnapshot.panTarget.node = rowState.panNode;
+            rowSnapshot.panTarget.node = rowState.postNode;
+            rowSnapshot.panTarget.embeddedProcessor = rowState.panProc;
             rowSnapshot.panTarget.parameter =
                 static_cast<juce::AudioProcessorParameter *>(rowState.panProc->pan);
         }
@@ -11964,8 +11972,11 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
                 if (rowAutomation.gainTarget.node != nullptr)
                 {
-                    if (auto *gainProc = dynamic_cast<SimpleGainProcessor *>(
-                            rowAutomation.gainTarget.node->getProcessor()))
+                    auto *targetProcessor =
+                        rowAutomation.gainTarget.embeddedProcessor != nullptr
+                            ? rowAutomation.gainTarget.embeddedProcessor
+                            : rowAutomation.gainTarget.node->getProcessor();
+                    if (auto *gainProc = dynamic_cast<SimpleGainProcessor *>(targetProcessor))
                     {
                         gainProc->setAutomationGainUiRealtime(gain);
                         gainProc->setMuted(rowAutomation.muted);
@@ -11994,8 +12005,11 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             {
                 if (rowAutomation.panTarget.node != nullptr)
                 {
-                    if (auto *panProc = dynamic_cast<StereoPanProcessor *>(
-                            rowAutomation.panTarget.node->getProcessor()))
+                    auto *targetProcessor =
+                        rowAutomation.panTarget.embeddedProcessor != nullptr
+                            ? rowAutomation.panTarget.embeddedProcessor
+                            : rowAutomation.panTarget.node->getProcessor();
+                    if (auto *panProc = dynamic_cast<StereoPanProcessor *>(targetProcessor))
                     {
                         panProc->setAutomationPanNormalizedRealtime(pan);
                     }
@@ -16476,10 +16490,7 @@ int JuceEngine::addRow(const juce::String &name, int iconId, int preferredRowId)
             for (auto id : failed.fxChain)
                 graph.removeNode(id, kBatchGraphUpdate);
             if (failed.inputNode) graph.removeNode(failed.inputNode->nodeID, kBatchGraphUpdate);
-            if (failed.automationNode) graph.removeNode(failed.automationNode->nodeID, kBatchGraphUpdate);
-            if (failed.gainNode) graph.removeNode(failed.gainNode->nodeID, kBatchGraphUpdate);
-            if (failed.panNode) graph.removeNode(failed.panNode->nodeID, kBatchGraphUpdate);
-            if (failed.meterTapNode) graph.removeNode(failed.meterTapNode->nodeID, kBatchGraphUpdate);
+            if (failed.postNode) graph.removeNode(failed.postNode->nodeID, kBatchGraphUpdate);
             rows.pop_back();
         }
         rebuildRowIdIndexCacheBestEffortLocked();
@@ -16553,10 +16564,7 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
             auto failed = std::move(*failedIt);
             for (auto id : failed.fxChain) graph.removeNode(id, kBatchGraphUpdate);
             if (failed.inputNode) graph.removeNode(failed.inputNode->nodeID, kBatchGraphUpdate);
-            if (failed.automationNode) graph.removeNode(failed.automationNode->nodeID, kBatchGraphUpdate);
-            if (failed.gainNode) graph.removeNode(failed.gainNode->nodeID, kBatchGraphUpdate);
-            if (failed.panNode) graph.removeNode(failed.panNode->nodeID, kBatchGraphUpdate);
-            if (failed.meterTapNode) graph.removeNode(failed.meterTapNode->nodeID, kBatchGraphUpdate);
+            if (failed.postNode) graph.removeNode(failed.postNode->nodeID, kBatchGraphUpdate);
             rows.erase(failedIt);
         }
         rebuildRowIdIndexCacheBestEffortLocked();
@@ -16617,10 +16625,7 @@ int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int
             auto failed = std::move(*failedIt);
             for (auto id : failed.fxChain) graph.removeNode(id, kBatchGraphUpdate);
             if (failed.inputNode) graph.removeNode(failed.inputNode->nodeID, kBatchGraphUpdate);
-            if (failed.automationNode) graph.removeNode(failed.automationNode->nodeID, kBatchGraphUpdate);
-            if (failed.gainNode) graph.removeNode(failed.gainNode->nodeID, kBatchGraphUpdate);
-            if (failed.panNode) graph.removeNode(failed.panNode->nodeID, kBatchGraphUpdate);
-            if (failed.meterTapNode) graph.removeNode(failed.meterTapNode->nodeID, kBatchGraphUpdate);
+            if (failed.postNode) graph.removeNode(failed.postNode->nodeID, kBatchGraphUpdate);
             rows.erase(failedIt);
         }
         rebuildRowIdIndexCacheBestEffortLocked();
@@ -16737,14 +16742,8 @@ bool JuceEngine::removeRow(int rowId)
             graph.removeNode(id, kBatchGraphUpdate);
         if (removed.inputNode)
             graph.removeNode(removed.inputNode->nodeID, kBatchGraphUpdate);
-        if (removed.automationNode)
-            graph.removeNode(removed.automationNode->nodeID, kBatchGraphUpdate);
-        if (removed.gainNode)
-            graph.removeNode(removed.gainNode->nodeID, kBatchGraphUpdate);
-        if (removed.panNode)
-            graph.removeNode(removed.panNode->nodeID, kBatchGraphUpdate);
-        if (removed.meterTapNode)
-            graph.removeNode(removed.meterTapNode->nodeID, kBatchGraphUpdate);
+        if (removed.postNode)
+            graph.removeNode(removed.postNode->nodeID, kBatchGraphUpdate);
 
         rows.erase(rows.begin() + idx);
         rebuildRowIdIndexCache();
@@ -16844,22 +16843,14 @@ void JuceEngine::rebuildBusesAndRewireClips()
     {
         if (r.inputNode)
             graph.removeNode(r.inputNode->nodeID, kBatchGraphUpdate);
-        if (r.automationNode)
-            graph.removeNode(r.automationNode->nodeID, kBatchGraphUpdate);
-        if (r.gainNode)
-            graph.removeNode(r.gainNode->nodeID, kBatchGraphUpdate);
-        if (r.panNode)
-            graph.removeNode(r.panNode->nodeID, kBatchGraphUpdate);
-        if (r.meterTapNode)
-            graph.removeNode(r.meterTapNode->nodeID, kBatchGraphUpdate);
+        if (r.postNode)
+            graph.removeNode(r.postNode->nodeID, kBatchGraphUpdate);
 
         r.inputNode = nullptr;
-        r.automationNode = nullptr;
-        r.gainNode = nullptr;
-        r.panNode = nullptr;
-        r.meterTapNode = nullptr;
+        r.postNode = nullptr;
 
         r.inputProc = nullptr;
+        r.postProc = nullptr;
         r.automationProc = nullptr;
         r.gainProc = nullptr;
         r.panProc = nullptr;

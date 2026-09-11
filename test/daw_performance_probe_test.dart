@@ -27,6 +27,7 @@ void main() {
     span.finish(fields: const <String, Object?>{'deleted': 1});
     tester.binding.scheduleFrame();
     await tester.pump();
+    await span.visibleFrame;
 
     final payloads = messages
         .map((message) => message.substring('[PRO17_PERF] '.length))
@@ -37,6 +38,13 @@ void main() {
     expect(payloads[1]['phase'], 'native_graph_done');
     expect(payloads[2]['event'], 'operation_end');
     expect(payloads[2]['deleted'], 1);
+    expect(payloads[2]['frame_already_scheduled'], isA<bool>());
+    expect(
+      payloads.any(
+        (payload) => payload['event'] == 'operation_event_loop_yield',
+      ),
+      isTrue,
+    );
     expect(payloads.last['event'], 'operation_visible_frame');
 
     enabled = false;

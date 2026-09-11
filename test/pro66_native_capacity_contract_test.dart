@@ -60,6 +60,38 @@ void main() {
         isNot(contains('routedPublicationFailed && freshAdmission')),
       );
     });
+
+    test('batched clip removal is preflighted and acknowledged: $root', () {
+      final source = File('$root/JuceEngine.cpp').readAsStringSync();
+      final start = source.indexOf(
+        'int JuceEngine::unloadClips(const juce::Array<int> &clipIds)',
+      );
+      final end = source.indexOf(
+        'std::shared_ptr<juce::AudioProcessor> JuceEngine::clearClipGraphNodes',
+        start,
+      );
+
+      expect(start, greaterThanOrEqualTo(0));
+      expect(end, greaterThan(start));
+      final unload = source.substring(start, end);
+      expect(unload, contains('uniqueClipIds.addIfNotAlreadyThere(clipId)'));
+      expect(unload, contains('!clips[(size_t)clipId].alive'));
+      expect(
+        unload.indexOf('!clips[(size_t)clipId].alive'),
+        lessThan(unload.indexOf('clearClipGraphNodes(')),
+      );
+      expect(
+        unload,
+        contains(
+          'routedPublicationSucceeded = '
+          'endRoutedClipScheduleMutationLocked();',
+        ),
+      );
+      expect(
+        unload,
+        contains('return routedPublicationSucceeded ? removed : -1;'),
+      );
+    });
   }
 
   test('every platform bridge exposes detailed project-load admission', () {
@@ -93,4 +125,16 @@ void main() {
       contains("invokeMethod<Object?>('endProjectClipLoadDetailed'"),
     );
   });
+
+  test(
+    'Apple project-load diagnostics expose publication lifecycle counts',
+    () {
+      final source = File(
+        'juce_audio_engine/ios/Classes/JuceEngine.cpp',
+      ).readAsStringSync();
+      expect(source, contains('callbackDetachCount='));
+      expect(source, contains('graphPublicationCount='));
+      expect(source, contains('callbackAttachCount='));
+    },
+  );
 }

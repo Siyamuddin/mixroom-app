@@ -531,8 +531,8 @@ class V3ServerContractTests(unittest.TestCase):
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
             "v3_instructions.txt": "db92912a052c1060ce668a55e4811948080cbf34071454b9cc05ba941be54dba",
             "v3_instructions_resource_refs.txt": "ee2297a73120c0bef602fd97245b3aaeed51645db461851f2b63383ba5edb792",
-            "v3_submit_plan_tool.json": "4376926c5add3526a1402aa9056d659457be8c479efa2675be743fdcb7c1a301",
-            "v3_submit_plan_tool_resource_refs.json": "770858c5722b9aba83826773b4a48b98cf08f4f776718afecc0ce02236ac9775",
+            "v3_submit_plan_tool.json": "77db6cbb819cbf7e4dba7771fcfba502d5f117e9187c7e812be15d50c374b166",
+            "v3_submit_plan_tool_resource_refs.json": "3075d7b865313d86b0ae1d08233ef2b215de852fc9f7acb5f0c5087071dbb497",
         }
         asset_directory = SRC / "common" / "v3_contract_assets"
         actual = {
@@ -676,6 +676,82 @@ class V3ServerContractTests(unittest.TestCase):
             "row_creation_policy",
             provider_content[1]["text"],
         )
+
+    def test_provider_context_disambiguates_clip_and_note_coordinates(self) -> None:
+        context = self._core_context()
+        context["clips"][0]["start_beat"] = 8
+        context["clips"][0]["midi_notes"] = [
+            {
+                "pitch": 60,
+                "start_beat": 1,
+                "length_beats": 1,
+                "velocity": 0.8,
+            }
+        ]
+        request = {
+            "original_request": "Rewrite this MIDI clip.",
+            "conversation": [],
+            "core_context": context,
+            "supported_command_types": {"midi.replace_notes"},
+            "resource_refs_enabled": False,
+            "capability_surface": v3_server_contract.extract_capability_surface(
+                context
+            ),
+        }
+
+        provider_request = v3_server_contract.build_provider_request(
+            request,
+            model="server-model",
+            reasoning_effort="low",
+        )
+        context_text = provider_request["messages"][0]["content"][1]["text"]
+        provider_context = json.loads(context_text.split("\n", 1)[1])
+        provider_clip = provider_context["clips"][0]
+
+        self.assertEqual(context["clips"][0]["start_beat"], 8)
+        self.assertNotIn("start_beat", provider_clip)
+        self.assertEqual(provider_clip["timeline_start_beat"], 8)
+        self.assertEqual(
+            provider_clip["midi_note_timebase"],
+            {"origin_beat": 0, "end_limit_beat": 8},
+        )
+        self.assertEqual(provider_clip["midi_notes"][0]["start_beat"], 1)
+
+        for resource_refs_enabled, expected_variants in ((False, 1), (True, 2)):
+            with self.subTest(resource_refs_enabled=resource_refs_enabled):
+                request["resource_refs_enabled"] = resource_refs_enabled
+                request["supported_command_types"] = (
+                    {"midi.create_clip", "midi.replace_notes"}
+                    if resource_refs_enabled
+                    else {"midi.replace_notes"}
+                )
+                provider_request = v3_server_contract.build_provider_request(
+                    request,
+                    model="server-model",
+                    reasoning_effort="low",
+                )
+                replace_variants = [
+                    variant
+                    for variant in provider_request["tools"][0]["parameters"]
+                    ["properties"]["commands"]["items"]["anyOf"]
+                    if variant["properties"]["type"]["enum"]
+                    == ["midi.replace_notes"]
+                ]
+                self.assertEqual(len(replace_variants), 1)
+                arguments_schema = replace_variants[0]["properties"]["arguments"]
+                argument_variants = arguments_schema.get(
+                    "anyOf", [arguments_schema]
+                )
+                self.assertEqual(len(argument_variants), expected_variants)
+                for argument_variant in argument_variants:
+                    notes_description = argument_variant["properties"]["notes"][
+                        "description"
+                    ]
+                    self.assertIn(
+                        "relative to this clip, never the project timeline",
+                        notes_description,
+                    )
+                    self.assertIn("start_beat + length_beats", notes_description)
 
     def test_dynamic_capacity_is_versioned_and_authenticated(self) -> None:
         paid_context = self._dynamic_context(row_count=101)
@@ -1837,6 +1913,41 @@ class V3ServerContractTests(unittest.TestCase):
                 )
                 self.assertEqual(validated, plan)
 
+    def test_row_deletion_retires_its_effect_instances_in_order(self) -> None:
+        context = self._core_context()
+        context["project"]["row_capacity"]["current_rows"] = 2
+        context["rows"].append(
+            {
+                "row_id": 102,
+                "lane_kind": "audio",
+                "mix_processing_supported": True,
+                "has_usable_signal": False,
+                "effects": [],
+            }
+        )
+        surface = v3_server_contract.extract_capability_surface(context)
+        delete_row = {
+            "command_id": "delete-row",
+            "type": "row.delete",
+            "arguments": {"row_id": 101},
+        }
+        remove_effect = {
+            "command_id": "remove-effect",
+            "type": "effect.remove",
+            "arguments": {"effect_instance_id": "fx-1"},
+        }
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_plan_capabilities(
+                {"commands": [delete_row, remove_effect]}, surface
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
+
+        result = v3_server_contract.validate_plan_capabilities(
+            {"commands": [remove_effect, delete_row]}, surface
+        )
+        self.assertEqual(result["row_count"], 1)
+
     def test_representative_paid_schema_stays_inside_runtime_size_budget(self) -> None:
         paid_effect_ids = [
             "Gain",
@@ -2311,6 +2422,58 @@ class V3ServerContractTests(unittest.TestCase):
             '"enum": ["midi-clip"]', encoded_by_type["midi.replace_notes"]
         )
         self.assertNotIn("audio-clip", encoded_by_type["midi.replace_notes"])
+
+    def test_runtime_schema_prunes_direct_audio_target_when_only_midi_exists(self) -> None:
+        surface = v3_server_contract.extract_capability_surface(self._core_context())
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types={"sample.place", "clip.set_timeline_length_beats"},
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+
+        variant = self._runtime_command_variant(
+            tool, "clip.set_timeline_length_beats"
+        )
+        self.assertIsNotNone(variant)
+        encoded = json.dumps(variant)
+        self.assertIn('"clip_ref"', encoded)
+        self.assertNotIn('"clip_id"', encoded)
+
+    def test_runtime_schema_constrains_direct_audio_target_with_resource_refs(self) -> None:
+        context = self._core_context()
+        context["project"]["row_capacity"]["current_rows"] = 2
+        context["rows"].append(
+            {
+                "row_id": 102,
+                "lane_kind": "audio",
+                "mix_processing_supported": True,
+                "has_usable_signal": True,
+                "effects": [],
+            }
+        )
+        context["clips"].append(
+            {
+                "clip_id": "audio-clip",
+                "row_id": 102,
+                "kind": "audio",
+                "length_beats": 8,
+            }
+        )
+        surface = v3_server_contract.extract_capability_surface(context)
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types={"sample.place", "clip.set_timeline_length_beats"},
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+
+        variant = self._runtime_command_variant(
+            tool, "clip.set_timeline_length_beats"
+        )
+        self.assertIsNotNone(variant)
+        encoded = json.dumps(variant)
+        self.assertIn('"clip_ref"', encoded)
+        self.assertIn('"enum": ["audio-clip"]', encoded)
+        self.assertNotIn('"enum": ["clip-1"]', encoded)
 
     def test_runtime_schema_preserves_generated_clip_consumers(self) -> None:
         context = self._core_context()

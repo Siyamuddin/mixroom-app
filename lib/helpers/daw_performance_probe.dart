@@ -186,6 +186,7 @@ class DawPerformanceSpan {
   }) : _probe = probe,
        _metadata = Map<String, Object?>.from(metadata),
        _stopwatch = Stopwatch()..start(),
+       _visibleFrame = Completer<void>(),
        _phaseStart = Duration.zero,
        _timelineTask = developer.TimelineTask() {
     _timelineTask!.start(
@@ -211,6 +212,7 @@ class DawPerformanceSpan {
       ),
       _metadata = const <String, Object?>{},
       _stopwatch = null,
+      _visibleFrame = Completer<void>()..complete(),
       _phaseStart = Duration.zero,
       _timelineTask = null;
 
@@ -220,11 +222,14 @@ class DawPerformanceSpan {
   final DawPerformanceContext contextAtStart;
   final Map<String, Object?> _metadata;
   final Stopwatch? _stopwatch;
+  final Completer<void> _visibleFrame;
   Duration _phaseStart;
   final developer.TimelineTask? _timelineTask;
   bool _finished = false;
 
   bool get enabled => _probe != null;
+
+  Future<void> get visibleFrame => _visibleFrame.future;
 
   void checkpoint(
     String phase, {
@@ -263,9 +268,21 @@ class DawPerformanceSpan {
     _write('operation_end', <String, Object?>{
       'result': result,
       'elapsed_ms': DawPerformanceProbe._milliseconds(elapsed),
+      'frame_already_scheduled': SchedulerBinding.instance.hasScheduledFrame,
       'start_rows': contextAtStart.rowCount,
       'start_clips': contextAtStart.clipCount,
       ...fields,
+    });
+
+    // Distinguish time spent waiting for the next platform frame from work
+    // that continues synchronously on the UI isolate after the operation.
+    // This remains behind the PRO17_PERF compile-time gate with the rest of
+    // the probe and does not schedule an otherwise-unrequested frame.
+    scheduleMicrotask(() {
+      _write('operation_event_loop_yield', <String, Object?>{
+        'elapsed_ms': DawPerformanceProbe._milliseconds(stopwatch.elapsed),
+        'result': result,
+      });
     });
 
     SchedulerBinding.instance.addPostFrameCallback((_) {
@@ -274,6 +291,9 @@ class DawPerformanceSpan {
         'elapsed_ms': DawPerformanceProbe._milliseconds(stopwatch.elapsed),
         'result': result,
       });
+      if (!_visibleFrame.isCompleted) {
+        _visibleFrame.complete();
+      }
     });
   }
 

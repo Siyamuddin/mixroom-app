@@ -514,6 +514,93 @@ private:
     std::atomic<uint64_t> *audioRenderGenerationPtr = nullptr;
 };
 
+// Keeps the row's built-in post-FX processing in one graph node. The child
+// processors remain the single source of truth for DSP and parameter behavior;
+// this wrapper only preserves their established processing order.
+class RowPostProcessor final : public juce::AudioProcessor
+{
+public:
+    template <typename MeterState>
+    RowPostProcessor(const std::shared_ptr<MeterState> &meterState,
+                     std::atomic<bool> *meterEnabled)
+        : juce::AudioProcessor(
+              BusesProperties()
+                  .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                  .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+          meterTap(meterState, meterEnabled)
+    {
+    }
+
+    const juce::String getName() const override { return "RowPostProcessor"; }
+
+    void prepareToPlay(double sampleRate, int samplesPerBlockExpected) override
+    {
+        automation.prepareToPlay(sampleRate, samplesPerBlockExpected);
+        gain.prepareToPlay(sampleRate, samplesPerBlockExpected);
+        pan.prepareToPlay(sampleRate, samplesPerBlockExpected);
+        meterTap.prepareToPlay(sampleRate, samplesPerBlockExpected);
+    }
+
+    void releaseResources() override
+    {
+        automation.releaseResources();
+        gain.releaseResources();
+        pan.releaseResources();
+        meterTap.releaseResources();
+    }
+
+    void reset() override
+    {
+        automation.reset();
+        gain.reset();
+        pan.reset();
+        meterTap.reset();
+    }
+
+    void processBlock(juce::AudioBuffer<float> &buffer,
+                      juce::MidiBuffer &midi) override
+    {
+        automation.processBlock(buffer, midi);
+        gain.processBlock(buffer, midi);
+        pan.processBlock(buffer, midi);
+        meterTap.processBlock(buffer, midi);
+    }
+
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override
+    {
+        const auto input = layouts.getMainInputChannelSet();
+        const auto output = layouts.getMainOutputChannelSet();
+        return input == output &&
+               (input == juce::AudioChannelSet::mono() ||
+                input == juce::AudioChannelSet::stereo());
+    }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    void getStateInformation(juce::MemoryBlock &) override {}
+    void setStateInformation(const void *, int) override {}
+
+    VolumeAutomationProcessor &automationProcessor() noexcept { return automation; }
+    SimpleGainProcessor &gainProcessor() noexcept { return gain; }
+    StereoPanProcessor &panProcessor() noexcept { return pan; }
+    MeterTapProcessor &meterProcessor() noexcept { return meterTap; }
+
+private:
+    VolumeAutomationProcessor automation;
+    SimpleGainProcessor gain;
+    StereoPanProcessor pan;
+    MeterTapProcessor meterTap;
+};
+
 // dummy node before a track/row (so it can easily switch next nodes)
 class TrackInputProcessor : public juce::AudioProcessor
 {
@@ -5556,6 +5643,7 @@ private:
 
         // processors
         TrackInputProcessor *inputProc = nullptr;
+        RowPostProcessor *postProc = nullptr;
         VolumeAutomationProcessor *automationProc = nullptr;
         SimpleGainProcessor *gainProc = nullptr;
         StereoPanProcessor *panProc = nullptr;
@@ -5563,10 +5651,7 @@ private:
 
         // nodes
         juce::AudioProcessorGraph::Node::Ptr inputNode;
-        juce::AudioProcessorGraph::Node::Ptr automationNode;
-        juce::AudioProcessorGraph::Node::Ptr gainNode;
-        juce::AudioProcessorGraph::Node::Ptr panNode;
-        juce::AudioProcessorGraph::Node::Ptr meterTapNode;
+        juce::AudioProcessorGraph::Node::Ptr postNode;
 
         // FX chain node ids (row-level FX between input and automation)
         juce::Array<juce::AudioProcessorGraph::NodeID> fxChain;
@@ -5619,6 +5704,7 @@ private:
         };
 
         juce::AudioProcessorGraph::Node::Ptr node;
+        juce::AudioProcessor *embeddedProcessor = nullptr;
         juce::AudioProcessorParameter *parameter = nullptr;
         std::atomic<float> *realtimeRawValue = nullptr;
         bool usesFloatRange = false;

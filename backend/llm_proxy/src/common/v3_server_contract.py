@@ -138,6 +138,7 @@ _PHONE_CLEANUP_CONFLICT_POLICY_VERSION = "phone_cleanup_sound_conflict_v1"
 _TYPED_CLIP_STATE_POLICY_VERSION = "ordered_typed_clip_reference_v1"
 _GROUP_STATE_POLICY_VERSION = "ordered_group_lifecycle_v1"
 _USER_VISIBLE_TEXT_POLICY_VERSION = "current_request_language_anchor_v2"
+_MIDI_NOTE_TIMEBASE_POLICY_VERSION = "provider_clip_timeline_and_note_end_v1"
 _LEGACY_ROW_CAPACITY_INSTRUCTION = (
     "Plan commands against the evolving project state, not just the starting snapshot. "
     "After every command, at least one row must remain and the row count must not exceed "
@@ -1153,6 +1154,61 @@ def _set_property_enum(value: Any, property_name: str, allowed_values: Sequence[
         _set_property_enum(child, property_name, allowed_values)
 
 
+def _constrain_required_property_values(
+    schema: Any, property_name: str, allowed_values: Sequence[Any]
+) -> bool:
+    """Constrain or prune alternatives that require a typed stable identifier."""
+
+    if not isinstance(schema, dict):
+        return True
+
+    properties = schema.get("properties")
+    required = schema.get("required")
+    required_names = set(required) if isinstance(required, list) else set()
+    if (
+        isinstance(properties, dict)
+        and property_name in required_names
+        and isinstance(properties.get(property_name), dict)
+    ):
+        if not allowed_values:
+            return False
+        properties[property_name].pop("minLength", None)
+        properties[property_name]["enum"] = list(allowed_values)
+
+    for keyword in ("anyOf", "oneOf"):
+        alternatives = schema.get(keyword)
+        if not isinstance(alternatives, list):
+            continue
+        retained = [
+            alternative
+            for alternative in alternatives
+            if _constrain_required_property_values(
+                alternative, property_name, allowed_values
+            )
+        ]
+        if not retained:
+            return False
+        schema[keyword] = retained
+
+    if isinstance(properties, dict):
+        for name in list(properties):
+            property_schema = properties[name]
+            if _constrain_required_property_values(
+                property_schema, property_name, allowed_values
+            ):
+                continue
+            if name in required_names:
+                return False
+            del properties[name]
+
+    items = schema.get("items")
+    if isinstance(items, dict) and not _constrain_required_property_values(
+        items, property_name, allowed_values
+    ):
+        return False
+    return True
+
+
 _MIDI_CLIP_COMMANDS = frozenset(
     {"midi.replace_notes", "midi.append_notes", "midi.chop_notes", "midi.transpose"}
 )
@@ -1180,8 +1236,6 @@ _AUDIO_CLIP_COMMANDS = frozenset(
 def _constrain_typed_command_targets(
     variant: dict[str, Any],
     capability_surface: V3CapabilitySurface,
-    *,
-    resource_refs_enabled: bool,
 ) -> bool:
     command_type = _command_type_for_variant(variant)
     if command_type == "row.set_instrument":
@@ -1189,18 +1243,14 @@ def _constrain_typed_command_targets(
             return False
         _set_property_enum(variant, "row_id", sorted(capability_surface.instrument_row_ids))
     elif command_type in _MIDI_CLIP_COMMANDS:
-        if capability_surface.midi_clip_ids:
-            _set_property_enum(
-                variant, "clip_id", sorted(capability_surface.midi_clip_ids)
-            )
-        elif not resource_refs_enabled:
+        if not _constrain_required_property_values(
+            variant, "clip_id", sorted(capability_surface.midi_clip_ids)
+        ):
             return False
     elif command_type in _AUDIO_CLIP_COMMANDS:
-        if capability_surface.audio_clip_ids:
-            _set_property_enum(
-                variant, "clip_id", sorted(capability_surface.audio_clip_ids)
-            )
-        elif not resource_refs_enabled:
+        if not _constrain_required_property_values(
+            variant, "clip_id", sorted(capability_surface.audio_clip_ids)
+        ):
             return False
     return True
 
@@ -1396,7 +1446,6 @@ def build_submit_plan_tool(
             if _constrain_typed_command_targets(
                 constrained_variant,
                 capability_surface,
-                resource_refs_enabled=resource_refs_enabled,
             ) and _prune_unavailable_identifier_schemas(
                 constrained_variant, capability_surface
             ):
@@ -1454,6 +1503,31 @@ def _budgeted_instructions(surface: V3CapabilitySurface, resource_refs_enabled: 
     )
 
 
+def _provider_core_context(core_context: Mapping[str, Any]) -> dict[str, Any]:
+    """Disambiguate timeline and clip-relative MIDI coordinates for the model."""
+    provider_context = copy.deepcopy(dict(core_context))
+    clips = provider_context.get("clips")
+    if not isinstance(clips, list):
+        return provider_context
+    for clip in clips:
+        if not isinstance(clip, dict):
+            continue
+        if "start_beat" in clip:
+            clip["timeline_start_beat"] = clip.pop("start_beat")
+        length_beats = clip.get("length_beats")
+        if (
+            clip.get("kind") == "midi"
+            and isinstance(length_beats, (int, float))
+            and not isinstance(length_beats, bool)
+            and math.isfinite(float(length_beats))
+        ):
+            clip["midi_note_timebase"] = {
+                "origin_beat": 0,
+                "end_limit_beat": length_beats,
+            }
+    return provider_context
+
+
 def build_provider_request(
     request: Mapping[str, Any],
     *,
@@ -1487,7 +1561,7 @@ def build_provider_request(
                 "role": "user",
                 "content": [
                     {"type": "input_text", "text": f"RECENT_CONVERSATION_JSON:\n{_canonical_json(request['conversation'])}"},
-                    {"type": "input_text", "text": f"CORE_CONTEXT_V3_JSON:\n{_canonical_json(request['core_context'])}"},
+                    {"type": "input_text", "text": f"CORE_CONTEXT_V3_JSON:\n{_canonical_json(_provider_core_context(request['core_context']))}"},
                     {"type": "input_text", "text": f"ORIGINAL_REQUEST_VERBATIM:\n{request['original_request']}"},
                 ],
             }
@@ -1577,6 +1651,7 @@ def contract_fingerprint(
         "typed_clip_state_policy": _TYPED_CLIP_STATE_POLICY_VERSION,
         "group_state_policy": _GROUP_STATE_POLICY_VERSION,
         "user_visible_text_policy": _USER_VISIBLE_TEXT_POLICY_VERSION,
+        "midi_note_timebase_policy": _MIDI_NOTE_TIMEBASE_POLICY_VERSION,
         "midi_creation_policy": "client_eight_bar_and_strict_note_end_v1",
         "max_output_tokens": max_output_tokens,
         "max_accepted_plan_bytes": output_budget(capability_surface).plan_bytes,
@@ -2010,7 +2085,12 @@ def validate_plan_capabilities(
         )
         for clip in capability_surface.clips
     }
-    active_effect_instances = set(capability_surface.effect_instance_ids)
+    effect_row_by_instance_id = {
+        effect_instance_id: row.row_id
+        for row in capability_surface.rows
+        for effect_instance_id in row.effect_instance_ids
+    }
+    active_effect_instances = set(effect_row_by_instance_id)
     available_outputs: dict[str, frozenset[str]] = {}
     command_ids: set[str] = set()
     simulated_rows = capability_surface.current_rows
@@ -2555,6 +2635,15 @@ def validate_plan_capabilities(
                     if clip.row_id == row_id
                 ]:
                     generated_clips.pop(clip_key, None)
+                for effect_instance_id in [
+                    effect_instance_id
+                    for effect_instance_id, effect_row_id in (
+                        effect_row_by_instance_id.items()
+                    )
+                    if effect_row_id == row_id
+                ]:
+                    active_effect_instances.discard(effect_instance_id)
+                    effect_row_by_instance_id.pop(effect_instance_id, None)
                 generated_material_by_stable_row.pop(row_id, None)
             elif row_ref_key is not None and row_ref_key in generated_row_material:
                 detach_group_members([row_ref_key])
@@ -2579,7 +2668,9 @@ def validate_plan_capabilities(
             clip_ref_key = resource_key(arguments.get("clip_ref"))
             consume_generated_clip(clip_ref_key)
         elif command_type == "effect.remove":
-            active_effect_instances.discard(arguments.get("effect_instance_id"))
+            effect_instance_id = arguments.get("effect_instance_id")
+            active_effect_instances.discard(effect_instance_id)
+            effect_row_by_instance_id.pop(effect_instance_id, None)
         elif command_type == "group.remove_row":
             remove_group_member(group_key(arguments), row_key(arguments))
         elif command_type == "group.set_collapsed":

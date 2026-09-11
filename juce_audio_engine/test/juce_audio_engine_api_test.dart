@@ -1131,6 +1131,63 @@ void main() {
     );
   });
 
+  test('detailed clip removal requires a complete native acknowledgement',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'unloadClips') return 2;
+      return null;
+    });
+
+    final result = await JuceAudioEngine.unloadClipsDetailed(<int>[3, 4, 4]);
+
+    expect(result, JuceMutationResult.success);
+    expect(calls, hasLength(1));
+    expect(calls.single.arguments, <String, dynamic>{
+      'clips': <int>[3, 4],
+    });
+  });
+
+  test('detailed clip removal fails closed on partial acknowledgement',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'unloadClips') return 1;
+      return null;
+    });
+
+    expect(
+      await JuceAudioEngine.unloadClipsDetailed(<int>[3, 4]),
+      JuceMutationResult.internalFailure,
+    );
+  });
+
+  test('detailed clip removal fails closed on malformed acknowledgement',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'unloadClips') return '2';
+      return null;
+    });
+
+    expect(
+      await JuceAudioEngine.unloadClipsDetailed(<int>[3, 4]),
+      JuceMutationResult.internalFailure,
+    );
+  });
+
+  test('detailed clip removal rejects invalid IDs before native access',
+      () async {
+    expect(
+      await JuceAudioEngine.unloadClipsDetailed(<int>[3, -1]),
+      JuceMutationResult.invalidInput,
+    );
+    expect(calls, isEmpty);
+  });
+
   test('setAutomationTransport routes to setAutomationTransport', () async {
     await JuceAudioEngine.setAutomationTransport(3.0);
 

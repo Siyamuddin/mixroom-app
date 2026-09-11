@@ -517,6 +517,7 @@ Resources:
         Variables:
           AI_V3_TIMEOUT_SECONDS: 105
           AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 105
+          LLM_MAX_OUTPUT_TOKENS: 16384
       Policies:
         - Statement:
             - Effect: Allow

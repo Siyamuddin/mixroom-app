@@ -188,7 +188,10 @@ void main() {
                       '${fixture.projectDirectory.path}/audio/pro17_stress_source.wav',
                 );
                 span.finish();
-                await tester.pump().timeout(const Duration(seconds: 5));
+                // The editor mutation has already scheduled its own frame.
+                // Waiting for that frame avoids altering the timing with an
+                // additional test-driven pump.
+                await span.visibleFrame.timeout(const Duration(seconds: 5));
                 expect(
                   binding.lifecycleState,
                   AppLifecycleState.resumed,

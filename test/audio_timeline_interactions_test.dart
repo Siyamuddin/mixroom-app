@@ -269,6 +269,25 @@ List<int> _paintedTimelineClipIndices(WidgetTester tester) {
   return List<int>.of(indices as List<int>);
 }
 
+List<int> _paintedTimelineRows(WidgetTester tester) {
+  final layouts =
+      (_timelineClipPainter(tester) as dynamic).visibleRowLayouts as List;
+  return <int>[
+    for (final layout in layouts) (layout as dynamic).row as int,
+  ];
+}
+
+int _mountedTimelineRowHeaderCount(WidgetTester tester) {
+  return find
+      .byWidgetPredicate((widget) {
+        final key = widget.key;
+        return key is ValueKey<String> &&
+            key.value.startsWith('timeline_row_header_');
+      })
+      .evaluate()
+      .length;
+}
+
 double _paintedTimelineVerticalScrollOffset(WidgetTester tester) {
   for (final customPaint in tester.widgetList<CustomPaint>(
     find.descendant(
@@ -286,6 +305,30 @@ double _paintedTimelineVerticalScrollOffset(WidgetTester tester) {
     }
   }
   fail('Timeline painter with vertical scroll state was not found.');
+}
+
+double _paintedTimelineHorizontalScrollOffset(WidgetTester tester) {
+  final offset = (_timelineClipPainter(tester) as dynamic).scrollOffsetMs;
+  return offset as double;
+}
+
+Future<void> _jumpTimelineHorizontallyTo(
+  WidgetTester tester,
+  AudioCanvasTimelineController controller,
+  double targetScrollMs,
+) async {
+  var low = 0.0;
+  var high = controller.horizontalScrollbarState.viewportWidth;
+  for (var iteration = 0; iteration < 16; iteration++) {
+    final middle = (low + high) / 2.0;
+    controller.jumpHorizontalScrollbarTo(middle);
+    await tester.pump();
+    if (_paintedTimelineHorizontalScrollOffset(tester) < targetScrollMs) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
 }
 
 ScrollController _timelineVerticalScrollController(WidgetTester tester) {
@@ -725,6 +768,119 @@ Widget _buildHarness({
 }
 
 void main() {
+  testWidgets(
+    'large timeline mounts and paints only the visible working set',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      final timelineController = AudioCanvasTimelineController();
+      try {
+        final rows = List<TimelineRow>.generate(500, (index) {
+          final instrument = index.isOdd;
+          return TimelineRow(
+            rowId: index + 1,
+            name: 'Track ${index + 1}',
+            iconId: instrument ? 1 : 0,
+            kind: instrument
+                ? TimelineRowKind.instrument
+                : TimelineRowKind.audio,
+            instrumentId: instrument ? 'piano' : '',
+            instrumentName: instrument ? 'Piano' : '',
+          );
+        });
+        final clips = await Future.wait<AudioTrack>(
+          List<Future<AudioTrack>>.generate(1000, (index) {
+            final row = index ~/ 2;
+            return row.isOdd
+                ? _buildMidiClip(row: row, rowId: row + 1)
+                : _buildClip(
+                    row: row,
+                    rowId: row + 1,
+                    engineClipId: index + 1,
+                  );
+          }),
+        );
+        for (int index = 0; index < clips.length; index++) {
+          clips[index].offset = (index / (clips.length - 1)) * 27000.0;
+        }
+
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: clips,
+            controller: timelineController,
+            rowsOverride: rows,
+            onMoveClipCommit: (_, __, ___) async {},
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final verticalController = _timelineVerticalScrollController(tester);
+        expect(verticalController.position.maxScrollExtent, greaterThan(39000));
+        expect(
+          find.byKey(const ValueKey('timeline_row_header_0')),
+          findsOneWidget,
+        );
+        expect(_mountedTimelineRowHeaderCount(tester), lessThanOrEqualTo(16));
+        expect(_paintedTimelineRows(tester), <int>[0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        expect(_paintedTimelineClipIndices(tester), contains(0));
+        expect(
+          _paintedTimelineClipIndices(tester).length,
+          lessThanOrEqualTo(18),
+        );
+
+        verticalController.jumpTo(250 * 80.0);
+        await _jumpTimelineHorizontallyTo(
+          tester,
+          timelineController,
+          clips[500].offset - 3000.0,
+        );
+        await tester.pump();
+
+        expect(
+          find.byKey(const ValueKey('timeline_row_header_250')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('timeline_row_header_0')),
+          findsNothing,
+        );
+        expect(_mountedTimelineRowHeaderCount(tester), lessThanOrEqualTo(16));
+        expect(
+          _paintedTimelineRows(tester),
+          <int>[248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258],
+        );
+        expect(_paintedTimelineClipIndices(tester), contains(500));
+        expect(
+          _paintedTimelineClipIndices(tester).length,
+          lessThanOrEqualTo(22),
+        );
+
+        verticalController.jumpTo(499 * 80.0);
+        await _jumpTimelineHorizontallyTo(
+          tester,
+          timelineController,
+          clips[999].offset - 3000.0,
+        );
+        await tester.pump();
+
+        expect(
+          find.byKey(const ValueKey('timeline_row_header_499')),
+          findsOneWidget,
+        );
+        expect(_mountedTimelineRowHeaderCount(tester), lessThanOrEqualTo(16));
+        expect(_paintedTimelineRows(tester), <int>[497, 498, 499]);
+        expect(_paintedTimelineClipIndices(tester), contains(999));
+        expect(
+          _paintedTimelineClipIndices(tester).length,
+          lessThanOrEqualTo(6),
+        );
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        timelineController.dispose();
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
   testWidgets('mobile timeline pan seeks only after the gesture ends',
       (tester) async {
     _setTestTargetPlatform(TargetPlatform.android);

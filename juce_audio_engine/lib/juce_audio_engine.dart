@@ -2040,6 +2040,40 @@ class JuceAudioEngine {
     }
   }
 
+  /// Removes one live clip and requires an acknowledgement from the native
+  /// engine. Missing or malformed bridge support fails closed.
+  static Future<JuceMutationResult> unloadClipDetailed(int clipIndex) {
+    if (clipIndex < 0) {
+      return Future<JuceMutationResult>.value(JuceMutationResult.invalidInput);
+    }
+    return unloadClipsDetailed(<int>[clipIndex]);
+  }
+
+  /// Removes every distinct live clip and succeeds only when native confirms
+  /// the complete batch. Callers must not recycle IDs after any other result.
+  static Future<JuceMutationResult> unloadClipsDetailed(
+    Iterable<int> clipIndices,
+  ) async {
+    final clips = clipIndices.toSet().toList(growable: false);
+    if (clips.any((clip) => clip < 0)) {
+      return JuceMutationResult.invalidInput;
+    }
+    if (clips.isEmpty) return JuceMutationResult.success;
+    try {
+      final raw = await _ch.invokeMethod<Object?>('unloadClips', {
+        'clips': clips,
+      });
+      return raw is int && raw == clips.length
+          ? JuceMutationResult.success
+          : JuceMutationResult.internalFailure;
+    } on MissingPluginException {
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('unloadClipsDetailed', e);
+      return JuceMutationResult.internalFailure;
+    }
+  }
+
   static Future<int> unloadClips(Iterable<int> clipIndices) async {
     final clips = clipIndices.where((clip) => clip >= 0).toSet().toList();
     if (clips.isEmpty) return 0;

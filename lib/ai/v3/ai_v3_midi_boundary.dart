@@ -8,10 +8,14 @@ double aiV3ExtendedMidiLength({
   required double bpm,
 }) {
   if ([original, current, end, bpm].any((v) => !v.isFinite || v <= 0) ||
-      end <= current) return current;
+      end <= current) {
+    return current;
+  }
   final scale = 60000000.0 / bpm;
   final values = [original * scale, current * scale, end * scale];
-  if (values.any((v) => !v.isFinite || v > 9007199254740991)) return current;
+  if (values.any((v) => !v.isFinite || v > 9007199254740991)) {
+    return current;
+  }
   final baseline = (values[0] + 0.5).floor();
   final required = values[2].ceil();
   if (required - baseline > 1000) return current;
@@ -28,12 +32,26 @@ bool aiV3MidiBoundaryExecutionMatches({
   required double bpm,
   required double currentBpm,
 }) {
-  if ([original, expected, current, end, finalLength, bpm, currentBpm]
-      .any((v) => !v.isFinite || v <= 0) || bpm != currentBpm) return false;
+  if ([
+        original,
+        expected,
+        current,
+        end,
+        finalLength,
+        bpm,
+        currentBpm,
+      ].any((v) => !v.isFinite || v <= 0) ||
+      bpm != currentBpm) {
+    return false;
+  }
   final scale = 60000000.0 / bpm;
   if (((expected - current) * scale).abs() > 1) return false;
   final normalized = aiV3ExtendedMidiLength(
-    original: original, current: expected, end: end, bpm: bpm);
+    original: original,
+    current: expected,
+    end: end,
+    bpm: bpm,
+  );
   return normalized > expected &&
       ((normalized - finalLength) * scale).abs() < 0.000001;
 }

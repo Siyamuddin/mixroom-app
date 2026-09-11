@@ -1421,6 +1421,13 @@ class ChatPipeline {
               'http_status=${diagnostic['http_status'] ?? '-'} '
               'server_error_code=${diagnostic['server_error_code'] ?? '-'}',
         );
+      } else {
+        // Local diagnostics must identify unexpected failure classes without
+        // logging exception text, requests, project data, or credentials.
+        aiDebugLog(
+          'v3-planner',
+          'failed code=$code error_type=${error.runtimeType}',
+        );
       }
       final response = _aiV3PlannerFailureResponse(code);
       _pendingAiV3Bundle = null;

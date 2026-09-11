@@ -18,8 +18,6 @@ import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
 
-const int _preferredUserMessageLength = 500;
-
 class _FakeCloudLlmService extends CloudLlmService {
   _FakeCloudLlmService(this._next) : super(apiKey: 'test-key', model: 'test');
 
@@ -260,8 +258,12 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     this.masterEffects = const <EffectState>[],
     this.rowEffects = const <int, List<EffectState>>{},
     this.rowAudioStats = const <int, Map<String, double>>{},
+    // Kept available for focused fixtures even when the broad smoke suite
+    // uses the default empty interpretation map.
+    // ignore: unused_element_parameter
     this.rowInterpretations = const <int, RowInterpretationState>{},
     this.rowApproxRms = const <int, double>{},
+    // ignore: unused_element_parameter
     this.rowApproxCrest = const <int, double>{},
   }) : super(classifier: InstrumentClassifier(), maxRows: rows);
 

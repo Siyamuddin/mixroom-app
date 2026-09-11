@@ -2873,7 +2873,23 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
 
 + (BOOL)pausePlaybackForRouteChangeV2ObjC
 {
+#if TARGET_OS_OSX
+    BOOL result = NO;
+    auto mutation = [&]
+    {
+        result = JuceEngine::get().pausePlaybackForRouteChangeV2();
+    };
+    if (auto *messageManager = juce::MessageManager::getInstance())
+    {
+        if (messageManager->isThisTheMessageThread())
+            mutation();
+        else
+            messageManager->callSync(mutation);
+    }
+    return result;
+#else
     return JuceEngine::get().pausePlaybackForRouteChangeV2();
+#endif
 }
 
 + (BOOL)quiescePlaybackRouteV2ObjC:(BOOL)closeRemovedDevice

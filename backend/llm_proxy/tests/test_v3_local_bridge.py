@@ -218,6 +218,28 @@ class LocalV3BridgeTests(unittest.TestCase):
         self.assertEqual(len(server.bridge_records), 1)
         self.assertIn("Local V3 bridge request complete", output.getvalue())
 
+    def test_dynamic_request_above_legacy_limit_crosses_loopback(self) -> None:
+        body = profiler.scenarios()["large_project"]
+        encoded_bytes = len(json.dumps(body).encode("utf-8"))
+        self.assertGreater(encoded_bytes, bridge.v3_server_contract.MAX_REQUEST_BYTES)
+        self.assertLessEqual(
+            encoded_bytes,
+            bridge.v3_server_contract.DYNAMIC_MAX_REQUEST_BYTES,
+        )
+
+        with _running_server() as server, redirect_stdout(StringIO()):
+            status, response = _request(
+                server,
+                "POST",
+                "/v1/llm/v3/responses",
+                body,
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["schema_version"], "v3_plan_response_server_v1")
+        self.assertEqual(len(server.measurements), 1)
+        self.assertEqual(server.backend.providers[-1].attempt_count, 1)
+
     def test_failure_and_repair_scenarios_preserve_status_and_settlement(self) -> None:
         expected = {
             "timeout": (504, "v3_upstream_timeout", 1, False),

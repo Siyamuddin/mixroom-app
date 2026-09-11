@@ -488,7 +488,14 @@ class LocalV3BridgeHandler(BaseHTTPRequestHandler):
         except ValueError:
             self._write_json(411, {"error": "content_length_required"})
             return
-        if content_length < 0 or content_length > v3_server_contract.MAX_REQUEST_BYTES:
+        # The listener must be able to read the largest recognized contract-6
+        # request before the real handler can select legacy or dynamic policy.
+        # The handler remains authoritative and rejects oversized/legacy input
+        # before usage reservation or provider access.
+        if (
+            content_length < 0
+            or content_length > v3_server_contract.DYNAMIC_MAX_REQUEST_BYTES
+        ):
             self._write_json(413, {"error": "local_request_too_large"})
             return
         started_at = time.perf_counter()

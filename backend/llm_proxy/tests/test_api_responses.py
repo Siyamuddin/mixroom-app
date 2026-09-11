@@ -1565,7 +1565,8 @@ class ApiResponsesTests(unittest.TestCase):
                 provider = _SequencedFakeProvider([
                     self._v3_provider_plan_payload(plan, response_id='budget-fixture')])
                 with mock.patch.dict(os.environ, {'AI_V3_ENABLED': 'true',
-                    'AI_V3_SERVER_CONTRACT_ENABLED': 'true', 'LLM_MAX_OUTPUT_TOKENS': ''}), \
+                    'AI_V3_SERVER_CONTRACT_ENABLED': 'true',
+                    'LLM_MAX_OUTPUT_TOKENS': '16384'}), \
                     mock.patch.object(api_responses, '_load_api_key', return_value='test'), \
                     mock.patch.object(api_responses, 'get_provider', return_value=provider), \
                     redirect_stdout(StringIO()):

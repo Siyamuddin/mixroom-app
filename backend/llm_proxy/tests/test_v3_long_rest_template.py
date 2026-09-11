@@ -96,8 +96,20 @@ class V3LongRestTemplateTests(unittest.TestCase):
         self.assertIn("Timeout: 115", function)
         self.assertIn("AI_V3_TIMEOUT_SECONDS: 105", function)
         self.assertIn("AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 105", function)
+        self.assertIn("LLM_MAX_OUTPUT_TOKENS: 16384", function)
         self.assertNotIn("Type: HttpApi", function)
         self.assertNotIn("mixroom_v3_context_v1", function)
+        self.assertRegex(
+            self.template,
+            r"(?ms)^  LlmMaxOutputTokens:\n"
+            r"    Type: Number\n"
+            r"    Default: 8192$",
+        )
+        released_function = _resource_block(
+            self.template,
+            "ProxyResponsesFunction",
+        )
+        self.assertNotIn("LLM_MAX_OUTPUT_TOKENS: 16384", released_function)
         self.assertRegex(
             self.template,
             r"(?ms)^  V3MaxRequestBytes:\n"

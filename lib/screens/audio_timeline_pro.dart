@@ -4588,26 +4588,29 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   int? _rowForLocalY(double localY) {
     if (_rowCount <= 0) return null;
-    double currentY = _masterAutomationLanePaintHeight;
-    for (int i = 0; i < _rowCount; i++) {
-      if (!_isSourceRowVisible(i)) continue;
-      final rowTotalHeight = _rowBlockHeightForIndex(i);
-      if (localY >= currentY && localY < currentY + rowTotalHeight) {
-        return i;
+    final entries = _rowVisibilityMap().entries;
+    var low = 0;
+    var high = entries.length - 1;
+    while (low <= high) {
+      final middle = low + ((high - low) ~/ 2);
+      final row = entries[middle].sourceIndex;
+      final top = _rowYPositions[row];
+      final bottom = top + _rowBlockHeightForIndex(row);
+      if (localY < top) {
+        high = middle - 1;
+      } else if (localY >= bottom) {
+        low = middle + 1;
+      } else {
+        return row;
       }
-      currentY += rowTotalHeight;
     }
     return null;
   }
 
   double _rowTopForIndex(int row) {
     if (row < 0 || row >= _rowCount) return 0.0;
-    double y = _masterAutomationLanePaintHeight;
-    for (int i = 0; i < row; i++) {
-      if (!_isSourceRowVisible(i)) continue;
-      y += _rowBlockHeightForIndex(i);
-    }
-    return y;
+    if (row < _rowYPositions.length) return _rowYPositions[row];
+    return _masterAutomationLanePaintHeight;
   }
 
   List<String> _automationTargetIdsForRow(int row) {
@@ -5491,7 +5494,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   List<int> _visibleClipIndices({
     required double viewportWidth,
-    required double visibleTimelineHeight,
+    required List<_TimelineVisibleRowLayout> visibleRows,
     double leftExtensionPx = 0.0,
   }) {
     _ensureClipSpatialIndex();
@@ -5506,17 +5509,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final endMs =
         _scrollOffsetMs +
         ((viewportWidth + horizontalPrefetchPx) / _pixelsPerMs);
-    final visibleTop = _verticalScrollOffset;
-    final visibleBottom = visibleTop + visibleTimelineHeight;
     final visible = <int>{};
 
-    for (final entry in _clipSpatialIndexByRow.entries) {
-      final row = entry.key;
-      if (row < 0 || row >= _rowCount || !_isSourceRowVisible(row)) continue;
-      final rowTop = _rowTopForIndex(row);
-      final rowBottom = rowTop + _rowHeight;
-      if (rowBottom < visibleTop || rowTop > visibleBottom) continue;
-      entry.value.addIntersecting(startMs, endMs, visible);
+    for (final layout in visibleRows) {
+      _clipSpatialIndexByRow[layout.row]?.addIntersecting(
+        startMs,
+        endMs,
+        visible,
+      );
     }
 
     final dragged = _draggedClipIndex;
@@ -5693,9 +5693,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     final startMs = _scrollOffsetMs + (rect.left / _pixelsPerMs);
     final endMs = _scrollOffsetMs + (rect.right / _pixelsPerMs);
     final candidates = <int>{};
+    final visibleRows = _rowVisibilityMap();
     for (final entry in _clipSpatialIndexByRow.entries) {
       final row = entry.key;
-      if (row < 0 || row >= _rowCount || !_isSourceRowVisible(row)) continue;
+      if (row < 0 ||
+          row >= _rowCount ||
+          visibleRows.visibleIndexForSourceIndex(row) == null) {
+        continue;
+      }
       final rowTop = _rowTopForIndex(row);
       final rowBottom = rowTop + _rowHeight;
       // Inclusive vertical overlap so a bottom-up or zero-width box still
@@ -7702,9 +7707,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   double get _totalTimelineHeight {
     double total = _masterAutomationLanePaintHeight;
-    for (int i = 0; i < _rowCount; i++) {
-      if (!_isSourceRowVisible(i)) continue;
-      total += _rowBlockHeightForIndex(i);
+    for (final entry in _rowVisibilityMap().entries) {
+      total += _rowBlockHeightForIndex(entry.sourceIndex);
     }
     return total;
   }
@@ -7726,12 +7730,64 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _rowYPositions.clear();
 
     double y = _masterAutomationLanePaintHeight;
+    final visibility = _rowVisibilityMap();
     for (int i = 0; i < _rowCount; i++) {
       _rowYPositions.add(y);
-      if (_isSourceRowVisible(i)) {
+      if (visibility.visibleIndexForSourceIndex(i) != null) {
         y += _rowBlockHeightForIndex(i);
       }
     }
+  }
+
+  List<_TimelineVisibleRowLayout> _visibleRowLayouts(
+    double viewportHeight, {
+    int overscanRows = 2,
+  }) {
+    if (_rowCount == 0 || viewportHeight <= 0.0) {
+      return const <_TimelineVisibleRowLayout>[];
+    }
+
+    final entries = _rowVisibilityMap().entries;
+    if (entries.isEmpty) return const <_TimelineVisibleRowLayout>[];
+
+    final visibleTop = _verticalScrollOffset;
+    final visibleBottom = visibleTop + viewportHeight;
+    var low = 0;
+    var high = entries.length;
+    while (low < high) {
+      final middle = low + ((high - low) ~/ 2);
+      final row = entries[middle].sourceIndex;
+      final top = _rowYPositions[row];
+      final bottom = top + _rowBlockHeightForIndex(row);
+      if (bottom <= visibleTop) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+
+    var firstVisible = low;
+    if (firstVisible >= entries.length) {
+      final atEnd = visibleTop >= _timelinePaintHeight;
+      firstVisible = atEnd ? entries.length - 1 : 0;
+    }
+    var lastVisible = firstVisible;
+    while (lastVisible + 1 < entries.length) {
+      final nextRow = entries[lastVisible + 1].sourceIndex;
+      if (_rowYPositions[nextRow] >= visibleBottom) break;
+      lastVisible += 1;
+    }
+
+    final start = math.max(0, firstVisible - overscanRows);
+    final end = math.min(entries.length - 1, lastVisible + overscanRows);
+    return <_TimelineVisibleRowLayout>[
+      for (int index = start; index <= end; index++)
+        _TimelineVisibleRowLayout(
+          row: entries[index].sourceIndex,
+          top: _rowYPositions[entries[index].sourceIndex],
+          height: _rowBlockHeightForIndex(entries[index].sourceIndex),
+        ),
+    ];
   }
 
   _AutomationValueFormatter _automationValueFormatterForTarget(
@@ -10916,35 +10972,6 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         );
         final timelineAutomationClipVisuals =
             _timelineAutomationClipVisualCache;
-        final staticTrackHeaders = Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          child: SizedBox(
-            width: headerWidth,
-            child: Listener(
-              behavior: HitTestBehavior.opaque,
-              onPointerSignal: _onTimelineLeftChromePointerSignal,
-              onPointerPanZoomStart: _onTimelinePointerPanZoomStart,
-              onPointerPanZoomUpdate: _onTimelineLeftChromePointerPanZoomUpdate,
-              onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
-              child: RepaintBoundary(
-                child: ClipRect(
-                  child: OverflowBox(
-                    alignment: Alignment.topLeft,
-                    minHeight: 0,
-                    maxHeight: _scrollContentHeight,
-                    child: SizedBox(
-                      height: _scrollContentHeight,
-                      child: _buildTrackHeadersContent(headerWidth),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-
         return Focus(
           focusNode: _timelineFocusNode,
           autofocus: true,
@@ -10969,6 +10996,42 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final visibleTimelineHeight = constraints.maxHeight;
+                      final visibleRowLayouts = _visibleRowLayouts(
+                        visibleTimelineHeight,
+                      );
+                      final staticTrackHeaders = Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: SizedBox(
+                          width: headerWidth,
+                          child: Listener(
+                            behavior: HitTestBehavior.opaque,
+                            onPointerSignal: _onTimelineLeftChromePointerSignal,
+                            onPointerPanZoomStart:
+                                _onTimelinePointerPanZoomStart,
+                            onPointerPanZoomUpdate:
+                                _onTimelineLeftChromePointerPanZoomUpdate,
+                            onPointerPanZoomEnd: _onTimelinePointerPanZoomEnd,
+                            child: RepaintBoundary(
+                              child: ClipRect(
+                                child: OverflowBox(
+                                  alignment: Alignment.topLeft,
+                                  minHeight: 0,
+                                  maxHeight: _scrollContentHeight,
+                                  child: SizedBox(
+                                    height: _scrollContentHeight,
+                                    child: _buildTrackHeadersContent(
+                                      headerWidth,
+                                      visibleRowLayouts,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
                       return Stack(
                         children: [
                           if (_usesTabletDawLayout)
@@ -11035,6 +11098,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                               timelineAutomationClipVisuals,
                                           rowsHiddenByCollapsedGroups:
                                               rowsHiddenByCollapsedGroups,
+                                          visibleRowLayouts: visibleRowLayouts,
                                         );
                                       },
                                     ),
@@ -11197,6 +11261,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     required List<double> automationLaneHeights,
     required List<_TimelineAutomationClipVisual> timelineAutomationClipVisuals,
     required Set<int> rowsHiddenByCollapsedGroups,
+    required List<_TimelineVisibleRowLayout> visibleRowLayouts,
   }) {
     final loopPreviewClipIndex = _clipLoopPreviewClipIndex;
     final loopPreviewActive = loopPreviewClipIndex != null;
@@ -11209,7 +11274,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         : null;
     final visibleClipIndices = _visibleClipIndices(
       viewportWidth: viewportWidth,
-      visibleTimelineHeight: visibleTimelineHeight,
+      visibleRows: visibleRowLayouts,
       leftExtensionPx: _headerWidth,
     );
     _scheduleWaveformDetailViewport(
@@ -11238,6 +11303,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                           rows: widget.rows,
                           clips: widget.clips,
                           visibleClipIndices: visibleClipIndices,
+                          visibleRowLayouts: visibleRowLayouts,
+                          rowTopPositions: _rowYPositions,
                           clipVisualRevision: widget.clipVisualRevision,
                           clipOverlapMode: widget.clipOverlapMode,
                           getStartMs: widget.getStartMs,
@@ -11362,6 +11429,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               rows: widget.rows,
                               clips: widget.clips,
                               visibleClipIndices: visibleClipIndices,
+                              visibleRowLayouts: visibleRowLayouts,
+                              rowTopPositions: _rowYPositions,
                               clipVisualRevision: widget.clipVisualRevision,
                               clipOverlapMode: widget.clipOverlapMode,
                               getStartMs: widget.getStartMs,
@@ -11570,7 +11639,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         if (_currentSelectionRect() != null) _buildSelectionBoxOverlay(),
         if (_selectionArmIndicatorAt != null)
           _buildSelectionArmIndicatorOverlay(),
-        ..._buildExpandedRows(viewportWidth),
+        ..._buildExpandedRows(viewportWidth, visibleRowLayouts),
         Positioned(
           top: _addRowSectionTop,
           left: 0,
@@ -11585,7 +11654,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
           visibleTimelineHeight,
           timelineAutomationClipVisuals,
         ),
-        if (!widget.useTabletDawLayout) _buildDeadZoneRowNames(viewportWidth),
+        if (!widget.useTabletDawLayout)
+          _buildDeadZoneRowNames(viewportWidth, visibleRowLayouts),
         _buildInlineClipControlOverlay(viewportWidth, visibleTimelineHeight),
       ],
     );
@@ -11642,11 +11712,14 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  List<Widget> _buildExpandedRows(double viewportWidth) {
+  List<Widget> _buildExpandedRows(
+    double viewportWidth,
+    List<_TimelineVisibleRowLayout> visibleRows,
+  ) {
     final list = <Widget>[];
 
-    for (int row = 0; row < _rowCount; row++) {
-      if (!_isSourceRowVisible(row)) continue;
+    for (final layout in visibleRows) {
+      final row = layout.row;
       if (!_rowExpanded[row]) continue;
       final expandedTab = _expandedTab[row];
       final expandedHeight = _expandedPanelHeightForRow(row);
@@ -11898,7 +11971,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  Widget _buildDeadZoneRowNames(double viewportWidth) {
+  Widget _buildDeadZoneRowNames(
+    double viewportWidth,
+    List<_TimelineVisibleRowLayout> visibleRows,
+  ) {
     final zeroMsX = (0 - _scrollOffsetMs) * _pixelsPerMs;
     if (zeroMsX <= 12 || _rowCount == 0) {
       return const SizedBox.shrink();
@@ -11927,8 +12003,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     return Positioned.fill(
       child: IgnorePointer(
         child: Stack(
-          children: List.generate(_rowCount, (row) {
-            if (!_isSourceRowVisible(row)) return const SizedBox.shrink();
+          children: visibleRows.map((layout) {
+            final row = layout.row;
             final name = widget.rows[row].name.trim();
             return Positioned(
               left: _headerWidth + 6,
@@ -11956,7 +12032,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 ),
               ),
             );
-          }),
+          }).toList(growable: false),
         ),
       ),
     );
@@ -14784,7 +14860,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  Widget _buildTrackHeadersContent(double dynamicWidth) {
+  Widget _buildTrackHeadersContent(
+    double dynamicWidth,
+    List<_TimelineVisibleRowLayout> visibleRows,
+  ) {
     if (_rowCount == 0) {
       return Align(
         alignment: Alignment.topCenter,
@@ -14813,81 +14892,84 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       );
     }
 
-    return Column(
-      children: [
+    return Stack(
+      children: <Widget>[
         if (_masterAutomationLanePaintHeight > 0.0)
-          _buildMasterAutomationLaneHeader(dynamicWidth),
-        ...List.generate(_rowCount, (row) {
-          if (!_isSourceRowVisible(row)) return const SizedBox.shrink();
+          Positioned(
+            left: 0,
+            top: 0,
+            width: dynamicWidth,
+            height: _masterAutomationLanePaintHeight,
+            child: _buildMasterAutomationLaneHeader(dynamicWidth),
+          ),
+        ...visibleRows.map((layout) {
+          final row = layout.row;
           final isSelected = _isRowSelected(row);
           final isExpanded = _rowExpanded[row];
           final showsAutomationLane =
               _automationTimelineLaneHeightForRow(row) > 0.0;
 
-          return Column(
-            children: [
-              _buildOneTrackHeader(row, isSelected),
-              if (showsAutomationLane)
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => _toggleAutomationTimelineCollapseForRow(row),
-                  child: Container(
-                    height: _automationTimelineLaneHeightForRow(row),
-                    width: dynamicWidth,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1F2328),
-                      border: Border(
-                        bottom: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.06),
+          return Positioned(
+            left: 0,
+            top: layout.top,
+            width: dynamicWidth,
+            height: layout.height,
+            child: Column(
+              children: [
+                _buildOneTrackHeader(row, isSelected),
+                if (showsAutomationLane)
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _toggleAutomationTimelineCollapseForRow(row),
+                    child: Container(
+                      height: _automationTimelineLaneHeightForRow(row),
+                      width: dynamicWidth,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1F2328),
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.06),
+                          ),
                         ),
                       ),
-                    ),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: _isAutomationTimelineCollapsedForRow(row)
-                          ? Icon(
-                              Icons.unfold_more_rounded,
-                              size: 14,
-                              color: const Color(0xFFE8AA62),
-                            )
-                          : FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                L10n.translate(context, 'Automation'),
-                                maxLines: 1,
-                                softWrap: false,
-                                style: const TextStyle(
-                                  fontFamily: 'Pretendard',
-                                  color: Color(0xFFC7CDD4),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 0.2,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: _isAutomationTimelineCollapsedForRow(row)
+                            ? Icon(
+                                Icons.unfold_more_rounded,
+                                size: 14,
+                                color: const Color(0xFFE8AA62),
+                              )
+                            : FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  L10n.translate(context, 'Automation'),
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Color(0xFFC7CDD4),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.2,
+                                  ),
                                 ),
                               ),
-                            ),
+                      ),
                     ),
                   ),
-                ),
-              if (isExpanded)
-                SizedBox(
-                  height: _expandedPanelHeightForRow(row),
-                  width: dynamicWidth,
-                  child: _buildHeaderTabs(row),
-                ),
-            ],
+                if (isExpanded)
+                  SizedBox(
+                    height: _expandedPanelHeightForRow(row),
+                    width: dynamicWidth,
+                    child: _buildHeaderTabs(row),
+                  ),
+              ],
+            ),
           );
         }),
-        if (!_usesTabletDawLayout) const SizedBox(height: kHeaderFooterHeight),
-        SizedBox(
-          height: _usesTabletDawLayout
-              ? _kTabletStickyFooterTotalHeight
-              : _kAddRowPillHeight +
-                    _kAddRowSectionGap +
-                    _editorLayoutSpec.bottomInteractionPadding +
-                    _kExtraAddRowBottomPadding,
-        ),
       ],
     );
   }
@@ -19573,6 +19655,18 @@ class _TimelineAutomationClipVisual {
   });
 }
 
+class _TimelineVisibleRowLayout {
+  final int row;
+  final double top;
+  final double height;
+
+  const _TimelineVisibleRowLayout({
+    required this.row,
+    required this.top,
+    required this.height,
+  });
+}
+
 class _CollapsedGroupSummary {
   final String groupId;
   final int leadRow;
@@ -19596,6 +19690,8 @@ class _TimelinePainter extends CustomPainter {
   final List<TimelineRow> rows;
   final List<AudioTrack> clips;
   final List<int> visibleClipIndices;
+  final List<_TimelineVisibleRowLayout> visibleRowLayouts;
+  final List<double> rowTopPositions;
   final String clipOverlapMode;
   final double Function(AudioTrack) getStartMs;
   final double Function(AudioTrack) getDurationMs;
@@ -19668,11 +19764,14 @@ class _TimelinePainter extends CustomPainter {
   final int _recordingPeakTimesHash;
   final int _rowKindHash;
   final int _rowVisualHash;
+  final int _visibleRowLayoutsHash;
 
   _TimelinePainter({
     required this.rows,
     required this.clips,
     required this.visibleClipIndices,
+    required this.visibleRowLayouts,
+    required this.rowTopPositions,
     required int clipVisualRevision,
     required this.clipOverlapMode,
     required this.getStartMs,
@@ -19756,7 +19855,22 @@ class _TimelinePainter extends CustomPainter {
              .map((row) => Object.hash(row.rowId, row.color, row.groupId))
              .toList(growable: false),
        ),
+       _visibleRowLayoutsHash = _computeVisibleRowLayoutsHash(
+         visibleRowLayouts,
+       ),
        super(repaint: waveformDetailLookup);
+
+  static int _computeVisibleRowLayoutsHash(
+    List<_TimelineVisibleRowLayout> layouts,
+  ) {
+    var hash = 0;
+    for (final layout in layouts) {
+      hash = _hashCombine(hash, layout.row);
+      hash = _hashCombine(hash, _quantizeDouble(layout.top));
+      hash = _hashCombine(hash, _quantizeDouble(layout.height));
+    }
+    return _hashFinish(hash);
+  }
 
   static int _computeAutomationClipHash(
     List<_TimelineAutomationClipVisual> clips,
@@ -19818,20 +19932,11 @@ class _TimelinePainter extends CustomPainter {
     return automationLaneHeights[row];
   }
 
-  double _rowBlockHeight(int row) {
-    final expanded = row >= 0 && row < expandedHeights.length
-        ? expandedHeights[row]
-        : 0.0;
-    return rowHeight + _automationLaneHeightForRow(row) + expanded;
-  }
-
   double _rowTopForIndex(int row) {
-    double y = masterAutomationLaneHeight;
-    for (int i = 0; i < row; i++) {
-      if (_isRowHiddenByCollapsedGroup(i)) continue;
-      y += _rowBlockHeight(i);
+    if (row >= 0 && row < rowTopPositions.length) {
+      return rowTopPositions[row];
     }
-    return y;
+    return masterAutomationLaneHeight;
   }
 
   bool _isRowHiddenByCollapsedGroup(int row) {
@@ -19978,14 +20083,14 @@ class _TimelinePainter extends CustomPainter {
       );
     }
 
-    double currentY = masterAutomationLaneHeight;
-
     // convert playheadPx → ms
     final double playheadMs = scrollOffsetMs + playheadPx / pixelsPerMs;
 
     // Draw row backgrounds
-    for (int row = 0; row < rowExpanded.length; row++) {
-      if (_isRowHiddenByCollapsedGroup(row)) continue;
+    for (final layout in visibleRowLayouts) {
+      final row = layout.row;
+      if (row < 0 || row >= rowExpanded.length) continue;
+      final currentY = layout.top;
       final automationLaneHeight = _automationLaneHeightForRow(row);
       final isExpanded = rowExpanded[row];
       final expandedHeight = expandedHeights[row];
@@ -20032,7 +20137,6 @@ class _TimelinePainter extends CustomPainter {
         linePaint,
       );
 
-      currentY += totalRowHeight;
     }
 
     if (highlightedSegmentRow != null &&
@@ -21847,6 +21951,7 @@ class _TimelinePainter extends CustomPainter {
         _expandedHeightsHash != old._expandedHeightsHash ||
         _automationLaneHeightsHash != old._automationLaneHeightsHash ||
         _rowVisualHash != old._rowVisualHash ||
+        _visibleRowLayoutsHash != old._visibleRowLayoutsHash ||
         stretchToolActive != old.stretchToolActive ||
         trimClipIndex != old.trimClipIndex ||
         _clipDataHash < 0 ||
