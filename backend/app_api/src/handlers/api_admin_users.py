@@ -95,6 +95,14 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             payload = repo.search_users(
                 query=str((query.get("query") if isinstance(query, dict) else "") or ""),
                 limit=(query.get("limit") if isinstance(query, dict) else None) or 24,
+                subscription_filter=str(
+                    (
+                        query.get("subscription_filter")
+                        if isinstance(query, dict)
+                        else ""
+                    )
+                    or "all"
+                ),
             )
             payload["requested_by"] = admin_user_id
             payload["requested_email"] = admin_email
