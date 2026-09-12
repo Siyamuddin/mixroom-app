@@ -6,7 +6,7 @@
     <title>Mixroom Admin</title>
     <link rel="icon" type="image/png" href="./mixroom-app-icon.png" />
     <link rel="apple-touch-icon" href="./mixroom-app-icon.png" />
-    <link rel="stylesheet" href="./styles.css?v=admin-limits-full-count-20260813" />
+    <link rel="stylesheet" href="./styles.css?v=paying-user-filter-20260910" />
     <script src="./config.js"></script>
     <script
       defer
@@ -572,13 +572,21 @@
                   Open PostHog
                 </a>
               </div>
+              <div class="user-filter-bar">
+                <span class="search-label" data-i18n="filter.subscription.label">Subscription view</span>
+                <div id="user-subscription-filter" class="analytics-range-controls" aria-label="Subscription view">
+                  <button class="analytics-range-button is-active" type="button" data-user-subscription-filter="all" data-i18n="filter.subscription.all">All users</button>
+                  <button class="analytics-range-button" type="button" data-user-subscription-filter="paying" data-i18n="filter.subscription.paying">Paying</button>
+                  <button class="analytics-range-button" type="button" data-user-subscription-filter="granted" data-i18n="filter.subscription.granted">Granted premium</button>
+                </div>
+              </div>
               <div class="subsection compact-subsection">
                 <div class="subsection-header">
                   <div>
                     <p class="panel-label" data-i18n="panel.accounts.label">Accounts</p>
                     <h3 data-i18n="panel.accounts.title">Search results</h3>
                   </div>
-                  <p class="panel-meta" data-i18n="panel.accounts.meta">
+                  <p id="accounts-list-meta" class="panel-meta" data-i18n="panel.accounts.meta">
                     Recent accounts show when blank.
                   </p>
                 </div>
@@ -2010,6 +2018,6 @@
       </main>
     </div>
 
-    <script src="./app.js?v=employee-provisioning-20260908" type="module"></script>
+    <script src="./app.js?v=paying-user-filter-20260910" type="module"></script>
   </body>
 </html>

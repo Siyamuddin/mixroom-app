@@ -210,6 +210,12 @@ const MESSAGES = {
     "panel.accounts.label": "Accounts",
     "panel.accounts.title": "Search results",
     "panel.accounts.meta": "Recent accounts show when blank.",
+    "panel.accounts.meta.paying": "Active paying users. Trials and admin grants are excluded.",
+    "panel.accounts.meta.granted": "Active premium access granted by an admin.",
+    "filter.subscription.label": "Subscription view",
+    "filter.subscription.all": "All users",
+    "filter.subscription.paying": "Paying",
+    "filter.subscription.granted": "Granted premium",
     "panel.selectedUser.label": "Selected User",
     "panel.selectedUser.title": "User details",
     "panel.selectedUser.meta": "Review actions here.",
@@ -343,8 +349,10 @@ const MESSAGES = {
     "summary.aiPromptsTodayDetail": "{count} AI-active users today",
     "summary.aiPromptsWeek": "AI prompts 7d",
     "summary.aiPromptsWeekDetail": "{count} AI-active users this week",
-    "summary.paidUsers": "Paid Users",
-    "summary.paidUsersDetail": "{count} active subs",
+    "summary.paidUsers": "Paying users",
+    "summary.paidUsersDetail": "{rate} conversion from all users",
+    "summary.grantedPremiumUsers": "Granted premium",
+    "summary.grantedPremiumUsersDetail": "{count} premium total · {trials} trials",
     "generated.at": "Generated {date}",
     "generated.unavailable": "Generated time unavailable",
     "identity.signedInAs": "Signed in as {email}",
@@ -382,6 +390,8 @@ const MESSAGES = {
     "projects.lastUser": "Last user: {user}",
     "search.meta": "Search: {query}",
     "search.recentAccounts": "Recent accounts",
+    "search.payingAccounts": "Paying users",
+    "search.grantedAccounts": "Granted premium users",
     "adminUsers.none": "No users matched that search.",
     "createAccount.username": "Username",
     "createAccount.usernamePlaceholder": "student_1",
@@ -680,6 +690,12 @@ const MESSAGES = {
     "panel.accounts.label": "계정",
     "panel.accounts.title": "검색 결과",
     "panel.accounts.meta": "검색어가 없으면 최근 계정을 보여줍니다.",
+    "panel.accounts.meta.paying": "활성 실결제 사용자입니다. 체험 및 관리자 지급은 제외됩니다.",
+    "panel.accounts.meta.granted": "관리자가 지급한 활성 프리미엄 이용권입니다.",
+    "filter.subscription.label": "구독 보기",
+    "filter.subscription.all": "전체 사용자",
+    "filter.subscription.paying": "실결제",
+    "filter.subscription.granted": "지급 프리미엄",
     "panel.selectedUser.label": "선택된 사용자",
     "panel.selectedUser.title": "사용자 상세",
     "panel.selectedUser.meta": "여기서 작업 내용을 검토하세요.",
@@ -813,8 +829,10 @@ const MESSAGES = {
     "summary.aiPromptsTodayDetail": "오늘 AI 활성 사용자 {count}명",
     "summary.aiPromptsWeek": "최근 7일 AI 프롬프트",
     "summary.aiPromptsWeekDetail": "이번 주 AI 활성 사용자 {count}명",
-    "summary.paidUsers": "유료 사용자",
-    "summary.paidUsersDetail": "활성 구독 {count}",
+    "summary.paidUsers": "실결제 사용자",
+    "summary.paidUsersDetail": "전체 사용자 대비 전환율 {rate}",
+    "summary.grantedPremiumUsers": "관리자 지급 프리미엄",
+    "summary.grantedPremiumUsersDetail": "전체 프리미엄 {count}명 · 체험 {trials}명",
     "generated.at": "{date} 생성",
     "generated.unavailable": "생성 시각 없음",
     "identity.signedInAs": "{email}(으)로 로그인됨",
@@ -852,6 +870,8 @@ const MESSAGES = {
     "projects.lastUser": "최근 사용자: {user}",
     "search.meta": "검색: {query}",
     "search.recentAccounts": "최근 계정",
+    "search.payingAccounts": "실결제 사용자",
+    "search.grantedAccounts": "지급 프리미엄 사용자",
     "adminUsers.none": "검색 조건에 맞는 사용자가 없습니다.",
     "createAccount.username": "사용자명",
     "createAccount.usernamePlaceholder": "student_1",
@@ -1294,6 +1314,11 @@ const elements = {
   userSearchButton: document.querySelector("#user-search-button"),
   userSearchClearButton: document.querySelector("#user-search-clear-button"),
   userSearchMeta: document.querySelector("#user-search-meta"),
+  userSubscriptionFilter: document.querySelector("#user-subscription-filter"),
+  userSubscriptionFilterButtons: Array.from(
+    document.querySelectorAll("[data-user-subscription-filter]"),
+  ),
+  accountsListMeta: document.querySelector("#accounts-list-meta"),
   createUsernameAccountForm: document.querySelector("#create-username-account-form"),
   createUsernameAccountButton: document.querySelector("#create-username-account-button"),
   createUsernameAccountFeedback: document.querySelector("#create-username-account-feedback"),
@@ -1346,6 +1371,7 @@ const state = {
   grantBusy: false,
   activeTab: DEFAULT_TAB,
   currentSearchQuery: "",
+  userSubscriptionFilter: "all",
   overview: null,
   overviewIncludes: buildOverviewIncludes(),
   homeSectionLoading: buildHomeSectionLoading(),
@@ -1429,6 +1455,10 @@ function bindEvents() {
   });
   elements.userSearchForm.addEventListener("submit", handleUserSearchSubmit);
   elements.userSearchClearButton.addEventListener("click", clearUserSearch);
+  elements.userSubscriptionFilter.addEventListener(
+    "click",
+    handleUserSubscriptionFilterClick,
+  );
   elements.createUsernameAccountForm?.addEventListener(
     "submit",
     handleCreateUsernameAccountSubmit,
@@ -1599,6 +1629,7 @@ function rerenderForLocale() {
   renderBillingWorkspaces();
   renderBillingCloudProjects();
   renderUserSearchMeta(state.lastUserSearchPayload || {});
+  renderUserSubscriptionFilters();
   renderCreateUsernameAccountFeedback();
   updateTabView();
 }
@@ -2439,6 +2470,7 @@ async function searchUsers({
   try {
     const params = new URLSearchParams({
       limit: `${state.userSearchLimit}`,
+      subscription_filter: state.userSubscriptionFilter,
     });
     if (state.currentSearchQuery) {
       params.set("query", state.currentSearchQuery);
@@ -2863,6 +2895,13 @@ function formatOverviewMetricValue(value, formatter = formatNumber) {
     return t("overview.loading");
   }
   return formatter(value);
+}
+
+function formatOverviewPercentage(value) {
+  if (value == null) {
+    return t("overview.loading");
+  }
+  return `${formatDecimal(value)}%`;
 }
 
 function renderAiPromptLimitSettings() {
@@ -4512,9 +4551,18 @@ function renderSummary(summary) {
       title: t("summary.paidUsers"),
       value: formatOverviewMetricValue(summary.paid_users),
       detail: t("summary.paidUsersDetail", {
-        count: formatOverviewMetricValue(summary.active_subscriptions),
+        rate: formatOverviewPercentage(summary.paid_conversion_rate),
       }),
       className: "summary-paid",
+    },
+    {
+      title: t("summary.grantedPremiumUsers"),
+      value: formatOverviewMetricValue(summary.granted_premium_users),
+      detail: t("summary.grantedPremiumUsersDetail", {
+        count: formatOverviewMetricValue(summary.premium_users),
+        trials: formatOverviewMetricValue(summary.trial_users),
+      }),
+      className: "summary-granted",
     },
   ];
 
@@ -5536,12 +5584,31 @@ function renderProjects(projects) {
 
 function renderUserSearchMeta(payload) {
   const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const defaultDetail = state.userSubscriptionFilter === "paying"
+    ? t("search.payingAccounts")
+    : state.userSubscriptionFilter === "granted"
+      ? t("search.grantedAccounts")
+      : t("search.recentAccounts");
   const detail = state.currentSearchQuery
-    ? t("search.meta", { query: state.currentSearchQuery })
-    : t("search.recentAccounts");
+    ? `${defaultDetail} · ${t("search.meta", { query: state.currentSearchQuery })}`
+    : defaultDetail;
   elements.userSearchMeta.textContent = warnings.length
     ? `${detail} • ${warnings.join(" • ")}`
     : detail;
+}
+
+function renderUserSubscriptionFilters() {
+  elements.userSubscriptionFilterButtons.forEach((button) => {
+    const isActive = button.dataset.userSubscriptionFilter === state.userSubscriptionFilter;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+  const metaKey = state.userSubscriptionFilter === "paying"
+    ? "panel.accounts.meta.paying"
+    : state.userSubscriptionFilter === "granted"
+      ? "panel.accounts.meta.granted"
+      : "panel.accounts.meta";
+  elements.accountsListMeta.textContent = t(metaKey);
 }
 
 function renderCreateUsernameAccountFeedback() {
@@ -5620,6 +5687,13 @@ function renderAdminUsers(users) {
               <span class="badge ${subscriptionStatusClass}">${escapeHtml(
                 formatStatusLabel(user.subscription_status || "unknown"),
               )}</span>
+              ${user.subscription_tier && user.subscription_tier !== "free"
+                ? `<span class="badge">${escapeHtml(
+                  user.subscription_provider === "admin_grant"
+                    ? t("summary.grantedPremiumUsers")
+                    : formatProviderLabel(user.subscription_provider || "unknown"),
+                )}</span>`
+                : ""}
             </div>
           </td>
           <td>
@@ -6388,6 +6462,7 @@ function setSignedOutState() {
   elements.identityMeta.textContent = t("identity.employeeEmailsOnly");
   renderWelcomeBanner(null);
   resetAdminState();
+  renderUserSubscriptionFilters();
   renderLivePresence();
   updateTabView();
   updateBusyState();
@@ -6410,6 +6485,9 @@ function updateBusyState() {
   elements.userSearchButton.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
   elements.userSearchClearButton.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
   elements.userSearchInput.disabled = !signedIn || destructiveBusy;
+  elements.userSubscriptionFilterButtons.forEach((button) => {
+    button.disabled = !signedIn || state.userSearchBusy || destructiveBusy;
+  });
   if (elements.createUsernameAccountButton) {
     elements.createUsernameAccountButton.disabled =
       !signedIn || state.createUsernameAccountBusy;
@@ -6887,6 +6965,28 @@ function clearUserSearch() {
   elements.userSearchInput.value = "";
   state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
   searchUsers({ query: "", silent: false, autoSelect: true });
+}
+
+function handleUserSubscriptionFilterClick(event) {
+  const button = event.target.closest("[data-user-subscription-filter]");
+  if (!button || state.userSearchBusy) {
+    return;
+  }
+  const nextFilter = `${button.dataset.userSubscriptionFilter || "all"}`.trim();
+  if (!["all", "paying", "granted"].includes(nextFilter)) {
+    return;
+  }
+  if (nextFilter === state.userSubscriptionFilter) {
+    return;
+  }
+  state.userSubscriptionFilter = nextFilter;
+  state.userSearchLimit = DEFAULT_ADMIN_USERS_LIMIT;
+  renderUserSubscriptionFilters();
+  searchUsers({
+    query: state.currentSearchQuery,
+    silent: false,
+    autoSelect: true,
+  });
 }
 
 function handleAdminUsersShowLess() {
@@ -7635,6 +7735,7 @@ function resetAdminState() {
   state.grantBusy = false;
   state.overrideBusy = false;
   state.currentSearchQuery = "";
+  state.userSubscriptionFilter = "all";
   state.overview = null;
   state.overviewIncludes = buildOverviewIncludes();
   state.homeSectionLoading = buildHomeSectionLoading();

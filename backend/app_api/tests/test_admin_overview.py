@@ -309,7 +309,16 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
                 {"plan_code": "studio", "user_count": 0, "active_user_count": 0},
             ]
         )
-        repo._describe_item_count = mock.Mock(return_value=0)
+        repo._build_paid_access_breakdown = mock.Mock(
+            return_value={
+                "paid_users": 5,
+                "granted_premium_users": 2,
+                "unattributed_premium_users": 0,
+                "trial_users": 1,
+                "premium_users": 8,
+            }
+        )
+        repo._describe_item_count = mock.Mock(return_value=20)
 
         result = overview_module.AdminOverviewRepository.build_overview(repo)
 
@@ -317,6 +326,9 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         self.assertEqual(result["product_analytics"]["metrics"]["mau"], 22)
         self.assertEqual(result["product_analytics"]["top_countries"][0]["country"], "South Korea")
         self.assertEqual(result["ai_observability"]["dashboard_metrics"]["timings"]["prompt_cycle_total_ms"]["p50"], 1200.0)
+        self.assertEqual(result["summary"]["paid_users"], 5)
+        self.assertEqual(result["summary"]["granted_premium_users"], 2)
+        self.assertEqual(result["summary"]["paid_conversion_rate"], 25.0)
 
     def test_build_overview_keeps_posthog_observability_when_product_metrics_are_deferred(self):
         repo = overview_module.AdminOverviewRepository.__new__(
@@ -439,6 +451,67 @@ class AdminOverviewRepositoryTests(unittest.TestCase):
         self.assertEqual(result[0]["user_count"], 5)
         repo._scan_tier_breakdown.assert_not_called()
         self.assertEqual(warnings, [])
+
+    def test_paid_access_breakdown_separates_payments_from_admin_grants(self):
+        repo = overview_module.AdminOverviewRepository.__new__(
+            overview_module.AdminOverviewRepository
+        )
+        repo._entitlements = mock.Mock()
+        repo._entitlements.scan.side_effect = [
+            {
+                "Items": [
+                    {
+                        "plan_code": "producer",
+                        "status": "active",
+                        "source_provider": "apple",
+                    },
+                    {
+                        "plan_code": "studio",
+                        "status": "trialing",
+                        "source_provider": "paddle",
+                    },
+                    {
+                        "plan_code": "starter",
+                        "status": "active",
+                        "source_provider": "admin_grant",
+                    },
+                    {
+                        "plan_code": "free",
+                        "status": "active",
+                        "source_provider": "admin_grant",
+                    },
+                ],
+                "LastEvaluatedKey": {"user_id": "page-2"},
+            },
+            {
+                "Items": [
+                    {
+                        "plan_code": "producer",
+                        "status": "expired",
+                        "source_provider": "google",
+                    },
+                    {
+                        "plan_code": "enterprise",
+                        "status": "grace_period",
+                        "source_provider": "legacy-provider",
+                    },
+                ]
+            },
+        ]
+        warnings: list[str] = []
+
+        result = overview_module.AdminOverviewRepository._build_paid_access_breakdown(
+            repo,
+            warnings,
+        )
+
+        self.assertEqual(result["paid_users"], 1)
+        self.assertEqual(result["granted_premium_users"], 1)
+        self.assertEqual(result["unattributed_premium_users"], 1)
+        self.assertEqual(result["trial_users"], 1)
+        self.assertEqual(result["premium_users"], 4)
+        self.assertEqual(repo._entitlements.scan.call_count, 2)
+        self.assertIn("premium_access_source_unknown:1", warnings)
 
     def test_build_overview_defers_expensive_sections_when_requested(self):
         repo = overview_module.AdminOverviewRepository.__new__(
