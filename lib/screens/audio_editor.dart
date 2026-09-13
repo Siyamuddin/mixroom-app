@@ -38,6 +38,7 @@ import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/audio_import_target.dart';
+import 'package:mixroom/helpers/audio_startup_retry_policy.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_midi_key_state.dart';
@@ -4620,6 +4621,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _compatibilityForkInFlight = false;
   int _projectCreatedAtMs = 0;
   bool _loadedOnce = false;
+  bool _editorStartupInFlight = false;
+  bool _audioStartupFailed = false;
+  String? _audioStartupDiagnosticCode;
   Future<String>? _bundledSamplePackRefreshTokenFuture;
   Future<String?>? _androidBundledInstrumentRootPathFuture;
   String? _androidBundledInstrumentRootPath;
@@ -9556,6 +9560,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // _startMeterPolling();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _startEditorSession();
+    });
+  }
+
+  Future<void> _startEditorSession() async {
+    if (!mounted || _editorStartupInFlight || _loadedOnce) return;
+    _editorStartupInFlight = true;
+    if (_audioStartupFailed || !_isLoadingNextScreen) {
+      setState(() {
+        _audioStartupFailed = false;
+        _isLoadingNextScreen = true;
+      });
+    }
+    try {
       final bluetoothSession = await _bluetoothImplementationSessionResolverV2
           .loadSession();
       if (!mounted) return;
@@ -9570,7 +9588,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         } catch (_) {
           if (!mounted) return;
           _showSmallNotice('Audio output is not available yet.');
-          setState(() => _isLoadingNextScreen = false);
+          setState(() {
+            _audioStartupFailed = true;
+            _isLoadingNextScreen = false;
+          });
           return;
         }
         if (!mounted) return;
@@ -9581,16 +9602,40 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       }
       if (!mounted) return;
-      final engineInitialised =
-          await JuceAudioEngine.initialiseForImplementation(
-            bluetoothSession.active,
-          );
-      if (!mounted) return;
+      var engineInitialised = false;
+      var startupAttempt = 0;
+      while (true) {
+        startupAttempt++;
+        engineInitialised =
+            await JuceAudioEngine.initialiseForImplementation(
+              bluetoothSession.active,
+            );
+        if (!mounted) return;
+        if (engineInitialised) break;
+        final startupResult = JuceAudioEngine.lastPlaybackStartupResultV2;
+        _logAudioStartupFailure(
+          attempt: startupAttempt,
+          result: startupResult,
+        );
+        final retry = decideStartupRetry(
+          diagnosticCode: startupResult?.diagnosticCode,
+          attempt: startupAttempt,
+        );
+        if (!retry.retry) break;
+        await Future<void>.delayed(retry.delay);
+        if (!mounted) return;
+      }
       if (!engineInitialised) {
+        _audioStartupDiagnosticCode =
+            JuceAudioEngine.lastPlaybackStartupResultV2?.diagnosticCode;
         _showSmallNotice('Audio output is not available yet.');
-        setState(() => _isLoadingNextScreen = false);
+        setState(() {
+          _audioStartupFailed = true;
+          _isLoadingNextScreen = false;
+        });
         return;
       }
+      _audioStartupDiagnosticCode = null;
       if (Platform.isMacOS &&
           JuceAudioEngine.v2BluetoothCommunicationQualityReduced) {
         _macBluetoothCommunicationQualityNoticeShown = true;
@@ -9701,7 +9746,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
       await _runInitialActionIfNeeded();
       await _maybeShowDawOnboarding();
-    });
+    } finally {
+      _editorStartupInFlight = false;
+    }
+  }
+
+  void _logAudioStartupFailure({
+    required int attempt,
+    required AudioPlaybackStartupResultV2? result,
+  }) {
+    debugPrint(
+      'Audio editor startup failed '
+      'attempt=$attempt '
+      'diagnosticCode=${result?.diagnosticCode} '
+      'captureConsistency=${result?.snapshot.captureConsistency.name} '
+      'unavailableReasons=${result?.snapshot.unavailableReasons}',
+    );
   }
 
   Future<void> _runInitialActionIfNeeded() async {
@@ -13051,8 +13111,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (state == AppLifecycleState.resumed) {
-        debugPrint("App Resumed on Android - Re-initializing.");
-        unawaited(_handleAndroidEditorResumed());
+        if (_audioStartupFailed && !_editorStartupInFlight) {
+          unawaited(_startEditorSession());
+        } else {
+          debugPrint("App Resumed on Android - Re-initializing.");
+          unawaited(_handleAndroidEditorResumed());
+        }
       } else if (_isEditorBackgroundState(state) ||
           (state == AppLifecycleState.inactive && !_isBluetoothV2Session)) {
         _markProjectDirty(immediate: true);
@@ -13081,7 +13145,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        if (_isBluetoothV2Session) {
+        if (_audioStartupFailed && !_editorStartupInFlight) {
+          unawaited(_startEditorSession());
+        } else if (_isBluetoothV2Session) {
           unawaited(_resumeIOSV2AudioAfterForeground());
         } else if (_bluetoothImplementationSessionV2 != null &&
             !_isBluetoothV2Session) {
@@ -16852,6 +16918,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _performAutosaveWrite() async {
+    if (!_loadedOnce) {
+      debugPrint('Skipping autosave because the project never loaded.');
+      return;
+    }
     if (_usingCompatibilityAudio) {
       await _forkCompatibilityProjectForEdits();
     }
@@ -18745,6 +18815,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _saveProject({bool showSnackBar = true}) async {
+    if (!_loadedOnce) {
+      debugPrint('Skipping project save because the project never loaded.');
+      return;
+    }
     try {
       await _projectAutosaveCoordinator.flush();
       if (!_usingCompatibilityAudio) {
@@ -18932,7 +19006,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    await _saveProject(showSnackBar: false);
+    if (_loadedOnce) {
+      await _saveProject(showSnackBar: false);
+    } else {
+      debugPrint(
+        'Skipping project save on back because the project never loaded.',
+      );
+    }
     _setDawPanelVisible('add_actions', false);
     _setDawPanelVisible('chat_panel', false);
     _setDawPanelVisible('chat_input', false);
@@ -82159,6 +82239,69 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
+  Widget _buildAudioStartupFailedBanner() {
+    return Material(
+      color: Colors.transparent,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color.fromRGBO(70, 80, 95, 0.97),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    L10n.translate(context, "Audio couldn't start."),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.2,
+                      color: Color(0xFFF4F4F4),
+                      letterSpacing: -0.05,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: _editorStartupInFlight
+                      ? null
+                      : () {
+                          debugPrint(
+                            'Retrying audio editor startup '
+                            'diagnosticCode=$_audioStartupDiagnosticCode',
+                          );
+                          unawaited(_startEditorSession());
+                        },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFF4F4F4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    L10n.translate(context, 'Retry'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String _localizedNoticeMessage(String message) {
     final exact = L10n.translate(context, message);
     if (exact != message) return exact;
@@ -86461,6 +86604,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       _buildTopBar(clock, editorLayoutSpec),
                                 ),
                               ),
+                              if (_audioStartupFailed)
+                                Positioned(
+                                  top: topBarReservedHeight + 8,
+                                  left: 16,
+                                  right: 16 + tabletRightPanelReservedWidth,
+                                  child: _buildAudioStartupFailedBanner(),
+                                ),
                               _buildTimelineHorizontalScrollbarOverlay(
                                 topBarReservedHeight: topBarReservedHeight,
                                 rightInset: tabletRightPanelReservedWidth,
