@@ -13,6 +13,8 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from .mix_magnitude_contract import CONTRACT as HUMAN_CONTRACT, FEATURE_COUNT as HUMAN_FEATURE_COUNT, runtime_target, features as human_features, refine_amount
+
 from .mix_plugin_contract import (
     CONTRACT as PLUGIN_CONTRACT, FEATURE_COUNT as PLUGIN_FEATURE_COUNT,
     extra_features, parameter_target, is_continuous, proposed_value, bus_target, STRUCTURAL_ACTIONS, parameter_recreated,
@@ -122,6 +124,10 @@ class OnnxMixModelRunner:
         self._ensure_sessions()
         return self._feature_contract
 
+    def magnitude_contract(self) -> str:
+        self._ensure_sessions()
+        return self._magnitude_contract
+
     def predict_apply_score(self, features: list[float]) -> float | None:
         self._ensure_sessions()
         named_outputs = self._run_named_outputs(self._apply_session, features)
@@ -150,6 +156,8 @@ class OnnxMixModelRunner:
         context = {
             "mix_magnitude_model_source": self._model_source,
             "mix_feature_contract_version": getattr(self, "_feature_contract", _CONTRACT_VERSION),
+            "mix_magnitude_feature_contract_version": getattr(self, "_magnitude_contract", _CONTRACT_VERSION),
+            "mix_magnitude_development_only": getattr(self, "_development_only", False),
             "mix_magnitude_model_bundle_version": self._bundle_version,
             "mix_apply_model_version": apply_version,
             "mix_magnitude_regressor_version": magnitude_version,
@@ -188,13 +196,38 @@ class OnnxMixModelRunner:
                 for session in (self._apply_session, self._magnitude_session):
                     metadata = session.get_modelmeta().custom_metadata_map
                     contract = metadata.get("mix_feature_contract_version", _CONTRACT_VERSION)
-                    expected = {_CONTRACT_VERSION: _FEATURE_COUNT, PLUGIN_CONTRACT: PLUGIN_FEATURE_COUNT}.get(contract)
+                    expected = {_CONTRACT_VERSION: _FEATURE_COUNT, PLUGIN_CONTRACT: PLUGIN_FEATURE_COUNT, HUMAN_CONTRACT: HUMAN_FEATURE_COUNT}.get(contract)
                     if expected is None or session.get_inputs()[0].shape[-1] != expected:
                         raise ValueError("Mix model feature metadata/shape mismatch")
                     contracts.append(contract)
-                if len(set(contracts)) != 1:
+                if contracts[0] not in {_CONTRACT_VERSION, PLUGIN_CONTRACT}:
+                    raise ValueError("Unsupported classifier contract")
+                if contracts[1] != HUMAN_CONTRACT and len(set(contracts)) != 1:
                     raise ValueError("Apply and magnitude models use different contracts")
-                self._feature_contract = contracts[0]
+                self._feature_contract, self._magnitude_contract = contracts
+                metadata = self._magnitude_session.get_modelmeta().custom_metadata_map
+                if "training_group_ids" in metadata:
+                    self.training_groups = set(json.loads(metadata["training_group_ids"]))
+                self._development_only = metadata.get("development_only") == "true"
+                if self._development_only and os.environ.get("MIX_ALLOW_DEVELOPMENT_MODELS") != "true":
+                    raise ValueError("Development model requires explicit local allowance")
+                self.magnitude_controls = {}
+                if self._magnitude_contract == HUMAN_CONTRACT:
+                    outputs = self._magnitude_session.get_outputs()
+                    if len(outputs) != 1 or outputs[0].type != "tensor(float)" or len(outputs[0].shape) != 2 or outputs[0].shape[-1] != 1:
+                        raise ValueError("Magnitude model must output one float per action")
+                    if metadata.get("output_contract") != "normalized_human_amount_v1":
+                        raise ValueError("Unknown magnitude output contract")
+                    from .mix_magnitude_contract import fingerprint
+                    controls = json.loads(metadata["control_contracts"])
+                    support = json.loads(metadata["control_song_counts"])
+                    for key, descriptor in controls.items():
+                        if key != fingerprint(descriptor) or descriptor.get("type") != "float":
+                            raise ValueError("Invalid continuous control identity")
+                        if not all(isinstance(descriptor.get(k), (int, float)) and math.isfinite(descriptor[k]) for k in ("min", "max")) or descriptor["max"] <= descriptor["min"]:
+                            raise ValueError("Invalid continuous control bounds")
+                        if self._development_only or support.get(key, 0) >= 3:
+                            self.magnitude_controls[key] = descriptor
                 self._np = np
                 self._ort = ort
                 self._apply_path = str(resolved.apply_path)
@@ -450,6 +483,7 @@ class MixResolveService:
             model_contract = self._runner.feature_contract() if hasattr(self._runner, "feature_contract") else _CONTRACT_VERSION
             if model_contract not in {_CONTRACT_VERSION, PLUGIN_CONTRACT}:
                 raise ValueError("Unsupported model feature contract")
+            magnitude_contract = self._runner.magnitude_contract() if hasattr(self._runner, "magnitude_contract") else model_contract
             onnx_started_at = time.perf_counter()
             refined_actions: list[dict[str, Any]] = []
             debug_entries: list[dict[str, Any]] = []
@@ -468,6 +502,32 @@ class MixResolveService:
                 if model_contract == PLUGIN_CONTRACT:
                     features.extend(extra_features(normalized_project, action))
                 apply_score = self._runner.predict_apply_score(features)
+                if magnitude_contract == HUMAN_CONTRACT:
+                    target = runtime_target(normalized_project, action, normalized_actions, index, self._runner.magnitude_controls)
+                    permitted = (_goal_execution_profile(normalized_goal) == "producer_safe" and
+                                 _goal_audibility(normalized_goal) == "noticeable" and not normalized_goal.get("style_tags"))
+                    raw_amount = None
+                    refined = action
+                    decision = "unchanged_unsupported_magnitude"
+                    if apply_score is None or not math.isfinite(apply_score):
+                        raise ValueError("Invalid classifier output")
+                    dropped = apply_score < .15 and not strict
+                    if dropped:
+                        decision = "drop"
+                    elif target is not None and permitted:
+                        d, scope, start, proposal, direction = target
+                        raw_amount = self._runner.predict_scalar(human_features(normalized_project, d, scope, direction))
+                        if raw_amount is None or not math.isfinite(raw_amount):
+                            raise ValueError("Invalid magnitude output")
+                        refined = refine_amount(action, target, raw_amount, apply_score)
+                        decision = "human_magnitude"
+                    if not dropped: refined_actions.append(refined)
+                    debug_entries.append({"action_index": index, "action_type": action["type"],
+                        "before": action, "after": None if dropped else refined,
+                        "apply_score": apply_score, "raw_magnitude": raw_amount,
+                        "magnitude_output_contract": "normalized_human_amount_v1",
+                        "decision": decision, "dropped": dropped})
+                    continue
                 raw_magnitude = self._runner.predict_scalar(features)
                 if apply_score is None or raw_magnitude is None:
                     return self._fallback_result(
@@ -554,6 +614,7 @@ class MixResolveService:
             observability = {
                 **self._runner.observability_context(),
                 "mix_model_onnx_ms": int((time.perf_counter() - onnx_started_at) * 1000),
+
             }
             return {
                 "actions": refined_actions,

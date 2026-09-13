@@ -1,5 +1,10 @@
 # Retraining without losing historical coverage
 
+For background manual capture and the replacement magnitude ONNX contract, start
+with [the current local guide](PRO-20-local-test.md). The 77/141-feature commands
+below document compatibility with existing model artifacts and AI-trace datasets.
+
+
 The regression suite exercises all 12 historical mixing action categories:
 row/master gain and pan, parameter changes, effect insertion/removal and chain
 resets. Continuous corrections train magnitude; discrete/structural actions train

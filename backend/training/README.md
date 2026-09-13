@@ -57,3 +57,18 @@ It imports original features/labels with historical provenance and can combine t
 with new captures in a 77-feature dataset. Missing historical plugin metadata never
 becomes fabricated 141-feature input. Migration into a v4 archive alone is not a
 training conversion.
+
+## Background producer capture: primary magnitude training path
+
+Follow [the local guide](PRO-20-local-test.md). `train_human_magnitude.py` trains
+one replacement magnitude ONNX model from actual successful control changes and
+historical final snapshots. It copies the classifier unchanged. The second model
+uses the `mix_magnitude_human_v3` contract (184 inputs, normalized human amount),
+with shared training/runtime features and a bounded decoder. No prompts,
+hypothetical proposal generation, or extra learned refinement component is needed.
+
+The earlier 77/141-feature training commands above remain compatibility workflows
+for those deployed contracts. They do not train background manual captures into
+the new magnitude contract. Use original historical JSON snapshots with the new
+trainer, rather than treating missing CSV context as observed input. All exports
+require separate evaluation and listening before any production promotion.

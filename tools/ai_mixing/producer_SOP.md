@@ -6,8 +6,8 @@
    project settings, then enable capture in its overlay and accept consent.
 2. Mix normally. Use AI where it helps; listen and make intentional corrections.
    You do not need to press Capture Final or export each prompt cycle. Natural
-   manual work is archived; AI proposals followed by explicit outcome feedback
-   supply the current model's training examples.
+   manual work with a successful outcome supplies magnitude-model training
+   examples. AI prompts are optional.
 3. Turn capture off, disable its project setting, or leave using the editor's
    back button. Review up to three sampled episodes. Use their prompt/time/edit
    summary to identify the work. Choose all relevant goals and strategies.

@@ -9493,7 +9493,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         : kUseRemoteLearnedMagnitudePredictor
         ? RemoteMixingMagnitudePredictor(
             enabled: true,
-            proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+            proxyApiBaseUrl: LlmConfig.effectiveMixResolveBaseUrl,
             proxyPath: LlmConfig.mixResolvePath,
             authTokenProvider: authService.getIdTokenOrNull,
             refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
@@ -75977,34 +75977,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   String _producerEpisodeSummary(Map<String, dynamic> episode) {
-    final request = episode['request_or_context'] as Map?;
-    final prompt = request?['prompt']?.toString() ?? '';
     final time = DateTime.tryParse(
       episode['started_at']?.toString() ?? '',
     )?.toLocal();
     final changes = (episode['control_changes'] as List?) ?? const [];
-    final controlSummary = changes.whereType<Map>().take(8).map((change) {
-      final label = [change['effect_name'], change['parameter_name'] ?? change['kind']]
-          .where((value) => value != null).join(' · ');
-      final before = change['before'], after = change['after'];
-      final values = before is! Map && before is! List && after is! Map && after is! List
-          ? ': $before → $after ${change['unit'] ?? ''}' : '';
-      return '$label$values';
-    }).join('\n');
-    final actions = (episode['actions_raw'] as List?) ?? const [];
-    final edits = actions
-        .whereType<Map>()
-        .take(8)
-        .map((action) {
-          final data = (action['payload'] ?? action['data']) as Map?;
-          return '${action['kind'] ?? action['type']}${data?['row'] == null ? '' : ' [${data!['row']}]'}';
-        })
-        .join(', ');
+    final labels = <String>{};
+    for (final change in changes.whereType<Map>()) {
+      final kind = change['kind']?.toString() ?? '';
+      final key = switch (kind) {
+        'gain' => 'producer_capture_summary_levels',
+        'pan' => 'producer_capture_label_stereo_placement',
+        'plugin_insert' => 'producer_capture_summary_added',
+        'plugin_remove' => 'producer_capture_summary_removed',
+        _ when kind.startsWith('plugin_') => 'producer_capture_summary_effects',
+        _ => 'producer_capture_summary_other',
+      };
+      labels.add(L10n.translate(context, key));
+    }
+    final request = episode['request_or_context'] as Map?;
+    final prompt = request?['prompt']?.toString().trim() ?? '';
     return [
       if (time != null)
-        '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
-      if (prompt.isNotEmpty) prompt,
-      if (controlSummary.isNotEmpty) controlSummary else edits,
+        L10n.translateWithParams(context, 'producer_capture_summary_time', {
+          'time': MaterialLocalizations.of(context).formatTimeOfDay(
+            TimeOfDay.fromDateTime(time),
+            alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+          ),
+        }),
+      if (labels.isNotEmpty) labels.join(' · '),
+      if (prompt.isNotEmpty)
+        L10n.translateWithParams(context, 'producer_capture_summary_prompt', {
+          'prompt': prompt,
+        }),
     ].join('\n');
   }
 
@@ -76042,10 +76046,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return FilterChip(
         label: Text(label),
         selected: selected,
-        showCheckmark: false,
+        showCheckmark: true,
+        checkmarkColor: const Color(0xFFF4F4F4),
+        color: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const Color(0xFF1F89E3).withValues(alpha: 0.28);
+          }
+          return Colors.white.withValues(alpha: 0.07);
+        }),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        pressElevation: 0,
         onSelected: onSelected,
-        backgroundColor: Colors.white.withValues(alpha: 0.07),
-        selectedColor: const Color(0xFF1F89E3).withValues(alpha: 0.28),
         side: BorderSide(
           color: selected
               ? const Color(0xFF8FD3FF).withValues(alpha: 0.62)
@@ -76146,32 +76158,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             ),
                           ),
                         ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 9,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            L10n.translateWithParams(
-                              context,
-                              'producer_capture_review_progress',
-                              {
-                                'current': '${index + 1}',
-                                'total': '${candidates.length}',
-                              },
+                        if (candidates.length > 1)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
                             ),
-                            style: TextStyle(
-                              fontFamily: 'Pretendard',
-                              color: Colors.white.withValues(alpha: 0.66),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              L10n.translateWithParams(
+                                context,
+                                'producer_capture_review_progress',
+                                {
+                                  'current': '${index + 1}',
+                                  'total': '${candidates.length}',
+                                },
+                              ),
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.66),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                     const SizedBox(height: 13),
@@ -76194,19 +76207,49 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         height: 1.4,
                       ),
                     ),
-                    Text(
-                      _producerEpisodeSummary(episode),
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
                     const SizedBox(height: 18),
                     Flexible(
                       child: SingleChildScrollView(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            if (_producerEpisodeSummary(
+                              episode,
+                            ).isNotEmpty) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _producerEpisodeSummary(episode),
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_review_hint',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white70,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
                             Text(
                               L10n.translate(
                                 context,
@@ -76325,12 +76368,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                               maxLines: 4,
                               style: const TextStyle(color: Colors.white),
                               decoration: InputDecoration(
-                                labelText: L10n.translate(
+                                hintText: L10n.translate(
                                   context,
                                   'producer_capture_notes',
                                 ),
-                                labelStyle: const TextStyle(
-                                  color: Colors.white70,
+                                hintStyle: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 13,
+                                ),
+                                filled: true,
+                                fillColor: Colors.white.withValues(alpha: 0.05),
+                                contentPadding: const EdgeInsets.all(12),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF8FD3FF),
+                                  ),
                                 ),
                               ),
                               onChanged: (value) => producerNotes = value,
@@ -78224,76 +78283,97 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Widget _buildProducerCaptureOverlay() {
-    return Semantics(
-      label: _producerCaptureStatusLabel(),
-      container: true,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 220),
-        padding: const EdgeInsets.fromLTRB(10, 4, 5, 4),
-        decoration: BoxDecoration(
-          color: const Color.fromRGBO(30, 36, 42, 0.94),
-          borderRadius: BorderRadius.circular(22),
-          border: Border.all(
-            color: _producerDataMode
-                ? const Color.fromRGBO(79, 149, 255, 0.52)
-                : Colors.white.withValues(alpha: 0.12),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.18),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+    return Tooltip(
+      message: L10n.translate(context, 'producer_capture_toggle_tooltip'),
+      preferBelow: false,
+      waitDuration: const Duration(milliseconds: 400),
+      showDuration: const Duration(seconds: 12),
+      triggerMode: TooltipTriggerMode.longPress,
+      constraints: const BoxConstraints(maxWidth: 300),
+      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E242A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      textStyle: const TextStyle(
+        fontFamily: 'Pretendard',
+        color: Color(0xFFF4F4F4),
+        fontSize: 12,
+        height: 1.5,
+      ),
+      child: Semantics(
+        label: _producerCaptureStatusLabel(),
+        container: true,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 220),
+          padding: const EdgeInsets.fromLTRB(10, 4, 5, 4),
+          decoration: BoxDecoration(
+            color: const Color.fromRGBO(30, 36, 42, 0.94),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: _producerDataMode
+                  ? const Color.fromRGBO(79, 149, 255, 0.52)
+                  : Colors.white.withValues(alpha: 0.12),
             ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 7,
-              height: 7,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _producerDataMode
-                    ? const Color(0xFF4F95FF)
-                    : Colors.white.withValues(alpha: 0.42),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
-            ),
-            const SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                _producerCaptureCompactStatusLabel(),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.92),
-                  fontFamily: 'Pretendard',
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.05,
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _producerDataMode
+                      ? const Color(0xFF4F95FF)
+                      : Colors.white.withValues(alpha: 0.42),
                 ),
               ),
-            ),
-            const SizedBox(width: 3),
-            Transform.scale(
-              scale: 0.76,
-              child: Switch.adaptive(
-                value: _producerDataMode,
-                onChanged: _producerUiBusy
-                    ? null
-                    : (value) async {
-                        _trackUiClick(
-                          controlId: 'producer_mode_toggle',
-                          surface: 'producer_capture',
-                          controlType: 'toggle',
-                          value: value,
-                        );
-                        await _setProducerDataMode(value);
-                        if (mounted) setState(() {});
-                      },
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  _producerCaptureCompactStatusLabel(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    fontFamily: 'Pretendard',
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.05,
+                  ),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(width: 3),
+              Transform.scale(
+                scale: 0.76,
+                child: Switch.adaptive(
+                  value: _producerDataMode,
+                  onChanged: _producerUiBusy
+                      ? null
+                      : (value) async {
+                          _trackUiClick(
+                            controlId: 'producer_mode_toggle',
+                            surface: 'producer_capture',
+                            controlType: 'toggle',
+                            value: value,
+                          );
+                          await _setProducerDataMode(value);
+                          if (mounted) setState(() {});
+                        },
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -1,5 +1,10 @@
 # PRO-20 acceptance and training verification
 
+For background manual capture and the replacement magnitude ONNX contract, start
+with [the current local guide](PRO-20-local-test.md). The 77/141-feature commands
+below document compatibility with existing model artifacts and AI-trace datasets.
+
+
 This release captures structured mixing decisions. It does not render or upload
 before/after audio pairs. Those fields remain explicitly unavailable, and the
 converter excludes them from audio-result training. The 90-day media lifecycle

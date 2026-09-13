@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from improvement_assessment import assess
 import json
+import hashlib
 import time
 import statistics
 from pathlib import Path
@@ -33,14 +35,18 @@ class CandidateRunner(OnnxMixModelRunner):
             if Path(name).name != name:
                 raise ValueError("Invalid model filename")
             paths[kind] = self.directory / name
+            expected = manifest.get("model_sha256", {}).get(kind)
+            if expected and hashlib.sha256(paths[kind].read_bytes()).hexdigest() != expected:
+                raise ValueError("Model bundle checksum mismatch")
         return _ResolvedModelBundle(source="review_directory", bundle_version=self.directory.name,
                                     apply_path=paths["apply"], magnitude_path=paths["magnitude"],
-                                    apply_version=paths["apply"].stem, magnitude_version=paths["magnitude"].stem)
+                                    apply_version=paths["apply"].stem, magnitude_version=paths["magnitude"].stem + ":" + hashlib.sha256(paths["magnitude"].read_bytes()).hexdigest()[:12])
 
 
 def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
     services = {"candidate": MixResolveService(runner=candidate), "baseline": MixResolveService(runner=baseline)}
     values = defaultdict(list)
+    group_deltas = defaultdict(lambda: defaultdict(list))
     groups = set()
     seen = set()
     timings = defaultdict(list)
@@ -71,11 +77,11 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
                 if row["example_id"] in seen:
                     continue
                 seen.add(row["example_id"])
-                if row["group_id"] in getattr(candidate, "training_groups", set()):
-                    raise ValueError("Evaluation source group was used to train the candidate")
+                if any(row["group_id"] in getattr(model, "training_groups", set()) for model in (candidate, baseline)):
+                    raise ValueError("Evaluation source group was used to train a compared model")
                 groups.add(row["group_id"])
                 index = trace["actions"].index(row["candidate_action"])
-                slices = ("all", row["candidate_action"]["type"])
+                slices = ("all", row["candidate_action"]["type"], "source:" + row["source"].get("action_source", "legacy"))
                 for name, response in responses.items():
                     entries = [e for e in response["debug_entries"] if e["action_index"] == index]
                     if len(entries) != 1:
@@ -96,6 +102,11 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
                                 effective_scale = _action_delta(trace["project_state"], entry["after"]) / _action_delta(trace["project_state"], row["candidate_action"])
                             values[f"{category}/{name}/effective_scale_mae"].append(abs(effective_scale - row["labels"]["magnitude_scale"]))
                 for category in slices:
+                    group_deltas[f"{category}/apply_accuracy"][row["group_id"]].append(
+                        values[f"{category}/candidate/apply_accuracy"][-1] - values[f"{category}/baseline/apply_accuracy"][-1])
+                    if row["eligibility"]["mix_magnitude"]:
+                        group_deltas[f"{category}/effective_scale_mae"][row["group_id"]].append(
+                            values[f"{category}/baseline/effective_scale_mae"][-1] - values[f"{category}/candidate/effective_scale_mae"][-1])
                     values[f"{category}/always_accept/apply_accuracy"].append(float(row["labels"]["apply"]))
                     if row["eligibility"]["mix_magnitude"]:
                         values[f"{category}/unchanged/effective_scale_mae"].append(abs(1 - row["labels"]["magnitude_scale"]))
@@ -108,6 +119,7 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
         "resolver_latency_ms": {name: {"first_call": times[0], "warm_calls": len(times) - 1,
             "warm_median": statistics.median(times[1:]) if len(times) > 1 else None,
             "warm_max": max(times[1:]) if len(times) > 1 else None} for name, times in timings.items()},
+        "improvement_assessment": assess(group_deltas, split=split),
         "listening_quality_verified": False, "publication_approved": False,
     }
 
@@ -115,7 +127,7 @@ def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", nargs="?", help="Held-out project/capture directory or capture JSON")
-    parser.add_argument("--candidate-directory", required=True, type=Path)
+    parser.add_argument("--candidate-directory", type=Path, required=True)
     parser.add_argument("--baseline-directory", type=Path, help="Prior trainer output; otherwise load currently configured/packaged models")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--split", choices=("validation", "test"), default="test")
