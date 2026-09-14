@@ -7446,7 +7446,7 @@ juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIn
         for (auto nodeId : chain)
         {
             auto node = graph.getNodeForId(nodeId);
-            ids.add(producerPluginIdentity(node != nullptr ? node->getProcessor() : nullptr));
+            ids.add(cachedProducerPluginIdentity(node));
         }
         return ids;
     }
@@ -9555,7 +9555,7 @@ juce::StringArray JuceEngine::getMasterEffectIds(bool modelIdentity)
             for (auto nodeId : *masterEffectChain)
             {
                 auto node = graph.getNodeForId(nodeId);
-                ids.add(producerPluginIdentity(node != nullptr ? node->getProcessor() : nullptr));
+                ids.add(cachedProducerPluginIdentity(node));
             }
         return ids;
     }

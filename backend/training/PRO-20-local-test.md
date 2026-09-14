@@ -76,6 +76,9 @@ format, manufacturer, name, UID and version. The same plugin/version installed a
 different paths shares a model identity. Versions remain separate; parameter IDs,
 types, bounds and choices must still match. We do not identify plugins by filename.
 The engine keeps its original loading ID; no saved project IDs are rewritten.
+Native descriptor lookups are cached on the graph node after first use, including
+unsupported results. Removing or replacing a node discards its cache; repeated
+snapshots do not query the plugin again.
 
 If a host cannot supply a usable descriptor, the existing path-hash identity remains
 the fallback. Runtime prefers a supported stable identity, then tries the exact old
@@ -146,6 +149,7 @@ and further corrections. Neither parameter agreement nor the scripts authorize
 publication; deploy only after both numerical review and listening support it.
 
 ```bash
+python3 tool/test_producer_plugin_identity_cache.py
 python -m unittest discover -s backend/training/tests -v
 python -m unittest discover -s backend/llm_proxy/tests -p '*mix_resolve*' -v
 ```
