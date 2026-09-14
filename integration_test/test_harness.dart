@@ -104,8 +104,9 @@ class IntegrationTestAppUserService extends AppUserService {
 
 Widget buildIntegrationTestApp({
   required Widget home,
+  AuthService? authServiceOverride,
 }) {
-  final authService = IntegrationTestAuthService();
+  final authService = authServiceOverride ?? IntegrationTestAuthService();
   final entitlementService = IntegrationTestEntitlementService();
   final appUserService = IntegrationTestAppUserService();
 

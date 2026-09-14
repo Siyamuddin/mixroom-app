@@ -26,13 +26,13 @@ class AudioImportTarget {
 AudioImportTarget resolveAutoAudioImportTarget({
   required int selectedRow,
   required int rowCount,
-  required int maxRows,
+  required int? creationLimit,
   required bool Function(int row) isAudioRow,
   required bool Function(int row) isOccupied,
   required bool Function(int row) isHiddenByCollapsedGroup,
 }) {
   if (rowCount <= 0) {
-    if (maxRows > 0) {
+    if (creationLimit == null || creationLimit > 0) {
       return const AudioImportTarget.createNew();
     }
     return const AudioImportTarget.atLimit();
@@ -76,7 +76,7 @@ AudioImportTarget resolveAutoAudioImportTarget({
     return AudioImportTarget.existing(anyEmpty);
   }
 
-  if (rowCount < maxRows) {
+  if (creationLimit == null || rowCount < creationLimit) {
     return AudioImportTarget.createNew(insertBelowRow: safeSelected);
   }
   return const AudioImportTarget.atLimit();

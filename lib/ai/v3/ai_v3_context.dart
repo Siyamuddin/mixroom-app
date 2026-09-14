@@ -9,10 +9,12 @@ import '../../helpers/midi_pitch_ranges.dart';
 import '../../models/models.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_audio_facts.dart';
+import 'ai_v3_midi_boundary.dart';
 
 enum AiV3ContextProfile { essential, enriched, rich }
 
 const int _aiV3MaxInstrumentCatalogFacts = 64;
+const String aiV3ProjectCapacityPolicy = 'unbounded_rows_clips_v1';
 
 AiV3ContextProfile parseAiV3ContextProfile(String value) {
   switch (value.trim().toLowerCase()) {
@@ -51,17 +53,10 @@ class AiV3CoreContext {
 }
 
 class AiV3CoreContextBuilder {
-  const AiV3CoreContextBuilder({
-    this.maxRows = 32,
-    this.maxClips = 128,
-    this.maxMidiNotes = 512,
-    this.maxLibraryAssets = 250,
-  });
+  const AiV3CoreContextBuilder({this.maxLibraryAssets = 250});
 
-  final int maxRows;
-  final int maxClips;
-  final int maxMidiNotes;
   final int maxLibraryAssets;
+  static const int maxCanonicalBytes = 4000000;
 
   AiV3CoreContext build({
     required AiV3ContextProfile profile,
@@ -87,25 +82,14 @@ class AiV3CoreContextBuilder {
         rawClips.any((value) => value is! Map)) {
       throw const AiV3ContextException('prototype_context_state_malformed');
     }
-    if (rawRows.length > maxRows) {
-      throw const AiV3ContextException('prototype_context_row_limit');
-    }
-    if (!const <String>{'new_request', 'modify_pending_plan'}
-            .contains(requestMode) ||
+    if (!const <String>{
+          'new_request',
+          'modify_pending_plan',
+        }.contains(requestMode) ||
         (requestMode == 'modify_pending_plan' &&
             (pendingPlan == null ||
                 (modificationRequest ?? '').trim().isEmpty))) {
       throw const AiV3ContextException('prototype_context_request_invalid');
-    }
-    if (rawClips.length > maxClips || audioTracks.length > maxClips) {
-      throw const AiV3ContextException('prototype_context_clip_limit');
-    }
-    final midiNoteCount = audioTracks.fold<int>(
-      0,
-      (count, clip) => count + clip.midiNotes.length,
-    );
-    if (midiNoteCount > maxMidiNotes) {
-      throw const AiV3ContextException('prototype_context_midi_note_limit');
     }
     final libraryAssets = _libraryAssets(clientContext);
     if (libraryAssets.length > maxLibraryAssets) {
@@ -226,7 +210,8 @@ class AiV3CoreContextBuilder {
           ? Map<Object?, Object?>.from(source['audio_analysis'] as Map)
           : const <Object?, Object?>{};
       final audioFacts = AiV3AudioFacts.fromAnalysis(
-        mixProcessingSupported: source['has_audio'] == true ||
+        mixProcessingSupported:
+            source['has_audio'] == true ||
             (clipIdsByRow[rowId]?.isNotEmpty ?? false),
         hasAudio: source['has_audio'] == true,
         approxRms: (source['approx_rms'] as num?)?.toDouble() ?? 0.0,
@@ -275,17 +260,21 @@ class AiV3CoreContextBuilder {
       }
       rows.add(_withoutNulls(row));
     }
-    rows.sort((a, b) => ((a['display_index'] as num?)?.toInt() ?? 0)
-        .compareTo((b['display_index'] as num?)?.toInt() ?? 0));
+    rows.sort(
+      (a, b) => ((a['display_index'] as num?)?.toInt() ?? 0).compareTo(
+        (b['display_index'] as num?)?.toInt() ?? 0,
+      ),
+    );
     if (rowStateById.keys.toSet().difference(rowIds).isNotEmpty ||
         rowIds.difference(rowStateById.keys.toSet()).isNotEmpty) {
       throw const AiV3ContextException('prototype_context_row_state_missing');
     }
 
     final clips = <Map<String, dynamic>>[];
-    final sourceAvailability = (clientContext['ai_v3_clip_source_available']
-                as Map?)
-            ?.map((key, value) => MapEntry(key.toString(), value == true)) ??
+    final sourceAvailability =
+        (clientContext['ai_v3_clip_source_available'] as Map?)?.map(
+          (key, value) => MapEntry(key.toString(), value == true),
+        ) ??
         const <String, bool>{};
     final validationClipIds = <String>{};
     final clipIndexes = <int>{};
@@ -307,13 +296,13 @@ class AiV3CoreContextBuilder {
         throw const AiV3ContextException('prototype_context_clip_id_duplicate');
       }
       final startBeat = runtime.offset * bpm / 60.0;
-      final durationBeats = math.max(
-        0.0,
-        (runtime.trimEnd - runtime.trimStart).inMilliseconds /
-            1000.0 *
-            bpm /
-            60.0,
-      );
+      final trimDuration = runtime.trimEnd - runtime.trimStart;
+      // MIDI beat lengths can end between milliseconds. Truncating them can
+      // turn a valid end-of-clip note into an apparent boundary violation.
+      final durationSeconds = runtime.isMidi
+          ? trimDuration.inMicroseconds / Duration.microsecondsPerSecond
+          : trimDuration.inMilliseconds / Duration.millisecondsPerSecond;
+      final durationBeats = math.max(0.0, durationSeconds * bpm / 60.0);
       final timelineLengthBeats = math.max(
         0.0,
         (timelineLengthMsByClipId[clipId] ?? 0.0) * bpm / 60000.0,
@@ -342,12 +331,14 @@ class AiV3CoreContextBuilder {
         'pitch_semitones': source['pitch_semitones'],
         if (runtime.midiNotes.isNotEmpty)
           'midi_notes': runtime.midiNotes
-              .map((note) => <String, dynamic>{
-                    'pitch': note.pitch,
-                    'start_beat': note.startBeat,
-                    'length_beats': note.lengthBeats,
-                    'velocity': note.velocity,
-                  })
+              .map(
+                (note) => <String, dynamic>{
+                  'pitch': note.pitch,
+                  'start_beat': note.startBeat,
+                  'length_beats': note.lengthBeats,
+                  'velocity': note.velocity,
+                },
+              )
               .toList(growable: false),
       };
       if (profile != AiV3ContextProfile.essential) {
@@ -358,26 +349,36 @@ class AiV3CoreContextBuilder {
     }
     if (validationClipIds.length != clipById.length) {
       throw const AiV3ContextException(
-          'prototype_context_clip_index_incomplete');
+        'prototype_context_clip_index_incomplete',
+      );
     }
-    clips.sort((a, b) => ((a['display_index'] as num?)?.toInt() ?? 0)
-        .compareTo((b['display_index'] as num?)?.toInt() ?? 0));
+    clips.sort(
+      (a, b) => ((a['display_index'] as num?)?.toInt() ?? 0).compareTo(
+        (b['display_index'] as num?)?.toInt() ?? 0,
+      ),
+    );
 
     final history = conversation
         .where((entry) => entry['role'] != null && entry['content'] != null)
         .toList(growable: false);
-    final recentHistory =
-        history.length <= 8 ? history : history.sublist(history.length - 8);
-    final stateDigest =
-        validationState['client_state_digest']?.toString().trim();
+    final recentHistory = history.length <= 8
+        ? history
+        : history.sublist(history.length - 8);
+    final stateDigest = validationState['client_state_digest']
+        ?.toString()
+        .trim();
     final computedDigest = (stateDigest == null || stateDigest.isEmpty)
         ? crypto.sha256
-            .convert(utf8.encode(jsonEncode(<String, dynamic>{
-              'rows': rows,
-              'clips': clips,
-              'project': validationState['project'],
-            })))
-            .toString()
+              .convert(
+                utf8.encode(
+                  jsonEncode(<String, dynamic>{
+                    'rows': rows,
+                    'clips': clips,
+                    'project': validationState['project'],
+                  }),
+                ),
+              )
+              .toString()
         : stateDigest;
     final playheadMs = clientContext['ai_v3_playhead_ms'];
     if (playheadMs is! num || !playheadMs.isFinite || playheadMs < 0) {
@@ -407,16 +408,24 @@ class AiV3CoreContextBuilder {
         (transport['loop_end_ms'] as int) < 0) {
       throw const AiV3ContextException('prototype_context_transport_invalid');
     }
+    final usesDynamicCapacity = clientContext.containsKey('row_creation_limit');
+    final configuredCreationLimit = clientContext['row_creation_limit'];
     final configuredMaxRows = clientContext['max_rows'];
     final configuredCurrentRows = clientContext['current_rows'];
-    if (configuredMaxRows is! int ||
-        configuredMaxRows < 0 ||
+    if ((usesDynamicCapacity &&
+            configuredCreationLimit != null &&
+            (configuredCreationLimit is! int || configuredCreationLimit < 0)) ||
+        (!usesDynamicCapacity &&
+            (configuredMaxRows is! int || configuredMaxRows < 0)) ||
         configuredCurrentRows is! int ||
         configuredCurrentRows != rows.length) {
       throw const AiV3ContextException(
-          'prototype_context_row_capacity_missing');
+        'prototype_context_row_capacity_missing',
+      );
     }
-    final effectiveMaxRows = math.min(maxRows, configuredMaxRows);
+    final creationLimit = usesDynamicCapacity
+        ? configuredCreationLimit as int?
+        : configuredMaxRows as int;
     final rowIdByIndex = <int, int>{
       for (final row in rows)
         if (row['display_index'] is int && row['row_id'] is int)
@@ -436,9 +445,9 @@ class AiV3CoreContextBuilder {
           !groupIds.add(groupId) ||
           memberIndices is! List ||
           memberIndices.any((value) => value is! int) ||
-          memberIndices
-              .whereType<int>()
-              .any((index) => !rowIdByIndex.containsKey(index))) {
+          memberIndices.whereType<int>().any(
+            (index) => !rowIdByIndex.containsKey(index),
+          )) {
         throw const AiV3ContextException('prototype_context_group_invalid');
       }
       final gainUi = (source['gain'] as num?)?.toDouble() ?? 2.0;
@@ -457,17 +466,20 @@ class AiV3CoreContextBuilder {
         'collapsed': source['collapsed'] == true,
         'effects': (source['effects'] as List? ?? const <Object>[])
             .whereType<Map>()
-            .map((effect) => <String, dynamic>{
-                  'effect_index': effect['effect_index'],
-                  'effect_id': effect['effect_id'] ?? effect['name'],
-                  'name': effect['name'] ?? effect['effect_id'],
-                  'bypassed': effect['bypassed'] == true,
-                })
+            .map(
+              (effect) => <String, dynamic>{
+                'effect_index': effect['effect_index'],
+                'effect_id': effect['effect_id'] ?? effect['name'],
+                'name': effect['name'] ?? effect['effect_id'],
+                'bypassed': effect['bypassed'] == true,
+              },
+            )
             .toList(growable: false),
       });
     }
     groups.sort(
-        (a, b) => a['group_id'].toString().compareTo(b['group_id'].toString()));
+      (a, b) => a['group_id'].toString().compareTo(b['group_id'].toString()),
+    );
     final rawMaster = validationState['master'];
     if (rawMaster is! Map) {
       throw const AiV3ContextException('prototype_context_master_missing');
@@ -480,11 +492,13 @@ class AiV3CoreContextBuilder {
       'pan_signed': (masterPan01.clamp(0.0, 1.0) * 2.0) - 1.0,
       'effects': (masterSource['effects'] as List? ?? const <Object>[])
           .whereType<Map>()
-          .map((effect) => <String, dynamic>{
-                'effect_index': effect['effect_index'],
-                'name': effect['name'],
-                'bypassed': effect['bypassed'] == true,
-              })
+          .map(
+            (effect) => <String, dynamic>{
+              'effect_index': effect['effect_index'],
+              'name': effect['name'],
+              'bypassed': effect['bypassed'] == true,
+            },
+          )
           .toList(growable: false),
     };
 
@@ -499,6 +513,11 @@ class AiV3CoreContextBuilder {
       'project': <String, dynamic>{
         'project_id': projectId,
         'bpm': bpm,
+        if (usesDynamicCapacity)
+          'project_capacity_policy': aiV3ProjectCapacityPolicy,
+        'midi_boundary_policy': aiV3MidiBoundaryPolicy,
+        'generated_midi_policy': aiV3GeneratedMidiPolicy,
+        'plan_command_policy': aiV3PlanCommandPolicy,
         'beats_per_bar': beatsPerBar,
         'beat_unit': beatUnit,
         'key': (validationState['project'] as Map?)?['project_key'],
@@ -507,8 +526,9 @@ class AiV3CoreContextBuilder {
         'playhead_beat': playheadMs.toDouble() * bpm / 60000.0,
         'row_capacity': <String, dynamic>{
           'current_rows': rows.length,
-          'max_rows': effectiveMaxRows,
-          'can_create': rows.length < effectiveMaxRows,
+          if (usesDynamicCapacity) 'creation_limit': creationLimit,
+          if (!usesDynamicCapacity) 'max_rows': creationLimit,
+          'can_create': creationLimit == null || rows.length < creationLimit,
         },
         'tempo_stretch_enabled': tempoStretchEnabled,
       },
@@ -522,8 +542,9 @@ class AiV3CoreContextBuilder {
       'groups': groups,
       'master': master,
       'clips': clips,
-      'instruments':
-          _sortedUniqueStrings(clientContext['allowed_instrument_ids']),
+      'instruments': _sortedUniqueStrings(
+        clientContext['allowed_instrument_ids'],
+      ),
       'instrument_catalog': _instrumentCatalogFacts(
         clientContext,
         existingInstrumentIds: rows
@@ -533,35 +554,50 @@ class AiV3CoreContextBuilder {
             .toSet(),
       ),
       'effects': _effectCatalog(clientContext, profile),
-      'library_assets': libraryAssets.map((asset) {
-        if (profile == AiV3ContextProfile.essential) {
-          return <String, dynamic>{
-            'asset_id': asset['asset_id'],
-            'path': asset['path'],
-            'role': asset['role'],
-          };
-        }
-        if (profile == AiV3ContextProfile.enriched) {
-          return <String, dynamic>{
-            'asset_id': asset['asset_id'],
-            'path': asset['path'],
-            'role': asset['role'],
-            'bpm': asset['bpm'],
-          };
-        }
-        return asset;
-      }).toList(growable: false),
+      'library_assets': libraryAssets
+          .map((asset) {
+            if (profile == AiV3ContextProfile.essential) {
+              return <String, dynamic>{
+                'asset_id': asset['asset_id'],
+                'path': asset['path'],
+                'role': asset['role'],
+              };
+            }
+            if (profile == AiV3ContextProfile.enriched) {
+              return <String, dynamic>{
+                'asset_id': asset['asset_id'],
+                'path': asset['path'],
+                'role': asset['role'],
+                'bpm': asset['bpm'],
+              };
+            }
+            return asset;
+          })
+          .toList(growable: false),
       'conversation': recentHistory,
       'capabilities': aiV3CommandTypes.toList()..sort(),
-      'runtime_capabilities':
-          _sortedUniqueStrings(clientContext['ai_capabilities']),
+      'runtime_capabilities': _sortedUniqueStrings(
+        clientContext['ai_capabilities'],
+      ),
       if (pendingPlan != null) 'pending_plan': pendingPlan,
     };
-    return AiV3CoreContext(
+    final cleanedData = _withoutNulls(data);
+    if (usesDynamicCapacity && creationLimit == null) {
+      final project = cleanedData['project'] as Map<String, dynamic>;
+      final rowCapacity = project['row_capacity'] as Map<String, dynamic>;
+      // Null is meaningful here: it explicitly means that the current plan has
+      // no product-defined row creation ceiling.
+      rowCapacity['creation_limit'] = null;
+    }
+    final context = AiV3CoreContext(
       profile: profile,
       stateDigest: computedDigest,
-      data: _withoutNulls(data),
+      data: cleanedData,
     );
+    if (utf8.encode(context.canonicalJson).length > maxCanonicalBytes) {
+      throw const AiV3ContextException('v3_context_request_limit');
+    }
+    return context;
   }
 }
 
@@ -586,12 +622,15 @@ List<Map<String, dynamic>> _libraryAssets(Map<String, dynamic> context) {
   final out = raw
       .whereType<Map>()
       .map((value) => _withoutNulls(Map<String, dynamic>.from(value)))
-      .where((value) =>
-          value['asset_id']?.toString().trim().isNotEmpty == true &&
-          value['path']?.toString().trim().isNotEmpty == true)
+      .where(
+        (value) =>
+            value['asset_id']?.toString().trim().isNotEmpty == true &&
+            value['path']?.toString().trim().isNotEmpty == true,
+      )
       .toList(growable: false);
   out.sort(
-      (a, b) => a['asset_id'].toString().compareTo(b['asset_id'].toString()));
+    (a, b) => a['asset_id'].toString().compareTo(b['asset_id'].toString()),
+  );
   return out;
 }
 
@@ -600,29 +639,35 @@ List<Map<String, dynamic>> _effectCatalog(
   AiV3ContextProfile profile,
 ) {
   final names = _sortedUniqueStrings(context['allowed_builtin_effects']);
-  return names.map((name) {
-    final parameters = kExposedEffectParameterNames[name] ?? const <String>[];
-    return <String, dynamic>{
-      'effect_id': name,
-      'parameters': parameters
-          .map((parameter) => <String, dynamic>{
-                'parameter_id': parameter,
-                'range': <double>[0, 1],
-                if (profile == AiV3ContextProfile.rich)
-                  'description': 'Normalized exposed $parameter control',
-              })
-          .toList(growable: false),
-    };
-  }).toList(growable: false);
+  return names
+      .map((name) {
+        final parameters =
+            kExposedEffectParameterNames[name] ?? const <String>[];
+        return <String, dynamic>{
+          'effect_id': name,
+          'parameters': parameters
+              .map(
+                (parameter) => <String, dynamic>{
+                  'parameter_id': parameter,
+                  'range': <double>[0, 1],
+                  if (profile == AiV3ContextProfile.rich)
+                    'description': 'Normalized exposed $parameter control',
+                },
+              )
+              .toList(growable: false),
+        };
+      })
+      .toList(growable: false);
 }
 
 List<String> _sortedUniqueStrings(Object? raw) {
-  final values = (raw as List? ?? const <Object>[])
-      .map((value) => value.toString().trim())
-      .where((value) => value.isNotEmpty)
-      .toSet()
-      .toList()
-    ..sort();
+  final values =
+      (raw as List? ?? const <Object>[])
+          .map((value) => value.toString().trim())
+          .where((value) => value.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
   return values;
 }
 
@@ -630,8 +675,9 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
   Map<String, dynamic> context, {
   required Set<String> existingInstrumentIds,
 }) {
-  final allowedIds =
-      _sortedUniqueStrings(context['allowed_instrument_ids']).toSet();
+  final allowedIds = _sortedUniqueStrings(
+    context['allowed_instrument_ids'],
+  ).toSet();
   final describableIds = allowedIds.union(existingInstrumentIds);
   final raw = context['ai_v3_instrument_catalog'];
   if (raw == null) return const <Map<String, dynamic>>[];
@@ -664,9 +710,11 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
     };
   }
   final result = byId.values.toList(growable: false)
-    ..sort((left, right) => left['instrument_id']
-        .toString()
-        .compareTo(right['instrument_id'].toString()));
+    ..sort(
+      (left, right) => left['instrument_id'].toString().compareTo(
+        right['instrument_id'].toString(),
+      ),
+    );
   return result.take(_aiV3MaxInstrumentCatalogFacts).toList(growable: false);
 }
 
@@ -699,8 +747,9 @@ Map<String, dynamic> _selectionWithStableIds(
         .map((index) => clipByIndex[index])
         .whereType<String>()
         .toList(),
-    'primary_selected_clip_id':
-        primaryIndex is int ? clipByIndex[primaryIndex] : null,
+    'primary_selected_clip_id': primaryIndex is int
+        ? clipByIndex[primaryIndex]
+        : null,
   });
 }
 

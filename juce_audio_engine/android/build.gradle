@@ -65,6 +65,17 @@ android {
         }
     }
 
+    buildTypes {
+        profile {
+            initWith debug
+            externalNativeBuild {
+                cmake {
+                    arguments "-DMIXROOM_ANDROID_PROFILE=ON"
+                }
+            }
+        }
+    }
+
     dependencies {
         testImplementation("org.jetbrains.kotlin:kotlin-test")
         testImplementation("org.mockito:mockito-core:5.0.0")

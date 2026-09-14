@@ -183,6 +183,94 @@ void main() {
     expect(intent, isNot(contains('AudioHardwareDestroyAggregateDevice')));
   });
 
+  test('unchanged macOS output is callback-proven without graph teardown', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final bridge = File(bridgePath).readAsStringSync();
+    final engine = File(enginePath).readAsStringSync();
+    final intent = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+    final preparation = _between(
+      intent,
+      'const double prepareDeadline = startedAtMs + 2000.0;',
+      'self.macLifecycleTransitionActiveV2 = NO;',
+    );
+    final beforeInput = _between(
+      preparation,
+      'const double prepareDeadline = startedAtMs + 2000.0;',
+      'const BOOL inputStarted =',
+    );
+    final pause = _between(
+      engine,
+      'bool JuceEngine::pausePlaybackForRouteChangeV2()',
+      'bool JuceEngine::reconfigurePlaybackRouteV2(',
+    );
+    final bridgePause = _between(
+      bridge,
+      '+ (BOOL)pausePlaybackForRouteChangeV2ObjC',
+      '+ (BOOL)quiescePlaybackRouteV2ObjC:',
+    );
+
+    expect(beforeInput, contains('pausePlaybackForRouteChangeV2ObjC'));
+    expect(beforeInput, isNot(contains('quiescePlaybackRouteV2ObjC')));
+    expect(
+      preparation,
+      contains('verifyPreservedSourceOutput(prepareDeadline)'),
+    );
+    expect(preparation, contains('outputMode = @"preserved"'));
+    expect(preparation, contains('outputMode = @"reconfigured"'));
+    expect(preparation, contains('self.macIntentOutputRouteMutatedV2 = YES'));
+    expect(
+      preparation.indexOf('verifyPreservedSourceOutput(prepareDeadline)'),
+      lessThan(preparation.indexOf('reconfigureMacPlaybackRouteV2ObjC')),
+    );
+    expect(pause, contains('#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS'));
+    expect(pause, contains('pause();'));
+    expect(pause, isNot(contains('removeAudioCallback')));
+    expect(bridgePause, contains('messageManager->callSync(mutation)'));
+  });
+
+  test('preserved output cleanup verifies before reopening', () {
+    final plugin = File(pluginPath).readAsStringSync();
+    final intent = _between(
+      plugin,
+      '- (NSDictionary<NSString *, id> *)setAudioRouteIntentV2:(NSDictionary *)args {',
+      '#else\n    const double startedAtMs = MixroomIOSMonotonicMilliseconds();',
+    );
+    final preservedProof = _between(
+      intent,
+      'BOOL (^verifyPreservedSourceOutput)(double)',
+      'if (!self.audioRouteMonitoringV2',
+    );
+    final cleanup = _between(
+      intent,
+      '} else if ([intent isEqualToString:@"playbackOnly"] &&',
+      '} else if (![intent isEqualToString:@"playbackOnly"])',
+    );
+
+    expect(preservedProof, contains('self.macIntentSourceFingerprintV2'));
+    expect(preservedProof, contains('MixroomCoreAudioDeviceIsAlive'));
+    expect(preservedProof, contains('beginMacOutputCallbackProofV2ObjC'));
+    expect(preservedProof, contains('waitForMacOutputCallbackProofV2ObjC'));
+    expect(
+      preservedProof,
+      contains('outputSnapshotIsValid(snapshot, candidate)'),
+    );
+    expect(preservedProof, contains('callbackShapeValid'));
+    expect(cleanup, contains('const BOOL outputRouteMutated'));
+    expect(cleanup, contains('if (outputRouteMutated)'));
+    expect(cleanup, contains('verifyPreservedSourceOutput('));
+    expect(cleanup, contains('if (restorationAllowed() && !success)'));
+    expect(cleanup, contains('phase=cleanup'));
+    expect(cleanup, contains('MixroomMonotonicMilliseconds() - startedAtMs'));
+    expect(
+      cleanup.indexOf('verifyPreservedSourceOutput('),
+      lessThan(cleanup.indexOf('restoreSourceOutput()')),
+    );
+  });
+
   test('AUHAL adapter is input-only, preallocated, and callback-proven', () {
     final bridge = File(bridgePath).readAsStringSync();
     final adapter = _between(

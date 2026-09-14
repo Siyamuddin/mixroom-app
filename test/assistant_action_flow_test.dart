@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart' as foundation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/chat_pipeline.dart';
 import 'package:mixroom/ai/cloud_llm_service.dart';
@@ -15,8 +17,6 @@ import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/models/mixing_result.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/models/project_state.dart';
-
-const int _preferredUserMessageLength = 500;
 
 class _FakeCloudLlmService extends CloudLlmService {
   _FakeCloudLlmService(this._next) : super(apiKey: 'test-key', model: 'test');
@@ -258,8 +258,12 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     this.masterEffects = const <EffectState>[],
     this.rowEffects = const <int, List<EffectState>>{},
     this.rowAudioStats = const <int, Map<String, double>>{},
+    // Kept available for focused fixtures even when the broad smoke suite
+    // uses the default empty interpretation map.
+    // ignore: unused_element_parameter
     this.rowInterpretations = const <int, RowInterpretationState>{},
     this.rowApproxRms = const <int, double>{},
+    // ignore: unused_element_parameter
     this.rowApproxCrest = const <int, double>{},
   }) : super(classifier: InstrumentClassifier(), maxRows: rows);
 
@@ -586,6 +590,31 @@ void main() {
       },
     );
 
+    test('V3 input capacity failure explains the safe rejection', () async {
+      final pipeline = ChatPipeline(
+        llm: _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        ),
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: const _FailingAiV3Planner('v3_context_request_limit'),
+      );
+      final result = await pipeline.handleUserText(
+        text: 'Rebalance.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const [1.0],
+        rowPan: const [0.5],
+        rowAutomation: const <List<AutomationPoint>>[[]],
+        bpmFallback: 120,
+        timelineRows: [TimelineRow(rowId: 101, name: 'Guitar', iconId: 1)],
+        clientContext: _v3ClientContext(),
+      );
+      expect(result.aiV3Handoff?['decision'], 'blocked');
+      expect(result.message, contains('exceeds the AI context capacity'));
+      expect(result.message, contains('Nothing was changed'));
+      expect(pipeline.hasActiveAiV3PendingPlan(), isFalse);
+    });
+
     test('V3 timeout response is accurate for short requests', () async {
       final pipeline = ChatPipeline(
         llm: _FakeCloudLlmService(
@@ -842,6 +871,12 @@ void main() {
     test(
       'factual preparation block explains the prerequisite without preview',
       () async {
+        final logs = <String>[];
+        final previousPrint = foundation.debugPrint;
+        foundation.debugPrint = (String? message, {int? wrapWidth}) {
+          logs.add(message ?? '');
+        };
+        addTearDown(() => foundation.debugPrint = previousPrint);
         final planner = _StaticAiV3Planner(
           const AiV3Plan(
             outcome: 'plan',
@@ -892,6 +927,36 @@ void main() {
         final meta = result.meta!;
         expect(meta['preparation_failure_stage'], 'command_preparation');
         expect(meta['preparation_error_code'], 'v3_row_capacity_exceeded');
+        final diagnosticLogs = logs
+            .where((line) => line.startsWith('[AI.v3-preparation] '))
+            .toList();
+        if (const bool.fromEnvironment('AI_V3_LOCAL_VALIDATION_DIAGNOSTICS')) {
+          expect(diagnosticLogs, hasLength(1));
+          final diagnostic =
+              jsonDecode(
+                    diagnosticLogs.single.substring(
+                      '[AI.v3-preparation] '.length,
+                    ),
+                  )
+                  as Map;
+          expect(diagnostic.keys.toSet(), {
+            'code',
+            'stage',
+            'stage_elapsed_ms',
+            'total_elapsed_ms',
+            'command_count',
+          });
+          expect(diagnostic['code'], 'v3_row_capacity_exceeded');
+          expect(diagnostic['stage'], 'command_preparation');
+          expect(diagnostic['command_count'], 1);
+          expect(diagnosticLogs.single, isNot(contains('Audio 2')));
+          expect(
+            diagnosticLogs.single,
+            isNot(contains('Create another audio row.')),
+          );
+        } else {
+          expect(diagnosticLogs, isEmpty);
+        }
         expect(
           (meta['plan_diagnostic'] as Map)['command_type_counts'],
           <String, int>{'row.create': 1},

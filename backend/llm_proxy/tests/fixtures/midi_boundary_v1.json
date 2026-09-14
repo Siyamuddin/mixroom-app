@@ -1,0 +1,13 @@
+[
+  {"original":31.9986,"current":31.9986,"end":32,"bpm":108,"expected_us":17777778,"extended":true},
+  {"original":1,"current":1,"end":1,"bpm":60,"expected_us":1000000,"extended":false},
+  {"original":1,"current":1,"end":1.001,"bpm":60,"expected_us":1001000,"extended":true},
+  {"original":1,"current":1,"end":1.001001,"bpm":60,"expected_us":1000000,"extended":false},
+  {"original":1,"current":1.0008,"end":1.0011,"bpm":60,"expected_us":1000800,"extended":false},
+  {"original":1,"current":1.0008,"end":1.0009,"bpm":60,"expected_us":1000900,"extended":true},
+  {"original":4,"current":4,"end":4.002,"bpm":120,"expected_us":2001000,"extended":true},
+  {"original":4,"current":4,"end":4.00201,"bpm":120,"expected_us":2000000,"extended":false},
+  {"original":7.375,"current":7.375,"end":7.3751,"bpm":240,"expected_us":1843775,"extended":true},
+  {"original":4,"current":4,"end":4.0002,"bpm":20,"expected_us":12000601,"extended":true},
+  {"original":1,"current":1.01,"end":1.009,"bpm":60,"expected_us":1010000,"extended":false}
+]

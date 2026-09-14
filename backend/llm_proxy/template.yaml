@@ -109,6 +109,9 @@ Parameters:
   MaxRequestBytes:
     Type: Number
     Default: 200000
+  V3MaxRequestBytes:
+    Type: Number
+    Default: 4500000
   LlmMaxOutputTokens:
     Type: Number
     Default: 8192
@@ -142,6 +145,16 @@ Parameters:
   ApiThrottleRateLimit:
     Type: Number
     Default: 100
+  V3LongApiThrottleBurstLimit:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 20
+  V3LongApiThrottleRateLimit:
+    Type: Number
+    Default: 1
+    MinValue: 0.1
+    MaxValue: 1
   ApiDetailedMetricsEnabled:
     Type: String
     AllowedValues:
@@ -195,6 +208,7 @@ Globals:
         ALLOW_CLIENT_MODEL_OVERRIDE: !Ref AllowClientModelOverride
         OPENAI_SECRET_CACHE_TTL_SECONDS: !Ref OpenAiSecretCacheTtlSeconds
         MAX_REQUEST_BYTES: !Ref MaxRequestBytes
+        V3_MAX_REQUEST_BYTES: !Ref V3MaxRequestBytes
         OPENAI_TIMEOUT_SECONDS: 30
         POSTHOG_API_KEY: !Ref PostHogApiKey
         POSTHOG_HOST: !Ref PostHogHost
@@ -453,6 +467,121 @@ Resources:
             Path: /v1/llm/conversation-events
             Method: POST
 
+  V3LongRestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub mixroom-v3-long-${StageName}
+      StageName: !Ref StageName
+      EndpointConfiguration:
+        Type: REGIONAL
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          MetricsEnabled: !If [ApiDetailedMetricsEnabledCondition, true, false]
+          ThrottlingBurstLimit: !Ref V3LongApiThrottleBurstLimit
+          ThrottlingRateLimit: !Ref V3LongApiThrottleRateLimit
+      Cors:
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: !Sub mixroom-v3-long-${StageName}
+          version: '1.0'
+        schemes:
+          - https
+        paths:
+          /v1/llm/v3/responses:
+            post:
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              responses:
+                '200':
+                  description: Lambda proxy response
+              x-amazon-apigateway-integration:
+                type: aws_proxy
+                httpMethod: POST
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${V3LongResponsesFunction.Arn}/invocations
+                timeoutInMillis: 120000
+
+  V3LongResponsesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_responses_v3_rest.handler
+      Timeout: 115
+      Environment:
+        Variables:
+          AI_V3_TIMEOUT_SECONDS: 105
+          AI_V3_MAX_PROVIDER_TIMEOUT_SECONDS: 105
+          LLM_MAX_OUTPUT_TOKENS: 16384
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/mixroom/*
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub ssm.${AWS::Region}.amazonaws.com
+                  kms:CallerAccount: !Ref AWS::AccountId
+        - !If
+          - HasOpenAiApiKeySecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref OpenAiApiKeySecretArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasAppAuthSecretArn
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref AppAuthSecretArn
+          - !Ref AWS::NoValue
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiUsageMetricsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AiUsageEventsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref AiPromptLimitSettingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OpenAiConversationStateTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref EntitlementsTableName
+        - !If
+          - HasCollaborationTableName
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CollaborationTableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${CollaborationTableName}/index/*
+          - !Ref AWS::NoValue
+        - DynamoDBReadPolicy:
+            TableName: !Ref AuthAccountsTableName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AuthSessionsTableName
+
+  V3LongRestApiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref V3LongResponsesFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${V3LongRestApi}/${StageName}/POST/v1/llm/v3/responses
+
   MixResolveFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -584,6 +713,9 @@ Outputs:
   ApiBaseUrl:
     Description: Base URL for the LLM proxy API
     Value: !Sub https://${LlmApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  V3LongApiBaseUrl:
+    Description: Opt-in base URL for the isolated long-running V3 REST API
+    Value: !Sub https://${V3LongRestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
   AiUsageStateTableName:
     Value: !Ref AiUsageMetricsTable
   AiUsageEventsTableName:

@@ -1346,16 +1346,16 @@ private:
 class MeterTapProcessor : public juce::AudioProcessor
 {
 public:
-    explicit MeterTapProcessor(std::atomic<float> *pL,
-                               std::atomic<float> *pR,
-                               std::atomic<float> *rL,
-                               std::atomic<float> *rR,
+    template <typename MeterState>
+    explicit MeterTapProcessor(const std::shared_ptr<MeterState> &meter,
                                std::atomic<bool> *enabledFlag)
         : juce::AudioProcessor(
               BusesProperties()
                   .withInput("Input", juce::AudioChannelSet::stereo(), true)
                   .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
-          peakL(pL), peakR(pR), rmsL(rL), rmsR(rR), enabled(enabledFlag)
+          meterOwner(meter),
+          peakL(&meter->peakL), peakR(&meter->peakR),
+          rmsL(&meter->rmsL), rmsR(&meter->rmsR), enabled(enabledFlag)
     {
     }
 
@@ -1417,15 +1417,15 @@ public:
         }
     }
 
-    void setMeterTargets(std::atomic<float> *pL,
+    void assertMeterTargets(std::atomic<float> *pL,
                          std::atomic<float> *pR,
                          std::atomic<float> *rL,
-                         std::atomic<float> *rR)
+                         std::atomic<float> *rR) const
     {
-        peakL = pL;
-        peakR = pR;
-        rmsL = rL;
-        rmsR = rR;
+        // Row/group moves preserve the shared state's address. Do not write
+        // raw pointer targets concurrently with the audio callback.
+        jassert(peakL == pL && peakR == pR && rmsL == rL && rmsR == rR);
+        juce::ignoreUnused(pL, pR, rL, rR);
     }
 
     bool isBusesLayoutSupported(const BusesLayout &layouts) const override
@@ -1451,11 +1451,15 @@ public:
     void setStateInformation(const void *, int) override {}
 
 private:
-    std::atomic<float> *peakL = nullptr;
-    std::atomic<float> *peakR = nullptr;
-    std::atomic<float> *rmsL = nullptr;
-    std::atomic<float> *rmsR = nullptr;
-    std::atomic<bool> *enabled = nullptr;
+    // A retired graph render sequence can retain this processor after its row
+    // or group is deleted. Keep its meter alive for exactly that lifetime.
+    // Ownership is acquired at construction, never on the audio thread.
+    const std::shared_ptr<void> meterOwner;
+    std::atomic<float> *const peakL;
+    std::atomic<float> *const peakR;
+    std::atomic<float> *const rmsL;
+    std::atomic<float> *const rmsR;
+    std::atomic<bool> *const enabled;
 };
 
 // ---------------------------
@@ -1693,6 +1697,93 @@ private:
 
     std::atomic<double> *blockTransportStartSecPtr = nullptr;
     std::atomic<uint64_t> *audioRenderGenerationPtr = nullptr;
+};
+
+// Keeps the row's built-in post-FX processing in one graph node. The child
+// processors remain the single source of truth for DSP and parameter behavior;
+// this wrapper only preserves their established processing order.
+class RowPostProcessor final : public juce::AudioProcessor
+{
+public:
+    template <typename MeterState>
+    RowPostProcessor(const std::shared_ptr<MeterState> &meterState,
+                     std::atomic<bool> *meterEnabled)
+        : juce::AudioProcessor(
+              BusesProperties()
+                  .withInput("Input", juce::AudioChannelSet::stereo(), true)
+                  .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+          meterTap(meterState, meterEnabled)
+    {
+    }
+
+    const juce::String getName() const override { return "RowPostProcessor"; }
+
+    void prepareToPlay(double sampleRate, int samplesPerBlockExpected) override
+    {
+        automation.prepareToPlay(sampleRate, samplesPerBlockExpected);
+        gain.prepareToPlay(sampleRate, samplesPerBlockExpected);
+        pan.prepareToPlay(sampleRate, samplesPerBlockExpected);
+        meterTap.prepareToPlay(sampleRate, samplesPerBlockExpected);
+    }
+
+    void releaseResources() override
+    {
+        automation.releaseResources();
+        gain.releaseResources();
+        pan.releaseResources();
+        meterTap.releaseResources();
+    }
+
+    void reset() override
+    {
+        automation.reset();
+        gain.reset();
+        pan.reset();
+        meterTap.reset();
+    }
+
+    void processBlock(juce::AudioBuffer<float> &buffer,
+                      juce::MidiBuffer &midi) override
+    {
+        automation.processBlock(buffer, midi);
+        gain.processBlock(buffer, midi);
+        pan.processBlock(buffer, midi);
+        meterTap.processBlock(buffer, midi);
+    }
+
+    bool isBusesLayoutSupported(const BusesLayout &layouts) const override
+    {
+        const auto input = layouts.getMainInputChannelSet();
+        const auto output = layouts.getMainOutputChannelSet();
+        return input == output &&
+               (input == juce::AudioChannelSet::mono() ||
+                input == juce::AudioChannelSet::stereo());
+    }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String &) override {}
+    bool hasEditor() const override { return false; }
+    juce::AudioProcessorEditor *createEditor() override { return nullptr; }
+    void getStateInformation(juce::MemoryBlock &) override {}
+    void setStateInformation(const void *, int) override {}
+
+    VolumeAutomationProcessor &automationProcessor() noexcept { return automation; }
+    SimpleGainProcessor &gainProcessor() noexcept { return gain; }
+    StereoPanProcessor &panProcessor() noexcept { return pan; }
+    MeterTapProcessor &meterProcessor() noexcept { return meterTap; }
+
+private:
+    VolumeAutomationProcessor automation;
+    SimpleGainProcessor gain;
+    StereoPanProcessor pan;
+    MeterTapProcessor meterTap;
 };
 
 #if JUCE_MAC && !JUCE_IOS
@@ -2827,10 +2918,6 @@ public:
             liveMidiEventQueue[i].sequence.store(i, std::memory_order_relaxed);
         liveMidiBlockEvents.fill({});
         activeLiveNotes.reserve(kMaxActiveLiveNotes);
-        blockNoteIndices.reserve(kMaxTimelineMidiNotes);
-        blockNotePitches.reserve(kMaxTimelineMidiNotes);
-        blockNoteEndSourceSecs.reserve(kMaxTimelineMidiNotes);
-        timelineRegions.reserve(kMaxTimelineMidiNotes);
     }
 
     void setTimeline(double startSec, double lengthSec, double inFileOffsetSec = 0.0) override
@@ -2903,6 +2990,18 @@ public:
             n.velocity = juce::jlimit(0.0, 1.0, note.velocity);
         next->renderNotes.push_back(n);
         }
+
+        // These vectors are reused by processBlock and must never grow on the
+        // realtime thread. Size them while this replacement processor is
+        // still being prepared, but only for the notes the clip can render.
+        // Reserving the global 16k safety ceiling for every MIDI clip made
+        // memory scale by gigabytes in projects containing many small clips.
+        const auto realtimeNoteCapacity = next->renderNotes.size();
+        blockNoteIndices.reserve(realtimeNoteCapacity);
+        blockNotePitches.reserve(realtimeNoteCapacity);
+        blockNoteEndSourceSecs.reserve(realtimeNoteCapacity);
+        timelineRegions.reserve(realtimeNoteCapacity);
+
         next->instrumentId = instrumentId;
         next->instrumentName = instrumentName;
         next->usesDrumKitSamplePitchMap =
@@ -5999,6 +6098,15 @@ class JuceEngine : public juce::MidiInputCallback,
                    public RoutedClipSource
 {
 public:
+    enum class MutationResult
+    {
+        success = 0,
+        invalidInput,
+        missingMedia,
+        resourceExhausted,
+        internalFailure,
+    };
+
     // Mixroom route-ownership modes; these are not JUCE API versions. A
     // session selects exactly one mode before engine initialisation and never
     // falls back to the other mode in the same editor session.
@@ -6139,8 +6247,15 @@ public:
     bool loadClipWithPreparedAudioAsset(int clipId, int rowId, const juce::File &file,
                                         std::shared_ptr<DecodedClipAudioAsset> decodedAsset,
                                         double startSec, double lengthSec, double inFileOffsetSec = 0.0);
+    MutationResult loadClipWithPreparedAudioAssetDetailed(
+        int clipId, int rowId, const juce::File &file,
+        std::shared_ptr<DecodedClipAudioAsset> decodedAsset,
+        double startSec, double lengthSec, double inFileOffsetSec = 0.0);
     bool loadClip(int clipId, int rowId, const juce::File &file,
                   double startSec, double lengthSec, double inFileOffsetSec = 0.0);
+    MutationResult loadClipDetailed(int clipId, int rowId, const juce::File &file,
+                                    double startSec, double lengthSec,
+                                    double inFileOffsetSec = 0.0);
     bool loadMidiClip(int clipId,
                       int rowId,
                       const juce::String &instrumentId,
@@ -6172,6 +6287,7 @@ public:
                                      const juce::Array<TimelineMidiNote> &notes);
     void beginProjectClipLoad();
     void endProjectClipLoad();
+    MutationResult endProjectClipLoadDetailed();
     void beginGraphMutationBatch();
     void endGraphMutationBatch();
     void prepareLiveClipProcessorsForCurrentDevice();
@@ -6733,8 +6849,8 @@ private:
 
     // Basic limits
     static constexpr int kNumTracks = 5;  // legacy fixed-row compatibility paths
-    static constexpr int kMaxRows = 100;  // hard safety cap
-    static constexpr int kMaxClips = 500; // safety cap for simultaneous clips
+    static constexpr int kInitialRowReserve = 100;
+    static constexpr int kInitialClipReserve = 500;
     static constexpr float kGainUiMin = 0.0f;
     static constexpr float kGainUiMax = 3.0f;
     static constexpr float kGainDbMin = -60.0f;
@@ -6832,15 +6948,39 @@ private:
     struct RowRoutedClipSchedule
     {
         std::vector<RoutedClipBucketItems> bucketItems;
-        std::array<RoutedClipRenderItem, kMaxClips> clipItemsById{};
-        std::bitset<kMaxClips> clipItemPresent;
+        std::vector<RoutedClipRenderItem> clipItemsById;
+        mutable std::vector<const RoutedClipRenderItem *> activeClipScratch;
+        mutable std::vector<std::uint64_t> activeClipVisitEpoch;
+        mutable std::uint64_t renderEpoch = 0;
+
+        void prepareRenderWorkspace()
+        {
+            activeClipScratch.resize(clipItemsById.size());
+            activeClipVisitEpoch.assign(clipItemsById.size(), 0);
+        }
 
         const RoutedClipRenderItem *findClip(int clipId) const noexcept
         {
-            if (clipId < 0 || clipId >= kMaxClips)
-                return nullptr;
-            const auto index = static_cast<size_t>(clipId);
-            return clipItemPresent.test(index) ? &clipItemsById[index] : nullptr;
+            const auto it = std::lower_bound(
+                clipItemsById.begin(), clipItemsById.end(), clipId,
+                [](const RoutedClipRenderItem &item, int id) noexcept
+                {
+                    return item.clipId < id;
+                });
+            return it != clipItemsById.end() && it->clipId == clipId ? &*it : nullptr;
+        }
+
+        int clipOrdinal(int clipId) const noexcept
+        {
+            const auto it = std::lower_bound(
+                clipItemsById.begin(), clipItemsById.end(), clipId,
+                [](const RoutedClipRenderItem &item, int id) noexcept
+                {
+                    return item.clipId < id;
+                });
+            return it != clipItemsById.end() && it->clipId == clipId
+                       ? static_cast<int>(std::distance(clipItemsById.begin(), it))
+                       : -1;
         }
     };
 
@@ -6851,15 +6991,17 @@ private:
 
     struct RoutedClipItemsSnapshot
     {
-        std::array<RoutedClipRenderItem, kMaxClips> itemsById{};
-        std::bitset<kMaxClips> itemPresent;
+        std::vector<RoutedClipRenderItem> itemsById;
 
         const RoutedClipRenderItem *findClip(int clipId) const noexcept
         {
-            if (clipId < 0 || clipId >= kMaxClips)
-                return nullptr;
-            const auto index = static_cast<size_t>(clipId);
-            return itemPresent.test(index) ? &itemsById[index] : nullptr;
+            const auto it = std::lower_bound(
+                itemsById.begin(), itemsById.end(), clipId,
+                [](const RoutedClipRenderItem &item, int id) noexcept
+                {
+                    return item.clipId < id;
+                });
+            return it != itemsById.end() && it->clipId == clipId ? &*it : nullptr;
         }
     };
 
@@ -6889,6 +7031,10 @@ private:
     std::vector<RetiredRoutedClipScheduleSnapshot> retiredRoutedClipScheduleSnapshots;
     std::vector<RetiredRoutedClipItemSnapshot> retiredRoutedClipItemSnapshots;
     std::atomic<uint64_t> routedAudioRenderGeneration{0};
+    std::atomic<std::uint64_t> routedSnapshotBuildCount{0};
+    std::atomic<std::uint64_t> routedSnapshotBuildFailureCount{0};
+    std::atomic<std::int64_t> routedSnapshotBuildTotalMicros{0};
+    std::atomic<std::int64_t> routedSnapshotBuildMaxMicros{0};
     std::mutex decodedClipAssetCacheMutex;
     std::unordered_map<std::string, std::weak_ptr<DecodedClipAudioAsset>> decodedClipAssetCache;
 
@@ -6990,6 +7136,7 @@ private:
 
         // processors
         TrackInputProcessor *inputProc = nullptr;
+        RowPostProcessor *postProc = nullptr;
         VolumeAutomationProcessor *automationProc = nullptr;
         SimpleGainProcessor *gainProc = nullptr;
         StereoPanProcessor *panProc = nullptr;
@@ -6997,10 +7144,7 @@ private:
 
         // nodes
         juce::AudioProcessorGraph::Node::Ptr inputNode;
-        juce::AudioProcessorGraph::Node::Ptr automationNode;
-        juce::AudioProcessorGraph::Node::Ptr gainNode;
-        juce::AudioProcessorGraph::Node::Ptr panNode;
-        juce::AudioProcessorGraph::Node::Ptr meterTapNode;
+        juce::AudioProcessorGraph::Node::Ptr postNode;
 
         // FX chain node ids (row-level FX between input and automation)
         juce::Array<juce::AudioProcessorGraph::NodeID> fxChain;
@@ -7054,6 +7198,7 @@ private:
 
         juce::AudioProcessorGraph::Node::Ptr node;
         std::shared_ptr<juce::AudioProcessor> processorOwner;
+        juce::AudioProcessor *embeddedProcessor = nullptr;
         juce::AudioProcessorParameter *parameter = nullptr;
         std::atomic<float> *realtimeRawValue = nullptr;
         bool usesFloatRange = false;
@@ -7147,6 +7292,8 @@ private:
     std::unordered_map<std::string, std::unique_ptr<HostedPluginEditorWindow>> hostedPluginEditorWindows;
     std::atomic<int> nextRowId{1};
     int allocateRowId(int preferredRowId);
+    bool prepareRowStorageForInsertionLocked() noexcept;
+    void rebuildRowIdIndexCacheBestEffortLocked() noexcept;
 
     // MASTER bus: rows → master input → [FX...] → gain → pan → output
     juce::Array<juce::AudioProcessorGraph::NodeID> *masterEffectChain = nullptr;
@@ -7222,6 +7369,7 @@ private:
     int projectClipLoadDepth = 0;
     bool projectClipLoadNeedsGraphRebuild = false;
     bool projectClipLoadNeedsOutputSafety = false;
+    bool projectClipLoadAutomationSnapshotDirty = false;
     bool projectClipLoadDetachedAudioCallback = false;
     int graphMutationBatchDepth = 0;
     bool graphMutationBatchNeedsRebuild = false;
@@ -7320,9 +7468,9 @@ private:
                                   double blockStartSec,
                                   double blockEndSec) const noexcept;
     void beginRoutedClipScheduleMutationLocked() noexcept;
-    void endRoutedClipScheduleMutationLocked();
+    bool endRoutedClipScheduleMutationLocked();
     void requestRoutedClipSchedulePublishLocked();
-    void publishRoutedClipSchedulesLocked();
+    bool publishRoutedClipSchedulesLocked();
     void refreshRowRoutedSchedulePointersLocked();
     void drainRetiredRoutedClipScheduleSnapshotsLocked();
     void clearRoutedClipSchedules();
@@ -7341,9 +7489,6 @@ private:
         juce::AudioProcessorGraph::UpdateKind updateKind);
     void compactRowFxChain(int row);
     void compactMasterFxChain();
-    bool isGraphConnectionPresent(juce::AudioProcessorGraph::NodeID src,
-                                  juce::AudioProcessorGraph::NodeID dst,
-                                  int ch) const;
     void ensureMasterOutputRouting();
     bool applyPreferredAudioDeviceSetup(int desiredInputChannels,
                                         bool forceReopen,

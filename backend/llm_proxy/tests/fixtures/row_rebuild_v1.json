@@ -1,0 +1,1962 @@
+{
+  "provenance": "Synthetic plans reconstruct observed command types/order, not retained original output.",
+  "original_request": "no way this is so bad. what kind of instruments r u using. I want u to remove everything and start from scratch. give some real good super chill jazz to relax to. whats that crazy stuff u added at the end. focus",
+  "cases": [
+    {
+      "name": "six_deletions_before_creation",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 6,
+            "max_rows": 8,
+            "can_create": true
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 101,
+            "display_index": 1,
+            "name": "Old 1",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 102,
+            "display_index": 2,
+            "name": "Old 2",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 103,
+            "display_index": 3,
+            "name": "Old 3",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 104,
+            "display_index": 4,
+            "name": "Old 4",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 105,
+            "display_index": 5,
+            "name": "Old 5",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old1",
+            "row_id": 101,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old2",
+            "row_id": 102,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old3",
+            "row_id": 103,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old4",
+            "row_id": 104,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old5",
+            "row_id": 105,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          },
+          {
+            "command_id": "delete1",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 101
+            }
+          },
+          {
+            "command_id": "delete2",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 102
+            }
+          },
+          {
+            "command_id": "delete3",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 103
+            }
+          },
+          {
+            "command_id": "delete4",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 104
+            }
+          },
+          {
+            "command_id": "delete5",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 105
+            }
+          },
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new1",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 1",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music1",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new1",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new2",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 2",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music2",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new2",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new3",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 3",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music3",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new3",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": "v3_plan_capability_invalid",
+      "client_error": "v3_row_delete_last_remaining"
+    },
+    {
+      "name": "rebuild_capacity_6",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 6,
+            "max_rows": 6,
+            "can_create": false
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 101,
+            "display_index": 1,
+            "name": "Old 1",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 102,
+            "display_index": 2,
+            "name": "Old 2",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 103,
+            "display_index": 3,
+            "name": "Old 3",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 104,
+            "display_index": 4,
+            "name": "Old 4",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 105,
+            "display_index": 5,
+            "name": "Old 5",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old1",
+            "row_id": 101,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old2",
+            "row_id": 102,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old3",
+            "row_id": 103,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old4",
+            "row_id": 104,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old5",
+            "row_id": 105,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          },
+          {
+            "command_id": "delete1",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 101
+            }
+          },
+          {
+            "command_id": "delete2",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 102
+            }
+          },
+          {
+            "command_id": "delete3",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 103
+            }
+          },
+          {
+            "command_id": "delete4",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 104
+            }
+          },
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "delete5",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 105
+            }
+          },
+          {
+            "command_id": "new1",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 1",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music1",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new1",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new2",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 2",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music2",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new2",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new3",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 3",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music3",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new3",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": null,
+      "client_error": null
+    },
+    {
+      "name": "rebuild_capacity_8",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 6,
+            "max_rows": 8,
+            "can_create": true
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 101,
+            "display_index": 1,
+            "name": "Old 1",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 102,
+            "display_index": 2,
+            "name": "Old 2",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 103,
+            "display_index": 3,
+            "name": "Old 3",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 104,
+            "display_index": 4,
+            "name": "Old 4",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 105,
+            "display_index": 5,
+            "name": "Old 5",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old1",
+            "row_id": 101,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old2",
+            "row_id": 102,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old3",
+            "row_id": 103,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old4",
+            "row_id": 104,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old5",
+            "row_id": 105,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          },
+          {
+            "command_id": "delete1",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 101
+            }
+          },
+          {
+            "command_id": "delete2",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 102
+            }
+          },
+          {
+            "command_id": "delete3",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 103
+            }
+          },
+          {
+            "command_id": "delete4",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 104
+            }
+          },
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "delete5",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 105
+            }
+          },
+          {
+            "command_id": "new1",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 1",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music1",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new1",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new2",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 2",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music2",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new2",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "new3",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 3",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music3",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new3",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": null,
+      "client_error": null
+    },
+    {
+      "name": "single_row_spare",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 1,
+            "max_rows": 2,
+            "can_create": true
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": null,
+      "client_error": null
+    },
+    {
+      "name": "single_row_no_capacity",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 1,
+            "max_rows": 1,
+            "can_create": false
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": "v3_plan_row_capacity_exceeded",
+      "client_error": "v3_row_capacity_exceeded"
+    },
+    {
+      "name": "deleted_id",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 2,
+            "max_rows": 3,
+            "can_create": true
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 101,
+            "display_index": 1,
+            "name": "Old 1",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old1",
+            "row_id": 101,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          },
+          {
+            "command_id": "rename",
+            "type": "row.rename",
+            "arguments": {
+              "row_id": 100,
+              "new_name": "Gone"
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": "v3_plan_capability_invalid",
+      "client_error": "v3_row_id_unknown"
+    },
+    {
+      "name": "deleted_generated_ref",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 1,
+            "max_rows": 3,
+            "can_create": true
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "remove",
+            "type": "row.delete",
+            "arguments": {
+              "row_ref": {
+                "command_id": "new0",
+                "output": "row"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": "v3_plan_target_type_invalid",
+      "client_error": "v3_resource_ref_unavailable"
+    },
+    {
+      "name": "capacity_overflow",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 2,
+            "max_rows": 2,
+            "can_create": false
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 101,
+            "display_index": 1,
+            "name": "Old 1",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old1",
+            "row_id": 101,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": "v3_plan_row_capacity_exceeded",
+      "client_error": "v3_row_capacity_exceeded"
+    },
+    {
+      "name": "preserve_unrelated",
+      "context": {
+        "schema_version": "core_context_v3_prototype_1",
+        "project": {
+          "bpm": 120,
+          "beats_per_bar": 4,
+          "row_capacity": {
+            "current_rows": 3,
+            "max_rows": 3,
+            "can_create": false
+          }
+        },
+        "selection": {
+          "selected_row_id": 100,
+          "selected_clip_ids": []
+        },
+        "rows": [
+          {
+            "row_id": 100,
+            "display_index": 0,
+            "name": "Old 0",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 101,
+            "display_index": 1,
+            "name": "Old 1",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          },
+          {
+            "row_id": 102,
+            "display_index": 2,
+            "name": "Old 2",
+            "lane_kind": "instrument",
+            "instrument_id": "free-piano",
+            "effects": [],
+            "mix_processing_supported": true,
+            "has_usable_signal": true
+          }
+        ],
+        "clips": [
+          {
+            "clip_id": "old0",
+            "row_id": 100,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old1",
+            "row_id": 101,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          },
+          {
+            "clip_id": "old2",
+            "row_id": 102,
+            "kind": "midi",
+            "instrument_id": "free-piano",
+            "start_beat": 0,
+            "length_beats": 8,
+            "midi_notes": [
+              {
+                "pitch": 60,
+                "start_beat": 0,
+                "length_beats": 1,
+                "velocity": 0.7
+              }
+            ]
+          }
+        ],
+        "groups": [],
+        "library_assets": [],
+        "effects": [],
+        "instruments": [
+          "free-piano"
+        ],
+        "instrument_catalog": [
+          {
+            "instrument_id": "free-piano",
+            "name": "Free Piano",
+            "playable_pitch_ranges": [
+              {
+                "low": 40,
+                "high": 84
+              }
+            ]
+          }
+        ]
+      },
+      "plan": {
+        "schema_version": "plan_v3_prototype_2",
+        "outcome": "plan",
+        "user_message": "Rebuilt the arrangement.",
+        "commands": [
+          {
+            "command_id": "delete0",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 100
+            }
+          },
+          {
+            "command_id": "new0",
+            "type": "row.create",
+            "arguments": {
+              "name": "New 0",
+              "lane": {
+                "kind": "midi",
+                "instrument_id": "free-piano"
+              },
+              "position": {
+                "kind": "end"
+              }
+            }
+          },
+          {
+            "command_id": "music0",
+            "type": "midi.create_clip",
+            "arguments": {
+              "destination": {
+                "row_ref": {
+                  "command_id": "new0",
+                  "output": "row"
+                }
+              },
+              "start_beat": 0,
+              "length_beats": 8,
+              "notes": [
+                {
+                  "pitch": 60,
+                  "start_beat": 0,
+                  "length_beats": 1,
+                  "velocity": 0.7
+                }
+              ]
+            }
+          },
+          {
+            "command_id": "delete1",
+            "type": "row.delete",
+            "arguments": {
+              "row_id": 101
+            }
+          }
+        ],
+        "question_options": []
+      },
+      "backend_error": null,
+      "client_error": null
+    }
+  ]
+}

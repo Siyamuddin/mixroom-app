@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'package:mixroom/helpers/daw_performance_probe.dart';
+import '../ai/v3/ai_v3_midi_boundary.dart';
 import 'dart:isolate';
 import 'dart:ui';
 import 'dart:math' as math;
@@ -86,6 +88,7 @@ import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/remote_mixing_magnitude_predictor.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_execution_failure_message.dart';
+import 'package:mixroom/ai/v3/ai_v3_execution_expectations.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
@@ -4022,6 +4025,20 @@ class AudioEditorEvaluationController {
   void Function(String? clipId, bool reconciliation)? _selectClipForInspector;
   VoidCallback? _closeClipInspector;
   Future<void> Function(String clipId)? _deleteClip;
+  Future<void> Function(String, int, String?, DawPerformanceSpan)?
+  _performanceAction;
+
+  Future<void> performanceAction(
+    String operation,
+    int index,
+    DawPerformanceSpan span, {
+    String? sourcePath,
+  }) async {
+    if (!kDawPerformanceMetricsEnabled || _performanceAction == null) {
+      throw StateError('performance_test_not_enabled');
+    }
+    await _performanceAction!(operation, index, sourcePath, span);
+  }
 
   bool get isAttached => _submit != null;
   bool get hasPendingPlan => _hasPendingPlan?.call() ?? false;
@@ -4101,6 +4118,8 @@ class AudioEditorEvaluationController {
     selectClipForInspector,
     required VoidCallback closeClipInspector,
     required Future<void> Function(String clipId) deleteClip,
+    required Future<void> Function(String, int, String?, DawPerformanceSpan)
+    performanceAction,
   }) {
     _submit = submit;
     _undo = undo;
@@ -4114,6 +4133,7 @@ class AudioEditorEvaluationController {
     _selectClipForInspector = selectClipForInspector;
     _closeClipInspector = closeClipInspector;
     _deleteClip = deleteClip;
+    _performanceAction = performanceAction;
   }
 
   void _detach() {
@@ -4123,6 +4143,7 @@ class AudioEditorEvaluationController {
     _executeV3Handoff = null;
     _effectChain = null;
     _snapshot = null;
+    _performanceAction = null;
     _stateDigest = null;
     _hasPendingPlan = null;
     _openClipInspector = null;
@@ -4220,6 +4241,18 @@ class _ProjectLoadIssue {
   final String detail;
 }
 
+class _PreservedProjectTrack {
+  const _PreservedProjectTrack({
+    required this.originalIndex,
+    required this.json,
+    required this.reason,
+  });
+
+  final int originalIndex;
+  final Map<String, dynamic> json;
+  final JuceMutationResult reason;
+}
+
 enum _HostedPluginRestoreScope { rowEffect, masterEffect, midiInstrument }
 
 enum _HostedPluginRestoreStatus { pending, loading, loaded, partial, failed }
@@ -4300,6 +4333,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const bool _kAllowSampledNativeRenderFallbackForBeta = false;
   static const Key _editorScaffoldKey = Key('audio_editor_screen');
   static const Key _editorBackButtonKey = Key('audio_editor_back_button');
+  DawPerformanceProbe? _manualPerformanceProbe;
+  Timer? _manualNavigationIdleTimer;
+  final Set<int> _manualPointerIds = <int>{};
+  bool _manualNavigationActive = false;
+  String _manualNavigationSource = '';
+  int _manualNavigationEventCount = 0;
+  double _manualNavigationDistanceX = 0.0;
+  double _manualNavigationDistanceY = 0.0;
   final GlobalKey _projectSettingsButtonKey = GlobalKey(
     debugLabel: 'audio_editor_project_settings_button',
   );
@@ -4505,9 +4546,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     });
   }
 
-  int get _effectiveMaxRows {
-    if (!_isFreePlan) return kMaxRows;
-    return math.min(kMaxRows, SubscriptionLimits.freeRowsPerProject);
+  int? get _rowCreationLimit =>
+      _isFreePlan ? SubscriptionLimits.freeRowsPerProject : null;
+
+  bool _canAddRows([int count = 1]) {
+    return SubscriptionLimits.canCreateRows(
+      currentRows: _rowCount,
+      count: count,
+      creationLimit: _rowCreationLimit,
+    );
+  }
+
+  // Retained for older AI contracts. Updated contract-6 requests use the
+  // nullable creation limit above instead.
+  int get _effectiveAiMaxRows {
+    if (!_isFreePlan) return kAiMaxRows;
+    return math.min(kAiMaxRows, SubscriptionLimits.freeRowsPerProject);
   }
 
   bool _canUseEffectForCurrentPlan(String effectName) {
@@ -4540,7 +4594,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   String _rowLimitReachedMessage() {
-    final limit = _effectiveMaxRows;
+    final limit = _rowCreationLimit;
+    if (limit == null) {
+      return L10n.translate(
+        context,
+        'This device could not create another row right now.',
+      );
+    }
     return '${L10n.translate(context, 'Maximum of')} $limit ${L10n.translate(context, 'rows reached.')}';
   }
 
@@ -4562,6 +4622,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _showSmallNotice(_rowLimitReachedMessage());
+  }
+
+  void _showClipAdmissionFailure(JuceMutationResult result) {
+    if (!mounted || result.succeeded) return;
+    final message = switch (result) {
+      JuceMutationResult.missingMedia =>
+        'The clip media is unavailable. Nothing was added.',
+      JuceMutationResult.resourceExhausted =>
+        'This device could not add another clip right now. The project was not changed.',
+      JuceMutationResult.invalidInput =>
+        'This clip could not be added because its data is invalid.',
+      JuceMutationResult.internalFailure =>
+        'The clip could not be added safely. The project was not changed.',
+      JuceMutationResult.success => '',
+    };
+    if (message.isNotEmpty) _showSmallNotice(message);
   }
 
   void _showUpgradeRequired({
@@ -4637,6 +4713,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _handledInitialAction = false;
   bool _hasTrackedAiAssistantScreen = false;
   bool _isProjectLoading = false;
+  bool _projectLoadPublicationFailedClosed = false;
   int _androidEngineCriticalSectionDepth = 0;
   bool _androidRouteRefreshInFlight = false;
   bool _pendingAndroidRouteRefresh = false;
@@ -4864,9 +4941,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     );
   }
 
-  static const int kMaxRows = 100; // source of truth is from JuceEngine.h
-  static const int kNumClips =
-      500; // pro-mode opportunity to restrict to arbitrary number for free ver
+  static const int kAiMaxRows = 100;
   static const double _kClipPitchMinSemitones = -12.0;
   static const double _kClipPitchMaxSemitones = 12.0;
 
@@ -5908,6 +5983,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Duration _copiedTrimEnd = Duration.zero;
   _EffectsClipboardEntry? _copiedEffects;
   final Set<int> _reservedEngineClipIds = <int>{};
+  final SplayTreeSet<int> _releasedEngineClipIds = SplayTreeSet<int>();
+  final Set<int> _unrecyclableEngineClipIds = <int>{};
+  int _nextEngineClipId = 0;
   Future<void> _clipPasteQueue = Future<void>.value();
 
   // Piano roll / instrument editor
@@ -5983,8 +6061,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   TimelineGridMode _timelineGridMode = TimelineGridMode.adaptive;
   int _timelineFixedQuantizeDivisionsPerBar = 4;
   final ValueNotifier<({String clipId, int divisionsPerBar})?>
-      _activePianoRollGridResolution =
-          ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
+  _activePianoRollGridResolution =
+      ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
 
   bool _loopEnabled = false;
   int _loopStartMs = 0;
@@ -6338,6 +6416,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   List<String> _desktopPluginSearchPaths = <String>[];
   int? _desktopLastPluginRescanAtMs;
   final List<_ProjectLoadIssue> _projectLoadIssues = <_ProjectLoadIssue>[];
+  final Map<String, _PreservedProjectTrack> _preservedProjectTracks =
+      <String, _PreservedProjectTrack>{};
   final SfzDefinitionLoader _sfzDefinitionLoader = SfzDefinitionLoader();
   static final Set<int> _allMidiPitches = Set<int>.unmodifiable(<int>{
     for (var pitch = 0; pitch <= 127; pitch++) pitch,
@@ -6440,28 +6520,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   int _allocateEngineClipId() {
-    final usedIds = Set<int>.from(_reservedEngineClipIds);
-    for (final track in _audioTracks) {
-      if (track.engineClipId >= 0) {
-        usedIds.add(track.engineClipId);
+    _ensureClipOperationIndexes();
+    while (_releasedEngineClipIds.isNotEmpty) {
+      final id = _releasedEngineClipIds.first;
+      _releasedEngineClipIds.remove(id);
+      if (_reservedEngineClipIds.contains(id) ||
+          _clipByEngineId.containsKey(id) ||
+          _unrecyclableEngineClipIds.contains(id)) {
+        continue;
       }
+      _reservedEngineClipIds.add(id);
+      return id;
     }
-    for (int id = 0; id < kNumClips; id++) {
-      if (!usedIds.contains(id)) {
-        _reservedEngineClipIds.add(id);
-        return id;
-      }
+    while (_reservedEngineClipIds.contains(_nextEngineClipId) ||
+        _clipByEngineId.containsKey(_nextEngineClipId) ||
+        _unrecyclableEngineClipIds.contains(_nextEngineClipId)) {
+      _nextEngineClipId++;
     }
-    return -1;
+    if (_nextEngineClipId > 0x7fffffff) return -1;
+    final id = _nextEngineClipId++;
+    _reservedEngineClipIds.add(id);
+    return id;
   }
 
   int _reserveEngineClipId() {
     return _allocateEngineClipId();
   }
 
-  void _releaseReservedEngineClipId(int engineClipId) {
+  void _releaseReservedEngineClipId(
+    int engineClipId, {
+    bool allowReuse = true,
+  }) {
     if (engineClipId >= 0) {
+      _ensureClipOperationIndexes();
       _reservedEngineClipIds.remove(engineClipId);
+      if (!allowReuse) {
+        _unrecyclableEngineClipIds.add(engineClipId);
+        _releasedEngineClipIds.remove(engineClipId);
+      } else if (!_unrecyclableEngineClipIds.contains(engineClipId) &&
+          !_clipByEngineId.containsKey(engineClipId)) {
+        _releasedEngineClipIds.add(engineClipId);
+      }
     }
   }
 
@@ -7279,7 +7378,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String instrumentName,
     required Map<String, double> instrumentParams,
   }) async {
-    await _ensureRowIndexExists(row);
+    if (!await _ensureRowIndexExists(row)) return -1;
     await _ensureRowExistsForClipInsertion();
     if (_rowCount == 0) return 0;
     var safeRow = row.clamp(0, _rowCount - 1).toInt();
@@ -7318,7 +7417,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return safeRow;
       }
 
-      if (_rowCount >= _effectiveMaxRows) {
+      if (!_canAddRows()) {
         _showRowLimitReachedNotice();
         return -1;
       }
@@ -7373,7 +7472,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return safeRow;
     }
 
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return -1;
     }
@@ -9365,6 +9464,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   @override
   void initState() {
     super.initState();
+    _startManualPerformanceMonitoring();
     _waveformDetailProvider = WaveformDetailProvider(
       loadTile: _extractWaveformDetailTile,
       overviewWorkPending: () => _waveformFutureByPath.isNotEmpty,
@@ -9462,6 +9562,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     unawaited(_magnitudePredictor.startBackgroundRefresh());
 
     _mixModel = LocalMixingModel();
+    final aiV3RequestRoute = LlmConfig.effectiveAiV3RequestRoute;
     _chatPipeline = ChatPipeline(
       llm: CloudLlmService(
         apiKey: LlmConfig.canUseDirectOpenAi ? LlmConfig.openAiApiKey : '',
@@ -9479,9 +9580,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       aiV3Planner: LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
               requestTimeout: Duration(
-                seconds: LlmConfig.aiV3RequestTimeoutSeconds,
+                seconds: aiV3RequestRoute.requestTimeoutSeconds,
               ),
-              proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+              proxyApiBaseUrl: aiV3RequestRoute.proxyApiBaseUrl,
               proxyPath: LlmConfig.aiV3ProxyPath,
               authTokenProvider: authService.getIdTokenOrNull,
               refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
@@ -9499,6 +9600,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       },
     );
     widget.evaluationController?._attach(
+      performanceAction: _runPerformanceTestAction,
       submit: _submitChatPrompt,
       undo: _performEditorUndo,
       redo: _performEditorRedo,
@@ -9629,17 +9731,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       var startupAttempt = 0;
       while (true) {
         startupAttempt++;
-        engineInitialised =
-            await JuceAudioEngine.initialiseForImplementation(
-              bluetoothSession.active,
-            );
+        engineInitialised = await JuceAudioEngine.initialiseForImplementation(
+          bluetoothSession.active,
+        );
         if (!mounted) return;
         if (engineInitialised) break;
         final startupResult = JuceAudioEngine.lastPlaybackStartupResultV2;
-        _logAudioStartupFailure(
-          attempt: startupAttempt,
-          result: startupResult,
-        );
+        _logAudioStartupFailure(attempt: startupAttempt, result: startupResult);
         final retry = decideStartupRetry(
           diagnosticCode: startupResult?.diagnosticCode,
           attempt: startupAttempt,
@@ -9724,6 +9822,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _refreshProducerCaptureUiAllowlistAccess();
       await _sampleBrowserPreferencesFuture;
       await _loadProjectIfAny();
+      if (_projectLoadPublicationFailedClosed) {
+        await _shutdownAudioEngineV2Aware();
+        if (mounted) {
+          _showSmallNotice(
+            'This project could not be opened safely. Reopen it to try again.',
+          );
+          await Navigator.of(context).maybePop();
+        }
+        return;
+      }
       if (!mounted) {
         await _shutdownAudioEngineV2Aware();
         return;
@@ -9769,8 +9877,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
       await _runInitialActionIfNeeded();
       await _maybeShowDawOnboarding();
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'audio editor initialization',
+          context: ErrorDescription('while initializing the audio editor'),
+        ),
+      );
+      if (mounted) {
+        _showSmallNotice('Some editor services could not be initialized.');
+      }
     } finally {
       _editorStartupInFlight = false;
+      if (mounted && _isLoadingNextScreen) {
+        setState(() => _isLoadingNextScreen = false);
+      }
     }
   }
 
@@ -11046,107 +11169,110 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       L10n.translate(context, sectionTitle),
                                     ),
                                   Container(
-                                  margin: const EdgeInsets.only(bottom: 10),
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    12,
-                                    14,
-                                    12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: active
-                                        ? Colors.white.withValues(alpha: 0.11)
-                                        : Colors.white.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: active
-                                          ? const Color(0xFF66B5FF)
-                                          : conflict != null
-                                          ? const Color(0xFFF57272)
-                                          : Colors.white.withValues(
-                                              alpha: 0.08,
-                                            ),
+                                    margin: const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14,
+                                      12,
+                                      14,
+                                      12,
                                     ),
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              L10n.translate(
-                                                context,
-                                                entry.value,
-                                              ),
-                                              style: const TextStyle(
-                                                color: Color(0xFFF4F4F4),
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                              ),
+                                    decoration: BoxDecoration(
+                                      color: active
+                                          ? Colors.white.withValues(alpha: 0.11)
+                                          : Colors.white.withValues(
+                                              alpha: 0.05,
                                             ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withValues(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: active
+                                            ? const Color(0xFF66B5FF)
+                                            : conflict != null
+                                            ? const Color(0xFFF57272)
+                                            : Colors.white.withValues(
                                                 alpha: 0.08,
                                               ),
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              active
-                                                  ? 'Press keys...'
-                                                  : _desktopShortcutLabel(
-                                                      binding,
-                                                    ),
-                                              style: TextStyle(
-                                                color: const Color(
-                                                  0xFFF4F4F4,
-                                                ).withValues(alpha: 0.86),
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 12.5,
-                                                fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                L10n.translate(
+                                                  context,
+                                                  entry.value,
+                                                ),
+                                                style: const TextStyle(
+                                                  color: Color(0xFFF4F4F4),
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          TextButton(
-                                            onPressed: () {
-                                              setModalState(() {
-                                                capturingActionId = active
-                                                    ? null
-                                                    : entry.key;
-                                              });
-                                            },
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.08,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                active
+                                                    ? 'Press keys...'
+                                                    : _desktopShortcutLabel(
+                                                        binding,
+                                                      ),
+                                                style: TextStyle(
+                                                  color: const Color(
+                                                    0xFFF4F4F4,
+                                                  ).withValues(alpha: 0.86),
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 12.5,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            TextButton(
+                                              onPressed: () {
+                                                setModalState(() {
+                                                  capturingActionId = active
+                                                      ? null
+                                                      : entry.key;
+                                                });
+                                              },
+                                              child: Text(
+                                                active ? 'Cancel' : 'Change',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (conflict != null) ...[
+                                          const SizedBox(height: 8),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
                                             child: Text(
-                                              active ? 'Cancel' : 'Change',
+                                              conflict,
+                                              style: const TextStyle(
+                                                color: Color(0xFFF58A8A),
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
                                           ),
                                         ],
-                                      ),
-                                      if (conflict != null) ...[
-                                        const SizedBox(height: 8),
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Text(
-                                            conflict,
-                                            style: const TextStyle(
-                                              color: Color(0xFFF58A8A),
-                                              fontFamily: 'Pretendard',
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ),
                                       ],
-                                    ],
+                                    ),
                                   ),
-                                ),
                                 ];
                               }),
                               const SizedBox(height: 4),
@@ -12584,6 +12710,76 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return snapshots;
   }
 
+  Future<_ProjectLoadRollbackSnapshot>
+  _captureProjectLoadRollbackSnapshot() async {
+    final layout = await _captureRowLayoutSnapshot();
+    final rowEffects = <RowEffectsSnapshot>[];
+    for (int row = 0; row < _rowCount; row++) {
+      rowEffects.add(await captureRowSnapshot(row, rowId: _rowIdAt(row)));
+    }
+    return _ProjectLoadRollbackSnapshot(
+      layout: layout,
+      rowUiById: _captureRowUiStateById(),
+      rowEffects: rowEffects,
+      masterEffects: await captureMasterSnapshot(),
+      masterGain: _masterGain,
+      masterPan: _masterPan,
+      selectedRowId: _rowIdAt(_selectedRow),
+    );
+  }
+
+  void _restoreProjectLoadRowUi(Map<int, _RowUiStateSnapshot> snapshots) {
+    _rowPeakHoldDb.clear();
+    _rowPeakHoldLastUpdate.clear();
+    _rowPeakHoldFreezeUntil.clear();
+    for (int row = 0; row < _rows.length; row++) {
+      final state = snapshots[_rows[row].rowId];
+      if (state == null) continue;
+      _rowPan[row] = state.pan;
+      _rowGain[row] = state.gain.clamp(_kGainUiMin, _kGainUiMax);
+      _rowMuted[row] = state.muted;
+      _rowSoloed[row] = state.soloed;
+      // Rows may have been recreated natively. Force mute/solo publication
+      // instead of trusting the cache captured for the previous nodes.
+      _rowMuteApplied[row] = null;
+      _rowExpanded[row] = state.expanded;
+      _rowExpandedTab[row] = state.expandedTab;
+      _rowVolumeAutomation[row] = state.volumeAutomation
+          .map((point) => point.copy())
+          .toList(growable: false);
+      _rowPluginAutomation[row] = state.pluginAutomation.map(
+        (key, value) => MapEntry(
+          key,
+          value.map((point) => point.copy()).toList(growable: false),
+        ),
+      );
+      _rowAutomationClips[row] = state.automationClips.map(
+        (key, value) => MapEntry(
+          key,
+          value.map((clip) => clip.copyWith()).toList(growable: false),
+        ),
+      );
+      _rowAutomationTargets[row] = Map<String, _AutomationTargetMeta>.from(
+        state.automationTargets,
+      );
+      _rowSelectedAutomationTarget[row] = state.selectedAutomationTarget;
+      _rowGainSnapshot[row] = state.gainSnapshot;
+      _rowPanSnapshot[row] = state.panSnapshot;
+      _rowAutomationSnapshot[row] = state.automationSnapshot
+          .map((point) => point.copy())
+          .toList(growable: false);
+      if (state.peakHoldDb != null) {
+        _rowPeakHoldDb[row] = state.peakHoldDb!;
+      }
+      if (state.peakHoldLastUpdate != null) {
+        _rowPeakHoldLastUpdate[row] = state.peakHoldLastUpdate!;
+      }
+      if (state.peakHoldFreezeUntil != null) {
+        _rowPeakHoldFreezeUntil[row] = state.peakHoldFreezeUntil!;
+      }
+    }
+  }
+
   void _syncAudioTrackRowsToCurrentRows({Map<int, int>? previousIndexById}) {
     if (_audioTracks.isEmpty) return;
     _ensureClipOperationIndexes();
@@ -12759,20 +12955,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  Future<void> _ensureRowIndexExists(int rowIndex) async {
-    if (rowIndex < 0) return;
-    if (rowIndex >= _effectiveMaxRows) {
-      _showRowLimitReachedNotice();
-      return;
-    }
+  Future<bool> _ensureRowIndexExists(int rowIndex) async {
+    if (rowIndex < 0) return false;
     while (_rowCount <= rowIndex) {
-      if (_rowCount >= _effectiveMaxRows) {
+      if (!_canAddRows()) {
         _showRowLimitReachedNotice();
-        return;
+        return false;
       }
       final next = _rowCount + 1;
       final id = await JuceAudioEngine.addRow('Track $next', iconId: 0);
-      if (id < 0) break;
+      if (id < 0) return false;
       await _applyRowsToEditorState(
         <TimelineRow>[
           ..._rows,
@@ -12782,6 +12974,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         syncClipRows: false,
       );
     }
+    return true;
   }
 
   Future<void> _restoreRowsFromProjectJson(
@@ -12862,8 +13055,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         currentIds.add(restoredId);
       }
     } else {
-      while (currentIds.length < targetRowCount &&
-          currentIds.length < kMaxRows) {
+      while (currentIds.length < targetRowCount) {
         final next = currentIds.length + 1;
         final id = await JuceAudioEngine.addRow('Track $next', iconId: 0);
         if (id < 0) break;
@@ -12952,6 +13144,16 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   @override
   void dispose() {
+    _manualNavigationIdleTimer?.cancel();
+    _manualNavigationIdleTimer = null;
+    if (kDawPerformanceMetricsEnabled) {
+      GestureBinding.instance.pointerRouter.removeGlobalRoute(
+        _handleManualPerformancePointerEvent,
+      );
+    }
+    _manualPerformanceProbe?.stopMonitoring();
+    unawaited(_manualPerformanceProbe?.flushLogs() ?? Future<void>.value());
+    _manualPerformanceProbe = null;
     _waveformDetailViewportGeneration++;
     _waveformDetailProvider.dispose();
     _chatMutationDisposed = true;
@@ -14019,11 +14221,32 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await JuceAudioEngine.clearMasterEffectAutomation();
   }
 
+  void _showProjectLoadRecoveryNoticeIfNeeded() {
+    if (!mounted || _projectLoadIssues.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Project opened with ${_projectLoadIssues.length} recovery notice${_projectLoadIssues.length == 1 ? '' : 's'}. See Project Settings for details.',
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Future<void> _loadProjectIfAny() async {
     if (_loadedOnce) return;
     _loadedOnce = true;
     _isProjectLoading = true;
     var projectLoadedSuccessfully = false;
+    final loadTotal = Stopwatch()..start();
+    var rowRestoreMs = 0;
+    var clipAdmissionMs = 0;
+    var nativeFinalizeMs = 0;
+    var deferredSyncMs = 0;
+    var effectsRestoreMs = 0;
+    var nativeLoadTransactions = 0;
+    var nativeDetailedFinalizations = 0;
+    var nativeLoadFinalization = JuceMutationResult.success;
 
     try {
       if (PlatformCapabilities.current.isMobile) {
@@ -14032,6 +14255,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _sampleBrowserRoots.clear();
       }
       _projectLoadIssues.clear();
+      _preservedProjectTracks.clear();
       _hostedPluginRestoreEntries.clear();
       _sampleDurationCache.clear();
       _waveformCacheByPath.clear();
@@ -14109,6 +14333,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
       }
+      final projectLoadRollbackSnapshot =
+          await _captureProjectLoadRollbackSnapshot();
       await _restoreChatHistoryFromProjectJson(json);
       _projectId = ProjectManager.ensureProjectIdInJson(json);
       _projectCreatedAtMs =
@@ -14265,25 +14491,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         masterState: master,
       );
       final loadedTracksForWaveforms = <AudioTrack>[];
+      final projectLoadInitialTrackCount = _audioTracks.length;
       final ensuredRowIndexes = <int>{};
-      await _restoreRowsFromProjectJson(rowsJson, tracks);
-
-      Future<void> ensureTrackRowReady(int rowIndex) async {
-        if (ensuredRowIndexes.contains(rowIndex)) return;
-        await _ensureRowIndexExists(rowIndex);
-        await _ensureRowExistsForClipInsertion();
-        ensuredRowIndexes.add(rowIndex);
-      }
-
+      Object? nativeLoadError;
+      StackTrace? nativeLoadStackTrace;
+      // Rows, clips, row state, automation, effects, and hosted instruments
+      // all publish native graph state. Restore them inside one transaction so
+      // playback cannot observe a partial project or pay for two graph builds.
       await JuceAudioEngine.beginProjectClipLoad();
+      nativeLoadTransactions++;
       try {
+        final rowRestore = Stopwatch()..start();
+        await _restoreRowsFromProjectJson(rowsJson, tracks);
+        rowRestoreMs = rowRestore.elapsedMilliseconds;
+
+        Future<void> ensureTrackRowReady(int rowIndex) async {
+          if (ensuredRowIndexes.contains(rowIndex)) return;
+          if (!await _ensureRowIndexExists(rowIndex)) {
+            throw StateError('project_row_restore_failed');
+          }
+          await _ensureRowExistsForClipInsertion();
+          ensuredRowIndexes.add(rowIndex);
+        }
+
+        final clipAdmission = Stopwatch()..start();
         // Load all clips (audio + MIDI/instrument)
-        for (final t in tracks) {
+        for (int trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
+          final t = tracks[trackIndex];
           final map = (t as Map).cast<String, dynamic>();
           final savedClipId = _normalizePersistedClipId(map['clipId']);
           final fileName = (map["fileName"] as String?)?.trim() ?? '';
           if (fileName.isEmpty) {
-            debugPrint('Skipping malformed track entry without fileName: $map');
+            _preserveRejectedProjectTrack(
+              map,
+              originalIndex: trackIndex,
+              reason: JuceMutationResult.invalidInput,
+            );
             continue;
           }
           final label = (map["label"] as String?) ?? '';
@@ -14372,15 +14615,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
           }
 
-          final trimStartMs = ((map["trimStartMs"] as num?)?.round() ?? 0)
-              .clamp(0, 1 << 30);
-          final rawTrimEndMs = (map["trimEndMs"] as num?)?.round();
-          final trimStartRequested = Duration(
-            milliseconds: trimStartMs.toInt(),
+          final trimStartMs =
+              (clipKind == ClipKind.midi
+                      ? (map["trimStartMs"] as num?) ?? 0
+                      : (map["trimStartMs"] as num?)?.round() ?? 0)
+                  .clamp(0, 1 << 30);
+          final rawTrimEndMs = clipKind == ClipKind.midi
+              ? map["trimEndMs"] as num?
+              : (map["trimEndMs"] as num?)?.round();
+          final trimStartRequested = clipTrimFromMilliseconds(
+            trimStartMs,
+            isMidi: clipKind == ClipKind.midi,
           );
           final trimEndRequested =
               (rawTrimEndMs != null && rawTrimEndMs > trimStartMs)
-              ? Duration(milliseconds: rawTrimEndMs)
+              ? clipTrimFromMilliseconds(
+                  rawTrimEndMs,
+                  isMidi: clipKind == ClipKind.midi,
+                )
               : null;
           final offsetSec = ((map["offset"] as num?) ?? 0).toDouble();
           final crossfade = ((map["crossfade"] as num?) ?? 0).toDouble();
@@ -14455,7 +14707,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
           if (!audioFile.existsSync()) {
             if (clipKind == ClipKind.midi) {
-              debugPrint(
+              _projectLoadTrace(
                 '[ProjectLoad] restore MIDI clip $savedClipId instrument=$instrumentId row=$rowIndex no-audio-file',
               );
               await ensureTrackRowReady(rowIndex);
@@ -14518,25 +14770,29 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                         AutomationPoint(x: 1.0, volume: 1.0),
                       ];
                 loadedTracksForWaveforms.add(tr);
+              } else {
+                _preserveRejectedProjectTrack(
+                  map,
+                  originalIndex: trackIndex,
+                  reason: JuceMutationResult.internalFailure,
+                );
               }
               continue;
             }
-            debugPrint("Missing audio file: ${audioFile.path}");
-            _projectLoadIssues.add(
-              _ProjectLoadIssue(
-                type: _ProjectLoadIssueType.missingAudio,
-                title: 'Missing Audio File',
-                detail:
-                    'Mixroom could not find "$fileName" in this project folder, so that clip was left out of the current session.',
-              ),
+            _projectLoadTrace('Missing audio file: ${audioFile.path}');
+            _preserveRejectedProjectTrack(
+              map,
+              originalIndex: trackIndex,
+              reason: JuceMutationResult.missingMedia,
             );
             continue;
           }
 
           await ensureTrackRowReady(rowIndex);
           final beforeCount = _audioTracks.length;
+          JuceMutationResult? admissionResult;
           if (clipKind == ClipKind.midi) {
-            debugPrint(
+            _projectLoadTrace(
               '[ProjectLoad] restore MIDI clip $savedClipId instrument=$instrumentId row=$rowIndex',
             );
             await _addMidiTrackFromProjectFile(
@@ -14574,11 +14830,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   deferHostedInstrumentStateRestore,
               clipId: savedClipId,
             );
-            debugPrint(
+            _projectLoadTrace(
               '[ProjectLoad] restore MIDI clip $savedClipId add complete',
             );
           } else {
-            debugPrint(
+            _projectLoadTrace(
               '[ProjectLoad] restore audio clip $savedClipId row=$rowIndex file=$fileName',
             );
             await _addAudioTrackFromProjectFile(
@@ -14605,13 +14861,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               startWaveform: false,
               assumeFreshEngineDefaults: true,
               clipId: savedClipId,
+              onAdmissionResult: (result) => admissionResult = result,
             );
-            debugPrint(
+            _projectLoadTrace(
               '[ProjectLoad] restore audio clip $savedClipId add complete',
             );
           }
           if (_audioTracks.length <= beforeCount) {
-            debugPrint('[ProjectLoad] skipped clip $savedClipId');
+            _projectLoadTrace('[ProjectLoad] skipped clip $savedClipId');
+            _preserveRejectedProjectTrack(
+              map,
+              originalIndex: trackIndex,
+              reason: clipKind == ClipKind.audio
+                  ? admissionResult ?? JuceMutationResult.internalFailure
+                  : JuceMutationResult.internalFailure,
+            );
             continue;
           }
 
@@ -14654,88 +14918,79 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   AutomationPoint(x: 1.0, volume: 1.0),
                 ];
           loadedTracksForWaveforms.add(tr);
-          debugPrint(
+          _projectLoadTrace(
             '[ProjectLoad] restored clip $savedClipId engine=${tr.engineClipId}',
           );
         }
-      } finally {
-        debugPrint('[ProjectLoad] end native clip load batch');
-        await JuceAudioEngine.endProjectClipLoad();
-        debugPrint('[ProjectLoad] ended native clip load batch');
-      }
+        clipAdmissionMs = clipAdmission.elapsedMilliseconds;
 
-      debugPrint('[ProjectLoad] sync clip timeline and mix batch');
-      await _syncDeferredClipTimelineBatchToEngine(
-        Iterable<int>.generate(_audioTracks.length),
-        includeMix: true,
-      );
-      debugPrint('[ProjectLoad] synced clip timeline and mix batch');
-      debugPrint('[ProjectLoad] sync all clip fades after clip load');
-      await _syncAllClipFadesToEngine();
-      debugPrint('[ProjectLoad] synced all clip fades after clip load');
-      debugPrint('[ProjectLoad] update duration after clip load');
-      _updateOverallDurationIfNeeded();
-      debugPrint('[ProjectLoad] updated duration after clip load');
-
-      final rowStatesList = (json["rowStates"] as List?) ?? [];
-
-      for (final rs in rowStatesList) {
-        final snap = RowStateSnapshot.fromJson(
-          (rs as Map).cast<String, dynamic>(),
+        final deferredSync = Stopwatch()..start();
+        await _syncDeferredClipTimelineBatchToEngine(
+          Iterable<int>.generate(_audioTracks.length),
+          includeMix: true,
         );
-        // Row IDs are session-scoped and can be reassigned after reopen.
-        // Prefer persisted row order index, and only fall back to rowId lookup.
-        var r = snap.row;
-        if (r < 0 || r >= _rowCount) {
-          r = snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : -1;
-        }
+        await _syncAllClipFadesToEngine();
+        _updateOverallDurationIfNeeded();
+        deferredSyncMs = deferredSync.elapsedMilliseconds;
 
-        // Safety check
-        if (r < 0 || r >= _rowCount) continue;
+        final rowStatesList = (json["rowStates"] as List?) ?? [];
 
-        // Restore pan & gain
-        _rowPan[r] = snap.pan;
-        _rowGain[r] = _normalizeLoadedGainUi(
-          snap.gain,
-          projectVersion: projectVersion,
-        );
-
-        // Restore automation (deep copy!)
-        _rowVolumeAutomation[r] = snap.volumeAutomation
-            .map((p) => p.copy())
-            .toList();
-        _restoreAutomationLanesForRow(
-          r,
-          snap.automationLanes,
-          selectedTargetId: snap.selectedAutomationTargetId,
-        );
-        _restoreAutomationClipsForRow(r, snap.automationClips);
-        if (r < _rowMuted.length) {
-          _rowMuted[r] = snap.muted;
-        }
-        if (r < _rowSoloed.length) {
-          _rowSoloed[r] = snap.soloed;
-        }
-        if (r < _rows.length) {
-          _rows[r] = _rows[r].copyWith(
-            roleOverride: snap.roleOverride,
-            groupId: snap.groupId,
-            inputDeviceName: snap.inputDeviceName,
-            inputChannelStart: snap.inputChannelStart,
-            inputChannelCount: snap.inputChannelCount,
+        for (final rs in rowStatesList) {
+          final snap = RowStateSnapshot.fromJson(
+            (rs as Map).cast<String, dynamic>(),
           );
+          // Row IDs are session-scoped and can be reassigned after reopen.
+          // Prefer persisted row order index, and only fall back to rowId lookup.
+          var r = snap.row;
+          if (r < 0 || r >= _rowCount) {
+            r = snap.rowId >= 0 ? _rowIndexForId(snap.rowId) : -1;
+          }
+
+          // Safety check
+          if (r < 0 || r >= _rowCount) continue;
+
+          // Restore pan & gain
+          _rowPan[r] = snap.pan;
+          _rowGain[r] = _normalizeLoadedGainUi(
+            snap.gain,
+            projectVersion: projectVersion,
+          );
+
+          // Restore automation (deep copy!)
+          _rowVolumeAutomation[r] = snap.volumeAutomation
+              .map((p) => p.copy())
+              .toList();
+          _restoreAutomationLanesForRow(
+            r,
+            snap.automationLanes,
+            selectedTargetId: snap.selectedAutomationTargetId,
+          );
+          _restoreAutomationClipsForRow(r, snap.automationClips);
+          if (r < _rowMuted.length) {
+            _rowMuted[r] = snap.muted;
+          }
+          if (r < _rowSoloed.length) {
+            _rowSoloed[r] = snap.soloed;
+          }
+          if (r < _rows.length) {
+            _rows[r] = _rows[r].copyWith(
+              roleOverride: snap.roleOverride,
+              groupId: snap.groupId,
+              inputDeviceName: snap.inputDeviceName,
+              inputChannelStart: snap.inputChannelStart,
+              inputChannelCount: snap.inputChannelCount,
+            );
+          }
+
+          await JuceAudioEngine.setRowGain(r, _rowGain[r]);
+          await JuceAudioEngine.setRowPan(r, snap.pan);
         }
+        await _recomputeAudibleState();
 
-        await JuceAudioEngine.setRowGain(r, _rowGain[r]);
-        await JuceAudioEngine.setRowPan(r, snap.pan);
-      }
-      await _recomputeAudibleState();
+        await _ensureLoadedAutomationDisplayRowsExist();
 
-      await _ensureLoadedAutomationDisplayRowsExist();
-
-      // Restore FX snapshots after tracks exist
-      await JuceAudioEngine.beginProjectClipLoad();
-      try {
+        // Restore FX snapshots after tracks exist
+        final effectsRestore = Stopwatch()..start();
         _rowEffectSnapshotsByRowId.clear();
         for (final rf in rowFxList) {
           final snap = RowEffectsSnapshotJson.fromJson(
@@ -14758,7 +15013,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             snap.effects,
             rowId: snap.rowId,
           );
-          debugPrint(
+          _projectLoadTrace(
             '[ProjectLoad] restore row FX row=${resolvedRow + 1} count=${resolvedSnapshot.effects.length}',
           );
           _registerPendingRowEffectRestores(resolvedSnapshot);
@@ -14775,8 +15030,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               detail: 'Restoring plugin from saved project state.',
             );
           }
-          final restoreResult = await _restoreRowSnapshot(resolvedSnapshot);
-          debugPrint(
+          final restoreResult = await _restoreRowSnapshot(
+            resolvedSnapshot,
+            logger: _projectLoadTrace,
+          );
+          _projectLoadTrace(
             '[ProjectLoad] restored row FX row=${resolvedRow + 1} failures=${restoreResult.failures.length}',
           );
           _applyEffectRestoreResultToLedger(
@@ -14794,7 +15052,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           if (masterFx != null) {
             final ms = MasterEffectsSnapshotJson.fromJson(masterFx);
             _masterEffectSnapshot = ms;
-            debugPrint(
+            _projectLoadTrace(
               '[ProjectLoad] restore master FX count=${ms.effects.length}',
             );
             _registerPendingMasterEffectRestores(ms);
@@ -14806,8 +15064,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 detail: 'Restoring plugin from saved project state.',
               );
             }
-            final restoreResult = await _restoreMasterSnapshot(ms);
-            debugPrint(
+            final restoreResult = await _restoreMasterSnapshot(
+              ms,
+              logger: _projectLoadTrace,
+            );
+            _projectLoadTrace(
               '[ProjectLoad] restored master FX failures=${restoreResult.failures.length}',
             );
             _applyEffectRestoreResultToLedger(
@@ -14823,11 +15084,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         _syncEffectSnapshotCacheToCurrentRows();
         await _restoreDeferredHostedInstrumentLoadsDuringProjectLoad();
+        effectsRestoreMs = effectsRestore.elapsedMilliseconds;
+
+        await _refreshAutomationTargetsForAllRows(syncNativeWhenDone: false);
+        await _syncNativeAutomationForAllRows();
+      } catch (error, stackTrace) {
+        nativeLoadError = error;
+        nativeLoadStackTrace = stackTrace;
       } finally {
-        await JuceAudioEngine.endProjectClipLoad();
+        final nativeFinalize = Stopwatch()..start();
+        nativeDetailedFinalizations++;
+        nativeLoadFinalization =
+            await JuceAudioEngine.endProjectClipLoadDetailed();
+        nativeFinalizeMs = nativeFinalize.elapsedMilliseconds;
       }
 
-      await _refreshAutomationTargetsForAllRows(syncNativeWhenDone: false);
+      final nativeLoadFailure = nativeLoadError != null
+          ? JuceMutationResult.internalFailure
+          : nativeLoadFinalization;
+      if (!nativeLoadFailure.succeeded) {
+        await _rollbackFailedProjectClipPublication(
+          tracks,
+          initialTrackCount: projectLoadInitialTrackCount,
+          loadedTracksForWaveforms: loadedTracksForWaveforms,
+          reason: nativeLoadFailure,
+          snapshot: projectLoadRollbackSnapshot,
+        );
+      }
+      _appendPreservedProjectTrackNotice();
+      if (nativeLoadError != null) {
+        Error.throwWithStackTrace(nativeLoadError, nativeLoadStackTrace!);
+      }
+      if (!nativeLoadFinalization.succeeded) {
+        throw StateError(
+          'native_project_load_publication_failed:'
+          '${nativeLoadFinalization.name}',
+        );
+      }
 
       // Prime transport state and recover any missing output route before the
       // first user-driven note audition or playback.
@@ -14838,7 +15131,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (Platform.isIOS || PlatformCapabilities.current.isDesktop) {
         await _ensurePlaybackRouteReady(reason: 'projectLoad');
       }
-      await _syncNativeAutomationForAllRows();
       await _stabilizeAutomationTargetsAfterProjectLoad();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -14866,23 +15158,26 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _restorePersistedUndoHistory(json);
       setState(() {});
       projectLoadedSuccessfully = true;
-      if (mounted && _projectLoadIssues.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Project opened with ${_projectLoadIssues.length} recovery notice${_projectLoadIssues.length == 1 ? '' : 's'}. See Project Settings for details.',
-            ),
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
+      _showProjectLoadRecoveryNoticeIfNeeded();
       if (mounted && _usingCompatibilityAudio) {
         _queueCompatibilityAudioOpenNotice();
       }
     } catch (e) {
       debugPrint("Project load failed: $e");
+      _showProjectLoadRecoveryNoticeIfNeeded();
     } finally {
       _isProjectLoading = false;
+      debugPrint(
+        '[ProjectLoadSummary] success=$projectLoadedSuccessfully '
+        'rows=$_rowCount activeClips=${_audioTracks.length} '
+        'preservedClips=${_preservedProjectTracks.length} '
+        'rowRestoreMs=$rowRestoreMs clipAdmissionMs=$clipAdmissionMs '
+        'nativeFinalizeMs=$nativeFinalizeMs deferredSyncMs=$deferredSyncMs '
+        'effectsRestoreMs=$effectsRestoreMs totalMs=${loadTotal.elapsedMilliseconds} '
+        'nativeTransactions=$nativeLoadTransactions '
+        'nativeDetailedFinalizations=$nativeDetailedFinalizations '
+        'nativeResult=${nativeLoadFinalization.name}',
+      );
       if (projectLoadedSuccessfully && !_usingCompatibilityAudio) {
         _scheduleProjectAutosave(debounce: const Duration(seconds: 3));
       }
@@ -16758,6 +17053,166 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return rows;
   }
 
+  void _preserveRejectedProjectTrack(
+    Map<String, dynamic> track, {
+    required int originalIndex,
+    required JuceMutationResult reason,
+  }) {
+    final clipId = (track['clipId'] ?? '').toString().trim();
+    final key = clipId.isNotEmpty ? clipId : 'project_track_$originalIndex';
+    _preservedProjectTracks[key] = _PreservedProjectTrack(
+      originalIndex: originalIndex,
+      json: Map<String, dynamic>.from(track),
+      reason: reason,
+    );
+  }
+
+  void _appendPreservedProjectTrackNotice() {
+    if (_preservedProjectTracks.isEmpty) return;
+    final missing = _preservedProjectTracks.values
+        .where((entry) => entry.reason == JuceMutationResult.missingMedia)
+        .length;
+    final resourceLimited = _preservedProjectTracks.values
+        .where((entry) => entry.reason == JuceMutationResult.resourceExhausted)
+        .length;
+    final other = _preservedProjectTracks.length - missing - resourceLimited;
+    final reasons = <String>[
+      if (missing > 0) '$missing missing-media',
+      if (resourceLimited > 0) '$resourceLimited device-capacity',
+      if (other > 0) '$other other',
+    ];
+    _projectLoadIssues.add(
+      _ProjectLoadIssue(
+        type: _ProjectLoadIssueType.missingAudio,
+        title: 'Some Clips Are Unavailable',
+        detail:
+            'Mixroom kept ${_preservedProjectTracks.length} unavailable clip${_preservedProjectTracks.length == 1 ? '' : 's'} in the saved project (${reasons.join(', ')}). They will be retried the next time the project opens.',
+      ),
+    );
+  }
+
+  Future<void> _rollbackFailedProjectClipPublication(
+    List<dynamic> originalTracks, {
+    required int initialTrackCount,
+    required List<AudioTrack> loadedTracksForWaveforms,
+    required JuceMutationResult reason,
+    required _ProjectLoadRollbackSnapshot snapshot,
+  }) async {
+    _projectLoadPublicationFailedClosed = true;
+    for (int index = 0; index < originalTracks.length; index++) {
+      final raw = originalTracks[index];
+      if (raw is! Map) continue;
+      _preserveRejectedProjectTrack(
+        raw.cast<String, dynamic>(),
+        originalIndex: index,
+        reason: reason,
+      );
+    }
+
+    final safeInitialTrackCount = initialTrackCount
+        .clamp(0, _audioTracks.length)
+        .toInt();
+    final rejectedTracks = _audioTracks
+        .sublist(safeInitialTrackCount)
+        .toList(growable: false);
+    final rejectedEngineIds = <int>[
+      for (final track in rejectedTracks)
+        if (track.engineClipId >= 0) track.engineClipId,
+    ];
+    _unrecyclableEngineClipIds.addAll(rejectedEngineIds);
+    _releasedEngineClipIds.removeAll(rejectedEngineIds);
+
+    Object? rollbackError;
+    StackTrace? rollbackStackTrace;
+    var finalization = JuceMutationResult.internalFailure;
+    await JuceAudioEngine.beginProjectClipLoad();
+    try {
+      await _requireNativeClipRemoval(rejectedEngineIds);
+      for (final track in rejectedTracks) {
+        track.audioStartTimer?.cancel();
+        _removeClipFromOperationIndexes(track, markMutation: false);
+      }
+      _audioTracks.removeWhere(rejectedTracks.contains);
+      loadedTracksForWaveforms.removeWhere(rejectedTracks.contains);
+
+      _trackGroups
+        ..clear()
+        ..addAll(snapshot.layout.trackGroups.map(_cloneTrackGroup));
+      final savedRows = snapshot.layout.rows
+          .map(_timelineRowToJson)
+          .toList(growable: false);
+      await _restoreRowsFromProjectJson(savedRows, const <Object>[]);
+      _restoreProjectLoadRowUi(snapshot.rowUiById);
+
+      for (int row = 0; row < _rowCount; row++) {
+        await JuceAudioEngine.setRowGain(row, _rowGain[row]);
+        await JuceAudioEngine.setRowPan(row, _rowPan[row]);
+      }
+      await _recomputeAudibleState();
+
+      _rowEffectSnapshotsByRowId.clear();
+      for (final savedEffects in snapshot.rowEffects) {
+        final row = _rowIndexForId(savedEffects.rowId);
+        if (row < 0) {
+          throw StateError('project_load_rollback_row_missing');
+        }
+        final resolved = RowEffectsSnapshot(
+          row,
+          savedEffects.effects,
+          rowId: savedEffects.rowId,
+        );
+        final restored = await _restoreRowSnapshot(resolved);
+        if (restored.hasFailures) {
+          throw StateError('project_load_rollback_row_effect_failed');
+        }
+        _rowEffectSnapshotsByRowId[savedEffects.rowId] = resolved;
+      }
+
+      final masterRestored = await _restoreMasterSnapshot(
+        snapshot.masterEffects,
+      );
+      if (masterRestored.hasFailures) {
+        throw StateError('project_load_rollback_master_effect_failed');
+      }
+      _masterEffectSnapshot = snapshot.masterEffects;
+      _masterGain = snapshot.masterGain;
+      _masterPan = snapshot.masterPan;
+      await _syncNativeMasterStaticState(
+        gain: snapshot.masterGain,
+        pan: snapshot.masterPan,
+        clearAutomation: true,
+      );
+
+      await _refreshAutomationTargetsForAllRows(syncNativeWhenDone: false);
+      await _syncNativeAutomationForAllRows();
+      final selectedRow = _rowIndexForId(snapshot.selectedRowId);
+      _selectedRow = selectedRow < 0 ? 0 : selectedRow;
+    } catch (error, stackTrace) {
+      rollbackError = error;
+      rollbackStackTrace = stackTrace;
+    } finally {
+      finalization = await JuceAudioEngine.endProjectClipLoadDetailed();
+    }
+
+    if (rollbackError != null || !finalization.succeeded) {
+      await _shutdownAudioEngineV2Aware();
+      if (rollbackError != null) {
+        Error.throwWithStackTrace(rollbackError, rollbackStackTrace!);
+      }
+      throw StateError(
+        'native_project_load_rollback_publication_failed:'
+        '${finalization.name}',
+      );
+    }
+
+    _unrecyclableEngineClipIds.removeAll(rejectedEngineIds);
+    _releasedEngineClipIds.addAll(rejectedEngineIds);
+    _updateOverallDurationIfNeeded(
+      removedClips: rejectedTracks,
+      notifyUi: false,
+    );
+  }
+
   Future<Map<String, dynamic>> _buildProjectJsonSnapshot() async {
     _migrateAutomationClipsToLanePoints();
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -16835,6 +17290,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
       }
       tracksJson.add(trackJson);
+    }
+
+    final activeClipIds = tracksJson
+        .map((track) => (track['clipId'] ?? '').toString().trim())
+        .where((clipId) => clipId.isNotEmpty)
+        .toSet();
+    final preserved = _preservedProjectTracks.values.toList(growable: false)
+      ..sort((a, b) => a.originalIndex.compareTo(b.originalIndex));
+    for (final entry in preserved) {
+      final clipId = (entry.json['clipId'] ?? '').toString().trim();
+      if (clipId.isNotEmpty && activeClipIds.contains(clipId)) continue;
+      final insertionIndex = entry.originalIndex.clamp(0, tracksJson.length);
+      tracksJson.insert(insertionIndex, Map<String, dynamic>.from(entry.json));
+      if (clipId.isNotEmpty) activeClipIds.add(clipId);
     }
 
     final rowStates = <Map<String, dynamic>>[];
@@ -17335,23 +17804,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           newHostedInstrumentStateBase64:
               (command['newHostedInstrumentStateB64'] ?? '').toString(),
           oldTrimEnd: command.containsKey('oldTrimEndMs')
-              ? Duration(
-                  milliseconds: _commandInt(command, 'oldTrimEndMs') ?? 0,
+              ? clipTrimFromMilliseconds(
+                  _commandDouble(command, 'oldTrimEndMs') ?? 0,
+                  isMidi: true,
                 )
               : null,
           newTrimEnd: command.containsKey('newTrimEndMs')
-              ? Duration(
-                  milliseconds: _commandInt(command, 'newTrimEndMs') ?? 0,
+              ? clipTrimFromMilliseconds(
+                  _commandDouble(command, 'newTrimEndMs') ?? 0,
+                  isMidi: true,
                 )
               : null,
           oldAudioDuration: command.containsKey('oldAudioDurationMs')
-              ? Duration(
-                  milliseconds: _commandInt(command, 'oldAudioDurationMs') ?? 0,
+              ? clipTrimFromMilliseconds(
+                  _commandDouble(command, 'oldAudioDurationMs') ?? 0,
+                  isMidi: true,
                 )
               : null,
           newAudioDuration: command.containsKey('newAudioDurationMs')
-              ? Duration(
-                  milliseconds: _commandInt(command, 'newAudioDurationMs') ?? 0,
+              ? clipTrimFromMilliseconds(
+                  _commandDouble(command, 'newAudioDurationMs') ?? 0,
+                  isMidi: true,
                 )
               : null,
           oldClipOwnedState: oldOwnedState is Map
@@ -18322,13 +18795,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       throw StateError('clip_restore_row_missing');
     }
     final timeMs = (_valueDouble(payload['offset']) ?? 0.0) * 1000.0;
-    final trimStart = Duration(
-      milliseconds: _valueInt(payload['trimStartMs']) ?? 0,
+    final trimStart = clipTrimFromMilliseconds(
+      (kind == ClipKind.midi
+              ? _valueDouble(payload['trimStartMs'])
+              : _valueInt(payload['trimStartMs'])) ??
+          0,
+      isMidi: kind == ClipKind.midi,
     );
-    final trimEnd = Duration(
-      milliseconds:
-          _valueInt(payload['trimEndMs']) ??
+    final trimEnd = clipTrimFromMilliseconds(
+      (kind == ClipKind.midi
+              ? _valueDouble(payload['trimEndMs'])
+              : _valueInt(payload['trimEndMs'])) ??
           math.max(0, _valueInt(payload['audioDurationMs']) ?? 0),
+      isMidi: kind == ClipKind.midi,
     );
     final automation = _commandAutomationPoints(payload['automation']);
 
@@ -18401,14 +18880,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isValidClipIndex(index)) return;
 
     final clip = _audioTracks[index];
+    await _requireNativeClipRemoval(<int>[clip.engineClipId]);
     clip.audioStartTimer?.cancel();
     if (_activeMidiClipEngineId == clip.engineClipId) {
       _closeMidiClipEditor();
     }
     _audioTracks.removeAt(index);
-    if (clip.engineClipId >= 0) {
-      await JuceAudioEngine.removeTrack(clip.engineClipId);
-    }
     _updateOverallDurationIfNeeded(removedClips: <AudioTrack>[clip]);
     await _syncClipFadesForRowsToEngine({_clipRowIdForFadeSync(clip)});
     _clipFadeRowIdByEngineId.remove(clip.engineClipId);
@@ -18813,6 +19290,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final assignedFileNameBySourcePath = <String, String>{};
     final usedSavedFileNamesLower = <String>{};
     final referenced = <String>{};
+
+    for (final preserved in _preservedProjectTracks.values) {
+      final fileName = (preserved.json['fileName'] ?? '').toString().trim();
+      if (fileName.isNotEmpty) {
+        referenced.add(fileName);
+        usedSavedFileNamesLower.add(fileName.toLowerCase());
+      }
+    }
 
     for (final tr in _audioTracks) {
       final src = tr.file;
@@ -19304,12 +19789,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return;
   }
 
+  bool _rejectTransportStartWhileProjectLoading() {
+    if (!_isProjectLoading) return false;
+    _showSmallNotice('Project is still loading. Please wait.');
+    return true;
+  }
+
   Future<void> _togglePlayPauseAudio(StateSetter setLocalState) async {
     // if (_audioTracks.isEmpty) {
     //   return;
     // }
 
     final targetPlaying = !_isPlaying;
+    if (targetPlaying && _rejectTransportStartWhileProjectLoading()) {
+      return;
+    }
     _transportDesiredPlaying = targetPlaying;
     _transportCommandSerial++;
     _applyOptimisticTransportVisual(targetPlaying);
@@ -22592,6 +23086,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String? existingClipId,
     int? instrumentLaneRowId,
   }) async {
+    if (_rejectTransportStartWhileProjectLoading()) return;
     if (_recordTransitionInFlight) return;
     if ((existingClipId == null) == (instrumentLaneRowId == null)) return;
 
@@ -22878,6 +23373,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _startRecordingJuce() async {
+    if (_rejectTransportStartWhileProjectLoading()) return;
     final explicitAudioRowSelected =
         _isValidRowIndex(_selectedRow) &&
         _rows[_selectedRow].kind == TimelineRowKind.audio;
@@ -23960,17 +24456,48 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool notifyUi = true,
     bool deferFadeSync = false,
   }) async {
-    if (_audioTracks.length >= kNumClips) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-          ),
-        ),
-      );
-      return;
-    }
+    await _measureManualPerformanceOperation<void>(
+      'add_clip',
+      () => _addAudioTrackFromFileUnmeasured(
+        fromFile,
+        row,
+        timeMs,
+        trimStartRequested: trimStartRequested,
+        trimEndRequested: trimEndRequested,
+        pausePlaybackBeforeInsert: pausePlaybackBeforeInsert,
+        transcodeTo48k: transcodeTo48k,
+        showLoadingOverlay: showLoadingOverlay,
+        uploadMethod: uploadMethod,
+        clipId: clipId,
+        recordingLatencyMs: recordingLatencyMs,
+        alignmentOffsetMs: alignmentOffsetMs,
+        notifyUi: notifyUi,
+        deferFadeSync: deferFadeSync,
+      ),
+      metadata: <String, Object?>{
+        'clip_kind': 'audio',
+        'target_row': row,
+        'upload_method': uploadMethod,
+      },
+    );
+  }
 
+  Future<void> _addAudioTrackFromFileUnmeasured(
+    File fromFile,
+    int row,
+    double timeMs, {
+    Duration? trimStartRequested,
+    Duration? trimEndRequested,
+    bool pausePlaybackBeforeInsert = true,
+    bool transcodeTo48k = true,
+    bool showLoadingOverlay = true,
+    String uploadMethod = 'import',
+    String? clipId,
+    double recordingLatencyMs = 0.0,
+    double alignmentOffsetMs = 0.0,
+    bool notifyUi = true,
+    bool deferFadeSync = false,
+  }) async {
     if (pausePlaybackBeforeInsert && _isPlaying) {
       await _pausePlayback();
     }
@@ -23984,7 +24511,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (PlatformCapabilities.current.isDesktop || Platform.isIOS) {
       await _ensurePlaybackRouteReady(reason: 'audioImport');
     }
-    await _ensureRowIndexExists(row);
+    final rowReady = await _ensureRowIndexExists(row);
+    if (!rowReady) return;
     await _ensureRowExistsForClipInsertion();
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
     if (!_rowAllowsClipKind(safeRow, ClipKind.audio)) {
@@ -23994,12 +24522,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _reserveEngineClipId();
     if (engineClipId < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-          ),
-        ),
+      _showSmallNotice(
+        'This device could not add another clip right now. Nothing was changed.',
       );
       return;
     }
@@ -24009,6 +24533,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       });
     }
     var addedTrack = false;
+    var admittedToEngine = false;
+    File? generatedClipSourceFile;
     try {
       final newFile = fromFile; //File(result.files.single.path!);
 
@@ -24023,7 +24549,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (uploadMethod == 'ai_library') {
           final candidatePath = _aiLibraryImportedAudioPath(newFile.path);
           final candidateFile = File(candidatePath);
-          if (!candidateFile.existsSync()) {
+          final candidateAlreadyExisted = candidateFile.existsSync();
+          if (!candidateAlreadyExisted) {
             // AI library/sample-pack inserts should reuse one imported WAV per
             // source sample instead of cloning identical files for every hit.
             await FFmpegKit.execute(
@@ -24031,13 +24558,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             );
           }
           clipSourceFile = candidateFile;
+          if (!candidateAlreadyExisted) generatedClipSourceFile = candidateFile;
         } else {
           // --- collision-safe temp name ---
           String candidatePath = p.join(audioDir.path, '$baseNameNoExt.wav');
           int suffix = 1;
 
-          // Keep incrementing if another track already uses this temp path
-          while (_audioTracks.any((t) => t.file.path == candidatePath)) {
+          // Never overwrite an active or preserved project asset while
+          // preparing a fresh admission.
+          while (_audioTracks.any((t) => t.file.path == candidatePath) ||
+              _preservedProjectTracks.values.any(
+                (entry) =>
+                    (entry.json['fileName'] ?? '').toString().toLowerCase() ==
+                    p.basename(candidatePath).toLowerCase(),
+              ) ||
+              File(candidatePath).existsSync()) {
             candidatePath = p.join(
               audioDir.path,
               '$baseNameNoExt #$suffix.wav',
@@ -24051,6 +24586,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             '-i "${newFile.path}" -ar 48000 -y "$candidatePath"',
           );
           clipSourceFile = File(candidatePath);
+          generatedClipSourceFile = clipSourceFile;
         }
       }
 
@@ -24065,8 +24601,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (trimEndRequested - requestedTrimStart).inMilliseconds / 1000.0,
             )
           : 0.0;
-      final loaded = await _runWithAndroidEngineCriticalSection(() {
-        return JuceAudioEngine.loadClip(
+      final admission = await _runWithAndroidEngineCriticalSection(() {
+        return JuceAudioEngine.loadClipDetailed(
           engineClipId,
           rowId,
           clipSourceFile.path,
@@ -24075,7 +24611,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
         );
       });
-      if (!loaded) return;
+      if (!admission.succeeded) {
+        _showClipAdmissionFailure(admission);
+        return;
+      }
+      admittedToEngine = true;
 
       final dur = await _runWithAndroidEngineCriticalSection(
         () => _resolveClipSourceDuration(
@@ -24132,7 +24672,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
     } finally {
-      _releaseReservedEngineClipId(engineClipId);
+      var allowEngineClipIdReuse = true;
+      if (admittedToEngine && !addedTrack) {
+        final removal = await JuceAudioEngine.unloadClipDetailed(engineClipId);
+        allowEngineClipIdReuse = removal.succeeded;
+      }
+      if (!addedTrack && generatedClipSourceFile != null) {
+        try {
+          final generated = generatedClipSourceFile;
+          if (await generated.exists()) await generated.delete();
+        } catch (error) {
+          debugPrint('Could not remove rejected clip file: $error');
+        }
+      }
+      _releaseReservedEngineClipId(
+        engineClipId,
+        allowReuse: allowEngineClipIdReuse,
+      );
       if (showLoadingOverlay && !addedTrack && mounted && _isLoadingAudio) {
         setState(() {
           _isLoadingAudio = false;
@@ -24164,18 +24720,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration? trimEndRequested,
     String? clipId,
   }) async {
-    if (_audioTracks.length >= kNumClips) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-          ),
-        ),
-      );
-      return;
-    }
-
-    await _ensureRowIndexExists(row);
+    if (!await _ensureRowIndexExists(row)) return;
     await _ensureRowExistsForClipInsertion();
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
     if (!_rowAllowsClipKind(safeRow, ClipKind.audio)) {
@@ -24186,15 +24731,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _reserveEngineClipId();
     if (engineClipId < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-          ),
-        ),
+      _showSmallNotice(
+        'This device could not add another clip right now. Nothing was changed.',
       );
       return;
     }
+    var admittedToEngine = false;
+    var addedTrack = false;
     try {
       final requestedTrimStart = trimStartRequested ?? Duration.zero;
       final requestedTrimEnd = trimEndRequested ?? clip.audioDuration;
@@ -24204,8 +24747,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       final requestedInFileOffsetSec =
           requestedTrimStart.inMilliseconds / 1000.0;
-      final loaded = await _runWithAndroidEngineCriticalSection(() {
-        return JuceAudioEngine.loadClip(
+      final admission = await _runWithAndroidEngineCriticalSection(() {
+        return JuceAudioEngine.loadClipDetailed(
           engineClipId,
           rowId,
           clip.file.path,
@@ -24214,7 +24757,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
         );
       });
-      if (!loaded) return;
+      if (!admission.succeeded) {
+        _showClipAdmissionFailure(admission);
+        return;
+      }
+      admittedToEngine = true;
       final dur = clip.audioDuration;
 
       // Create a new AudioTrack instance with a fixed audioDuration.
@@ -24257,11 +24804,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       setState(() {
         _audioTracks.add(newTrack);
       });
+      addedTrack = true;
       _indexClipForOperations(newTrack);
       _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[newTrack]);
       await _syncClipFadesForRowsToEngine({rowId});
     } finally {
-      _releaseReservedEngineClipId(engineClipId);
+      var allowEngineClipIdReuse = true;
+      if (admittedToEngine && !addedTrack) {
+        final removal = await JuceAudioEngine.unloadClipDetailed(engineClipId);
+        allowEngineClipIdReuse = removal.succeeded;
+      }
+      _releaseReservedEngineClipId(
+        engineClipId,
+        allowReuse: allowEngineClipIdReuse,
+      );
     }
   }
 
@@ -24294,10 +24850,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool startWaveform = true,
     bool assumeFreshEngineDefaults = false,
     String? clipId,
+    void Function(JuceMutationResult result)? onAdmissionResult,
   }) async {
     // no FFmpeg, no temp renaming
     if (!rowAlreadyEnsured) {
-      await _ensureRowIndexExists(row);
+      if (!await _ensureRowIndexExists(row)) {
+        onAdmissionResult?.call(JuceMutationResult.resourceExhausted);
+        return;
+      }
       await _ensureRowExistsForClipInsertion();
     }
     final safeRow = _rowCount == 0 ? 0 : row.clamp(0, _rowCount - 1);
@@ -24308,7 +24868,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final safeTimeMs = math.max(0.0, timeMs);
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _reserveEngineClipId();
-    if (engineClipId < 0) return;
+    if (engineClipId < 0) {
+      onAdmissionResult?.call(JuceMutationResult.resourceExhausted);
+      return;
+    }
+    var admittedToEngine = false;
+    var addedTrack = false;
     try {
       final requestedTrimStart = trimStartRequested ?? Duration.zero;
       final requestedInFileOffsetSec =
@@ -24319,8 +24884,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               (trimEndRequested - requestedTrimStart).inMilliseconds / 1000.0,
             )
           : 0.0;
-      final loaded = await _runWithAndroidEngineCriticalSection(() {
-        return JuceAudioEngine.loadClip(
+      final admission = await _runWithAndroidEngineCriticalSection(() {
+        return JuceAudioEngine.loadClipDetailed(
           engineClipId,
           rowId,
           projectAudioFile.path,
@@ -24329,7 +24894,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
         );
       });
-      if (!loaded) return;
+      onAdmissionResult?.call(admission);
+      if (!admission.succeeded) return;
+      admittedToEngine = true;
 
       final dur = await _runWithAndroidEngineCriticalSection(
         () => _resolveClipSourceDuration(
@@ -24400,7 +24967,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
 
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] add audio track model clip=${newTrack.clipId} engine=${newTrack.engineClipId} start',
         );
       }
@@ -24411,9 +24978,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } else {
         _audioTracks.add(newTrack);
       }
+      addedTrack = true;
       _indexClipForOperations(newTrack);
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] add audio track model clip=${newTrack.clipId} engine=${newTrack.engineClipId} done',
         );
       }
@@ -24428,7 +24996,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[newTrack]);
       }
     } finally {
-      _releaseReservedEngineClipId(engineClipId);
+      var allowEngineClipIdReuse = true;
+      if (admittedToEngine && !addedTrack) {
+        final removal = await JuceAudioEngine.unloadClipDetailed(engineClipId);
+        allowEngineClipIdReuse = removal.succeeded;
+      }
+      _releaseReservedEngineClipId(
+        engineClipId,
+        allowReuse: allowEngineClipIdReuse,
+      );
     }
   }
 
@@ -26580,8 +27156,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final attackOverrideMs = params['attackMs'];
     final attackOverrideSec =
         attackOverrideMs != null && attackOverrideMs.isFinite
-            ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
-            : null;
+        ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
+        : null;
     final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
       0.0,
       2.0,
@@ -26592,8 +27168,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final releaseOverrideMs = params['releaseMs'];
     final releaseOverrideSec =
         releaseOverrideMs != null && releaseOverrideMs.isFinite
-            ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
-            : null;
+        ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
+        : null;
     final sampleStartNorm = (params['sampleStartNorm'] ?? 0.0)
         .clamp(0.0, 0.98)
         .toDouble();
@@ -27225,6 +27801,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
       timeout: _kProjectPluginInstanceRestoreTimeout,
+      logger: _isProjectLoading ? _projectLoadTrace : null,
       onTimeout: () {
         // Cancellation must not extend the user-visible timeout if the native
         // message thread is the component that is stalled.
@@ -27414,6 +27991,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
       timeout: _kProjectPluginStateRestoreTimeout,
+      logger: _isProjectLoading ? _projectLoadTrace : null,
     );
     return applied ?? false;
   }
@@ -27833,16 +28411,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     String hostedInstrumentStateBase64 = '',
     String? clipId,
   }) async {
-    if (_audioTracks.length >= kNumClips) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-          ),
-        ),
-      );
-      return;
-    }
     if (instrumentId.trim().isEmpty) {
       if (notifyUi && mounted) {
         _showSmallNotice('This MIDI clip is missing its instrument.');
@@ -27860,7 +28428,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     if (!rowAlreadyEnsured) {
-      await _ensureRowIndexExists(row);
+      if (!await _ensureRowIndexExists(row)) return;
       await _ensureRowExistsForClipInsertion();
     }
     final safeRow = await _ensureInstrumentLaneForMidiClip(
@@ -27874,26 +28442,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final rowId = _rowIdAt(safeRow);
     final engineClipId = _allocateEngineClipId();
     if (engineClipId < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-          ),
-        ),
+      _showSmallNotice(
+        'This device could not add another clip right now. Nothing was changed.',
       );
       return;
     }
+    var admittedToEngine = false;
+    var addedTrack = false;
     try {
       final outFile =
           renderedFile ?? await _nextInstrumentRenderFile(instrumentId);
 
       final requestedTrimStart = trimStartRequested ?? Duration.zero;
       final requestedInFileOffsetSec =
-          requestedTrimStart.inMilliseconds / 1000.0;
+          requestedTrimStart.inMicroseconds / Duration.microsecondsPerSecond;
       final requestedLengthSec = trimEndRequested != null
           ? math.max(
               0.0,
-              (trimEndRequested - requestedTrimStart).inMilliseconds / 1000.0,
+              (trimEndRequested - requestedTrimStart).inMicroseconds /
+                  Duration.microsecondsPerSecond,
             )
           : 0.0;
       final resolvedSourceTempoBpm =
@@ -27964,6 +28531,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         } else {
           _audioTracks.add(pendingTrack);
         }
+        addedTrack = true;
         _indexClipForOperations(pendingTrack);
         _setHostedPluginRestoreEntry(
           _HostedPluginRestoreEntry(
@@ -28008,12 +28576,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         debugPrint('Live MIDI clip load failed: $e\n$st');
         loadedLiveMidi = false;
       }
+      admittedToEngine = loadedLiveMidi;
 
       if (!loadedLiveMidi) {
         final fallbackFile = renderedFile;
         if (fallbackFile != null && fallbackFile.existsSync()) {
-          final fallbackLoaded = await _runWithAndroidEngineCriticalSection(
-            () => JuceAudioEngine.loadClip(
+          final fallbackAdmission = await _runWithAndroidEngineCriticalSection(
+            () => JuceAudioEngine.loadClipDetailed(
               engineClipId,
               rowId,
               fallbackFile.path,
@@ -28022,7 +28591,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               inFileOffsetSec: math.max(0.0, requestedInFileOffsetSec),
             ),
           );
-          if (!fallbackLoaded) return;
+          if (!fallbackAdmission.succeeded) return;
+          admittedToEngine = true;
 
           _projectLoadIssues.add(
             _ProjectLoadIssue(
@@ -28087,6 +28657,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           } else {
             _audioTracks.add(fallbackTrack);
           }
+          addedTrack = true;
           _indexClipForOperations(fallbackTrack);
           if (updateProjectDuration) {
             _updateOverallDurationIfNeeded(
@@ -28158,7 +28729,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         deferHostedInstrumentStateRestore: deferHostedInstrumentStateRestore,
       );
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] add MIDI track model clip=${newTrack.clipId} engine=${newTrack.engineClipId} start',
         );
       }
@@ -28169,9 +28740,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       } else {
         _audioTracks.add(newTrack);
       }
+      addedTrack = true;
       _indexClipForOperations(newTrack);
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] add MIDI track model clip=${newTrack.clipId} engine=${newTrack.engineClipId} done',
         );
       }
@@ -28182,7 +28754,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _updateOverallDurationIfNeeded(changedClips: <AudioTrack>[newTrack]);
       }
     } finally {
-      _releaseReservedEngineClipId(engineClipId);
+      var allowEngineClipIdReuse = true;
+      if (admittedToEngine && !addedTrack) {
+        final removal = await JuceAudioEngine.unloadClipDetailed(engineClipId);
+        allowEngineClipIdReuse = removal.succeeded;
+      }
+      _releaseReservedEngineClipId(
+        engineClipId,
+        allowReuse: allowEngineClipIdReuse,
+      );
     }
   }
 
@@ -28277,6 +28857,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   double _rawClipDurationSec(AudioTrack clip) {
+    if (clip.isMidi) {
+      return math.max(
+        0.0,
+        (clip.trimEnd - clip.trimStart).inMicroseconds /
+            Duration.microsecondsPerSecond,
+      );
+    }
     final ms = (clip.trimEnd - clip.trimStart).inMilliseconds.toDouble();
     return math.max(0.0, ms / 1000.0);
   }
@@ -28491,6 +29078,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_clipByEngineId[clip.engineClipId] == clip) {
       removed = true;
       _clipByEngineId.remove(clip.engineClipId);
+      if (clip.engineClipId >= 0 &&
+          !_reservedEngineClipIds.contains(clip.engineClipId) &&
+          !_unrecyclableEngineClipIds.contains(clip.engineClipId)) {
+        _releasedEngineClipIds.add(clip.engineClipId);
+      }
     }
     if (removed && markMutation) {
       _markClipVisualMutation(topology: true);
@@ -28516,6 +29108,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _incrementClipEndCount(endMs);
     if (clip.engineClipId >= 0) {
       _clipByEngineId[clip.engineClipId] = clip;
+      _releasedEngineClipIds.remove(clip.engineClipId);
+      _nextEngineClipId = math.max(_nextEngineClipId, clip.engineClipId + 1);
     }
     if (markMutation) {
       final layoutChanged =
@@ -28532,6 +29126,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _rebuildClipOperationIndexes() {
+    final previouslyIndexedEngineIds = _clipByEngineId.keys.toSet();
     _indexedClipRowId.clear();
     _indexedClipRowIndex.clear();
     _indexedClipStartSec.clear();
@@ -28542,6 +29137,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _clipOperationIndexesInitialized = true;
     for (final clip in _audioTracks) {
       _indexClipForOperations(clip, markMutation: false);
+    }
+    final currentEngineIds = _clipByEngineId.keys.toSet();
+    _releasedEngineClipIds
+      ..addAll(previouslyIndexedEngineIds.difference(currentEngineIds))
+      ..removeAll(currentEngineIds)
+      ..removeAll(_reservedEngineClipIds)
+      ..removeAll(_unrecyclableEngineClipIds);
+    if (currentEngineIds.isNotEmpty) {
+      _nextEngineClipId = math.max(
+        _nextEngineClipId,
+        currentEngineIds.reduce(math.max) + 1,
+      );
     }
     _markClipVisualMutation(topology: true);
   }
@@ -28654,12 +29261,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _syncAllClipFadesToEngine() async {
     final fades = _resolvedClipFadesByEngineId();
     if (_isProjectLoading) {
-      debugPrint('[ProjectLoad] sync clip fades count=${fades.length}');
+      _projectLoadTrace('[ProjectLoad] sync clip fades count=${fades.length}');
     }
     await _applyClipFadesToEngine(fades);
     _rememberClipFadeRowsForAllClips();
     if (_isProjectLoading) {
-      debugPrint('[ProjectLoad] sync clip fades done');
+      _projectLoadTrace('[ProjectLoad] sync clip fades done');
     }
   }
 
@@ -29888,17 +30495,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     final deferInitialPropertySync = _isProjectLoading && assumeEngineDefaults;
     if (_isProjectLoading) {
-      debugPrint(
+      _projectLoadTrace(
         '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} timeline start',
       );
     }
     if (!deferInitialPropertySync) {
       await _syncClipTimelineModelToEngine(clip);
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} timeline done',
         );
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} mix start',
         );
       }
@@ -29907,12 +30514,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         assumeEngineDefaults: assumeEngineDefaults,
       );
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} mix done',
         );
       }
     } else {
-      debugPrint(
+      _projectLoadTrace(
         '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} timeline and mix deferred',
       );
     }
@@ -29920,14 +30527,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clip.hostedInstrumentStateBase64.trim().isNotEmpty) {
       if (deferHostedInstrumentStateRestore) {
         if (_isProjectLoading) {
-          debugPrint(
+          _projectLoadTrace(
             '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} hosted state deferred',
           );
         }
         return;
       }
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} hosted state start',
         );
       }
@@ -29936,7 +30543,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         clip.hostedInstrumentStateBase64,
       );
       if (_isProjectLoading) {
-        debugPrint(
+        _projectLoadTrace(
           '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} hosted state done applied=$applied',
         );
       }
@@ -29951,7 +30558,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
       }
     } else if (_isProjectLoading) {
-      debugPrint(
+      _projectLoadTrace(
         '[ProjectLoad] sync clip ${clip.clipId} engine=${clip.engineClipId} no hosted state',
       );
     }
@@ -30744,25 +31351,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               '$normalizedPath|${stat.size}|${stat.modified.millisecondsSinceEpoch}',
           durationMs: durationMs,
         );
-        final sourceRange =
-            waveformDetailSourceRangeForTimelineIntersection(
-              clipStartMs: clipStartMs,
-              timelineDurationMs: timelineDurationMs,
-              trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
-              trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
-              sourceDurationMs: durationMs,
-              isReversed: clip.isReversed,
-              viewportStartMs: viewport.timelineStartMs,
-              viewportEndMs: viewport.timelineEndMs,
-            );
+        final sourceRange = waveformDetailSourceRangeForTimelineIntersection(
+          clipStartMs: clipStartMs,
+          timelineDurationMs: timelineDurationMs,
+          trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
+          trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
+          sourceDurationMs: durationMs,
+          isReversed: clip.isReversed,
+          viewportStartMs: viewport.timelineStartMs,
+          viewportEndMs: viewport.timelineEndMs,
+        );
         if (sourceRange == null) {
           return const <WaveformDetailTileRequest>[];
         }
         return waveformDetailTileIndicesForRange(
-          sourceStartMs: sourceRange.startMs,
-          sourceEndMs: sourceRange.endMs,
-          sourceDurationMs: durationMs,
-        )
+              sourceStartMs: sourceRange.startMs,
+              sourceEndMs: sourceRange.endMs,
+              sourceDurationMs: durationMs,
+            )
             .map(
               (tileIndex) => WaveformDetailTileRequest(
                 source: source,
@@ -31158,7 +31764,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final target = resolveAutoAudioImportTarget(
       selectedRow: _selectedRow,
       rowCount: _rowCount,
-      maxRows: _effectiveMaxRows,
+      creationLimit: _rowCreationLimit,
       isAudioRow: (row) =>
           row >= 0 && row < _rows.length && !_rows[row].isInstrumentLane,
       isOccupied: _rowHasTimelineClip,
@@ -32570,7 +33176,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (LlmConfig.normalizedToolRoutingMode != 'full')
         'ai_tool_routing_mode': LlmConfig.normalizedToolRoutingMode,
       'subscription_plan': entitlement?.planCode ?? 'free',
-      'max_rows': _effectiveMaxRows,
+      'row_creation_limit': _rowCreationLimit,
+      // Retained for legacy AI contracts. Contract 6 uses the nullable
+      // row_creation_limit above.
+      'max_rows': _effectiveAiMaxRows,
       'current_rows': _rowCount,
       'allowed_builtin_effects': allowedEffects,
       'allowed_instrument_ids': allowedInstruments,
@@ -33955,7 +34564,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _addInstrumentClipFromPicker() async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return;
     }
@@ -33983,7 +34592,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     int row, {
     required bool above,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return;
     }
@@ -34240,6 +34849,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool openEditor = true,
     int editorTab = 0,
   }) async {
+    await _measureManualPerformanceOperation<void>(
+      'add_clip',
+      () => _createMidiClipInInstrumentLaneUnmeasured(
+        row,
+        timeMs,
+        openEditor: openEditor,
+        editorTab: editorTab,
+      ),
+      metadata: <String, Object?>{'clip_kind': 'midi', 'target_row': row},
+    );
+  }
+
+  Future<void> _createMidiClipInInstrumentLaneUnmeasured(
+    int row,
+    double timeMs, {
+    bool openEditor = true,
+    int editorTab = 0,
+  }) async {
     if (row < 0 || row >= _rows.length) return;
     final lane = _rows[row];
     if (!lane.isInstrumentLane) return;
@@ -34307,9 +34934,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return false;
     if (epoch != _liveMidiRowArmEpoch) return false;
     final row = _rowIndexForId(rowId);
-    return row >= 0 &&
-        row < _rows.length &&
-        _rows[row].isInstrumentLane;
+    return row >= 0 && row < _rows.length && _rows[row].isInstrumentLane;
   }
 
   Future<void> _armLiveMidiInputForInstrumentRow(int row) async {
@@ -40757,8 +41382,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, _) {
         final controls = _timelineController.topControlsState;
         final pianoRollGrid = _activePianoRollGridResolution.value;
-        final pianoRollDivisions = _showPianoRoll &&
-                controls.gridMode == TimelineGridMode.adaptive
+        final pianoRollDivisions =
+            _showPianoRoll && controls.gridMode == TimelineGridMode.adaptive
             ? pianoRollGrid?.divisionsPerBar
             : null;
         final rawQuantizeLabel = pianoRollDivisions != null
@@ -43343,40 +43968,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             : scannedCandidateCount;
                                         currentScannedPlugin =
                                             event['currentPlugin']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                currentScannedPlugin;
+                                                ?.toString()
+                                                .trim() ??
+                                            currentScannedPlugin;
                                         currentScannedPluginFormat =
                                             event['format']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                currentScannedPluginFormat;
+                                                ?.toString()
+                                                .trim() ??
+                                            currentScannedPluginFormat;
                                         if (rawPlugin is Map) {
-                                          final plugin = JuceAudioEngine
-                                              .normalizeScannedPlugin(
-                                            rawPlugin,
-                                          );
+                                          final plugin =
+                                              JuceAudioEngine.normalizeScannedPlugin(
+                                                rawPlugin,
+                                              );
                                           if (plugin != null) {
                                             currentScannedPlugin =
                                                 plugin['name'] as String;
                                             final rawFormat =
                                                 (plugin['format'] as String?)
-                                                        ?.trim() ??
-                                                    '';
+                                                    ?.trim() ??
+                                                '';
                                             currentScannedPluginFormat =
                                                 rawFormat == 'AudioUnit'
-                                                    ? 'AU'
-                                                    : rawFormat;
+                                                ? 'AU'
+                                                : rawFormat;
                                             final id = plugin['id'] as String;
                                             currentPlugins =
-                                                _applyDesktopPluginPreferences(<
-                                              Map<String, dynamic>
-                                            >[
-                                              ...currentPlugins.where(
-                                                (entry) => entry['id'] != id,
-                                              ),
-                                              plugin,
-                                            ]);
+                                                _applyDesktopPluginPreferences(
+                                                  <Map<String, dynamic>>[
+                                                    ...currentPlugins.where(
+                                                      (entry) =>
+                                                          entry['id'] != id,
+                                                    ),
+                                                    plugin,
+                                                  ],
+                                                );
                                           }
                                         }
                                       });
@@ -47806,7 +48432,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 : monitoringAvailable &&
                       (_liveInputMonitoringEffective ??
                           _shouldEnableLiveInputMonitoring(_audioRouteInfo));
-            final monitoringSubtitle = !monitoringAvailable && !monitoringEnabled
+            final monitoringSubtitle =
+                !monitoringAvailable && !monitoringEnabled
                 ? L10n.translate(
                     context,
                     'Monitoring is unavailable for the current audio route.',
@@ -48839,6 +49466,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {
+    if (!_isRecording &&
+        !_recordStartVisualPending &&
+        _rejectTransportStartWhileProjectLoading()) {
+      return;
+    }
     if (_recordStartVisualPending && !_isRecording) {
       _recordStartCancelRequested = true;
       _midiRecordingGeneration.invalidate();
@@ -49219,11 +49851,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final rawCurrent = parameter['value'];
       final currentNormalized = switch (rawCurrent) {
         bool value => value ? 1.0 : 0.0,
-        _ => (_toActionDouble(parameter['valueNormalized']) ??
-                _toActionDouble(rawCurrent) ??
-                0.0)
-            .clamp(0.0, 1.0)
-            .toDouble(),
+        _ =>
+          (_toActionDouble(parameter['valueNormalized']) ??
+                  _toActionDouble(rawCurrent) ??
+                  0.0)
+              .clamp(0.0, 1.0)
+              .toDouble(),
       };
       double nextNormalized;
       if (mode == 'set') {
@@ -49289,8 +49922,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mode == 'set') {
       final normalized = _toActionDouble(action['value_norm']);
       if (normalized != null && minimum != null && maximum != null) {
-        next = minimum +
-            (maximum - minimum) * normalized.clamp(0.0, 1.0);
+        next = minimum + (maximum - minimum) * normalized.clamp(0.0, 1.0);
       } else {
         final value = _toActionDouble(action['value']);
         if (value == null) {
@@ -49876,7 +50508,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     for (int row = bottomOccupied + 1; row < _rowCount; row++) {
       if (!occupiedRows.contains(row)) return row;
     }
-    if (_rowCount < _effectiveMaxRows) return _rowCount;
+    if (_canAddRows()) return _rowCount;
     for (int row = 0; row < _rowCount; row++) {
       if (!occupiedRows.contains(row)) return row;
     }
@@ -49913,7 +50545,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       data,
       fallbackClipIndex: fallbackClipIndex,
     );
-    while (requestedRow >= _rowCount && _rowCount < _effectiveMaxRows) {
+    while (requestedRow >= _rowCount && _canAddRows()) {
       final added = await _addRowImpl();
       if (!added || _rowCount <= 0) break;
     }
@@ -49926,7 +50558,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (!_rows[candidate].isInstrumentLane) return candidate;
     }
 
-    if (_rowCount < _effectiveMaxRows) {
+    if (_canAddRows()) {
       final inserted = await _insertRowBelowImpl(boundedRow);
       if (inserted) return (boundedRow + 1).clamp(0, _rowCount - 1).toInt();
     }
@@ -50913,7 +51545,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (v3RuntimeExpectations != null) {
                 _addAiV3Expectation(
                   v3RuntimeExpectations,
-                  instrumentExpectation,
+                  aiV3RowInstrumentExpectationForFinalState(
+                    v3RuntimeExpectations,
+                    instrumentExpectation,
+                  ),
                 );
               }
               if (chatFlowId != null) {
@@ -51891,20 +52526,74 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               final operation = data['operation']?.toString() ?? '';
               final producerCommandId =
                   data['command_id']?.toString().trim() ?? '';
+              // Bind the intended destination before execution, independently
+              // of the produced clip. Row indices can shift later in the plan.
+              if (operation == 'create_clip' && v3RuntimeExpectations != null) {
+                final expectation = v3RuntimeExpectations
+                    .where(
+                      (candidate) =>
+                          candidate['kind'] == 'midi_clip_created' &&
+                          candidate['producer_action_index'] == actionIndex,
+                    )
+                    .singleOrNull;
+                final target = _actionTarget(data);
+                final intendedId = _toActionInt(target['row_id']);
+                final intendedIndex = intendedId == null
+                    ? _toActionInt(target['row_index'] ?? data['row_index']) ??
+                          -1
+                    : _rowIndexForId(intendedId);
+                if (expectation == null || !_isValidRowIndex(intendedIndex)) {
+                  throw StateError('v3_resource_binding_target_mismatch');
+                }
+                final rowId = _rowIdAt(intendedIndex);
+                if (expectation['row_id'] is int &&
+                    expectation['row_id'] != rowId) {
+                  throw StateError('v3_resource_binding_target_mismatch');
+                }
+                expectation['row_id'] = rowId;
+              }
               final beforeMidiClipIds =
                   operation == 'create_clip' &&
-                      producerCommandId.isNotEmpty &&
-                      v3WorkflowRuntime != null
+                      (v3RuntimeExpectations != null ||
+                          (producerCommandId.isNotEmpty &&
+                              v3WorkflowRuntime != null))
                   ? _audioTracks
                         .where((clip) => clip.isMidi)
                         .map((clip) => clip.clipId)
                         .toSet()
                   : const <String>{};
               await _applyMidiComposeAction(data, chatFlowId: chatFlowId);
-              if (beforeMidiClipIds.isNotEmpty ||
-                  (operation == 'create_clip' &&
-                      producerCommandId.isNotEmpty &&
-                      v3WorkflowRuntime != null)) {
+              // Unreferenced outputs still need exact identity for readback.
+              // Matching by row/instrument/duration is ambiguous when a plan
+              // creates multiple same-length sections on the same instrument.
+              if (operation == 'create_clip' &&
+                  producerCommandId.isEmpty &&
+                  v3RuntimeExpectations != null) {
+                final created = _audioTracks
+                    .where(
+                      (clip) =>
+                          clip.isMidi &&
+                          !beforeMidiClipIds.contains(clip.clipId),
+                    )
+                    .toList(growable: false);
+                final expectation = v3RuntimeExpectations
+                    .where(
+                      (candidate) =>
+                          candidate['kind'] == 'midi_clip_created' &&
+                          candidate['producer_action_index'] == actionIndex,
+                    )
+                    .singleOrNull;
+                if (created.length != 1 || expectation == null) {
+                  throw StateError('v3_resource_binding_missing_output');
+                }
+                if (created.single.rowId != expectation['row_id']) {
+                  throw StateError('v3_resource_binding_target_mismatch');
+                }
+                expectation['runtime_clip_id'] = created.single.clipId;
+              }
+              if (operation == 'create_clip' &&
+                  producerCommandId.isNotEmpty &&
+                  v3WorkflowRuntime != null) {
                 final created = _audioTracks
                     .where(
                       (clip) =>
@@ -51948,7 +52637,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       (_clipTimelineDurationSec(createdClip) - expectedLength)
                               .abs() >
                           0.003 ||
-                      createdClip.rowIndex != expectation['row'] ||
+                      createdClip.rowIndex !=
+                          _aiV3ExpectationRow(expectation) ||
                       createdClip.instrumentId !=
                           expectation['instrument_id']) {
                     throw StateError('v3_resource_binding_target_mismatch');
@@ -52747,7 +53437,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return null;
     }
 
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _insertAssistantChatText(
         "I couldn't create another row because the row limit is reached.",
       );
@@ -52866,7 +53556,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required int? referenceRowId,
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       throw StateError('row_create_capacity_exceeded');
     }
     int? referenceRow;
@@ -53290,7 +53980,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (!_isPlaying) {
           await _togglePlayPause();
         }
-        _insertSystemChatText('• Playback started •');
+        if (_isPlaying) {
+          _insertSystemChatText('• Playback started •');
+        }
         return;
       case 'pause':
       case 'stop':
@@ -53324,9 +54016,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         final willPlay = !_isPlaying;
         await _togglePlayPause();
-        _insertSystemChatText(
-          willPlay ? '• Playback started •' : '• Playback paused •',
-        );
+        if (_isPlaying == willPlay) {
+          _insertSystemChatText(
+            willPlay ? '• Playback started •' : '• Playback paused •',
+          );
+        }
         return;
       case 'start_recording':
         if (_recordButtonVisuallyActive) {
@@ -57262,18 +57956,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             startMs: firstPasteMs,
             stepMs: stepMs,
           );
-          final duplicateCount = validClipIndices.length * repeatCount;
-          if (_audioTracks.length + duplicateCount > kNumClips) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-                ),
-              ),
-            );
-            return;
-          }
-
           final actions = <EditorUndoAction>[];
           for (int copyIndex = 0; copyIndex < repeatCount; copyIndex++) {
             final groupStartMs = math.max(
@@ -57547,10 +58229,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isValidClipIndex(clipIndex) || _audioTracks[clipIndex].isMidi) {
       throw StateError('v3_sample_replace_target_invalid');
     }
-    if (_audioTracks.length >= kNumClips) {
-      throw StateError('v3_sample_replace_capacity');
-    }
-
     final replacementFile = await _prepareAiV3LibraryReplacementFile(
       libraryPath,
     );
@@ -57669,10 +58347,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _audioTracks[originalIndex].isMidi) {
       throw StateError('v3_sample_replace_target_invalid');
     }
-    if (_audioTracks.length >= kNumClips) {
-      throw StateError('v3_sample_replace_capacity');
-    }
-
     final original = _audioTracks[originalIndex];
     final originalPayload = _persistedClipPayload(original);
     final selectedIds = _timelineSelectedClipIndices
@@ -57697,11 +58371,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       staged = _audioTracks[stagedIndex];
 
+      await _requireNativeClipRemoval(<int>[original.engineClipId]);
       original.audioStartTimer?.cancel();
       _audioTracks.removeAt(originalIndex);
-      if (original.engineClipId >= 0) {
-        await JuceAudioEngine.removeTrack(original.engineClipId);
-      }
       originalRemoved = true;
 
       final currentStagedIndex = _audioTracks.indexOf(staged);
@@ -57731,10 +58403,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (mounted) setState(() {});
     } catch (error, stackTrace) {
       if (staged != null && _audioTracks.contains(staged)) {
+        await _requireNativeClipRemoval(<int>[staged.engineClipId]);
         _audioTracks.remove(staged);
-        if (staged.engineClipId >= 0) {
-          await JuceAudioEngine.removeTrack(staged.engineClipId);
-        }
       }
       if (originalRemoved && _clipIndexForPersistentId(clipId) < 0) {
         await _addClipFromUndoPayload(originalPayload);
@@ -58318,8 +58988,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isValidClipIndex(clipIndex) || _audioTracks[clipIndex].isMidi) {
       throw StateError('v3_clip_stems_target_invalid');
     }
-    if (_rowCount + 2 > _effectiveMaxRows ||
-        _audioTracks.length + 2 > kNumClips) {
+    if (!_canAddRows(2)) {
       throw StateError('v3_clip_stems_capacity');
     }
     final source = _audioTracks[clipIndex];
@@ -58711,8 +59380,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_isValidClipIndex(clipIndex) || _audioTracks[clipIndex].isMidi) {
       throw StateError('v3_audio_to_midi_target_invalid');
     }
-    if (_rowCount + 1 > _effectiveMaxRows ||
-        _audioTracks.length + 1 > kNumClips) {
+    if (!_canAddRows()) {
       throw StateError('v3_audio_to_midi_capacity');
     }
     final source = _audioTracks[clipIndex];
@@ -61709,12 +62377,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _ensureAutomationClipDisplayRowExists(int sourceRow) async {
     if (sourceRow < 0 || sourceRow >= _rowCount) return;
     if (sourceRow + 1 < _rowCount) return;
-    if (_rowCount >= _effectiveMaxRows) return;
+    if (!_canAddRows()) return;
     await _addRowImpl();
   }
 
   Future<void> _ensureLoadedAutomationDisplayRowsExist() async {
-    if (_rowCount <= 0 || _rowCount >= _effectiveMaxRows) return;
+    if (_rowCount <= 0 || !_canAddRows()) return;
     final lastRow = _rowCount - 1;
     final rowMap = _rowAutomationClips[lastRow];
     if (rowMap == null) return;
@@ -64913,6 +65581,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       fallback: false,
     );
     final finalLengthBeats = _toActionDouble(data['final_length_beats']);
+    if (data.containsKey('midi_boundary_original_length_beats')) {
+      final end = notes.fold<double>(
+        0,
+        (value, note) => math.max(value, note.startBeat + note.lengthBeats),
+      );
+      if (!aiV3MidiBoundaryExecutionMatches(
+        original:
+            _toActionDouble(data['midi_boundary_original_length_beats']) ?? 0,
+        expected:
+            _toActionDouble(data['midi_boundary_expected_length_beats']) ?? 0,
+        current:
+            (clip.trimEnd - clip.trimStart).inMicroseconds *
+            _tempo /
+            60000000.0,
+        end: end,
+        finalLength: finalLengthBeats ?? 0,
+        bpm: _toActionDouble(data['midi_boundary_bpm']) ?? 0,
+        currentBpm: _tempo,
+      )) {
+        throw StateError('v3_midi_boundary_state_changed');
+      }
+    }
     final hasExactFinalLength =
         finalLengthBeats != null &&
         finalLengthBeats.isFinite &&
@@ -65054,6 +65744,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             },
       ),
     );
+    if (kDebugMode &&
+        const bool.fromEnvironment('MIXROOM_AI_DEBUG') &&
+        data.containsKey('midi_boundary_original_length_beats')) {
+      debugPrint(
+        '[AI.midi-boundary] applied extension_us='
+        '${(clip.trimEnd - oldTrimEnd).inMicroseconds} '
+        'final_length_beats=$finalLengthBeats',
+      );
+    }
     _showSmallNotice(append ? 'Appended MIDI notes.' : 'Updated MIDI notes.');
   }
 
@@ -65062,8 +65761,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) async {
     if (sourceRow < 0) return null;
     final targetRow = sourceRow + 1;
-    if (targetRow >= _effectiveMaxRows) return null;
-
     final hasExistingRowBelow = _rowCount > targetRow;
     final rowBelowHasAnyClip =
         hasExistingRowBelow &&
@@ -65073,7 +65770,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (hasExistingRowBelow && !rowBelowHasAnyClip && rowBelowAcceptsAudio) {
       return null;
     }
-    if (!hasExistingRowBelow && _rowCount >= _effectiveMaxRows) {
+    if (!hasExistingRowBelow && !_canAddRows()) {
       return null;
     }
 
@@ -65104,7 +65801,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final sourceRow = sourceClip.rowIndex;
-    if (sourceRow < 0 || sourceRow >= _effectiveMaxRows) {
+    if (sourceRow < 0 || sourceRow >= _rowCount) {
       _insertAssistantChatText(
         'I need an available row below that clip to place the MIDI result.',
       );
@@ -65281,7 +65978,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
 
     final sourceRow = sourceClip.rowIndex;
-    if (sourceRow < 0 || sourceRow >= _effectiveMaxRows) {
+    if (sourceRow < 0 || sourceRow >= _rowCount) {
       _showSmallNotice(
         L10n.translate(
           context,
@@ -65823,7 +66520,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required Duration renderedDuration,
   }) async {
     final sourceRow = sourceClip.rowIndex;
-    if (sourceRow < 0 || sourceRow >= _effectiveMaxRows) {
+    if (sourceRow < 0 || sourceRow >= _rowCount) {
       _showSmallNotice('Could not resolve a row for the rendered clip.');
       return;
     }
@@ -66373,7 +67070,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (sourceClip.isMidi) return;
 
     final sourceRow = sourceClip.rowIndex;
-    if (sourceRow < 0 || sourceRow >= _effectiveMaxRows) {
+    if (sourceRow < 0 || sourceRow >= _rowCount) {
       _showSmallNotice('Select an audio clip on a timeline row first.');
       return;
     }
@@ -66766,8 +67463,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           _rowAllowsClipKind(targetRow, ClipKind.audio) &&
           !_audioTracks.any((track) => track.rowIndex == targetRow);
       if (hasUsableRow) continue;
-      if (_rowCount >= _effectiveMaxRows ||
-          !await _insertRowBelowImpl(targetRow - 1)) {
+      if (!_canAddRows() || !await _insertRowBelowImpl(targetRow - 1)) {
         await _applyRowLayoutSnapshot(before);
         return null;
       }
@@ -66796,15 +67492,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       return false;
     }
-    if (_audioTracks.length + 2 > kNumClips) {
-      if (showInlineFailureNotice) {
-        _showSmallNotice(
-          "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-        );
-      }
-      return false;
-    }
-
     final sourcePath = clip.file.path;
     final source = File(sourcePath);
     if (!source.existsSync()) {
@@ -66849,10 +67536,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final row = clip.rowIndex;
     const stemCount = 2;
-    final rowLimit = _effectiveMaxRows;
-    final vocalsRow = math.min(row + 1, rowLimit - 1);
-    final instrumentalRow = math.min(row + 2, rowLimit - 1);
-    if (row < 0 || row >= rowLimit) {
+    final vocalsRow = row + 1;
+    final instrumentalRow = row + 2;
+    if (row < 0 || row >= _rowCount) {
       if (showInlineFailureNotice) {
         _showSmallNotice(
           'Stem separation needs an available track in this project.',
@@ -67990,12 +68676,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
               final parameterApplied = adjustment.usesNormalizedVerification
                   ? normalizedValue != null &&
-                        (normalizedValue -
-                                    adjustment.expectedNormalizedValue!)
+                        (normalizedValue - adjustment.expectedNormalizedValue!)
                                 .abs() <=
                             normalizedTolerance
                   : appliedValue != null &&
-                        (appliedValue - (adjustment.newValue as double)).abs() <=
+                        (appliedValue - (adjustment.newValue as double))
+                                .abs() <=
                             math.max(
                               0.0001,
                               adjustment.rawInterval / 2.0 + 0.000001,
@@ -69680,6 +70366,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Map<String, dynamic> _aiEvaluationSnapshot() => <String, dynamic>{
+    // Opt-in test readiness, not a provider/client-response field. Attachment
+    // happens before asynchronous engine and project initialization finishes.
+    'project_ready': _loadedOnce && !_isProjectLoading && !_isLoadingNextScreen,
     'tempo_bpm': _tempo,
     'rows': <Map<String, dynamic>>[
       for (var index = 0; index < _rows.length; index++)
@@ -70953,6 +71642,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   .map((clip) => clip.clipId)
                   .toList(),
               'row': targetRow,
+              if (target['row_id'] is int) 'row_id': target['row_id'],
+              if (target['resource_ref'] is Map)
+                'destination_row_ref': Map<String, dynamic>.from(
+                  target['resource_ref'] as Map,
+                ),
               'start': startMs / 1000.0,
               'length': lengthBeats * 60.0 / simulatedProjectTempo,
               'instrument_id':
@@ -70971,7 +71665,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   .toList(growable: false),
             });
             expectedNewClips += 1;
-            recordCreatedClipForRow(rowIdForIndex(targetRow), 1);
+            if (target['resource_ref'] == null) {
+              recordCreatedClipForRow(rowIdForIndex(targetRow), 1);
+            }
           }
           break;
         case 'sample_insert':
@@ -72773,17 +73469,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         return (expectation['items'] as List? ?? const <Object>[]).isEmpty;
       }
       if (clipIds.contains(expectation['clip_id'])) return true;
-      if ((kind == 'clip_created' || kind == 'midi_clip_created') &&
-          expectation['row'] == rowIndex) {
+      if ((kind == 'clip_created' ||
+              (kind == 'midi_clip_created' && expectation['row_id'] is! int)) &&
+          aiV3ExpectationMatchesDeletedStableRow(
+            expectation,
+            rowId: rowId,
+            rowIndex: rowIndex,
+          )) {
         final producerActionIndex = _toActionInt(
           expectation['producer_action_index'],
         );
         return producerActionIndex == null ||
             producerActionIndex <= deletionActionIndex;
       }
-      final matchesRow =
-          expectation['row_id'] == rowId ||
-          (expectation['row_id'] is! int && expectation['row'] == rowIndex);
+      final matchesRow = aiV3ExpectationMatchesDeletedStableRow(
+        expectation,
+        rowId: rowId,
+        rowIndex: rowIndex,
+      );
       if (!matchesRow) return false;
       return kind != 'row_deleted' &&
           kind != 'group_created' &&
@@ -73889,7 +74592,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 (expectation['runtime_clip_id'] == null ||
                     clip.clipId == expectation['runtime_clip_id']) &&
                 clip.isMidi &&
-                clip.rowIndex == expectation['row'] &&
+                clip.rowIndex == _aiV3ExpectationRow(expectation) &&
                 (expectation['resource_transformed'] == true ||
                     (_clipTimelineDurationMs(clip) / 1000.0 -
                                 (expectation['length'] as num).toDouble())
@@ -74564,9 +75267,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         case 'mix_effects_empty':
         case 'mix_effect_parameter_resolved':
         case 'effect_parameter_value':
-          final effects = expectation['master'] == true
+          final master = expectation['master'] == true;
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
+          var effects = master
               ? _aiV3MasterEffectsJson()
-              : expectation['force_individual_row'] == true
+              : forceIndividualRow
               ? await _aiV3NativeRowEffectChain(
                   _aiV3ExpectationRow(expectation),
                 )
@@ -74575,7 +75281,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               kind == 'mix_effect_parameter_resolved' ||
               (kind == 'mix_effect_presence' && expectation['present'] == true);
           if (requiresObservedEffect && effects.isEmpty) {
-            throw StateError('v3_effect_observation_missing');
+            final nativeNames = master
+                ? await JuceAudioEngine.getMasterEffects()
+                : await JuceAudioEngine.getTrackEffectsForRow(
+                    _aiV3ExpectationRow(expectation),
+                    forceIndividualRow: forceIndividualRow,
+                  );
+            effects = aiV3EffectObservationWithNativeFallback(
+              snapshotEffects: effects,
+              nativeEffectNames: nativeNames,
+              requiredNeedle: expectation['needle']?.toString() ?? '',
+            );
           }
           item['value'] = effects;
           break;
@@ -81337,11 +82053,242 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return actions;
   }
 
+  DawPerformanceSpan? _activePerformanceSpan;
+
+  void _startManualPerformanceMonitoring() {
+    if (!kDawPerformanceMetricsEnabled) return;
+    final startedAt = DateTime.now().toUtc().microsecondsSinceEpoch;
+    final logFile = File('/tmp/mixroom-pro17-manual-$pid-$startedAt.jsonl');
+    final probe = DawPerformanceProbe(
+      isEnabled: () => mounted,
+      context: () => DawPerformanceContext(
+        projectId: _projectId,
+        projectName: _projectName,
+        rowCount: _rows.length,
+        clipCount: _audioTracks.length,
+      ),
+      logFile: logFile,
+    );
+    _manualPerformanceProbe = probe;
+    GestureBinding.instance.pointerRouter.addGlobalRoute(
+      _handleManualPerformancePointerEvent,
+    );
+    probe.startMonitoring();
+  }
+
+  void _handleManualPerformancePointerEvent(PointerEvent event) {
+    final probe = _manualPerformanceProbe;
+    if (probe == null || !probe.enabled) return;
+
+    if (event is PointerDownEvent) {
+      final wasEmpty = _manualPointerIds.isEmpty;
+      _manualPointerIds.add(event.pointer);
+      if (wasEmpty) {
+        probe.emit('interaction_start', <String, Object?>{
+          'source': 'pointer',
+          'device_kind': event.kind.name,
+        });
+      }
+      return;
+    }
+    if (event is PointerUpEvent || event is PointerCancelEvent) {
+      final removed = _manualPointerIds.remove(event.pointer);
+      if (removed && _manualPointerIds.isEmpty) {
+        probe.emit('interaction_end', <String, Object?>{
+          'source': 'pointer',
+          'device_kind': event.kind.name,
+        });
+      }
+      return;
+    }
+    if (event is PointerScrollEvent) {
+      _recordManualNavigation(
+        source: 'pointer_scroll',
+        deltaX: event.scrollDelta.dx,
+        deltaY: event.scrollDelta.dy,
+        finishAfterIdle: true,
+      );
+      return;
+    }
+    if (event is PointerPanZoomStartEvent) {
+      _beginManualNavigation('trackpad_pan_zoom');
+      return;
+    }
+    if (event is PointerPanZoomUpdateEvent) {
+      _recordManualNavigation(
+        source: 'trackpad_pan_zoom',
+        deltaX: event.panDelta.dx,
+        deltaY: event.panDelta.dy,
+        finishAfterIdle: false,
+      );
+      return;
+    }
+    if (event is PointerPanZoomEndEvent) {
+      _finishManualNavigation();
+    }
+  }
+
+  void _beginManualNavigation(String source) {
+    final probe = _manualPerformanceProbe;
+    if (probe == null || !probe.enabled) return;
+    _manualNavigationIdleTimer?.cancel();
+    _manualNavigationIdleTimer = null;
+    if (_manualNavigationActive) return;
+    _manualNavigationActive = true;
+    _manualNavigationSource = source;
+    _manualNavigationEventCount = 0;
+    _manualNavigationDistanceX = 0.0;
+    _manualNavigationDistanceY = 0.0;
+    probe.emit('navigation_start', <String, Object?>{'source': source});
+  }
+
+  void _recordManualNavigation({
+    required String source,
+    required double deltaX,
+    required double deltaY,
+    required bool finishAfterIdle,
+  }) {
+    _beginManualNavigation(source);
+    _manualNavigationEventCount += 1;
+    _manualNavigationDistanceX += deltaX.abs();
+    _manualNavigationDistanceY += deltaY.abs();
+    if (!finishAfterIdle) return;
+    _manualNavigationIdleTimer?.cancel();
+    _manualNavigationIdleTimer = Timer(
+      const Duration(milliseconds: 250),
+      _finishManualNavigation,
+    );
+  }
+
+  void _finishManualNavigation() {
+    _manualNavigationIdleTimer?.cancel();
+    _manualNavigationIdleTimer = null;
+    if (!_manualNavigationActive) return;
+    _manualPerformanceProbe?.emit('navigation_end', <String, Object?>{
+      'source': _manualNavigationSource,
+      'events': _manualNavigationEventCount,
+      'absolute_delta_x': _manualNavigationDistanceX,
+      'absolute_delta_y': _manualNavigationDistanceY,
+    });
+    _manualNavigationActive = false;
+    _manualNavigationSource = '';
+    _manualNavigationEventCount = 0;
+    _manualNavigationDistanceX = 0.0;
+    _manualNavigationDistanceY = 0.0;
+  }
+
+  Future<T> _measureManualPerformanceOperation<T>(
+    String operation,
+    Future<T> Function() action, {
+    Map<String, Object?> metadata = const <String, Object?>{},
+  }) async {
+    final probe = _manualPerformanceProbe;
+    if (probe == null ||
+        !probe.enabled ||
+        !_loadedOnce ||
+        _isProjectLoading ||
+        _activePerformanceSpan != null) {
+      return action();
+    }
+
+    final span = probe.beginOperation(operation, metadata: metadata);
+    _activePerformanceSpan = span;
+    try {
+      final result = await action();
+      span.checkpoint('operation_complete');
+      span.finish();
+      return result;
+    } catch (error) {
+      span.fail(error);
+      rethrow;
+    } finally {
+      if (identical(_activePerformanceSpan, span)) {
+        _activePerformanceSpan = null;
+      }
+    }
+  }
+
+  Future<void> _runPerformanceTestAction(
+    String operation,
+    int index,
+    String? sourcePath,
+    DawPerformanceSpan span,
+  ) async {
+    if (!kDawPerformanceMetricsEnabled ||
+        widget.evaluationController == null ||
+        _aiEvaluationSnapshot()['project_ready'] != true) {
+      throw StateError('performance_test_not_ready');
+    }
+    if (_activePerformanceSpan != null)
+      throw StateError('performance_test_busy');
+    _activePerformanceSpan = span;
+    try {
+      switch (operation) {
+        case 'add_row':
+          await _addRow();
+          break;
+        case 'remove_row':
+          await _deleteRow(index);
+          break;
+        case 'move_row_up':
+          await _moveRow(index, index - 1);
+          break;
+        case 'move_row_down':
+          await _moveRow(index, index + 1);
+          break;
+        case 'delete_clip':
+          await _handleDeleteClip(index);
+          break;
+        case 'add_clip':
+          await _undoManager.execute(
+            AddAudioTrackAction(
+              addTrack:
+                  ({
+                    required File file,
+                    required int row,
+                    required double timeMs,
+                    Duration? trimStartRequested,
+                    Duration? trimEndRequested,
+                  }) => _addAudioTrackFromFile(
+                    file,
+                    row,
+                    timeMs,
+                    trimStartRequested: trimStartRequested,
+                    trimEndRequested: trimEndRequested,
+                    transcodeTo48k: false,
+                    showLoadingOverlay: false,
+                  ),
+              tracks: _audioTracks,
+              restoreTrack: _addClipFromUndoPayload,
+              file: File(sourcePath!),
+              row: index,
+              timeMs: 0,
+              onRemove: _syncRemovedClipFadesAfterUndo,
+            ),
+          );
+          break;
+        default:
+          throw ArgumentError.value(operation);
+      }
+      span.checkpoint('operation_complete');
+    } finally {
+      _activePerformanceSpan = null;
+    }
+  }
+
   Future<void> _handleDeleteClip(int clipIndex) async {
     await _handleDeleteClips(<int>[clipIndex]);
   }
 
   Future<void> _handleDeleteClips(List<int> clipIndices) async {
+    await _measureManualPerformanceOperation<void>(
+      'delete_clip',
+      () => _handleDeleteClipsUnmeasured(clipIndices),
+      metadata: <String, Object?>{'requested_clip_count': clipIndices.length},
+    );
+  }
+
+  Future<void> _handleDeleteClipsUnmeasured(List<int> clipIndices) async {
     final validDescending =
         clipIndices
             .where((i) => i >= 0 && i < _audioTracks.length)
@@ -81375,6 +82322,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (actions.isEmpty) return;
 
+    _activePerformanceSpan?.checkpoint('delete_preparation');
     if (actions.length == 1) {
       await _undoManager.execute(actions.first);
     } else {
@@ -81509,7 +82457,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String name,
     int? afterRow,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return -1;
     }
@@ -81945,18 +82893,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       final group = _copiedClipGroup;
       if (group != null && group.isNotEmpty) {
-        if (_audioTracks.length + group.length > kNumClips) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-                ),
-              ),
-            );
-          }
-          return false;
-        }
         final actions = <EditorUndoAction>[];
         for (final entry in group) {
           final targetRow = row + entry.rowDelta;
@@ -81989,19 +82925,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
 
       if (_copiedClip == null) return false;
-      if (_audioTracks.length >= kNumClips) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-              ),
-            ),
-          );
-        }
-        return false;
-      }
-
       await _undoManager.execute(
         _buildPasteAction(
           clip: _copiedClip!,
@@ -82043,19 +82966,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         if (rowCompare != 0) return rowCompare;
         return a.compareTo(b);
       });
-
-      if (_audioTracks.length + valid.length > kNumClips) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                "Max number of audio clips reached ($kNumClips). Unable to add more clips.",
-              ),
-            ),
-          );
-        }
-        return false;
-      }
 
       final anchorStartMs = _audioTracks[valid.first].offset * 1000.0;
       final safePasteStartMs = math.max(0.0, pasteStartMs);
@@ -82679,10 +83589,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required String description,
     required Future<bool> Function() perform,
   }) async {
+    final normalizedDescription = description.toLowerCase();
+    final operation = normalizedDescription.contains('add row')
+        ? 'add_row'
+        : normalizedDescription.contains('delete row')
+        ? 'remove_row'
+        : normalizedDescription.contains('move row')
+        ? 'move_row'
+        : 'row_layout';
+    await _measureManualPerformanceOperation<void>(
+      operation,
+      () => _runRowLayoutActionWithUndoUnmeasured(
+        description: description,
+        perform: perform,
+      ),
+      metadata: <String, Object?>{'description': description},
+    );
+  }
+
+  Future<void> _runRowLayoutActionWithUndoUnmeasured({
+    required String description,
+    required Future<bool> Function() perform,
+  }) async {
     final before = await _captureRowLayoutSnapshot();
+    _activePerformanceSpan?.checkpoint('undo_before_snapshot');
     final changed = await perform();
     if (!changed) return;
     final after = await _captureRowLayoutSnapshot();
+    _activePerformanceSpan?.checkpoint('undo_after_snapshot');
     await _undoManager.addWithoutExecute(
       _RowLayoutSnapshotAction(
         descriptionText: description,
@@ -82694,13 +83628,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _addRowImpl({int? preferredRowId}) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (!_canAddRows()) return false;
     final nextIndex = _rowCount + 1;
     final rowId = await JuceAudioEngine.addRow(
       'Track $nextIndex',
       iconId: 0,
       preferredRowId: preferredRowId,
     );
+    _activePerformanceSpan?.checkpoint('native_add_row');
     if (rowId >= 0) {
       await _applyRowsToEditorState(
         <TimelineRow>[
@@ -82723,7 +83658,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _addRow() async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return;
     }
@@ -82742,7 +83677,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     TimelineRow instrumentRow, {
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return false;
     }
@@ -82766,7 +83701,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     required bool above,
     int? preferredRowId,
   }) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return false;
     }
@@ -82797,7 +83732,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _insertRowAboveImpl(int row, {int? preferredRowId}) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (!_canAddRows()) return false;
     if (row < 0 || row >= _rowCount) return false;
     final refRowId = _rowIdAt(row);
     final rowId = await JuceAudioEngine.insertRowAbove(
@@ -82828,7 +83763,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _insertRowAbove(int row) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return;
     }
@@ -82839,7 +83774,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<bool> _insertRowBelowImpl(int row, {int? preferredRowId}) async {
-    if (_rowCount >= _effectiveMaxRows) return false;
+    if (!_canAddRows()) return false;
     if (row < 0 || row >= _rowCount) return false;
     final refRowId = _rowIdAt(row);
     final rowId = await JuceAudioEngine.insertRowBelow(
@@ -82870,7 +83805,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _insertRowBelow(int row) async {
-    if (_rowCount >= _effectiveMaxRows) {
+    if (!_canAddRows()) {
       _showRowLimitReachedNotice();
       return;
     }
@@ -82921,6 +83856,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       ),
     );
+  }
+
+  void _projectLoadTrace(String message) {
+    assert(() {
+      if (const bool.fromEnvironment('MIXROOM_PROJECT_LOAD_VERBOSE')) {
+        debugPrint(message);
+      }
+      return true;
+    }());
   }
 
   Widget _buildAudioStartupFailedBanner() {
@@ -83034,22 +83978,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     final removedEngineClipIds = <int>[];
     final removedClips = <AudioTrack>[];
-    // Remove clips on this row (descending so indices stay valid for removal).
-    for (int i = _audioTracks.length - 1; i >= 0; i--) {
-      final clip = _audioTracks[i];
+    for (final clip in _audioTracks) {
       final matchesRowId = rowId >= 0 && clip.rowId == rowId;
       final matchesRowIndex = clip.rowIndex == row;
       if (matchesRowId || matchesRowIndex) {
-        clip.audioStartTimer?.cancel();
-        _audioTracks.removeAt(i);
         removedClips.add(clip);
         if (clip.engineClipId >= 0) {
           removedEngineClipIds.add(clip.engineClipId);
-          _clipFadeRowIdByEngineId.remove(clip.engineClipId);
         }
       }
     }
-    await JuceAudioEngine.unloadClips(removedEngineClipIds);
+    await _requireNativeClipRemoval(removedEngineClipIds);
+    for (final clip in removedClips) {
+      clip.audioStartTimer?.cancel();
+      _audioTracks.remove(clip);
+      _clipFadeRowIdByEngineId.remove(clip.engineClipId);
+    }
     _updateOverallDurationIfNeeded(removedClips: removedClips);
 
     // Clear row FX chain.
@@ -83609,7 +84553,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _disarmLiveMidiInputForRow(int rowId) async {
     if (!_liveMidiEventPlaybackSupported) return;
     final targetId = _lastLiveMidiInputTargetClipId;
-    final targetOnRow = targetId >= 0 &&
+    final targetOnRow =
+        targetId >= 0 &&
         _audioTracks.any(
           (clip) => clip.rowId == rowId && clip.engineClipId == targetId,
         );
@@ -83635,50 +84580,51 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _waveformDetailProvider.beginMutation();
     try {
       await _disarmLiveMidiInputForRow(deletingRowId);
-    if (_rowCount == 1) {
-      await _clearRowContent(row);
-      final rowId = deletingRowId;
-      if (rowId >= 0) {
-        await JuceAudioEngine.renameRow(rowId, 'Track 1');
-        await JuceAudioEngine.setRowIcon(rowId, 0);
-        await _applyRowsToEditorState(
-          <TimelineRow>[
-            TimelineRow(
-              rowId: rowId,
-              name: 'Track 1',
-              iconId: 0,
-              kind: TimelineRowKind.audio,
-            ),
-          ],
-          refreshAutomationTargets: false,
-          syncClipRows: false,
-        );
-        await _recomputeAudibleState();
+      if (_rowCount == 1) {
+        await _clearRowContent(row);
+        final rowId = deletingRowId;
+        if (rowId >= 0) {
+          await JuceAudioEngine.renameRow(rowId, 'Track 1');
+          await JuceAudioEngine.setRowIcon(rowId, 0);
+          await _applyRowsToEditorState(
+            <TimelineRow>[
+              TimelineRow(
+                rowId: rowId,
+                name: 'Track 1',
+                iconId: 0,
+                kind: TimelineRowKind.audio,
+              ),
+            ],
+            refreshAutomationTargets: false,
+            syncClipRows: false,
+          );
+          await _recomputeAudibleState();
+        }
+        return true;
       }
+      final removedClips = _clipsForFadeResolution(
+        rowIds: <int>{deletingRowId},
+      ).toList(growable: false);
+
+      final ok = await JuceAudioEngine.removeRow(deletingRowId);
+      _activePerformanceSpan?.checkpoint('native_remove_row');
+      if (!ok) return false;
+
+      for (final clip in removedClips) {
+        clip.audioStartTimer?.cancel();
+        _clipFadeRowIdByEngineId.remove(clip.engineClipId);
+      }
+      _audioTracks.removeWhere((clip) => clip.rowId == deletingRowId);
+      _updateOverallDurationIfNeeded(removedClips: removedClips);
+
+      final nextRows = List<TimelineRow>.from(_rows)..removeAt(row);
+      await _applyRowsToEditorState(
+        nextRows,
+        refreshAutomationTargets: false,
+        syncClipRows: true,
+      );
+      await _recomputeAudibleState();
       return true;
-    }
-    final removedClips = _clipsForFadeResolution(
-      rowIds: <int>{deletingRowId},
-    ).toList(growable: false);
-
-    final ok = await JuceAudioEngine.removeRow(deletingRowId);
-    if (!ok) return false;
-
-    for (final clip in removedClips) {
-      clip.audioStartTimer?.cancel();
-      _clipFadeRowIdByEngineId.remove(clip.engineClipId);
-    }
-    _audioTracks.removeWhere((clip) => clip.rowId == deletingRowId);
-    _updateOverallDurationIfNeeded(removedClips: removedClips);
-
-    final nextRows = List<TimelineRow>.from(_rows)..removeAt(row);
-    await _applyRowsToEditorState(
-      nextRows,
-      refreshAutomationTargets: false,
-      syncClipRows: true,
-    );
-    await _recomputeAudibleState();
-    return true;
     } finally {
       _waveformDetailProvider.endMutation();
     }
@@ -83686,6 +84632,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
   Future<void> _deleteRow(int row) async {
     final snapshot = await _captureDeletedRowSnapshot(row);
+    _activePerformanceSpan?.checkpoint('undo_delete_row_snapshot');
     if (snapshot == null) return;
     await _undoManager.execute(
       _DeleteRowAction(
@@ -84280,6 +85227,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final nextOrder = nextRows.map((row) => row.rowId).toList();
     if (listEquals(currentOrder, nextOrder)) return false;
     final ok = await _applyEngineRowOrder(nextRows);
+    _activePerformanceSpan?.checkpoint('native_move_row');
     if (!ok) return false;
     await _applyRowsToEditorState(
       nextRows,
@@ -84470,11 +85418,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _removeDuplicatedRows(List<int> rowIds) async {
-    final indices = rowIds
-        .map(_rowIndexForId)
-        .where((index) => index >= 0 && index < _rowCount)
-        .toList()
-      ..sort();
+    final indices =
+        rowIds
+            .map(_rowIndexForId)
+            .where((index) => index >= 0 && index < _rowCount)
+            .toList()
+          ..sort();
     if (indices.isEmpty) return;
     // Bottom-up so the indices we have not deleted yet stay valid.
     for (final index in indices.reversed) {
@@ -84490,7 +85439,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         rows.where((row) => row >= 0 && row < _rowCount).toSet().toList()
           ..sort();
     if (ordered.isEmpty) return;
-    if (_rowCount + ordered.length > _effectiveMaxRows) {
+    if (!_canAddRows(ordered.length)) {
       _showRowLimitReachedNotice();
       return;
     }
@@ -90489,6 +91438,26 @@ class _RowLayoutSnapshot {
   };
 }
 
+class _ProjectLoadRollbackSnapshot {
+  const _ProjectLoadRollbackSnapshot({
+    required this.layout,
+    required this.rowUiById,
+    required this.rowEffects,
+    required this.masterEffects,
+    required this.masterGain,
+    required this.masterPan,
+    required this.selectedRowId,
+  });
+
+  final _RowLayoutSnapshot layout;
+  final Map<int, _RowUiStateSnapshot> rowUiById;
+  final List<RowEffectsSnapshot> rowEffects;
+  final MasterEffectsSnapshot masterEffects;
+  final double masterGain;
+  final double masterPan;
+  final int selectedRowId;
+}
+
 class _AiV3GroupLayoutState {
   const _AiV3GroupLayoutState({
     required this.layout,
@@ -90519,6 +91488,7 @@ class _AiV3TransportSnapshot {
 
 abstract class EditorUndoAction {
   String get description;
+  bool get didChange => true;
   Map<String, dynamic>? toPersistedUndoCommand() => null;
 
   Future<void> undo();
@@ -90572,6 +91542,15 @@ class _EditorUndoCaptureRollbackException
 }
 
 const int _kMaxPersistedUndoCommandJsonBytes = 256 * 1024;
+
+Future<void> _requireNativeClipRemoval(Iterable<int> engineClipIds) async {
+  final ids = engineClipIds.where((id) => id >= 0).toSet().toList();
+  if (ids.isEmpty) return;
+  final result = await JuceAudioEngine.unloadClipsDetailed(ids);
+  if (!result.succeeded) {
+    throw StateError('native_clip_removal_failed:${result.name}');
+  }
+}
 
 Map<String, dynamic> _persistedClipPayload(AudioTrack clip) {
   final payload = clip.toJson(p.basename(clip.file.path));
@@ -90635,6 +91614,7 @@ class EditorUndoManager extends ChangeNotifier {
   Future<void> execute(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
     await action.redo();
+    if (!action.didChange) return;
     if (_capturedActions != null) {
       _captureAction(action);
       return;
@@ -90656,7 +91636,7 @@ class EditorUndoManager extends ChangeNotifier {
   Future<void> executeWithoutAdd(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
     await action.redo();
-    if (_capturedActions != null) {
+    if (action.didChange && _capturedActions != null) {
       _captureAction(action);
     }
   }
@@ -90664,6 +91644,7 @@ class EditorUndoManager extends ChangeNotifier {
   // same comment here as above
   Future<void> addWithoutExecute(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!action.didChange) return;
     if (_capturedActions != null) {
       _captureAction(action);
       return;
@@ -90726,7 +91707,7 @@ class EditorUndoManager extends ChangeNotifier {
 
   void _captureAction(EditorUndoAction action) {
     final captured = _capturedActions;
-    if (captured == null) return;
+    if (captured == null || !action.didChange) return;
     if (action is CompoundUndoAction) {
       captured.removeWhere((item) => action.actions.contains(item));
     } else {
@@ -91541,6 +92522,9 @@ class AddAudioTrackAction extends EditorUndoAction {
   String get description => 'Add audio clip';
 
   @override
+  bool get didChange => _addedTrack != null;
+
+  @override
   Map<String, dynamic>? toPersistedUndoCommand() {
     final payload =
         _addedTrackPayload ??
@@ -91594,6 +92578,7 @@ class AddAudioTrackAction extends EditorUndoAction {
     if (_addedTrack == null) return;
 
     final track = _addedTrack!;
+    await _requireNativeClipRemoval(<int>[track.engineClipId]);
     track.audioStartTimer?.cancel();
 
     final removed = tracks.remove(track);
@@ -91604,9 +92589,6 @@ class AddAudioTrackAction extends EditorUndoAction {
       if (idx >= 0) {
         tracks.removeAt(idx);
       }
-    }
-    if (track.engineClipId >= 0) {
-      await JuceAudioEngine.removeTrack(track.engineClipId);
     }
     if (onRemove != null) {
       await onRemove!(track);
@@ -91652,6 +92634,9 @@ class PasteAudioClipAction extends EditorUndoAction {
 
   @override
   String get description => 'Paste audio clip';
+
+  @override
+  bool get didChange => _addedTrack != null;
 
   @override
   Map<String, dynamic>? toPersistedUndoCommand() {
@@ -91708,6 +92693,7 @@ class PasteAudioClipAction extends EditorUndoAction {
     if (_addedTrack == null) return;
 
     final track = _addedTrack!;
+    await _requireNativeClipRemoval(<int>[track.engineClipId]);
     track.audioStartTimer?.cancel();
 
     final removed = tracks.remove(track);
@@ -91718,9 +92704,6 @@ class PasteAudioClipAction extends EditorUndoAction {
       if (idx >= 0) {
         tracks.removeAt(idx);
       }
-    }
-    if (track.engineClipId >= 0) {
-      await JuceAudioEngine.removeTrack(track.engineClipId);
     }
     if (onRemove != null) {
       await onRemove!(track);
@@ -91774,6 +92757,9 @@ class AddMidiClipAction extends EditorUndoAction {
   String get description => 'Add instrument clip';
 
   @override
+  bool get didChange => _addedTrack != null;
+
+  @override
   Map<String, dynamic>? toPersistedUndoCommand() {
     final payload =
         _addedTrackPayload ??
@@ -91825,6 +92811,7 @@ class AddMidiClipAction extends EditorUndoAction {
   Future<void> undo() async {
     if (_addedTrack == null) return;
     final track = _addedTrack!;
+    await _requireNativeClipRemoval(<int>[track.engineClipId]);
     track.audioStartTimer?.cancel();
     final removed = tracks.remove(track);
     if (!removed && track.engineClipId >= 0) {
@@ -91832,9 +92819,6 @@ class AddMidiClipAction extends EditorUndoAction {
         (t) => t.engineClipId == track.engineClipId,
       );
       if (idx >= 0) tracks.removeAt(idx);
-    }
-    if (track.engineClipId >= 0) {
-      await JuceAudioEngine.removeTrack(track.engineClipId);
     }
     if (onRemove != null) {
       await onRemove!(track);
@@ -91879,6 +92863,9 @@ class PasteMidiClipAction extends EditorUndoAction {
 
   @override
   String get description => 'Paste instrument clip';
+
+  @override
+  bool get didChange => _addedTrack != null;
 
   @override
   Map<String, dynamic>? toPersistedUndoCommand() {
@@ -91931,6 +92918,7 @@ class PasteMidiClipAction extends EditorUndoAction {
   Future<void> undo() async {
     if (_addedTrack == null) return;
     final track = _addedTrack!;
+    await _requireNativeClipRemoval(<int>[track.engineClipId]);
     track.audioStartTimer?.cancel();
     final removed = tracks.remove(track);
     if (!removed && track.engineClipId >= 0) {
@@ -91938,9 +92926,6 @@ class PasteMidiClipAction extends EditorUndoAction {
         (t) => t.engineClipId == track.engineClipId,
       );
       if (idx >= 0) tracks.removeAt(idx);
-    }
-    if (track.engineClipId >= 0) {
-      await JuceAudioEngine.removeTrack(track.engineClipId);
     }
     if (onRemove != null) {
       await onRemove!(track);
@@ -92025,12 +93010,20 @@ class EditMidiClipAction extends EditorUndoAction {
     'newInstrumentParams': newInstrumentParams,
     if (newHostedInstrumentStateBase64.trim().isNotEmpty)
       'newHostedInstrumentStateB64': newHostedInstrumentStateBase64.trim(),
-    if (oldTrimEnd != null) 'oldTrimEndMs': oldTrimEnd!.inMilliseconds,
-    if (newTrimEnd != null) 'newTrimEndMs': newTrimEnd!.inMilliseconds,
+    if (oldTrimEnd != null)
+      'oldTrimEndMs': clipTrimMilliseconds(oldTrimEnd!, isMidi: true),
+    if (newTrimEnd != null)
+      'newTrimEndMs': clipTrimMilliseconds(newTrimEnd!, isMidi: true),
     if (oldAudioDuration != null)
-      'oldAudioDurationMs': oldAudioDuration!.inMilliseconds,
+      'oldAudioDurationMs': clipTrimMilliseconds(
+        oldAudioDuration!,
+        isMidi: true,
+      ),
     if (newAudioDuration != null)
-      'newAudioDurationMs': newAudioDuration!.inMilliseconds,
+      'newAudioDurationMs': clipTrimMilliseconds(
+        newAudioDuration!,
+        isMidi: true,
+      ),
     if (oldClipOwnedState != null) 'oldClipOwnedState': oldClipOwnedState,
     if (newClipOwnedState != null) 'newClipOwnedState': newClipOwnedState,
   };
@@ -92231,11 +93224,9 @@ class DeleteClipAction extends EditorUndoAction {
     if (idx < 0) return;
     final existing = tracks[idx];
 
+    await _requireNativeClipRemoval(<int>[existing.engineClipId]);
     existing.audioStartTimer?.cancel();
     tracks.removeAt(idx);
-    if (existing.engineClipId >= 0) {
-      await JuceAudioEngine.removeTrack(existing.engineClipId);
-    }
 
     onChange(existing, removed: true);
   }
@@ -92289,8 +93280,7 @@ class DeleteClipsAction extends EditorUndoAction {
 
   @override
   Future<void> redo() async {
-    final removed = <AudioTrack>[];
-    final engineClipIds = <int>[];
+    final removals = <({DeleteClipAction action, AudioTrack clip})>[];
     for (final action in actions) {
       var index = action.tracks.indexOf(action.clip);
       if (index < 0 && action.clip.engineClipId >= 0) {
@@ -92299,15 +93289,21 @@ class DeleteClipsAction extends EditorUndoAction {
         );
       }
       if (index < 0) continue;
-
-      final clip = action.tracks.removeAt(index);
+      removals.add((action: action, clip: action.tracks[index]));
+    }
+    await _requireNativeClipRemoval(
+      removals.map((removal) => removal.clip.engineClipId),
+    );
+    final removed = <AudioTrack>[];
+    for (final removal in removals) {
+      final currentIndex = removal.action.tracks.indexOf(removal.clip);
+      if (currentIndex < 0) {
+        throw StateError('clip_model_changed_during_native_removal');
+      }
+      final clip = removal.action.tracks.removeAt(currentIndex);
       clip.audioStartTimer?.cancel();
       removed.add(clip);
-      if (clip.engineClipId >= 0) {
-        engineClipIds.add(clip.engineClipId);
-      }
     }
-    await JuceAudioEngine.unloadClips(engineClipIds);
     await onChange(removed, removed: true);
   }
 
@@ -94807,6 +95803,9 @@ class CompoundUndoAction extends EditorUndoAction {
   String get description => _description;
 
   @override
+  bool get didChange => actions.any((action) => action.didChange);
+
+  @override
   Map<String, dynamic>? toPersistedUndoCommand() {
     final commands = <Map<String, dynamic>>[];
     for (final action in actions) {
@@ -95061,8 +96060,9 @@ Future<void> _waitForMasterEffectParameters(
 }
 
 Future<_EffectRestoreResult> _restoreRowSnapshot(
-  RowEffectsSnapshot snap,
-) async {
+  RowEffectsSnapshot snap, {
+  NativeOperationLogger? logger,
+}) async {
   final failures = <_EffectRestoreFailure>[];
   await JuceAudioEngine.beginGraphMutationBatch();
   try {
@@ -95103,6 +96103,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
             'Row ${snap.row + 1} FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertTrackEffect(snap.row, fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
+            logger: logger,
           ) ??
           false;
       bool inserted = false;
@@ -95144,6 +96145,7 @@ Future<_EffectRestoreResult> _restoreRowSnapshot(
                 stateBase64: fx.stateBase64,
               ),
               timeout: _kProjectPluginStateRestoreTimeout,
+              logger: logger,
             ) ??
             false;
       }
@@ -95216,8 +96218,9 @@ Future<MasterEffectsSnapshot> captureMasterSnapshot() async {
 }
 
 Future<_EffectRestoreResult> _restoreMasterSnapshot(
-  MasterEffectsSnapshot snap,
-) async {
+  MasterEffectsSnapshot snap, {
+  NativeOperationLogger? logger,
+}) async {
   final failures = <_EffectRestoreFailure>[];
   await JuceAudioEngine.beginGraphMutationBatch();
   try {
@@ -95255,6 +96258,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
             'Master FX insert ${_effectSnapshotName(fx)}',
             () => JuceAudioEngine.insertMasterEffect(fx.effectId),
             timeout: _kProjectPluginInstanceRestoreTimeout,
+            logger: logger,
           ) ??
           false;
       bool inserted = false;
@@ -95295,6 +96299,7 @@ Future<_EffectRestoreResult> _restoreMasterSnapshot(
                 stateBase64: fx.stateBase64,
               ),
               timeout: _kProjectPluginStateRestoreTimeout,
+              logger: logger,
             ) ??
             false;
       }

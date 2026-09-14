@@ -527,6 +527,7 @@ class LocalMixingModel {
           project,
           target: normGoal.target,
           resolvedTargets: effectiveTargets,
+          generationScope: generationScope,
         ),
       );
     }
@@ -830,6 +831,7 @@ class LocalMixingModel {
             ref,
             intensity: normGoal.intensity,
             policy: policy,
+            limitTo: generationScope == null ? null : rows,
           ));
         }
 
@@ -3191,12 +3193,14 @@ class LocalMixingModel {
   // Balance core
   // -----------------------------
   List<MixAction> _planBalance(ProjectState p, _MixRef ref,
-      {required double intensity, required _MixExecutionPolicy policy}) {
+      {required double intensity,
+      required _MixExecutionPolicy policy,
+      List<RowState>? limitTo}) {
     final out = <MixAction>[];
     final median = ref.medianEffRms;
     final effectiveIntensity = policy.scaleIntensity(intensity);
 
-    for (final r in p.rows) {
+    for (final r in limitTo ?? p.rows) {
       if (r.approxRms <= 0.001) continue;
       if (!_rowUsable(r)) continue;
       final eff = _effRms(r);
@@ -4157,10 +4161,13 @@ class LocalMixingModel {
     ProjectState project, {
     required MixTarget target,
     required List<RowState> resolvedTargets,
+    MixGenerationScope? generationScope,
   }) {
     final out = <MixAction>[];
 
-    final resetMaster = _isMasterTarget(target) || _isGlobalTarget(target);
+    final resetMaster =
+        (generationScope == null || generationScope.masterOnly) &&
+        (_isMasterTarget(target) || _isGlobalTarget(target));
     if (resetMaster) {
       out.add(MixAction('hard_reset_master_fx', const {}));
       out.add(MixAction('set_master_gain', {
@@ -4179,6 +4186,7 @@ class LocalMixingModel {
 
     for (final r in rowResetTargets) {
       if (!_rowUsable(r)) continue;
+      if (generationScope != null && !generationScope.permitsRow(r)) continue;
 
       // FX reset (authoritative)
       out.add(MixAction('hard_reset_row_fx', {

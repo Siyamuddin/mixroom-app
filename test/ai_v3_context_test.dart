@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
+import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
 import 'package:mixroom/models/models.dart';
 
@@ -128,7 +130,7 @@ Map<String, dynamic> _clientContext() => <String, dynamic>{
   },
   'ai_v3_tempo_stretch_enabled': false,
   'ai_v3_clip_timeline_lengths_ms': <String, double>{'clip-42': 4000},
-  'max_rows': 24,
+  'row_creation_limit': null,
   'current_rows': 1,
   'ai_v3_library_assets': <Map<String, dynamic>>[
     <String, dynamic>{
@@ -140,7 +142,242 @@ Map<String, dynamic> _clientContext() => <String, dynamic>{
   ],
 };
 
+Future<
+  ({
+    Map<String, dynamic> validation,
+    List<AudioTrack> tracks,
+    Map<String, dynamic> client,
+  })
+>
+_largeProjectFixture({required int rowCount, required int clipCount}) async {
+  final rows = <Map<String, dynamic>>[];
+  final clips = <Map<String, dynamic>>[];
+  final tracks = <AudioTrack>[];
+  final rowState = <Map<String, dynamic>>[];
+  final timelineLengths = <String, double>{};
+  for (var rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+    final rowId = 1000 + rowIndex;
+    final isMidi = rowIndex.isOdd;
+    rows.add(<String, dynamic>{
+      'row_index': rowIndex,
+      'row_id': rowId,
+      'name': 'Synthetic row $rowIndex',
+      'lane_kind': isMidi ? 'instrument' : 'audio',
+      'instrument_id': isMidi ? 'piano' : null,
+      'gain': 2.0,
+      'pan': 0.5,
+      'row_color': 0,
+      'effects': const <Object>[],
+      'automation_targets': const <Object>[],
+      'source_type': isMidi ? 'midi' : 'audio',
+      'has_audio': !isMidi,
+      'group_id': 'group-${rowIndex ~/ 2}',
+    });
+    rowState.add(<String, dynamic>{
+      'row_id': rowId,
+      'muted': false,
+      'soloed': false,
+    });
+  }
+  for (var clipIndex = 0; clipIndex < clipCount; clipIndex++) {
+    final rowIndex = clipIndex % rowCount;
+    final rowId = 1000 + rowIndex;
+    final isMidi = rowIndex.isOdd;
+    final clipId = 'synthetic-clip-${clipIndex.toString().padLeft(4, '0')}';
+    final notes = isMidi && clipIndex == 1
+        ? List<MidiNote>.generate(
+            512,
+            (index) => MidiNote(
+              id: 'note-$index',
+              pitch: 48 + index % 24,
+              startBeat: (index % 32) / 4,
+              lengthBeats: 0.25,
+              velocity: 0.75,
+            ),
+          )
+        : <MidiNote>[];
+    final path = '/tmp/$clipId.wav';
+    tracks.add(
+      await AudioTrack.create(
+        file: File(path),
+        originalFile: File(path),
+        audioDuration: const Duration(seconds: 4),
+        trimStart: Duration.zero,
+        trimEnd: const Duration(seconds: 4),
+        offset: clipIndex / 10,
+        rowIndex: rowIndex,
+        rowId: rowId,
+        clipId: clipId,
+        label: 'Synthetic clip $clipIndex',
+        clipKind: isMidi ? ClipKind.midi : ClipKind.audio,
+        instrumentId: isMidi ? 'piano' : '',
+        instrumentName: isMidi ? 'Piano' : '',
+        midiNotes: notes,
+      ),
+    );
+    clips.add(<String, dynamic>{
+      'clip_index': clipIndex,
+      'clip_id': clipId,
+      'row_id': rowId,
+      'clip_kind': isMidi ? 'midi' : 'audio',
+      'label': 'Synthetic clip $clipIndex',
+      'file': '$clipId.wav',
+      'instrument_id': isMidi ? 'piano' : null,
+    });
+    timelineLengths[clipId] = 4000;
+  }
+  final groups = <Map<String, dynamic>>[
+    for (var rowIndex = 0; rowIndex + 1 < rowCount; rowIndex += 2)
+      <String, dynamic>{
+        'group_id': 'group-${rowIndex ~/ 2}',
+        'name': 'Synthetic group ${rowIndex ~/ 2}',
+        'member_row_indices': <int>[rowIndex, rowIndex + 1],
+        'gain': 2.0,
+        'pan': 0.5,
+        'muted': false,
+        'soloed': false,
+        'effects': const <Object>[],
+      },
+  ];
+  final validation = <String, dynamic>{
+    'client_state_digest': 'large-$rowCount-$clipCount',
+    'project': <String, dynamic>{'tempo_bpm': 120},
+    'rows': rows,
+    'groups': groups,
+    'master': <String, dynamic>{
+      'gain': 2.0,
+      'pan': 0.5,
+      'effects': const <Object>[],
+    },
+    'clips': clips,
+    'selection': <String, dynamic>{},
+  };
+  final client = _clientContext()
+    ..['ai_v3_row_state'] = rowState
+    ..['ai_v3_clip_timeline_lengths_ms'] = timelineLengths
+    ..['current_rows'] = rowCount
+    ..['ai_v3_library_assets'] = <Map<String, dynamic>>[
+      for (var index = 0; index < 250; index++)
+        <String, dynamic>{
+          'asset_id': 'asset-$index',
+          'path': 'Synthetic/asset-$index.wav',
+          'role': index.isEven ? 'drums' : 'melodic',
+        },
+    ];
+  return (validation: validation, tracks: tracks, client: client);
+}
+
 void main() {
+  test('MIDI context preserves sub-millisecond clip boundaries', () async {
+    final clip = await _midiClip();
+    for (final bpm in <double>[84, 108, 120, 137, 240]) {
+      for (final beats in <double>[32, 7.375]) {
+        clip.trimStart = const Duration(microseconds: 123456);
+        clip.trimEnd =
+            clip.trimStart +
+            Duration(microseconds: (beats * 60000000 / bpm).round());
+        final saved = clip.toJson('precision.mid');
+        clip.trimStart = clipTrimFromMilliseconds(
+          saved['trimStartMs'] as num,
+          isMidi: true,
+        );
+        clip.trimEnd = clipTrimFromMilliseconds(
+          saved['trimEndMs'] as num,
+          isMidi: true,
+        );
+        final context = const AiV3CoreContextBuilder().build(
+          profile: AiV3ContextProfile.essential,
+          userRequest: 'Replace the notes.',
+          conversation: const <Map<String, String>>[],
+          validationState: _validation(),
+          audioTracks: <AudioTrack>[clip],
+          clientContext: _clientContext(),
+          bpm: bpm,
+          beatsPerBar: 4,
+          beatUnit: 4,
+        );
+        final length =
+            ((context.data['clips'] as List).single as Map)['length_beats']
+                as double;
+        expect(length, closeTo(beats, bpm / 120000000 + 1e-12));
+        AiV3Plan replacement(double end) => AiV3Plan.fromJson({
+          'schema_version': aiV3PlanVersion,
+          'outcome': 'plan',
+          'user_message': 'Replaced the notes.',
+          'question_options': <String>[],
+          'commands': [
+            {
+              'command_id': 'replace',
+              'type': 'midi.replace_notes',
+              'arguments': {
+                'clip_id': 'clip-42',
+                'notes': [
+                  {
+                    'pitch': 66,
+                    'start_beat': end - 1,
+                    'length_beats': 1.0,
+                    'velocity': 0.8,
+                  },
+                ],
+              },
+            },
+          ],
+        });
+        const preparer = AiV3CommandPreparer();
+        expect(
+          preparer.prepare(plan: replacement(length), context: context).actions,
+          hasLength(1),
+        );
+        // Whole-ms truncation can advertise a boundary just below 32 beats.
+        if ((bpm == 84 || bpm == 108) && beats == 32) {
+          expect(
+            preparer.prepare(plan: replacement(32), context: context).actions,
+            hasLength(1),
+          );
+        }
+        expect(
+          () => preparer.prepare(
+            plan: replacement(length + 0.002 * bpm / 60),
+            context: context,
+          ),
+          throwsA(
+            isA<AiV3PreparationException>().having(
+              (error) => error.code,
+              'code',
+              'v3_midi_note_out_of_bounds',
+            ),
+          ),
+        );
+      }
+    }
+  });
+
+  test(
+    'duration precision does not round saved MIDI or alter audio context',
+    () async {
+      for (final midi in <bool>[true, false]) {
+        final clip = midi ? await _midiClip() : await _audioClip();
+        clip.trimStart = Duration.zero;
+        clip.trimEnd = Duration(microseconds: midi ? 22856000 : 22856999);
+        final context = const AiV3CoreContextBuilder().build(
+          profile: AiV3ContextProfile.essential,
+          userRequest: 'Inspect the clip.',
+          conversation: const <Map<String, String>>[],
+          validationState: _validation(),
+          audioTracks: <AudioTrack>[clip],
+          clientContext: _clientContext(),
+          bpm: 84,
+          beatsPerBar: 4,
+          beatUnit: 4,
+        );
+        expect(
+          ((context.data['clips'] as List).single as Map)['length_beats'],
+          22856 / 1000 * 84 / 60,
+        );
+      }
+    },
+  );
+
   test('builds deterministic complete identity and MIDI context', () async {
     final clip = await _midiClip();
     const builder = AiV3CoreContextBuilder();
@@ -174,6 +411,8 @@ void main() {
     final notes = ((first.data['clips'] as List).single as Map)['midi_notes'];
     expect(notes, hasLength(1));
     final project = first.data['project'] as Map;
+    expect(project['generated_midi_policy'], aiV3GeneratedMidiPolicy);
+    expect(project['plan_command_policy'], aiV3PlanCommandPolicy);
     expect(project['playhead_ms'], 1500);
     expect(project['playhead_beat'], 3.0);
     final transport = first.data['transport'] as Map;
@@ -186,7 +425,8 @@ void main() {
       'loop_end_ms': 5000,
     });
     expect(transport, isNot(contains('playhead_ms')));
-    expect((project['row_capacity'] as Map)['max_rows'], 24);
+    expect(project['project_capacity_policy'], aiV3ProjectCapacityPolicy);
+    expect((project['row_capacity'] as Map)['creation_limit'], isNull);
     expect((project['row_capacity'] as Map)['can_create'], isTrue);
     expect((project['row_capacity'] as Map).containsKey('policy'), isFalse);
     final row = (first.data['rows'] as List).single as Map;
@@ -206,6 +446,128 @@ void main() {
     expect(group['member_row_ids'], <int>[42]);
     expect(group['collapsed'], isFalse);
     expect((first.data['master'] as Map)['gain_db'], 0.0);
+  });
+
+  test('capable context preserves rows and clips beyond former caps', () async {
+    for (final shape in <(int, int)>[(33, 129), (120, 600)]) {
+      final fixture = await _largeProjectFixture(
+        rowCount: shape.$1,
+        clipCount: shape.$2,
+      );
+      final context = const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: 'Inspect the complete synthetic project.',
+        conversation: const <Map<String, String>>[],
+        validationState: fixture.validation,
+        audioTracks: fixture.tracks,
+        clientContext: fixture.client,
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      );
+      final rows = (context.data['rows'] as List).cast<Map>();
+      final clips = (context.data['clips'] as List).cast<Map>();
+      expect(rows, hasLength(shape.$1));
+      expect(clips, hasLength(shape.$2));
+      expect(
+        rows.map((row) => row['row_id']).toList(),
+        List<int>.generate(shape.$1, (index) => 1000 + index),
+      );
+      expect(
+        clips.map((clip) => clip['clip_id']).toList(),
+        List<String>.generate(
+          shape.$2,
+          (index) => 'synthetic-clip-${index.toString().padLeft(4, '0')}',
+        ),
+      );
+      expect((clips[1]['midi_notes'] as List), hasLength(512));
+      expect(utf8.encode(context.canonicalJson).length, lessThan(4000000));
+    }
+  });
+
+  test('legacy context keeps finite capacity metadata', () async {
+    final client = _clientContext()
+      ..remove('row_creation_limit')
+      ..['max_rows'] = 32;
+    final context = const AiV3CoreContextBuilder().build(
+      profile: AiV3ContextProfile.essential,
+      userRequest: 'Inspect the project.',
+      conversation: const <Map<String, String>>[],
+      validationState: _validation(),
+      audioTracks: <AudioTrack>[await _midiClip()],
+      clientContext: client,
+      bpm: 120,
+      beatsPerBar: 4,
+      beatUnit: 4,
+    );
+    final project = context.data['project'] as Map;
+    expect(project, isNot(contains('project_capacity_policy')));
+    expect(project['row_capacity'], <String, dynamic>{
+      'current_rows': 1,
+      'max_rows': 32,
+      'can_create': true,
+    });
+  });
+
+  test('capable context rejects overflow instead of truncating', () async {
+    final clip = await _midiClip();
+    expect(
+      () => const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: '界' * 1400000,
+        conversation: const <Map<String, String>>[],
+        validationState: _validation(),
+        audioTracks: <AudioTrack>[clip],
+        clientContext: _clientContext(),
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      ),
+      throwsA(
+        isA<AiV3ContextException>().having(
+          (error) => error.code,
+          'code',
+          'v3_context_request_limit',
+        ),
+      ),
+    );
+  });
+
+  test('preserves all existing notes above the generated-note budget', () async {
+    final clip = await _midiClip();
+    // Includes the next snapshot after adding 300 notes to a 300-note project.
+    for (final count in [300, 512, 513, 600, 1024]) {
+      clip.midiNotes = List.generate(
+        count,
+        (i) => MidiNote(
+          id: 'note-$i',
+          pitch: 60 + i % 12,
+          startBeat: i / count,
+          lengthBeats: 0.01,
+          velocity: 0.8,
+        ),
+      );
+      final context = const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: 'Rebalance without changing the notes.',
+        conversation: const [],
+        validationState: _validation(),
+        audioTracks: [clip],
+        clientContext: _clientContext(),
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      );
+      final notes =
+          ((context.data['clips'] as List).single as Map)['midi_notes'] as List;
+      expect(notes, hasLength(count));
+      for (var i = 0; i < count; i++) {
+        expect(notes[i]['pitch'], clip.midiNotes[i].pitch);
+        expect(notes[i]['start_beat'], clip.midiNotes[i].startBeat);
+        expect(notes[i]['length_beats'], clip.midiNotes[i].lengthBeats);
+        expect(notes[i]['velocity'], clip.midiNotes[i].velocity);
+      }
+    }
   });
 
   test(
@@ -282,7 +644,7 @@ void main() {
           ],
         },
       ]
-      ..['max_rows'] = SubscriptionLimits.freeRowsPerProject;
+      ..['row_creation_limit'] = SubscriptionLimits.freeRowsPerProject;
     final context = const AiV3CoreContextBuilder().build(
       profile: AiV3ContextProfile.essential,
       userRequest: 'Add a Free-tier effect.',
@@ -302,7 +664,7 @@ void main() {
     expect(advertisedEffects, isNot(contains('Distortion')));
     expect(
       (context.data['project'] as Map)['row_capacity'],
-      containsPair('max_rows', SubscriptionLimits.freeRowsPerProject),
+      containsPair('creation_limit', SubscriptionLimits.freeRowsPerProject),
     );
     final advertisedInstruments = (context.data['instruments'] as List)
         .map((id) => id.toString())
@@ -354,7 +716,7 @@ void main() {
             ],
           },
         ]
-        ..['max_rows'] = SubscriptionLimits.freeRowsPerProject
+        ..['row_creation_limit'] = SubscriptionLimits.freeRowsPerProject
         ..['current_rows'] = 6
         ..['ai_v3_row_state'] = <Map<String, dynamic>>[
           for (var index = 0; index < 6; index++)
@@ -383,7 +745,7 @@ void main() {
       expect(rows.first['instrument_id'], 'paid-orchestral-strings');
       expect(context.data['instruments'], <String>['sfz.vsco.upright_piano']);
       expect(capacity['current_rows'], 6);
-      expect(capacity['max_rows'], SubscriptionLimits.freeRowsPerProject);
+      expect(capacity['creation_limit'], SubscriptionLimits.freeRowsPerProject);
       expect(capacity['can_create'], isFalse);
     },
   );
@@ -510,12 +872,10 @@ void main() {
     expect(enrichedRow['audio_analysis'], isA<Map>());
   });
 
-  test('rejects envelope overflow rather than truncating', () async {
+  test('keeps the supporting library envelope', () async {
     final clip = await _midiClip();
-    const builder = AiV3CoreContextBuilder(maxClips: 0);
-
     expect(
-      () => builder.build(
+      () => const AiV3CoreContextBuilder(maxLibraryAssets: 0).build(
         profile: AiV3ContextProfile.essential,
         userRequest: 'Edit it.',
         conversation: const <Map<String, String>>[],
@@ -530,54 +890,11 @@ void main() {
         isA<AiV3ContextException>().having(
           (error) => error.code,
           'code',
-          'prototype_context_clip_limit',
+          'prototype_context_library_limit',
         ),
       ),
     );
   });
-
-  test(
-    'independently enforces row, MIDI-note, and library envelopes',
-    () async {
-      final clip = await _midiClip();
-
-      for (final entry in <({AiV3CoreContextBuilder builder, String code})>[
-        (
-          builder: const AiV3CoreContextBuilder(maxRows: 0),
-          code: 'prototype_context_row_limit',
-        ),
-        (
-          builder: const AiV3CoreContextBuilder(maxMidiNotes: 0),
-          code: 'prototype_context_midi_note_limit',
-        ),
-        (
-          builder: const AiV3CoreContextBuilder(maxLibraryAssets: 0),
-          code: 'prototype_context_library_limit',
-        ),
-      ]) {
-        expect(
-          () => entry.builder.build(
-            profile: AiV3ContextProfile.essential,
-            userRequest: 'Edit it.',
-            conversation: const <Map<String, String>>[],
-            validationState: _validation(),
-            audioTracks: <AudioTrack>[clip],
-            clientContext: _clientContext(),
-            bpm: 120,
-            beatsPerBar: 4,
-            beatUnit: 4,
-          ),
-          throwsA(
-            isA<AiV3ContextException>().having(
-              (error) => error.code,
-              'code',
-              entry.code,
-            ),
-          ),
-        );
-      }
-    },
-  );
 
   test('rejects contradictory stable identity indexes', () async {
     final clip = await _midiClip();

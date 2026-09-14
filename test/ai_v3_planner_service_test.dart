@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' as foundation;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -65,6 +66,249 @@ AiV3PlannerService _service(
 );
 
 void main() {
+  test('backend context rejection retains actionable capacity code', () async {
+    final service = _service(
+      MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'error': {'code': 'v3_context_request_limit'},
+          }),
+          400,
+        ),
+      ),
+    );
+    await expectLater(
+      service.plan(context: _context(), originalRequest: 'Edit.'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (e) => e.code,
+          'code',
+          'v3_context_request_limit',
+        ),
+      ),
+    );
+  });
+  test(
+    'oversized UTF-8 context or request never authenticates or posts',
+    () async {
+      for (final oversizedContext in [true, false]) {
+        final context = _context();
+        if (oversizedContext) context.data['padding'] = '界' * 47000;
+        final service = _service(
+          MockClient((_) async {
+            fail('Oversized input must not reach the network');
+          }),
+          authTokenProvider: () async {
+            fail('Oversized input must not authenticate');
+          },
+        );
+        await expectLater(
+          service.plan(
+            context: context,
+            originalRequest: oversizedContext ? 'Rebalance.' : '界' * 61000,
+          ),
+          throwsA(
+            isA<AiV3PlannerException>().having(
+              (e) => e.code,
+              'code',
+              'v3_context_request_limit',
+            ),
+          ),
+        );
+      }
+    },
+  );
+
+  test(
+    'recognized capacity policy uses the expanded request envelope',
+    () async {
+      final context = _context();
+      context.data['project'] = <String, dynamic>{
+        'project_id': 'project-1',
+        'bpm': 120,
+        'project_capacity_policy': aiV3ProjectCapacityPolicy,
+        'row_capacity': <String, dynamic>{
+          'current_rows': 0,
+          'creation_limit': null,
+          'can_create': true,
+        },
+      };
+      context.data['padding'] = <String>['x' * 30000, 'y' * 30000];
+      var calls = 0;
+      final service = _service(
+        MockClient((request) async {
+          calls++;
+          expect(utf8.encode(request.body).length, greaterThan(180000));
+          return http.Response(
+            jsonEncode(_serverResponse(_respondPlan())),
+            200,
+          );
+        }),
+      );
+
+      await service.plan(context: context, originalRequest: '界' * 41000);
+      expect(calls, 1);
+    },
+  );
+
+  test('expanded envelope overflow never authenticates or posts', () async {
+    final context = _context();
+    context.data['project'] = <String, dynamic>{
+      'project_id': 'project-1',
+      'bpm': 120,
+      'project_capacity_policy': aiV3ProjectCapacityPolicy,
+      'row_capacity': <String, dynamic>{
+        'current_rows': 0,
+        'creation_limit': null,
+        'can_create': true,
+      },
+    };
+    context.data['padding'] = '界' * 1400000;
+    final service = _service(
+      MockClient(
+        (_) async => fail('Oversized input must not reach the network'),
+      ),
+      authTokenProvider: () async {
+        fail('Oversized input must not authenticate');
+      },
+    );
+
+    await expectLater(
+      service.plan(context: context, originalRequest: 'Inspect.'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_context_request_limit',
+        ),
+      ),
+    );
+  });
+
+  test(
+    'expanded complete-request overflow never authenticates or posts',
+    () async {
+      final context = _context();
+      context.data['project'] = <String, dynamic>{
+        'project_id': 'project-1',
+        'bpm': 120,
+        'project_capacity_policy': aiV3ProjectCapacityPolicy,
+        'row_capacity': <String, dynamic>{
+          'current_rows': 0,
+          'creation_limit': null,
+          'can_create': true,
+        },
+      };
+      context.data['padding'] = List<String>.generate(
+        120,
+        (index) => '${index.toString().padLeft(3, '0')}${'x' * 31997}',
+      );
+      expect(
+        utf8.encode(context.canonicalJson).length,
+        lessThan(AiV3CoreContextBuilder.maxCanonicalBytes),
+      );
+      final service = _service(
+        MockClient(
+          (_) async => fail('Oversized input must not reach the network'),
+        ),
+        authTokenProvider: () async {
+          fail('Oversized input must not authenticate');
+        },
+      );
+
+      await expectLater(
+        service.plan(context: context, originalRequest: 'y' * 700000),
+        throwsA(
+          isA<AiV3PlannerException>().having(
+            (error) => error.code,
+            'code',
+            'v3_context_request_limit',
+          ),
+        ),
+      );
+    },
+  );
+
+  test('complete input above 512 notes reaches proxy unchanged', () async {
+    final context = _context();
+    final notes = List.generate(
+      1024,
+      (i) => {
+        'pitch': 60,
+        'start_beat': i / 1024,
+        'length_beats': 0.01,
+        'velocity': 0.8,
+      },
+    );
+    context.data['clips'] = [
+      {'clip_id': 'clip-1', 'midi_notes': notes},
+    ];
+    var calls = 0;
+    final service = _service(
+      MockClient((request) async {
+        calls++;
+        final body = jsonDecode(request.body) as Map;
+        expect(body['core_context']['clips'][0]['midi_notes'], notes);
+        return http.Response(jsonEncode(_serverResponse(_respondPlan())), 200);
+      }),
+    );
+    await service.plan(context: context, originalRequest: 'Rebalance.');
+    expect(calls, 1);
+  });
+  test(
+    'local validation diagnostics contain only codes and numeric metadata',
+    () async {
+      final messages = <String>[];
+      final previous = foundation.debugPrint;
+      foundation.debugPrint = (String? message, {int? wrapWidth}) {
+        messages.add(message ?? '');
+      };
+      addTearDown(() => foundation.debugPrint = previous);
+      final plan = _respondPlan()..['user_message'] = '';
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode(
+            _serverResponse(
+              plan,
+              traceExtra: {'prompt_trace_id': 'SECRET_TRACE'},
+            ),
+          ),
+          200,
+        ),
+      );
+      await expectLater(
+        _service(
+          client,
+        ).plan(context: _context(), originalRequest: 'SECRET_PROMPT'),
+        throwsA(
+          isA<AiV3PlannerException>()
+              .having((e) => e.code, 'code', 'v3_planner_contract_invalid')
+              .having((e) => e.detail, 'detail', 'v3_user_message_invalid'),
+        ),
+      );
+      const enabled = bool.fromEnvironment(
+        'AI_V3_LOCAL_VALIDATION_DIAGNOSTICS',
+      );
+      if (enabled) {
+        expect(messages, hasLength(1));
+        final data =
+            jsonDecode(messages.single.split('[AI.v3-validation] ').last)
+                as Map;
+        expect(data.keys.toSet(), {
+          'code',
+          'contract_error_code',
+          'http_status',
+          'elapsed_ms',
+          'request_timeout_ms',
+        });
+        expect(data['contract_error_code'], 'v3_user_message_invalid');
+        expect(data['http_status'], 200);
+      } else {
+        expect(messages, isEmpty);
+      }
+      expect(messages.join(), isNot(contains('SECRET_')));
+    },
+  );
   test('builds only the context request contract with sorted capabilities', () {
     final conversation = List<Map<String, String>>.generate(
       14,
@@ -188,8 +432,9 @@ void main() {
         calls += 1;
         authorizations.add(request.headers['authorization'] ?? '');
         bodies.add(request.body);
-        if (calls == 1)
+        if (calls == 1) {
           return http.Response('{"error":{"code":"expired"}}', 401);
+        }
         return http.Response(jsonEncode(_serverResponse(_respondPlan())), 200);
       });
 
@@ -279,7 +524,7 @@ void main() {
       return http.Response(jsonEncode(_serverResponse(plan)), 200);
     });
 
-    final result = await _service(
+    await _service(
       client,
       commandTypes: const <String>{'clip.align_tempo_to_project'},
     ).plan(context: _context(), originalRequest: 'Make this a remix.');
@@ -466,5 +711,63 @@ void main() {
             ),
       ),
     );
+  });
+
+  test('does not resubmit a request after its client deadline', () async {
+    var calls = 0;
+    final timeoutClient = MockClient((_) async {
+      calls += 1;
+      await Completer<void>().future;
+      return http.Response('{}', 200);
+    });
+
+    await expectLater(
+      _service(
+        timeoutClient,
+        timeout: const Duration(milliseconds: 1),
+      ).plan(context: _context(), originalRequest: 'Make one change.'),
+      throwsA(
+        isA<AiV3PlannerException>().having(
+          (error) => error.code,
+          'code',
+          'v3_planner_timeout',
+        ),
+      ),
+    );
+    expect(calls, 1);
+  });
+
+  test('does not cross-route retry or resubmit throttled requests', () async {
+    var calls = 0;
+    final client = MockClient((request) async {
+      calls += 1;
+      expect(
+        request.url,
+        Uri.parse('https://proxy.example/v1/llm/v3/responses'),
+      );
+      return http.Response(
+        jsonEncode(<String, dynamic>{
+          'error': <String, dynamic>{'code': 'too_many_requests'},
+        }),
+        429,
+      );
+    });
+
+    await expectLater(
+      _service(
+        client,
+        refreshAuthTokenProvider: () async => 'unused-refresh-token',
+      ).plan(context: _context(), originalRequest: 'Make one change.'),
+      throwsA(
+        isA<AiV3PlannerException>()
+            .having((error) => error.code, 'code', 'v3_planner_http_error')
+            .having(
+              (error) => error.diagnostic['http_status'],
+              'http status',
+              429,
+            ),
+      ),
+    );
+    expect(calls, 1);
   });
 }

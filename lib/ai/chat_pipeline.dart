@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'ai_debug.dart';
 import 'v3/ai_v3_context.dart';
 import 'v3/ai_v3_contract.dart';
@@ -409,6 +410,11 @@ _AiV3PreparationFailureResponse _aiV3PreparationFailureResponse(
 _AiV3PreparationFailureResponse _aiV3PlannerFailureResponse(
   String code,
 ) => switch (code) {
+  'v3_context_request_limit' => const _AiV3PreparationFailureResponse(
+    decision: 'blocked',
+    message:
+        'This project or request exceeds the AI context capacity. Nothing was changed. Try a smaller project or shorter request.',
+  ),
   'v3_planner_timeout' => const _AiV3PreparationFailureResponse(
     decision: 'blocked',
     message:
@@ -1415,6 +1421,13 @@ class ChatPipeline {
               'http_status=${diagnostic['http_status'] ?? '-'} '
               'server_error_code=${diagnostic['server_error_code'] ?? '-'}',
         );
+      } else {
+        // Local diagnostics must identify unexpected failure classes without
+        // logging exception text, requests, project data, or credentials.
+        aiDebugLog(
+          'v3-planner',
+          'failed code=$code error_type=${error.runtimeType}',
+        );
       }
       final response = _aiV3PlannerFailureResponse(code);
       _pendingAiV3Bundle = null;
@@ -1477,6 +1490,14 @@ class ChatPipeline {
       preparationElapsedMs = totalPreparationStopwatch.elapsedMilliseconds;
       _pendingAiV3Bundle = null;
       _pendingAiV3PlanId = null;
+      if (kDebugMode &&
+          const bool.fromEnvironment('AI_V3_LOCAL_VALIDATION_DIAGNOSTICS')) {
+        // Metadata only: deliberately exclude planDiagnostic/error.diagnostic,
+        // which can contain project/resource identifiers or generated content.
+        debugPrint(
+          '[AI.v3-preparation] ${jsonEncode(<String, dynamic>{'code': error.code, 'stage': stage, 'stage_elapsed_ms': stageElapsedMs, 'total_elapsed_ms': preparationElapsedMs, 'command_count': plan.commands.length})}',
+        );
+      }
       aiDebugLog(
         'v3-prepare',
         'failed trace=${promptTraceId ?? '-'} stage=$stage '

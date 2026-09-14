@@ -4,6 +4,17 @@ project(juce_audio_engine)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Flutter's Android Profile variant otherwise falls back to this plugin's
+# Debug native build, leaving the realtime engine completely unoptimised.
+# Keep symbols for profiling while matching release-quality optimisation and
+# disabled assertions. The Gradle profile variant is the only caller that
+# enables this option; ordinary Debug builds remain unchanged.
+option(MIXROOM_ANDROID_PROFILE "Optimise native audio code for Flutter Profile" OFF)
+if(MIXROOM_ANDROID_PROFILE)
+    add_compile_options(-O2 -g)
+    add_compile_definitions(NDEBUG)
+endif()
+
 # Ensure PIC everywhere (shared libs require this; static libs benefit too)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 

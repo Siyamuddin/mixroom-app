@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +30,82 @@ Future<AudioTrack> _midiClip() => AudioTrack.create(
     );
 
 void main() {
+  test('512-note edits preserve exact data through undo redo and serialization', () async {
+    final clip = await _midiClip();
+    final oldNotes = clip.midiNotes.map((note) => note.copy()).toList();
+    final notes = List.generate(512, (i) => MidiNote(
+      id: 'budget-$i', pitch: 48 + i % 24, startBeat: i / 128,
+      lengthBeats: 0.03125, velocity: 0.75,
+    ));
+    final expected = notes.map((note) => note.toJson()).toList();
+    var failSync = false;
+    final action = EditMidiClipAction(
+      tracks: [clip], originalIndex: 0, oldNotes: oldNotes, newNotes: notes,
+      oldInstrumentId: clip.instrumentId, newInstrumentId: clip.instrumentId,
+      oldInstrumentName: clip.instrumentName, newInstrumentName: clip.instrumentName,
+      oldInstrumentParams: const {}, newInstrumentParams: const {},
+      oldTrimEnd: clip.trimEnd, newTrimEnd: clip.trimEnd,
+      oldAudioDuration: clip.audioDuration, newAudioDuration: clip.audioDuration,
+      applyToClip: (target, values, id, name, params, state) async {
+        target.midiNotes = values.map((note) => note.copy()).toList();
+        if (failSync && values.length == 512) throw StateError('synthetic sync failure');
+      },
+    );
+    await action.redo();
+    expect(clip.midiNotes.map((note) => note.toJson()).toList(), expected);
+    expect(clip.toJson('budget.mid')['midiNotes'], expected);
+    await action.undo();
+    expect(clip.midiNotes.map((note) => note.toJson()).toList(),
+        oldNotes.map((note) => note.toJson()).toList());
+    await action.redo();
+    expect(clip.midiNotes.map((note) => note.toJson()).toList(), expected);
+    expect(action.toPersistedUndoCommand()['newNotes'], expected);
+    final directory = await Directory.systemTemp.createTemp('pro4-note-budget-');
+    try {
+      final file = File('${directory.path}/clip.json');
+      await file.writeAsString(jsonEncode(clip.toJson('budget.mid')));
+      final saved = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final reopened = (saved['midiNotes'] as List)
+          .map((note) => MidiNote.fromJson(Map<String, dynamic>.from(note as Map)))
+          .map((note) => note.toJson()).toList();
+      expect(reopened, expected);
+    } finally {
+      await directory.delete(recursive: true);
+    }
+    await action.undo();
+    failSync = true;
+    await expectLater(action.redo(), throwsStateError);
+    expect(clip.midiNotes.map((note) => note.toJson()).toList(),
+        oldNotes.map((note) => note.toJson()).toList());
+  });
+
+  test('MIDI undo persistence retains fractional millisecond bounds', () async {
+    final clip = await _midiClip();
+    const before = Duration(microseconds: 17777778);
+    const after = Duration(microseconds: 22857143);
+    final action = EditMidiClipAction(
+      tracks: [clip], originalIndex: 0,
+      oldNotes: clip.midiNotes, newNotes: clip.midiNotes,
+      oldInstrumentId: clip.instrumentId, newInstrumentId: clip.instrumentId,
+      oldInstrumentName: clip.instrumentName, newInstrumentName: clip.instrumentName,
+      oldInstrumentParams: const {}, newInstrumentParams: const {},
+      oldTrimEnd: before, newTrimEnd: after,
+      oldAudioDuration: before, newAudioDuration: after,
+      applyToClip: (target, notes, id, name, params, state) async {},
+    );
+    final persisted = action.toPersistedUndoCommand();
+    for (final field in ['oldTrimEndMs', 'oldAudioDurationMs']) {
+      expect(clipTrimFromMilliseconds(persisted[field] as num, isMidi: true), before);
+    }
+    for (final field in ['newTrimEndMs', 'newAudioDurationMs']) {
+      expect(clipTrimFromMilliseconds(persisted[field] as num, isMidi: true), after);
+    }
+    await action.redo();
+    expect(clip.trimEnd, after);
+    await action.undo();
+    expect(clip.trimEnd, before);
+  });
+
   test('guitar IDs, names, parameters, and notes serialize unchanged',
       () async {
     for (final guitar in <Map<String, Object>>[

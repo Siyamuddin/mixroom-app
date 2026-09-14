@@ -9,6 +9,27 @@ import 'audio_route_snapshot_provider_v2.dart';
 import 'audio_route_v2.dart';
 import 'ios_recording_input_v2.dart';
 
+enum JuceMutationResult {
+  success,
+  invalidInput,
+  missingMedia,
+  resourceExhausted,
+  internalFailure;
+
+  static JuceMutationResult fromWire(Object? value) {
+    // Platform bridges return an integer enum. Reject coercible or malformed
+    // values so an unsupported/old bridge cannot be mistaken for success.
+    if (value is! int ||
+        value < 0 ||
+        value >= JuceMutationResult.values.length) {
+      return JuceMutationResult.internalFailure;
+    }
+    return JuceMutationResult.values[value];
+  }
+
+  bool get succeeded => this == JuceMutationResult.success;
+}
+
 class JuceEngineCapabilities {
   final bool externalPluginHosting;
   final List<String> supportedPluginFormats;
@@ -1919,6 +1940,20 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<JuceMutationResult> endProjectClipLoadDetailed() async {
+    try {
+      final raw = await _ch.invokeMethod<Object?>('endProjectClipLoadDetailed');
+      return JuceMutationResult.fromWire(raw);
+    } on MissingPluginException {
+      // Do not invoke the legacy void finalizer and assume it succeeded. A
+      // caller requiring verified publication must fail closed instead.
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('endProjectClipLoadDetailed', e);
+      return JuceMutationResult.internalFailure;
+    }
+  }
+
   static Future<void> beginGraphMutationBatch() async {
     try {
       await _ch.invokeMethod('beginGraphMutationBatch');
@@ -1991,11 +2026,74 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<JuceMutationResult> loadClipDetailed(
+    int clipIndex,
+    int rowId,
+    String path, {
+    double startSec = 0.0,
+    double lengthSec = 0.0,
+    double inFileOffsetSec = 0.0,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<Object?>('loadClipDetailed', {
+        'clip': clipIndex,
+        'rowId': rowId,
+        'row': rowId,
+        'path': path,
+        'startSec': startSec,
+        'lengthSec': lengthSec,
+        'inFileOffsetSec': inFileOffsetSec,
+      });
+      return JuceMutationResult.fromWire(raw);
+    } on MissingPluginException {
+      // Avoid a legacy mutation with no detailed admission result. Callers can
+      // use loadClip directly when legacy best-effort behavior is intended.
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('loadClipDetailed', e);
+      return JuceMutationResult.internalFailure;
+    }
+  }
+
   static Future<void> unloadClip(int clipIndex) async {
     try {
       await _ch.invokeMethod('unloadClip', {'clip': clipIndex});
     } on PlatformException catch (e) {
       _logError('unloadClip', e);
+    }
+  }
+
+  /// Removes one live clip and requires an acknowledgement from the native
+  /// engine. Missing or malformed bridge support fails closed.
+  static Future<JuceMutationResult> unloadClipDetailed(int clipIndex) {
+    if (clipIndex < 0) {
+      return Future<JuceMutationResult>.value(JuceMutationResult.invalidInput);
+    }
+    return unloadClipsDetailed(<int>[clipIndex]);
+  }
+
+  /// Removes every distinct live clip and succeeds only when native confirms
+  /// the complete batch. Callers must not recycle IDs after any other result.
+  static Future<JuceMutationResult> unloadClipsDetailed(
+    Iterable<int> clipIndices,
+  ) async {
+    final clips = clipIndices.toSet().toList(growable: false);
+    if (clips.any((clip) => clip < 0)) {
+      return JuceMutationResult.invalidInput;
+    }
+    if (clips.isEmpty) return JuceMutationResult.success;
+    try {
+      final raw = await _ch.invokeMethod<Object?>('unloadClips', {
+        'clips': clips,
+      });
+      return raw is int && raw == clips.length
+          ? JuceMutationResult.success
+          : JuceMutationResult.internalFailure;
+    } on MissingPluginException {
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('unloadClipsDetailed', e);
+      return JuceMutationResult.internalFailure;
     }
   }
 

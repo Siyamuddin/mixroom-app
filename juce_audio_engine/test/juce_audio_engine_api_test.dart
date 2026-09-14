@@ -991,6 +991,60 @@ void main() {
     );
   });
 
+  test('detailed mutation results map every native status', () async {
+    for (final status in JuceMutationResult.values) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+        calls.add(methodCall);
+        return status.index;
+      });
+      calls.clear();
+
+      final clipResult = await JuceAudioEngine.loadClipDetailed(
+        5,
+        99,
+        '/tmp/clip.wav',
+        startSec: 1.25,
+        lengthSec: 4.5,
+        inFileOffsetSec: 0.4,
+      );
+      expect(clipResult, status);
+      expect(calls.single.method, 'loadClipDetailed');
+
+      calls.clear();
+      final finalizeResult = await JuceAudioEngine.endProjectClipLoadDetailed();
+      expect(finalizeResult, status);
+      expect(calls.single.method, 'endProjectClipLoadDetailed');
+    }
+  });
+
+  test('malformed detailed mutation results fail closed', () async {
+    for (final value in <Object?>[null, true, '0', -1, 99, 1.0]) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => value);
+
+      expect(
+        await JuceAudioEngine.loadClipDetailed(1, 7, '/tmp/clip.wav'),
+        JuceMutationResult.internalFailure,
+      );
+      expect(
+        await JuceAudioEngine.endProjectClipLoadDetailed(),
+        JuceMutationResult.internalFailure,
+      );
+    }
+  });
+
+  test('legacy loadClip retains its boolean contract', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      return methodCall.method == 'loadClip';
+    });
+
+    expect(await JuceAudioEngine.loadClip(1, 7, '/tmp/clip.wav'), isTrue);
+    expect(calls.single.method, 'loadClip');
+  });
+
   test('clip mutations stay batched across the platform channel', () async {
     await JuceAudioEngine.updateClipTimelineBatch(
       <Map<String, dynamic>>[
@@ -1054,6 +1108,63 @@ void main() {
         'clips': <int>[3, 4],
       },
     );
+  });
+
+  test('detailed clip removal requires a complete native acknowledgement',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'unloadClips') return 2;
+      return null;
+    });
+
+    final result = await JuceAudioEngine.unloadClipsDetailed(<int>[3, 4, 4]);
+
+    expect(result, JuceMutationResult.success);
+    expect(calls, hasLength(1));
+    expect(calls.single.arguments, <String, dynamic>{
+      'clips': <int>[3, 4],
+    });
+  });
+
+  test('detailed clip removal fails closed on partial acknowledgement',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'unloadClips') return 1;
+      return null;
+    });
+
+    expect(
+      await JuceAudioEngine.unloadClipsDetailed(<int>[3, 4]),
+      JuceMutationResult.internalFailure,
+    );
+  });
+
+  test('detailed clip removal fails closed on malformed acknowledgement',
+      () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+      calls.add(methodCall);
+      if (methodCall.method == 'unloadClips') return '2';
+      return null;
+    });
+
+    expect(
+      await JuceAudioEngine.unloadClipsDetailed(<int>[3, 4]),
+      JuceMutationResult.internalFailure,
+    );
+  });
+
+  test('detailed clip removal rejects invalid IDs before native access',
+      () async {
+    expect(
+      await JuceAudioEngine.unloadClipsDetailed(<int>[3, -1]),
+      JuceMutationResult.invalidInput,
+    );
+    expect(calls, isEmpty);
   });
 
   test('setAutomationTransport routes to setAutomationTransport', () async {
