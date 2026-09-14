@@ -8,6 +8,7 @@ SIM_HEADERS="$IOS_DIR/JuceModules.xcframework/ios-arm64_x86_64-simulator/Headers
 WRAPPER_DIR="$ROOT_DIR/tools/ios/juce_vendor"
 POLICY_PATCH="$WRAPPER_DIR/mixroom_ios_audio_session_policy.patch"
 POLICY_INCLUDE_DIR="$IOS_DIR/Classes"
+CANONICAL_MODULES="$ROOT_DIR/juce_audio_engine/android/src/main/cpp/juce/modules"
 EXPECTED_IOS_AUDIO_SOURCE_SHA="cb90606887e7c9fc925f8c004a651135edf86880cfd2ddf8590239f0a0abca05"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/juce_vendor_rebuild.XXXXXX")"
 
@@ -108,6 +109,7 @@ replace_objects_in_archive() {
   local dest_archive="$2"
   local new_devices_o="$3"
   local new_utils_o="$4"
+  local new_processors_o="$5"
 
   local work_dir="$TMP_DIR/$(basename "$dest_archive" .a)"
   mkdir -p "$work_dir"
@@ -120,6 +122,17 @@ replace_objects_in_archive() {
     xcrun ar -x "$source_archive"
     cp "$new_devices_o" include_juce_audio_devices.o
     cp "$new_utils_o" include_juce_audio_utils.o
+
+    local processors_member=""
+    if grep -Fxq "JuceModule_juce_audio_processors.o" "$manifest"; then
+      processors_member="JuceModule_juce_audio_processors.o"
+    elif grep -Fxq "include_juce_audio_processors.o" "$manifest"; then
+      processors_member="include_juce_audio_processors.o"
+    else
+      echo "Archive is missing its JUCE audio-processors object: $source_archive" >&2
+      exit 1
+    fi
+    cp "$new_processors_o" "$processors_member"
 
     local -a ordered_objects=()
     while IFS= read -r obj; do
@@ -138,33 +151,43 @@ replace_objects_in_archive() {
 
 DEVICE_DEBUG_DEVICES_O="$TMP_DIR/include_juce_audio_devices.debug.device.o"
 DEVICE_DEBUG_UTILS_O="$TMP_DIR/include_juce_audio_utils.debug.device.o"
+DEVICE_DEBUG_PROCESSORS_O="$TMP_DIR/include_juce_audio_processors.debug.device.o"
 DEVICE_RELEASE_DEVICES_O="$TMP_DIR/include_juce_audio_devices.release.device.o"
 DEVICE_RELEASE_UTILS_O="$TMP_DIR/include_juce_audio_utils.release.device.o"
+DEVICE_RELEASE_PROCESSORS_O="$TMP_DIR/include_juce_audio_processors.release.device.o"
 SIM_ARM64_DEVICES_O="$TMP_DIR/include_juce_audio_devices.debug.sim.arm64.o"
 SIM_ARM64_UTILS_O="$TMP_DIR/include_juce_audio_utils.debug.sim.arm64.o"
+SIM_ARM64_PROCESSORS_O="$TMP_DIR/include_juce_audio_processors.debug.sim.arm64.o"
 SIM_X64_DEVICES_O="$TMP_DIR/include_juce_audio_devices.debug.sim.x86_64.o"
 SIM_X64_UTILS_O="$TMP_DIR/include_juce_audio_utils.debug.sim.x86_64.o"
+SIM_X64_PROCESSORS_O="$TMP_DIR/include_juce_audio_processors.debug.sim.x86_64.o"
 
 compile_module iphoneos arm64 debug "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$DEVICE_DEBUG_DEVICES_O"
 compile_module iphoneos arm64 debug "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$DEVICE_DEBUG_UTILS_O"
+compile_module iphoneos arm64 debug "$CANONICAL_MODULES" "$WRAPPER_DIR/include_juce_audio_processors.mm" "$DEVICE_DEBUG_PROCESSORS_O"
 compile_module iphoneos arm64 release "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$DEVICE_RELEASE_DEVICES_O"
 compile_module iphoneos arm64 release "$DEVICE_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$DEVICE_RELEASE_UTILS_O"
+compile_module iphoneos arm64 release "$CANONICAL_MODULES" "$WRAPPER_DIR/include_juce_audio_processors.mm" "$DEVICE_RELEASE_PROCESSORS_O"
 compile_module iphonesimulator arm64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$SIM_ARM64_DEVICES_O"
 compile_module iphonesimulator arm64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$SIM_ARM64_UTILS_O"
+compile_module iphonesimulator arm64 debug "$CANONICAL_MODULES" "$WRAPPER_DIR/include_juce_audio_processors.mm" "$SIM_ARM64_PROCESSORS_O"
 compile_module iphonesimulator x86_64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_devices.mm" "$SIM_X64_DEVICES_O"
 compile_module iphonesimulator x86_64 debug "$SIM_PATCHED_HEADERS" "$WRAPPER_DIR/include_juce_audio_utils.mm" "$SIM_X64_UTILS_O"
+compile_module iphonesimulator x86_64 debug "$CANONICAL_MODULES" "$WRAPPER_DIR/include_juce_audio_processors.mm" "$SIM_X64_PROCESSORS_O"
 
 replace_objects_in_archive \
   "$IOS_DIR/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a" \
   "$IOS_DIR/JuceModules.xcframework/ios-arm64/libJuceModules_debug3.a" \
   "$DEVICE_DEBUG_DEVICES_O" \
-  "$DEVICE_DEBUG_UTILS_O"
+  "$DEVICE_DEBUG_UTILS_O" \
+  "$DEVICE_DEBUG_PROCESSORS_O"
 
 replace_objects_in_archive \
   "$IOS_DIR/JuceModules.xcframework/ios-arm64/libJuceModules.a" \
   "$IOS_DIR/JuceModules.xcframework/ios-arm64/libJuceModules.a" \
   "$DEVICE_RELEASE_DEVICES_O" \
-  "$DEVICE_RELEASE_UTILS_O"
+  "$DEVICE_RELEASE_UTILS_O" \
+  "$DEVICE_RELEASE_PROCESSORS_O"
 
 SIM_THIN_ARM64="$TMP_DIR/libJuceModules_sim.arm64.a"
 SIM_THIN_X64="$TMP_DIR/libJuceModules_sim.x86_64.a"
@@ -174,8 +197,8 @@ SIM_REBUILT_X64="$TMP_DIR/libJuceModules_sim.x86_64.rebuilt.a"
 xcrun lipo "$IOS_DIR/JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a" -thin arm64 -output "$SIM_THIN_ARM64"
 xcrun lipo "$IOS_DIR/JuceModules.xcframework/ios-arm64_x86_64-simulator/libJuceModules_sim.a" -thin x86_64 -output "$SIM_THIN_X64"
 
-replace_objects_in_archive "$SIM_THIN_ARM64" "$SIM_REBUILT_ARM64" "$SIM_ARM64_DEVICES_O" "$SIM_ARM64_UTILS_O"
-replace_objects_in_archive "$SIM_THIN_X64" "$SIM_REBUILT_X64" "$SIM_X64_DEVICES_O" "$SIM_X64_UTILS_O"
+replace_objects_in_archive "$SIM_THIN_ARM64" "$SIM_REBUILT_ARM64" "$SIM_ARM64_DEVICES_O" "$SIM_ARM64_UTILS_O" "$SIM_ARM64_PROCESSORS_O"
+replace_objects_in_archive "$SIM_THIN_X64" "$SIM_REBUILT_X64" "$SIM_X64_DEVICES_O" "$SIM_X64_UTILS_O" "$SIM_X64_PROCESSORS_O"
 
 xcrun lipo -create \
   "$SIM_REBUILT_ARM64" \

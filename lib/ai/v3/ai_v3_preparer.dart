@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'ai_v3_midi_boundary.dart';
 
 import '../../helpers/timeline_tempo_mapping.dart';
 import '../../helpers/midi_pitch_ranges.dart';
@@ -516,15 +517,29 @@ class AiV3CommandPreparer {
     var symbolicBpm = bpm;
     var projectAudioForcedTempoFollow = false;
     final rowCapacity = project['row_capacity'];
+    final usesDynamicCapacity =
+        project['project_capacity_policy'] == aiV3ProjectCapacityPolicy;
+    final rawCreationLimit = rowCapacity is Map
+        ? (usesDynamicCapacity
+              ? rowCapacity['creation_limit']
+              : rowCapacity['max_rows'])
+        : null;
     if (rowCapacity is! Map ||
         rowCapacity['current_rows'] is! int ||
-        rowCapacity['max_rows'] is! int ||
-        rowCapacity['current_rows'] != rows.length) {
+        (usesDynamicCapacity && !rowCapacity.containsKey('creation_limit')) ||
+        (!usesDynamicCapacity && !rowCapacity.containsKey('max_rows')) ||
+        (rawCreationLimit != null &&
+            (rawCreationLimit is! int || rawCreationLimit < 0)) ||
+        rowCapacity['current_rows'] != rows.length ||
+        (usesDynamicCapacity &&
+            (rowCapacity['can_create'] is! bool ||
+                rowCapacity['can_create'] !=
+                    (rawCreationLimit == null ||
+                        rows.length < rawCreationLimit)))) {
       throw const AiV3PreparationException('v3_row_capacity_missing');
     }
-    final maximumRows = rowCapacity['max_rows'] as int;
+    final maximumRows = rawCreationLimit as int?;
     var simulatedRowCount = rows.length;
-    var simulatedClipCount = clips.length;
     final previouslyMutatedClipIds = <String>{};
     var hasPriorTopologyMutation = false;
     var hasPreparedStemSeparation = false;
@@ -778,7 +793,7 @@ class AiV3CommandPreparer {
         );
       }
       final newRow = Map<String, dynamic>.from(value['new_row'] as Map);
-      if (simulatedRowCount >= maximumRows) {
+      if (maximumRows != null && simulatedRowCount >= maximumRows) {
         throw const AiV3PreparationException('v3_row_capacity_exceeded');
       }
       // Embedded destinations always append their row. Its executable index is
@@ -1348,7 +1363,7 @@ class AiV3CommandPreparer {
               : label;
           break;
         case 'row.create':
-          if (simulatedRowCount >= maximumRows) {
+          if (maximumRows != null && simulatedRowCount >= maximumRows) {
             throw const AiV3PreparationException('v3_row_capacity_exceeded');
           }
           final name = args['name'].toString().trim();
@@ -2026,9 +2041,6 @@ class AiV3CommandPreparer {
               (rightDurationMs != null && rightDurationMs < 50.0)) {
             throw const AiV3PreparationException('v3_clip_split_point_invalid');
           }
-          if (simulatedClipCount + 1 > 128) {
-            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
-          }
           commandActions.add(
             AssistantAction(
               type: 'clip_edit',
@@ -2130,7 +2142,6 @@ class AiV3CommandPreparer {
                 boundsRuntimeAuthoritative:
                     deferredRuntimeBounds || currentDurationMs == null,
               );
-          simulatedClipCount += 1;
           label = clipRef == null
               ? 'Split ${_clipLabel(clipById, clipId!)} at beat $atBeat'
               : 'Split ${clipRef.commandId}.${clipRef.output} at beat $atBeat';
@@ -2190,9 +2201,6 @@ class AiV3CommandPreparer {
                 'v3_clip_destination_lane_mismatch',
               );
             }
-          }
-          if (simulatedClipCount + 1 > 128) {
-            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
           final startBeat = (args['start_beat'] as num).toDouble();
           final startMs = startBeat * 60000.0 / symbolicBpm;
@@ -2294,7 +2302,6 @@ class AiV3CommandPreparer {
                     symbolic?.boundsRuntimeAuthoritative == true ||
                     durationMs == null,
               );
-          simulatedClipCount += 1;
           label = clipRef == null
               ? 'Duplicate ${_clipLabel(clipById, clipId!)} to ${_rowLabel(rowById, destinationRowId!)} at beat $startBeat'
               : 'Duplicate ${clipRef.commandId}.${clipRef.output} at beat $startBeat';
@@ -2363,7 +2370,6 @@ class AiV3CommandPreparer {
           } else {
             simulatedProject.deleteClip(clipId!);
           }
-          simulatedClipCount -= 1;
           label = clipRef == null
               ? 'Delete ${_clipLabel(clipById, clipId!)}'
               : 'Delete ${clipRef.commandId}.${clipRef.output}';
@@ -2537,7 +2543,6 @@ class AiV3CommandPreparer {
                   boundsRuntimeAuthoritative: true,
                 );
           }
-          simulatedClipCount -= rawSources.length - 1;
           hasPriorTopologyMutation = true;
           label =
               'Glue ${rawSources.length} audio clips as ${labelValue.isEmpty ? 'Glued Clip' : labelValue}';
@@ -2560,11 +2565,8 @@ class AiV3CommandPreparer {
               'v3_stem_separation_unavailable',
             );
           }
-          if (simulatedRowCount + 2 > maximumRows) {
+          if (maximumRows != null && simulatedRowCount + 2 > maximumRows) {
             throw const AiV3PreparationException('v3_row_capacity_exceeded');
-          }
-          if (simulatedClipCount + 2 > 128) {
-            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
           final symbolic = clipRef == null
               ? null
@@ -2640,7 +2642,6 @@ class AiV3CommandPreparer {
             ),
           );
           simulatedRowCount += 2;
-          simulatedClipCount += 2;
           hasPriorTopologyMutation = true;
           hasPreparedStemSeparation = true;
           final sourceLabel = clipRef == null
@@ -2666,11 +2667,8 @@ class AiV3CommandPreparer {
               'v3_audio_to_midi_unavailable',
             );
           }
-          if (simulatedRowCount + 1 > maximumRows) {
+          if (maximumRows != null && simulatedRowCount + 1 > maximumRows) {
             throw const AiV3PreparationException('v3_row_capacity_exceeded');
-          }
-          if (simulatedClipCount + 1 > 128) {
-            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
           }
           final instrumentId = args['instrument_id'].toString().trim();
           if (!instruments.contains(instrumentId)) {
@@ -2764,7 +2762,6 @@ class AiV3CommandPreparer {
           simulatedRowCount += 1;
           hasPriorTopologyMutation = true;
           hasPreparedAudioToMidi = true;
-          simulatedClipCount += 1;
           label =
               'Convert ${clipId == null ? '${clipRef!.commandId}.${clipRef.output}' : _clipLabel(clipById, clipId)} to MIDI with $instrumentName on a new row below the source; preserve the source clip';
           verifiedLabel =
@@ -3594,9 +3591,6 @@ class AiV3CommandPreparer {
               )) {
             throw const AiV3PreparationException('v3_midi_arrangement_limit');
           }
-          if (simulatedClipCount + 1 > 128) {
-            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
-          }
           final resolved = destination(args['destination'], midi: true);
           final usesRowRef = (args['destination'] as Map)['row_ref'] is Map;
           commandActions.addAll(resolved.setup);
@@ -3634,7 +3628,6 @@ class AiV3CommandPreparer {
               },
             ),
           );
-          simulatedClipCount += 1;
           label =
               'Create MIDI clip with ${(args['notes'] as List).length} notes';
           verifiedLabel =
@@ -3807,11 +3800,49 @@ class AiV3CommandPreparer {
                   .toDouble(),
             );
           }
-          final double? finalClipLength = deferredRuntimeTransform
+          double? finalClipLength = deferredRuntimeTransform
               ? null
               : clipRef == null
               ? simulatedMidiLengthByClipId[clipId] ?? clipLength
               : symbolic!.durationMs! * symbolicBpm / 60000.0;
+          var boundaryExtended = false;
+          final beforeBoundaryLength = finalClipLength;
+          final originalBoundaryLength = (clip?['length_beats'] as num?)
+              ?.toDouble();
+          if (command.type == 'midi.replace_notes' &&
+              project['midi_boundary_policy'] == aiV3MidiBoundaryPolicy &&
+              !plan.commands.any(
+                (c) =>
+                    c.type == 'project.set_tempo' ||
+                    c.type == 'project.set_tempo_from_clip',
+              ) &&
+              bpm > 0 &&
+              bpm <= 999 &&
+              clipId != null &&
+              clip?['kind'] == 'midi' &&
+              !deferredRuntimeTransform &&
+              finalClipLength != null &&
+              originalBoundaryLength != null &&
+              nextNotes.isNotEmpty) {
+            final end = nextNotes.fold<double>(
+              0,
+              (value, note) => math.max(
+                value,
+                (note['start_beat'] as num).toDouble() +
+                    (note['length_beats'] as num).toDouble(),
+              ),
+            );
+            finalClipLength = aiV3ExtendedMidiLength(
+              original: originalBoundaryLength,
+              current: finalClipLength,
+              end: end,
+              bpm: bpm,
+            );
+            boundaryExtended = finalClipLength > beforeBoundaryLength!;
+            if (boundaryExtended) {
+              simulatedMidiLengthByClipId[clipId] = finalClipLength;
+            }
+          }
           if (!deferredRuntimeTransform &&
               nextNotes.any(
                 (note) =>
@@ -3833,6 +3864,7 @@ class AiV3CommandPreparer {
           }
           final alreadySatisfied =
               !deferredRuntimeTransform &&
+              !boundaryExtended &&
               command.type != 'midi.append_notes' &&
               _midiNotesEqual(currentNotes, nextNotes);
           if (alreadySatisfied) {
@@ -3863,9 +3895,16 @@ class AiV3CommandPreparer {
                   'exact_notes': true,
                   'preserve_existing_notes': false,
                   'preserve_clip_state': true,
-                  if (command.type == 'midi.append_notes' &&
+                  if ((command.type == 'midi.append_notes' ||
+                          boundaryExtended) &&
                       !deferredRuntimeTransform)
                     'final_length_beats': finalClipLength!,
+                  if (boundaryExtended) ...{
+                    'midi_boundary_original_length_beats':
+                        originalBoundaryLength,
+                    'midi_boundary_expected_length_beats': beforeBoundaryLength,
+                    'midi_boundary_bpm': bpm,
+                  },
                 },
               ),
             );
@@ -4131,9 +4170,6 @@ class AiV3CommandPreparer {
               'target': resolved.target,
             });
           }
-          if (simulatedClipCount + items.length > 128) {
-            throw const AiV3PreparationException('v3_clip_capacity_exceeded');
-          }
           commandActions.add(
             AssistantAction(
               type: 'sample_insert',
@@ -4147,7 +4183,6 @@ class AiV3CommandPreparer {
               },
             ),
           );
-          simulatedClipCount += items.length;
           label =
               'Place ${items.length} library sample${items.length == 1 ? '' : 's'}';
           verifiedLabel =

@@ -3,9 +3,32 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'android_recording_input_v2.dart';
 import 'audio_route_coordinator_v2.dart';
 import 'audio_route_snapshot_provider_v2.dart';
 import 'audio_route_v2.dart';
+import 'ios_recording_input_v2.dart';
+
+enum JuceMutationResult {
+  success,
+  invalidInput,
+  missingMedia,
+  resourceExhausted,
+  internalFailure;
+
+  static JuceMutationResult fromWire(Object? value) {
+    // Platform bridges return an integer enum. Reject coercible or malformed
+    // values so an unsupported/old bridge cannot be mistaken for success.
+    if (value is! int ||
+        value < 0 ||
+        value >= JuceMutationResult.values.length) {
+      return JuceMutationResult.internalFailure;
+    }
+    return JuceMutationResult.values[value];
+  }
+
+  bool get succeeded => this == JuceMutationResult.success;
+}
 
 class JuceEngineCapabilities {
   final bool externalPluginHosting;
@@ -337,6 +360,7 @@ class AudioInputDeviceInfo {
   const AudioInputDeviceInfo({
     this.uid = '',
     this.channelCount = 0,
+    this.channelNames = const [],
     this.clockDomain,
     required this.name,
     required this.isBluetoothInput,
@@ -347,6 +371,7 @@ class AudioInputDeviceInfo {
 
   final String uid;
   final int channelCount;
+  final List<String> channelNames;
   final int? clockDomain;
   final String name;
   final bool isBluetoothInput;
@@ -358,6 +383,10 @@ class AudioInputDeviceInfo {
     return AudioInputDeviceInfo(
       uid: map['uid']?.toString() ?? '',
       channelCount: (map['channelCount'] as num?)?.toInt() ?? 0,
+      channelNames: map['channelNames'] is List
+          ? List.unmodifiable((map['channelNames'] as List)
+              .map((name) => name is String ? name : ''))
+          : const [],
       clockDomain: (map['clockDomain'] as num?)?.toInt(),
       name: map['name']?.toString() ?? '',
       isBluetoothInput: map['isBluetoothInput'] == true,
@@ -374,10 +403,13 @@ class JuceAudioEngine {
   static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
       MethodChannelAudioRouteSnapshotProviderV2();
   static AudioRouteSnapshotV2? _v2StartupSnapshot;
+  static AudioPlaybackStartupResultV2? _lastPlaybackStartupResultV2;
   static bool _v2BluetoothCommunicationQualityReduced = false;
 
   static bool get v2BluetoothCommunicationQualityReduced =>
       _v2BluetoothCommunicationQualityReduced;
+  static AudioPlaybackStartupResultV2? get lastPlaybackStartupResultV2 =>
+      _lastPlaybackStartupResultV2;
   static Future<void>? _shutdownInFlight;
 
   static final Stream<Map<String, dynamic>> _events = _eventCh
@@ -418,6 +450,7 @@ class JuceAudioEngine {
   // Core controls
   // -------------------------------
   static Future<bool> initialise() async {
+    _lastPlaybackStartupResultV2 = null;
     final shutdown = _shutdownInFlight;
     if (shutdown != null) await shutdown;
     try {
@@ -473,7 +506,7 @@ class JuceAudioEngine {
       _v2StartupSnapshot = result.success ? result.snapshot : null;
       _v2BluetoothCommunicationQualityReduced =
           result.success && result.bluetoothCommunicationQualityReduced;
-      return result;
+      return _rememberPlaybackStartupResultV2(result);
     } on MissingPluginException {
       _v2StartupSnapshot = null;
       _v2BluetoothCommunicationQualityReduced = false;
@@ -492,16 +525,25 @@ class JuceAudioEngine {
   static AudioPlaybackStartupResultV2 _unavailablePlaybackStartupV2([
     String diagnosticCode = 'actual_state_unavailable',
   ]) {
-    return AudioPlaybackStartupResultV2(
-      success: false,
-      diagnosticCode: diagnosticCode,
-      snapshot: AudioRouteSnapshotV2.fromMap(<String, dynamic>{
-        'captureConsistency': 'unavailable',
-        'unavailableReasons': const <String, String>{
-          'startup': 'nativeV2PlaybackUnavailable',
-        },
-      }),
+    return _rememberPlaybackStartupResultV2(
+      AudioPlaybackStartupResultV2(
+        success: false,
+        diagnosticCode: diagnosticCode,
+        snapshot: AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+          'captureConsistency': 'unavailable',
+          'unavailableReasons': const <String, String>{
+            'startup': 'nativeV2PlaybackUnavailable',
+          },
+        }),
+      ),
     );
+  }
+
+  static AudioPlaybackStartupResultV2 _rememberPlaybackStartupResultV2(
+    AudioPlaybackStartupResultV2 result,
+  ) {
+    _lastPlaybackStartupResultV2 = result;
+    return result;
   }
 
   static Future<AudioRouteSnapshotV2> startAudioRouteMonitoringV2({
@@ -531,6 +573,8 @@ class JuceAudioEngine {
     }
   }
 
+  /// On macOS and iOS, a sample rate of zero follows the current output clock.
+  /// Positive values request an explicit supported rate at the native boundary.
   static Future<AudioRouteTransitionResultV2> applyAudioRouteConfigurationV2(
     int generation, {
     String? outputDeviceName,
@@ -1896,6 +1940,20 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<JuceMutationResult> endProjectClipLoadDetailed() async {
+    try {
+      final raw = await _ch.invokeMethod<Object?>('endProjectClipLoadDetailed');
+      return JuceMutationResult.fromWire(raw);
+    } on MissingPluginException {
+      // Do not invoke the legacy void finalizer and assume it succeeded. A
+      // caller requiring verified publication must fail closed instead.
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('endProjectClipLoadDetailed', e);
+      return JuceMutationResult.internalFailure;
+    }
+  }
+
   static Future<void> beginGraphMutationBatch() async {
     try {
       await _ch.invokeMethod('beginGraphMutationBatch');
@@ -1968,11 +2026,74 @@ class JuceAudioEngine {
     }
   }
 
+  static Future<JuceMutationResult> loadClipDetailed(
+    int clipIndex,
+    int rowId,
+    String path, {
+    double startSec = 0.0,
+    double lengthSec = 0.0,
+    double inFileOffsetSec = 0.0,
+  }) async {
+    try {
+      final raw = await _ch.invokeMethod<Object?>('loadClipDetailed', {
+        'clip': clipIndex,
+        'rowId': rowId,
+        'row': rowId,
+        'path': path,
+        'startSec': startSec,
+        'lengthSec': lengthSec,
+        'inFileOffsetSec': inFileOffsetSec,
+      });
+      return JuceMutationResult.fromWire(raw);
+    } on MissingPluginException {
+      // Avoid a legacy mutation with no detailed admission result. Callers can
+      // use loadClip directly when legacy best-effort behavior is intended.
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('loadClipDetailed', e);
+      return JuceMutationResult.internalFailure;
+    }
+  }
+
   static Future<void> unloadClip(int clipIndex) async {
     try {
       await _ch.invokeMethod('unloadClip', {'clip': clipIndex});
     } on PlatformException catch (e) {
       _logError('unloadClip', e);
+    }
+  }
+
+  /// Removes one live clip and requires an acknowledgement from the native
+  /// engine. Missing or malformed bridge support fails closed.
+  static Future<JuceMutationResult> unloadClipDetailed(int clipIndex) {
+    if (clipIndex < 0) {
+      return Future<JuceMutationResult>.value(JuceMutationResult.invalidInput);
+    }
+    return unloadClipsDetailed(<int>[clipIndex]);
+  }
+
+  /// Removes every distinct live clip and succeeds only when native confirms
+  /// the complete batch. Callers must not recycle IDs after any other result.
+  static Future<JuceMutationResult> unloadClipsDetailed(
+    Iterable<int> clipIndices,
+  ) async {
+    final clips = clipIndices.toSet().toList(growable: false);
+    if (clips.any((clip) => clip < 0)) {
+      return JuceMutationResult.invalidInput;
+    }
+    if (clips.isEmpty) return JuceMutationResult.success;
+    try {
+      final raw = await _ch.invokeMethod<Object?>('unloadClips', {
+        'clips': clips,
+      });
+      return raw is int && raw == clips.length
+          ? JuceMutationResult.success
+          : JuceMutationResult.internalFailure;
+    } on MissingPluginException {
+      return JuceMutationResult.internalFailure;
+    } on PlatformException catch (e) {
+      _logError('unloadClipsDetailed', e);
+      return JuceMutationResult.internalFailure;
     }
   }
 
@@ -3181,7 +3302,23 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<AudioInputDeviceInfo>> getInputDeviceInfos() async {
+  static Future<AndroidRecordingInputV2?>
+      getAndroidRecordingInputConfigurationV2() async {
+    final result = await _ch.invokeMapMethod<String, dynamic>(
+        'getAndroidRecordingInputConfigurationV2');
+    return result == null ? null : AndroidRecordingInputV2.fromMap(result);
+  }
+
+  static Future<IOSRecordingInputV2?>
+      getIOSRecordingInputConfigurationV2() async {
+    final result = await _ch.invokeMapMethod<String, dynamic>(
+      'getIOSRecordingInputConfigurationV2',
+    );
+    return result == null ? null : IOSRecordingInputV2.fromMap(result);
+  }
+
+  static Future<List<AudioInputDeviceInfo>> getInputDeviceInfos(
+      {bool throwOnError = false}) async {
     try {
       final res = await _ch.invokeMethod<List>('getInputDeviceInfos');
       return (res ?? const [])
@@ -3192,9 +3329,11 @@ class JuceAudioEngine {
           .where((info) => info.name.trim().isNotEmpty)
           .toList(growable: false);
     } on MissingPluginException {
+      if (throwOnError) rethrow;
       return const [];
     } on PlatformException catch (e) {
       _logError('getInputDeviceInfos', e);
+      if (throwOnError) rethrow;
       return const [];
     }
   }

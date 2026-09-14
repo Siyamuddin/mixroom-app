@@ -1895,6 +1895,17 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_endProjectClipLoadTransactionJNI
                                                   { JuceEngine::get().endProjectClipLoadTransaction(); });
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_endProjectClipLoadTransactionDetailedJNI(JNIEnv *, jclass)
+{
+    std::atomic<int> result{(int)JuceEngine::MutationResult::internalFailure};
+    juce::MessageManager::getInstance()->callSync([&result]
+    {
+        result.store((int)JuceEngine::get().endProjectClipLoadTransactionDetailed());
+    });
+    return (jint)result.load();
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mixroom_juce_1audio_1engine_JuceBridge_beginGraphMutationBatchJNI(JNIEnv *, jclass)
 {
@@ -2642,6 +2653,48 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipJNI(JNIEnv *env,
     }
 
     return ok;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_loadClipDetailedJNI(JNIEnv *env,
+                                                                     jclass,
+                                                                     jint clipIndex,
+                                                                     jint rowId,
+                                                                     jstring path,
+                                                                     jdouble startSec,
+                                                                     jdouble lengthSec,
+                                                                     jdouble inFileOffsetSec)
+{
+    const juce::String jucePath = juceStringFromJString(env, path);
+    juce::File file(jucePath);
+    auto preparedAsset = JuceEngine::get().prepareClipAudioAsset(file);
+    if (preparedAsset == nullptr)
+        return (jint)JuceEngine::MutationResult::missingMedia;
+
+    JuceEngine::MutationResult result = JuceEngine::MutationResult::internalFailure;
+    auto installPreparedClip = [&]
+    {
+        result = JuceEngine::get().loadClipWithPreparedAudioAssetDetailed(
+            (int)clipIndex,
+            (int)rowId,
+            file,
+            preparedAsset,
+            (double)startSec,
+            (double)lengthSec,
+            (double)inFileOffsetSec);
+    };
+    if (auto *mm = juce::MessageManager::getInstance())
+    {
+        if (mm->isThisTheMessageThread())
+            installPreparedClip();
+        else
+            mm->callSync(installPreparedClip);
+    }
+    else
+    {
+        installPreparedClip();
+    }
+    return (jint)result;
 }
 
 extern "C" JNIEXPORT void JNICALL

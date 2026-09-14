@@ -32,7 +32,7 @@ void main() {
       expect(handler, contains('self.audioRouteGenerationV2 += 1'));
       expect(
         handler.indexOf('pausePlaybackForRouteChangeV2ObjC'),
-        lessThan(handler.indexOf('self.eventSink(@{')),
+        lessThan(handler.indexOf('@"event": @"audioRouteChangedV2"')),
       );
       for (final forbidden in <String>[
         'quiescePlaybackRouteV2',

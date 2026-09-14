@@ -1,5 +1,17 @@
 import 'package:flutter/foundation.dart';
 
+class AiV3RequestRoute {
+  const AiV3RequestRoute({
+    required this.proxyApiBaseUrl,
+    required this.requestTimeoutSeconds,
+    required this.usesLongPath,
+  });
+
+  final String proxyApiBaseUrl;
+  final int requestTimeoutSeconds;
+  final bool usesLongPath;
+}
+
 class LlmConfig {
   const LlmConfig._();
 
@@ -81,6 +93,24 @@ class LlmConfig {
     defaultValue: 35,
   );
 
+  /// Enabled for updated clients after the long route passed its backend and
+  /// compatibility rollout gates. Builds can set this to false as a kill
+  /// switch; a valid, distinct URL is still required before V3 changes route.
+  static const bool aiV3LongPathEnabled = bool.fromEnvironment(
+    'AI_V3_LONG_PATH_ENABLED',
+    defaultValue: true,
+  );
+
+  /// Public endpoint only; provider credentials, prompts, schemas, model
+  /// settings, and repair logic remain in the backend.
+  static const String aiV3LongApiBaseUrl = String.fromEnvironment(
+    'AI_V3_LONG_API_BASE_URL',
+    defaultValue:
+        'https://5px4k98xz2.execute-api.ap-northeast-2.amazonaws.com/prod',
+  );
+
+  static const int _aiV3LongRequestTimeoutSeconds = 130;
+
   static const bool disableProxyInDebug = bool.fromEnvironment(
     'LLM_DISABLE_PROXY_IN_DEBUG',
     defaultValue: false,
@@ -112,6 +142,43 @@ class LlmConfig {
       aiV3PrimaryEnabled && hasProxyApiBaseUrl;
 
   static bool get effectiveAiV3Enabled => effectiveAiV3ProxyEnabled;
+
+  static AiV3RequestRoute get effectiveAiV3RequestRoute =>
+      resolveAiV3RequestRoute(
+        standardApiBaseUrl: effectiveProxyApiBaseUrl,
+        standardTimeoutSeconds: aiV3RequestTimeoutSeconds,
+        longPathEnabled: aiV3LongPathEnabled,
+        longApiBaseUrl: aiV3LongApiBaseUrl,
+      );
+
+  static AiV3RequestRoute resolveAiV3RequestRoute({
+    required String standardApiBaseUrl,
+    required int standardTimeoutSeconds,
+    required bool longPathEnabled,
+    required String longApiBaseUrl,
+    bool allowInsecureLoopback = kDebugMode,
+  }) {
+    final normalizedStandardUrl = standardApiBaseUrl.trim();
+    final rawLongUrl = longApiBaseUrl.trim();
+    final normalizedLongUrl = _isValidLongApiBaseUrl(
+      rawLongUrl,
+      allowInsecureLoopback: allowInsecureLoopback,
+    )
+        ? _normalizeProxyApiBaseUrl(rawLongUrl)
+        : '';
+    final useLongPath =
+        normalizedStandardUrl.isNotEmpty &&
+        longPathEnabled &&
+        normalizedLongUrl.isNotEmpty &&
+        !_sameProxyApiBaseUrl(normalizedStandardUrl, normalizedLongUrl);
+    return AiV3RequestRoute(
+      proxyApiBaseUrl: useLongPath ? normalizedLongUrl : normalizedStandardUrl,
+      requestTimeoutSeconds: useLongPath
+          ? _aiV3LongRequestTimeoutSeconds
+          : standardTimeoutSeconds,
+      usesLongPath: useLongPath,
+    );
+  }
 
   static String get effectiveProxyApiBaseUrl {
     if (kDebugMode && disableProxyInDebug) {
@@ -190,5 +257,45 @@ class LlmConfig {
         ? trimmed.substring(0, trimmed.length - 1)
         : trimmed;
     return '$normalizedBase/$stage';
+  }
+
+  static bool _isValidLongApiBaseUrl(
+    String raw, {
+    required bool allowInsecureLoopback,
+  }) {
+    final uri = Uri.tryParse(raw);
+    if (uri == null ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      return false;
+    }
+    if (uri.scheme == 'https') return true;
+    // Never send bearer credentials over remote HTTP. The exception is only
+    // for opt-in debug bridges, not release/profile builds or LAN endpoints.
+    return allowInsecureLoopback &&
+        const {'localhost', '127.0.0.1', '::1'}.contains(uri.host);
+  }
+
+  static bool _sameProxyApiBaseUrl(String left, String right) {
+    String identity(String raw) {
+      final normalized = _normalizeProxyApiBaseUrl(raw.trim());
+      final withoutTrailingSlash = normalized.endsWith('/')
+          ? normalized.substring(0, normalized.length - 1)
+          : normalized;
+      final uri = Uri.tryParse(withoutTrailingSlash);
+      if (uri == null || !uri.hasAuthority) return withoutTrailingSlash;
+      return uri
+          .replace(
+            scheme: uri.scheme.toLowerCase(),
+            host: uri.host.toLowerCase(),
+          )
+          .toString();
+    }
+
+    return identity(left) == identity(right);
   }
 }

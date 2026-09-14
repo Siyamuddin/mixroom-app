@@ -1,0 +1,6 @@
+; Additional restriction for the synthetic benchmark process and its children.
+; SDK/cache/file permissions remain governed by the surrounding environment.
+(version 1)
+(allow default)
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))

@@ -4,6 +4,39 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/models/models.dart';
 
 void main() {
+  test('MIDI save preserves a 32-beat boundary at 84 BPM', () async {
+    final end = Duration(microseconds: (32 * 60000000 / 84).round());
+    final track = await AudioTrack.create(
+      file: File('/tmp/precision.mid'), originalFile: File('/tmp/precision.mid'),
+      audioDuration: end, trimStart: Duration.zero, trimEnd: end,
+      offset: 0, rowIndex: 0, label: 'Precision', clipKind: ClipKind.midi,
+    );
+    final saved = track.toJson('precision.mid');
+    expect(saved['trimEndMs'], 22857.143);
+    expect(clipTrimFromMilliseconds(saved['trimEndMs'] as num, isMidi: true), end);
+    // The existing numeric fields remain readable by old rounded-ms clients.
+    expect((saved['trimEndMs'] as num).round(), 22857);
+  });
+
+  test('MIDI trim round trips retain fractional endpoints without snapping', () {
+    for (final us in <int>[0, 123456, 17777778, 22857143, 12345001]) {
+      final duration = Duration(microseconds: us);
+      var value = clipTrimMilliseconds(duration, isMidi: true);
+      for (var cycle = 0; cycle < 5; cycle++) {
+        final restored = clipTrimFromMilliseconds(value, isMidi: true);
+        expect(restored, duration);
+        value = clipTrimMilliseconds(restored, isMidi: true);
+      }
+      expect(clipTrimMilliseconds(duration, isMidi: false), us ~/ 1000);
+    }
+    // Old whole-ms data is not guessed back to a musical grid.
+    expect(clipTrimFromMilliseconds(17777, isMidi: true),
+        const Duration(milliseconds: 17777));
+    expect(clipTrimFromMilliseconds(17777.8, isMidi: false),
+        const Duration(milliseconds: 17778));
+    expect(clipTrimMilliseconds(const Duration(seconds: 4), isMidi: true), isA<int>());
+  });
+
   test('AudioTrack JSON preserves clip-level processing state', () async {
     final track = await AudioTrack.create(
       file: File('audio/kick.wav'),

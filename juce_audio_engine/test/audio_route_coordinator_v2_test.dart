@@ -543,6 +543,52 @@ void main() {
     await coordinator.dispose();
   });
 
+  test('automatic sample rate is serialized and forwarded without a default',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(adapter: adapter);
+    await coordinator.start();
+    final result = await coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: 0,
+      preferredBufferFrames: 512,
+    );
+    expect(result.succeeded, isTrue);
+    expect(adapter.preferredSampleRates, <int?>[0]);
+    expect(adapter.hardwarePreferenceUpdates, <bool>[true]);
+    await coordinator.dispose();
+  });
+
+  test('negative rates are rejected without invoking native settings',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(adapter: adapter);
+    await coordinator.start();
+    final result = await coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: -1,
+      preferredBufferFrames: 512,
+    );
+    expect(result.succeeded, isFalse);
+    expect(adapter.hardwarePreferenceUpdates, isEmpty);
+    await coordinator.dispose();
+  });
+
+  test(
+      'failed automatic settings preserve native recovery result without a retry',
+      () async {
+    final adapter = _FakeAdapter();
+    final coordinator = AudioRouteCoordinatorV2(adapter: adapter);
+    await coordinator.start();
+    final recovered = _result(0, status: AudioRouteTransitionStatusV2.failure);
+    adapter.queuedResults.add(Future.value(recovered));
+    final result = await coordinator.configurePlaybackHardware(
+      preferredSampleRateHz: 0,
+      preferredBufferFrames: 512,
+    );
+    expect(result, same(recovered));
+    expect(adapter.preferredSampleRates, [0]);
+    await coordinator.dispose();
+  });
+
   test('hardware settings cannot overlap an intent transition', () async {
     final adapter = _FakeAdapter();
     final preparing = Completer<AudioRouteTransitionResultV2>();

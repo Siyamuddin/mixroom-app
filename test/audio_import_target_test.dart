@@ -4,7 +4,7 @@ import 'package:mixroom/helpers/audio_import_target.dart';
 AudioImportTarget _resolve({
   required int selectedRow,
   required int rowCount,
-  required int maxRows,
+  required int? creationLimit,
   Set<int> audioRows = const <int>{},
   Set<int> occupiedRows = const <int>{},
   Set<int> hiddenRows = const <int>{},
@@ -12,7 +12,7 @@ AudioImportTarget _resolve({
   return resolveAutoAudioImportTarget(
     selectedRow: selectedRow,
     rowCount: rowCount,
-    maxRows: maxRows,
+    creationLimit: creationLimit,
     isAudioRow: audioRows.contains,
     isOccupied: occupiedRows.contains,
     isHiddenByCollapsedGroup: hiddenRows.contains,
@@ -24,7 +24,7 @@ void main() {
     final target = _resolve(
       selectedRow: 1,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 1, 2},
     );
 
@@ -36,7 +36,7 @@ void main() {
     final target = _resolve(
       selectedRow: 1,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 2},
       occupiedRows: const <int>{0},
     );
@@ -49,7 +49,7 @@ void main() {
     final target = _resolve(
       selectedRow: 0,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 1, 2},
       occupiedRows: const <int>{0},
     );
@@ -62,7 +62,7 @@ void main() {
     final target = _resolve(
       selectedRow: 1,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 2},
     );
 
@@ -74,7 +74,7 @@ void main() {
     final target = _resolve(
       selectedRow: 0,
       rowCount: 2,
-      maxRows: 5,
+      creationLimit: 5,
       audioRows: const <int>{0},
       occupiedRows: const <int>{0},
     );
@@ -87,7 +87,7 @@ void main() {
     final target = _resolve(
       selectedRow: 1,
       rowCount: 5,
-      maxRows: 5,
+      creationLimit: 5,
       audioRows: const <int>{0, 2, 4},
       occupiedRows: const <int>{0, 2, 4},
     );
@@ -100,7 +100,7 @@ void main() {
     final target = _resolve(
       selectedRow: 0,
       rowCount: 4,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 1, 3},
       occupiedRows: const <int>{0},
       hiddenRows: const <int>{1},
@@ -114,7 +114,7 @@ void main() {
     final target = _resolve(
       selectedRow: 0,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 2},
       occupiedRows: const <int>{0},
       hiddenRows: const <int>{2},
@@ -125,7 +125,7 @@ void main() {
   });
 
   test('empty project under the limit creates a new row', () {
-    final target = _resolve(selectedRow: 0, rowCount: 0, maxRows: 5);
+    final target = _resolve(selectedRow: 0, rowCount: 0, creationLimit: 5);
 
     expect(target.kind, AudioImportTargetKind.createNewRow);
     expect(target.insertBelowRow, isNull);
@@ -135,7 +135,7 @@ void main() {
     final target = _resolve(
       selectedRow: 1,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 2},
     );
 
@@ -147,7 +147,7 @@ void main() {
     final target = _resolve(
       selectedRow: 1,
       rowCount: 3,
-      maxRows: 8,
+      creationLimit: 8,
       audioRows: const <int>{0, 1, 2},
       occupiedRows: const <int>{0, 2},
       hiddenRows: const <int>{1},
@@ -155,5 +155,18 @@ void main() {
 
     expect(target.kind, AudioImportTargetKind.existingRow);
     expect(target.row, 1);
+  });
+
+  test('paid projects can create a row without a product-defined limit', () {
+    final target = _resolve(
+      selectedRow: 199,
+      rowCount: 200,
+      creationLimit: null,
+      audioRows: Set<int>.from(List<int>.generate(200, (index) => index)),
+      occupiedRows: Set<int>.from(List<int>.generate(200, (index) => index)),
+    );
+
+    expect(target.kind, AudioImportTargetKind.createNewRow);
+    expect(target.insertBelowRow, 199);
   });
 }

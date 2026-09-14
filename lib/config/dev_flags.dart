@@ -18,7 +18,10 @@ const String kDevLoginPassword = String.fromEnvironment('DEV_LOGIN_PASSWORD');
 /// Set to `true` to stream verbose native JUCE logs into Dart console.
 /// Keep this `false` for normal debug runs because high-volume native logs
 /// can significantly slow first-use UI interactions on iOS/Xcode.
-const bool kEnableNativeJuceLogsInDebug = true;
+const bool kEnableNativeJuceLogsInDebug = bool.fromEnvironment(
+  'MIXROOM_NATIVE_JUCE_LOGS',
+  defaultValue: false,
+);
 
 bool get isAuthBypassEnabled => kDebugMode && kBypassAuthInDebug;
 bool get isDevLoginButtonEnabled => kDebugMode && kShowDevLoginButtonInDebug;

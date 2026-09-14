@@ -642,14 +642,25 @@ class AutomationClipSnapshot {
   }
 }
 
+// Keep the existing numeric millisecond fields, but retain MIDI's sub-ms
+// timing. Whole-ms values stay integers for legacy readers and snapshots.
+num clipTrimMilliseconds(Duration value, {required bool isMidi}) =>
+    isMidi && value.inMicroseconds % Duration.microsecondsPerMillisecond != 0
+        ? value.inMicroseconds / Duration.microsecondsPerMillisecond
+        : value.inMilliseconds;
+
+Duration clipTrimFromMilliseconds(num value, {required bool isMidi}) => isMidi
+    ? Duration(microseconds: (value * Duration.microsecondsPerMillisecond).round())
+    : Duration(milliseconds: value.round());
+
 extension AudioTrackSerialization on AudioTrack {
   Map<String, dynamic> toJson(String fileName) {
     return {
       "fileName": fileName,
       "label": label,
       "clipType": clipKind.wireName,
-      "trimStartMs": trimStart.inMilliseconds,
-      "trimEndMs": trimEnd.inMilliseconds,
+      "trimStartMs": clipTrimMilliseconds(trimStart, isMidi: isMidi),
+      "trimEndMs": clipTrimMilliseconds(trimEnd, isMidi: isMidi),
       "offset": offset,
       "crossfade": crossfade,
       "gain": gain,
