@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import math
+from .plugin_identity import canonical_plugin_id
 from .mix_plugin_contract import bus_target, chain, parameter_target, extra_features
 
 CONTRACT = 'mix_magnitude_human_v3'
@@ -66,7 +67,7 @@ def parameter_descriptor(effect, parameter, *, inserted=False):
     choices = parameter.get('choices')
     if not isinstance(choices, list):
         choices = [parameter[k] for k in sorted((k for k in parameter if k.startswith('choice_') and k[7:].isdigit()), key=lambda k: int(k[7:]))]
-    return {'kind': 'parameter', 'effect_id': effect['effectId'], 'effect_name': effect['name'],
+    return {'kind': 'parameter', 'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name'],
             'parameter_id': parameter['id'], 'parameter_name': parameter['name'],
             'type': parameter['type'], 'min': parameter.get('min'), 'max': parameter.get('max'),
             'choices': choices, 'inserted': inserted}

@@ -8,7 +8,8 @@ from unittest.mock import patch
 from test_plugin_training import plugin_bundle
 from test_producer_capture_converter import _bundle
 from human_magnitude_data import extract, extract_historical
-from train_human_magnitude import train, review, paths
+from human_selection_data import extract_selection
+from train_human_refinement import train, review, paths
 from common.mix_magnitude_contract import features, fingerprint, control_action, runtime_target, refine_amount, FEATURE_COUNT
 from common.mix_resolve import MixResolveService, OnnxMixModelRunner
 from evaluate_producer_models import CandidateRunner
@@ -75,11 +76,15 @@ class HumanMagnitudeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'10 training songs'):
                 train(extract(self.bundle())[0],Path(tmp)/'models',classifier=CLASSIFIER)
 
-    def test_real_onnx_replaces_second_model_only_and_decoder_matches(self):
+    def test_both_real_onnx_models_train_and_decoder_matches(self):
         rows=extract(self.bundle())[0]
         with tempfile.TemporaryDirectory() as tmp:
-            output=Path(tmp)/'models';report=train(rows,output,classifier=CLASSIFIER,development=True)
-            self.assertTrue(report['classifier_unchanged']);self.assertEqual(len(list(output.glob('*.onnx'))),2)
+            output=Path(tmp)/'models'
+            positive=self.bundle();negative=plugin_bundle(proposal=-6,final=-12)
+            negative['session_id']='rejected-session';negative['ended_at']='now';negative['episodes'][0]['producer_outcome']='rejected'
+            choices=extract_selection(positive)[0]+extract_selection(negative)[0]
+            report=train(rows,output,classifier=CLASSIFIER,development=True,selection_rows=choices)
+            self.assertTrue(report['classifier_retrained']);self.assertEqual(len(list(output.glob('*.onnx'))),2)
             with patch.dict(os.environ,{'MIX_ALLOW_DEVELOPMENT_MODELS':'false'}):
                 with self.assertRaisesRegex(ValueError,'Development model'):CandidateRunner(output).feature_contract()
             with patch.dict(os.environ,{'MIX_ALLOW_DEVELOPMENT_MODELS':'true'}):
@@ -88,7 +93,7 @@ class HumanMagnitudeTests(unittest.TestCase):
                 self.assertFalse(response['fallback_used'])
                 self.assertEqual(response['debug_entries'][0]['decision'],'human_magnitude')
                 self.assertAlmostEqual(response['actions'][0]['data']['value'],-18,places=4)
-                self.assertEqual(runner.feature_contract(),'mix_refine_v1')
+                self.assertEqual(runner.feature_contract(),'mix_selection_human_v1')
                 self.assertEqual(runner.magnitude_contract(),'mix_magnitude_human_v3')
                 with self.assertRaisesRegex(ValueError,'used to train'):
                     evaluate(rows,runner,OnnxMixModelRunner(),split='external')

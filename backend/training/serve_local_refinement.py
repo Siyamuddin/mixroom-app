@@ -31,7 +31,7 @@ def main():
         runner = CandidateRunner(args.model_directory)
     else:
         runner = OnnxMixModelRunner()
-    feature_count = 141 if runner.feature_contract() == 'mix_refine_plugins_v2' else 77
+    feature_count = {'mix_refine_v1':77, 'mix_refine_plugins_v2':141, 'mix_selection_human_v1':208}[runner.feature_contract()]
     runner.predict_apply_score([0.0] * feature_count)
     magnitude_count = {'mix_refine_v1': 77, 'mix_refine_plugins_v2': 141, 'mix_magnitude_human_v3': 184}[runner.magnitude_contract()]
     runner.predict_scalar([0.0] * magnitude_count)

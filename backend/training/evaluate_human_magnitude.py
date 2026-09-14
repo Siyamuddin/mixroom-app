@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import statistics
 import time
-from train_human_magnitude import train
+from train_human_refinement import train
 from human_magnitude_data import extract
 from common.mix_magnitude_contract import control_action, starting_value
 from common.mix_plugin_contract import proposed_value, parameter_target
@@ -64,18 +64,20 @@ def evaluate(rows,candidate,baseline, *, split='test'):
             if response['fallback_used']: raise ValueError('Resolver fallback during comparison')
             entry=response['debug_entries'][-1]; decisions[name]=entry['decision']
             value=value_of(entry.get('after'),row)
-            if value is None: raise ValueError('Unable to measure resolved parameter value')
-            errors[name]=abs(value-row['native_target'])/(row['descriptor']['max']-row['descriptor']['min'])
+            errors[name]=abs(value-row['native_target'])/(row['descriptor']['max']-row['descriptor']['min']) if value is not None else None
         used+=decisions['candidate']=='human_magnitude'
-        delta=errors['baseline']-errors['candidate']
-        for category in ['all',row['descriptor']['kind'],'source:'+row['source'], 'control:'+row['descriptor'].get('effect_name', row['descriptor']['kind'])+':'+row['descriptor'].get('parameter_name','')]: deltas[category+'/normalized_target_mae'][row['group']].append(delta)
+        delta=errors['baseline']-errors['candidate'] if all(v is not None for v in errors.values()) else None
+        for category in ['all',row['descriptor']['kind'],'source:'+row['source'], 'control:'+row['descriptor'].get('effect_name', row['descriptor']['kind'])+':'+row['descriptor'].get('parameter_name','')]:
+            if delta is not None: deltas[category+'/normalized_target_mae'][row['group']].append(delta)
         results.append({'id':row['id'],'group':row['group'],'kind':row['descriptor']['kind'],'errors':errors,'decisions':decisions})
-    paired=assess(deltas,split='test')['paired_song_bootstrap']; overall=paired['all/normalized_target_mae']
+    paired=assess(deltas,split='test')['paired_song_bootstrap']; overall=paired.get('all/normalized_target_mae', {'source_groups':0,'confidence_interval_95':[0,0]})
+    paired_results=[r for r in results if all(v is not None for v in r['errors'].values())]
     enough=overall['source_groups']>=10
-    improves=enough and overall['confidence_interval_95'][0]>0 and all(v['mean_improvement']>=0 for v in paired.values())
+    improves=len(paired_results)==len(results) and enough and overall['confidence_interval_95'][0]>0 and all(v['mean_improvement']>=0 for v in paired.values())
     return {'benchmark':'fixed_proposal_with_demonstrated_control_and_direction','examples':len(results),
         'songs':len({r['group'] for r in selected}),'candidate_refined':used,'candidate_coverage':used/len(results),
-        'mean_error':{name:statistics.mean(r['errors'][name] for r in results) for name in services},
+        'paired_numeric_examples':len(paired_results), 'unexecuted_inserted_controls':len(results)-len(paired_results),
+        'mean_error':{name:statistics.mean(r['errors'][name] for r in paired_results) if paired_results else None for name in services},
         'models':{name:s._runner.observability_context() for name,s in services.items()},
         'warm_median_ms':{name:statistics.median(t[1:] or t) for name,t in timings.items()},
         'paired_song_statistics':paired,'parameter_agreement_improved':improves,

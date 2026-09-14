@@ -40,7 +40,7 @@ class CandidateRunner(OnnxMixModelRunner):
                 raise ValueError("Model bundle checksum mismatch")
         return _ResolvedModelBundle(source="review_directory", bundle_version=self.directory.name,
                                     apply_path=paths["apply"], magnitude_path=paths["magnitude"],
-                                    apply_version=paths["apply"].stem, magnitude_version=paths["magnitude"].stem + ":" + hashlib.sha256(paths["magnitude"].read_bytes()).hexdigest()[:12])
+                                    apply_version=paths["apply"].stem + ":" + hashlib.sha256(paths["apply"].read_bytes()).hexdigest()[:12], magnitude_version=paths["magnitude"].stem + ":" + hashlib.sha256(paths["magnitude"].read_bytes()).hexdigest()[:12])
 
 
 def evaluate(bundles: list[dict], *, candidate, baseline, split="test") -> dict:

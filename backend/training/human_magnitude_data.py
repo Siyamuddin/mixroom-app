@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'llm_proxy/src'))
 from common.mix_magnitude_contract import CONTRACT, features, fingerprint, parameter_descriptor, encode_target, control_action, starting_value
+from common.plugin_identity import canonical_plugin_id
 from producer_capture_converter import _sha256, _split
 
 
@@ -26,7 +27,7 @@ def scope_key(scope):
     return (scope['scope'], scope.get('row_id'), scope.get('group_id'))
 
 
-def extract(bundle):
+def extract(bundle, *, include_discrete=False):
     rows, exclusions = [], Counter()
     if bundle.get('schema_version') != 'producer_training_capture_v4' or not bundle.get('consent_version') or not bundle.get('ended_at'):
         return rows, Counter({'unsupported_or_open_capture': 1})
@@ -48,13 +49,14 @@ def extract(bundle):
             target = encode_target(descriptor, value)
             if target is None:
                 exclusions['unsupported_parameter_encoding'] += 1; return
-            if descriptor.get('type') != 'float':
+            if descriptor.get('type') != 'float' and not include_discrete:
                 exclusions['discrete_action_archived_not_magnitude'] += 1; return
-            start = starting_value(before, descriptor, scope)
-            if not descriptor.get('inserted') and encode_target(descriptor, start) is None:
+            discrete = descriptor.get('type') != 'float'
+            start = None if descriptor['kind'] in ('insert', 'remove', 'reset') else starting_value(before, descriptor, scope)
+            if not discrete and not descriptor.get('inserted') and encode_target(descriptor, start) is None:
                 exclusions['missing_initial_value'] += 1; return
-            direction = 0 if descriptor.get('inserted') else (1 if value > start else -1)
-            magnitude = target if descriptor.get('inserted') else abs(value - start) / (descriptor['max'] - descriptor['min'])
+            direction = 0 if discrete or descriptor.get('inserted') else (1 if value > start else -1)
+            magnitude = target if discrete or descriptor.get('inserted') else abs(value - start) / (descriptor['max'] - descriptor['min'])
             try: vector = features(before, descriptor, scope, direction)
             except (ValueError, TypeError, KeyError):
                 exclusions['invalid_starting_context'] += 1; return
@@ -91,7 +93,7 @@ def extract(bundle):
                 if previous and (previous.get('effectId') != effect['effectId'] or previous.get('isBypassed')):
                     exclusions['plugin_contract_changed'] += 1; continue
                 if inserted:
-                    add({'kind': 'insert', 'effect_id': effect['effectId'], 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'chosen_effect')
+                    add({'kind': 'insert', 'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'chosen_effect')
                 old_params = {p.get('id'): p for p in previous.get('parameters', [])} if previous else {}
                 for parameter in effect.get('parameters', []):
                     if not parameter.get('id') or not parameter.get('name'): continue
@@ -106,13 +108,13 @@ def extract(bundle):
                     add(descriptor, scope, parameter.get('value'), 'chosen_preset_parameter' if inserted else 'settled_control_change')
             for effect in old:
                 if effect['instanceId'] not in new_by_id and effect.get('effectId'):
-                    add({'kind': 'remove', 'effect_id': effect['effectId'], 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'removed_effect')
+                    add({'kind': 'remove', 'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'removed_effect')
             if old and not new:
                 add({'kind': 'reset', 'type': 'bool'}, scope, True, 'cleared_chain')
     return rows, exclusions
 
 
-def extract_historical(bundle):
+def historical_bundles(bundle):
     """Import explicitly supplied v3 snapshots, retaining weaker historical provenance.
 
     Old files lack UUIDs and outcome ratings. Track matching requires identical
@@ -148,10 +150,21 @@ def extract_historical(bundle):
             'state_before':{'project_state':before}, 'state_after':{'project_state':after}}]}
         if not adapted['source_group_ref']:
             excluded['historical_missing_song_identity'] += 1; continue
-        rows, reasons=extract(adapted);excluded.update(reasons)
+        adapted['episodes'][0]['historical_actions'] = copy.deepcopy(cycle.get('resolved_ai_actions', []))
+        adapted['episodes'][0]['historical_goal'] = copy.deepcopy(cycle.get('llm_payload', {}).get('tool_args', {}))
+        result.append(adapted)
+    return result, excluded
+
+
+def extract_historical(bundle, *, include_discrete=False):
+    adapted_bundles, excluded = historical_bundles(bundle)
+    result = []
+    for adapted in adapted_bundles:
+        rows, reasons = extract(adapted, include_discrete=include_discrete)
+        excluded.update(reasons)
         for row in rows:
-            row['source']='historical_final_snapshot'
-            row['producer_confirmed_good']=False
-            row['label_provenance']='submitted_final_snapshot_without_outcome_rating'
+            row['source'] = 'historical_final_snapshot'
+            row['producer_confirmed_good'] = False
+            row['label_provenance'] = 'submitted_final_snapshot_without_outcome_rating'
             result.append(row)
     return result, excluded

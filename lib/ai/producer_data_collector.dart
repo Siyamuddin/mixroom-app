@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'producer_control_changes.dart';
+import 'producer_plugin_identity.dart';
 
 typedef ProducerSnapshotProvider = Future<Map<String, dynamic>> Function();
 
@@ -908,9 +909,8 @@ class ProducerDataCollector {
           .toList();
     }
     if (value is String &&
-        key.toLowerCase() == 'effectid' &&
-        _sanitizeText(value) != value) {
-      return 'plugin_${sha256.convert(utf8.encode(value))}';
+        const {'effectid', 'effect_id', 'plugin_id'}.contains(key.toLowerCase())) {
+      return canonicalProducerPluginId(value);
     }
     if (value is String) return _sanitizeText(value, key: key);
     return value;
