@@ -40,6 +40,7 @@ import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/app_haptics.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/helpers/audio_import_target.dart';
+import 'package:mixroom/helpers/audio_startup_retry_policy.dart';
 import 'package:mixroom/helpers/daw_add_menu_config.dart';
 import 'package:mixroom/helpers/daw_onboarding_prefs.dart';
 import 'package:mixroom/helpers/desktop_midi_key_state.dart';
@@ -4695,6 +4696,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _compatibilityForkInFlight = false;
   int _projectCreatedAtMs = 0;
   bool _loadedOnce = false;
+  bool _editorStartupInFlight = false;
+  bool _audioStartupFailed = false;
+  String? _audioStartupDiagnosticCode;
   Future<String>? _bundledSamplePackRefreshTokenFuture;
   Future<String?>? _androidBundledInstrumentRootPathFuture;
   String? _androidBundledInstrumentRootPath;
@@ -9657,180 +9661,229 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // _startMeterPolling();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      try {
-        final bluetoothSession = await _bluetoothImplementationSessionResolverV2
-            .loadSession();
-        if (!mounted) return;
-        setState(() {
-          _bluetoothImplementationSessionV2 = bluetoothSession;
-        });
-        while (true) {
-          final priorShutdown = _processAudioEngineShutdownFuture;
-          if (priorShutdown == null) break;
-          try {
-            await priorShutdown;
-          } catch (_) {
-            if (!mounted) return;
-            _showSmallNotice('Audio output is not available yet.');
-            setState(() => _isLoadingNextScreen = false);
-            return;
-          }
+      await _startEditorSession();
+    });
+  }
+
+  Future<void> _startEditorSession() async {
+    if (!mounted || _editorStartupInFlight || _loadedOnce) return;
+    _editorStartupInFlight = true;
+    if (_audioStartupFailed || !_isLoadingNextScreen) {
+      setState(() {
+        _audioStartupFailed = false;
+        _isLoadingNextScreen = true;
+      });
+    }
+    try {
+      final bluetoothSession = await _bluetoothImplementationSessionResolverV2
+          .loadSession();
+      if (!mounted) return;
+      setState(() {
+        _bluetoothImplementationSessionV2 = bluetoothSession;
+      });
+      while (true) {
+        final priorShutdown = _processAudioEngineShutdownFuture;
+        if (priorShutdown == null) break;
+        try {
+          await priorShutdown;
+        } catch (_) {
           if (!mounted) return;
-          final latestShutdown = _processAudioEngineShutdownFuture;
-          if (latestShutdown == null ||
-              identical(latestShutdown, priorShutdown)) {
-            break;
-          }
-        }
-        if (!mounted) return;
-        final engineInitialised =
-            await JuceAudioEngine.initialiseForImplementation(
-              bluetoothSession.active,
-            );
-        if (!mounted) return;
-        if (!engineInitialised) {
           _showSmallNotice('Audio output is not available yet.');
-          setState(() => _isLoadingNextScreen = false);
+          setState(() {
+            _audioStartupFailed = true;
+            _isLoadingNextScreen = false;
+          });
           return;
         }
-        if (Platform.isMacOS &&
-            JuceAudioEngine.v2BluetoothCommunicationQualityReduced) {
-          _macBluetoothCommunicationQualityNoticeShown = true;
-          _showSmallNotice(
-            'Bluetooth microphone selected. Playback quality is reduced. Select another microphone for stereo audio.',
-          );
+        if (!mounted) return;
+        final latestShutdown = _processAudioEngineShutdownFuture;
+        if (latestShutdown == null ||
+            identical(latestShutdown, priorShutdown)) {
+          break;
         }
-        _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
-          _handleJuceEngineEvent,
+      }
+      if (!mounted) return;
+      var engineInitialised = false;
+      var startupAttempt = 0;
+      while (true) {
+        startupAttempt++;
+        engineInitialised = await JuceAudioEngine.initialiseForImplementation(
+          bluetoothSession.active,
         );
-        if (_isBluetoothV2Session &&
-            _usesLiveAudioRouteCoordinatorV2 &&
-            !Platform.isIOS) {
-          final coordinator = AudioRouteCoordinatorV2(
-            adapter: const MethodChannelAudioRouteAdapterV2(),
-            allowRecoveryGenerationSupersession: Platform.isMacOS,
-            onStateChanged: _handleAudioRouteCoordinatorStateV2,
-            onTransition: _handleAudioRouteTransitionV2,
-            onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
-          );
-          _audioRouteCoordinatorV2 = coordinator;
-          final initialRoute = await coordinator.start();
-          if (!mounted) {
-            await _shutdownAudioEngineV2Aware();
-            return;
-          }
-          if (initialRoute.captureConsistency ==
-              AudioRouteCaptureConsistencyV2.unavailable) {
-            await _shutdownAudioEngineV2Aware();
-            _showSmallNotice('Audio output monitoring is unavailable.');
-            setState(() => _isLoadingNextScreen = false);
-            return;
-          }
-          _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
-            initialRoute,
-          );
-          if (Platform.isMacOS) {
-            await _loadMacV2AudioDevices();
-          }
-          await _refreshSystemSelectedRouteInfoV2();
-        }
-        await _refreshPlatformCapabilities();
-        if (!_isBluetoothV2Session) {
-          await _refreshMicrophonePermissionState();
-          await _maybePromptMicrophonePermissionOnDawEntry();
-          await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
-          await _refreshAudioRouteInfo();
-        }
-        await _loadBundledInstrumentCatalog();
-        final engineSupportsLiveMidi =
-            await JuceAudioEngine.supportsLiveMidiClipPlayback();
-        _liveMidiEventPlaybackSupported =
-            !_kForceRenderedMidiPlaybackForBeta && engineSupportsLiveMidi;
-        if (_kForceRenderedMidiPlaybackForBeta && engineSupportsLiveMidi) {
-          debugPrint(
-            '🎹 Live MIDI clip playback disabled for beta quality; using rendered MIDI WAV playback.',
-          );
-        }
-        if (_liveMidiEventPlaybackSupported) {
-          _startMidiDeviceConnectionPolling();
-        }
-        await _reloadRowsFromEngine();
-        await _refreshProducerCaptureUiAllowlistAccess();
-        await _sampleBrowserPreferencesFuture;
-        await _loadProjectIfAny();
-        if (_projectLoadPublicationFailedClosed) {
-          await _shutdownAudioEngineV2Aware();
-          if (mounted) {
-            _showSmallNotice(
-              'This project could not be opened safely. Reopen it to try again.',
-            );
-            await Navigator.of(context).maybePop();
-          }
-          return;
-        }
+        if (!mounted) return;
+        if (engineInitialised) break;
+        final startupResult = JuceAudioEngine.lastPlaybackStartupResultV2;
+        _logAudioStartupFailure(attempt: startupAttempt, result: startupResult);
+        final retry = decideStartupRetry(
+          diagnosticCode: startupResult?.diagnosticCode,
+          attempt: startupAttempt,
+        );
+        if (!retry.retry) break;
+        await Future<void>.delayed(retry.delay);
+        if (!mounted) return;
+      }
+      if (!engineInitialised) {
+        _audioStartupDiagnosticCode =
+            JuceAudioEngine.lastPlaybackStartupResultV2?.diagnosticCode;
+        _showSmallNotice('Audio output is not available yet.');
+        setState(() {
+          _audioStartupFailed = true;
+          _isLoadingNextScreen = false;
+        });
+        return;
+      }
+      _audioStartupDiagnosticCode = null;
+      if (Platform.isMacOS &&
+          JuceAudioEngine.v2BluetoothCommunicationQualityReduced) {
+        _macBluetoothCommunicationQualityNoticeShown = true;
+        _showSmallNotice(
+          'Bluetooth microphone selected. Playback quality is reduced. Select another microphone for stereo audio.',
+        );
+      }
+      _juceEngineEventSubscription ??= JuceAudioEngine.eventsStream.listen(
+        _handleJuceEngineEvent,
+      );
+      if (_isBluetoothV2Session &&
+          _usesLiveAudioRouteCoordinatorV2 &&
+          !Platform.isIOS) {
+        final coordinator = AudioRouteCoordinatorV2(
+          adapter: const MethodChannelAudioRouteAdapterV2(),
+          allowRecoveryGenerationSupersession: Platform.isMacOS,
+          onStateChanged: _handleAudioRouteCoordinatorStateV2,
+          onTransition: _handleAudioRouteTransitionV2,
+          onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
+        );
+        _audioRouteCoordinatorV2 = coordinator;
+        final initialRoute = await coordinator.start();
         if (!mounted) {
           await _shutdownAudioEngineV2Aware();
           return;
         }
-        if (_isBluetoothV2Session && Platform.isIOS) {
-          final coordinator = AudioRouteCoordinatorV2(
-            adapter: const MethodChannelAudioRouteAdapterV2(),
-            allowRecoveryGenerationSupersession: true,
-            onStateChanged: _handleAudioRouteCoordinatorStateV2,
-            onTransition: _handleAudioRouteTransitionV2,
-            onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
-          );
-          _audioRouteCoordinatorV2 = coordinator;
-          final initialRoute = await coordinator.start();
-          if (!mounted) {
-            await _shutdownAudioEngineV2Aware();
-            return;
-          }
-          if (initialRoute.captureConsistency ==
-              AudioRouteCaptureConsistencyV2.unavailable) {
-            await _shutdownAudioEngineV2Aware();
-            _showSmallNotice('Audio output monitoring is unavailable.');
-            setState(() => _isLoadingNextScreen = false);
-            return;
-          }
-          _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
-            initialRoute,
-          );
-          await _refreshSystemSelectedRouteInfoV2();
-          if (_v2HardwareSettingsApplicationPending) {
-            _v2HardwareSettingsApplicationPending = false;
-            await _applyAudioEngineSettingsToNative(
-              reason: 'projectLoadDeferred',
-              notifyOnFailure: false,
-            );
-          }
-        }
-        if (!_isBluetoothV2Session) {
-          _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
-        }
-        await _flushPendingDesktopFinderDrops();
-        setState(() => _isLoadingNextScreen = false);
-        unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
-        await _runInitialActionIfNeeded();
-        await _maybeShowDawOnboarding();
-      } catch (error, stackTrace) {
-        FlutterError.reportError(
-          FlutterErrorDetails(
-            exception: error,
-            stack: stackTrace,
-            library: 'audio editor initialization',
-            context: ErrorDescription('while initializing the audio editor'),
-          ),
-        );
-        if (mounted) {
-          _showSmallNotice('Some editor services could not be initialized.');
-        }
-      } finally {
-        if (mounted && _isLoadingNextScreen) {
+        if (initialRoute.captureConsistency ==
+            AudioRouteCaptureConsistencyV2.unavailable) {
+          await _shutdownAudioEngineV2Aware();
+          _showSmallNotice('Audio output monitoring is unavailable.');
           setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+        _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
+          initialRoute,
+        );
+        if (Platform.isMacOS) {
+          await _loadMacV2AudioDevices();
+        }
+        await _refreshSystemSelectedRouteInfoV2();
+      }
+      await _refreshPlatformCapabilities();
+      if (!_isBluetoothV2Session) {
+        await _refreshMicrophonePermissionState();
+        await _maybePromptMicrophonePermissionOnDawEntry();
+        await _loadInputDevicesFromJuce(scheduleRecordingPrewarm: true);
+        await _refreshAudioRouteInfo();
+      }
+      await _loadBundledInstrumentCatalog();
+      final engineSupportsLiveMidi =
+          await JuceAudioEngine.supportsLiveMidiClipPlayback();
+      _liveMidiEventPlaybackSupported =
+          !_kForceRenderedMidiPlaybackForBeta && engineSupportsLiveMidi;
+      if (_kForceRenderedMidiPlaybackForBeta && engineSupportsLiveMidi) {
+        debugPrint(
+          '🎹 Live MIDI clip playback disabled for beta quality; using rendered MIDI WAV playback.',
+        );
+      }
+      if (_liveMidiEventPlaybackSupported) {
+        _startMidiDeviceConnectionPolling();
+      }
+      await _reloadRowsFromEngine();
+      await _refreshProducerCaptureUiAllowlistAccess();
+      await _sampleBrowserPreferencesFuture;
+      await _loadProjectIfAny();
+      if (_projectLoadPublicationFailedClosed) {
+        await _shutdownAudioEngineV2Aware();
+        if (mounted) {
+          _showSmallNotice(
+            'This project could not be opened safely. Reopen it to try again.',
+          );
+          await Navigator.of(context).maybePop();
+        }
+        return;
+      }
+      if (!mounted) {
+        await _shutdownAudioEngineV2Aware();
+        return;
+      }
+      if (_isBluetoothV2Session && Platform.isIOS) {
+        final coordinator = AudioRouteCoordinatorV2(
+          adapter: const MethodChannelAudioRouteAdapterV2(),
+          allowRecoveryGenerationSupersession: true,
+          onStateChanged: _handleAudioRouteCoordinatorStateV2,
+          onTransition: _handleAudioRouteTransitionV2,
+          onIntentInvalidated: _handleAudioRouteIntentInvalidatedV2,
+        );
+        _audioRouteCoordinatorV2 = coordinator;
+        final initialRoute = await coordinator.start();
+        if (!mounted) {
+          await _shutdownAudioEngineV2Aware();
+          return;
+        }
+        if (initialRoute.captureConsistency ==
+            AudioRouteCaptureConsistencyV2.unavailable) {
+          await _shutdownAudioEngineV2Aware();
+          _showSmallNotice('Audio output monitoring is unavailable.');
+          setState(() => _isLoadingNextScreen = false);
+          return;
+        }
+        _v2UserVisibleOutputIdentity = _userVisibleOutputIdentityV2(
+          initialRoute,
+        );
+        await _refreshSystemSelectedRouteInfoV2();
+        if (_v2HardwareSettingsApplicationPending) {
+          _v2HardwareSettingsApplicationPending = false;
+          await _applyAudioEngineSettingsToNative(
+            reason: 'projectLoadDeferred',
+            notifyOnFailure: false,
+          );
         }
       }
-    });
+      if (!_isBluetoothV2Session) {
+        _scheduleRecordingInputPrewarm(reason: 'projectLoaded');
+      }
+      await _flushPendingDesktopFinderDrops();
+      setState(() => _isLoadingNextScreen = false);
+      unawaited(_flushDeferredAndroidRouteRefreshIfNeeded());
+      await _runInitialActionIfNeeded();
+      await _maybeShowDawOnboarding();
+    } catch (error, stackTrace) {
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stackTrace,
+          library: 'audio editor initialization',
+          context: ErrorDescription('while initializing the audio editor'),
+        ),
+      );
+      if (mounted) {
+        _showSmallNotice('Some editor services could not be initialized.');
+      }
+    } finally {
+      _editorStartupInFlight = false;
+      if (mounted && _isLoadingNextScreen) {
+        setState(() => _isLoadingNextScreen = false);
+      }
+    }
+  }
+
+  void _logAudioStartupFailure({
+    required int attempt,
+    required AudioPlaybackStartupResultV2? result,
+  }) {
+    debugPrint(
+      'Audio editor startup failed '
+      'attempt=$attempt '
+      'diagnosticCode=${result?.diagnosticCode} '
+      'captureConsistency=${result?.snapshot.captureConsistency.name} '
+      'unavailableReasons=${result?.snapshot.unavailableReasons}',
+    );
   }
 
   Future<void> _runInitialActionIfNeeded() async {
@@ -13259,8 +13312,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (state == AppLifecycleState.resumed) {
-        debugPrint("App Resumed on Android - Re-initializing.");
-        unawaited(_handleAndroidEditorResumed());
+        if (_audioStartupFailed && !_editorStartupInFlight) {
+          unawaited(_startEditorSession());
+        } else {
+          debugPrint("App Resumed on Android - Re-initializing.");
+          unawaited(_handleAndroidEditorResumed());
+        }
       } else if (_isEditorBackgroundState(state) ||
           (state == AppLifecycleState.inactive && !_isBluetoothV2Session)) {
         _markProjectDirty(immediate: true);
@@ -13289,7 +13346,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } else if (defaultTargetPlatform == TargetPlatform.iOS) {
       if (state == AppLifecycleState.resumed) {
-        if (_isBluetoothV2Session) {
+        if (_audioStartupFailed && !_editorStartupInFlight) {
+          unawaited(_startEditorSession());
+        } else if (_isBluetoothV2Session) {
           unawaited(_resumeIOSV2AudioAfterForeground());
         } else if (_bluetoothImplementationSessionV2 != null &&
             !_isBluetoothV2Session) {
@@ -17327,6 +17386,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _performAutosaveWrite() async {
+    if (!_loadedOnce) {
+      debugPrint('Skipping autosave because the project never loaded.');
+      return;
+    }
     if (_usingCompatibilityAudio) {
       await _forkCompatibilityProjectForEdits();
     }
@@ -19236,6 +19299,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _saveProject({bool showSnackBar = true}) async {
+    if (!_loadedOnce) {
+      debugPrint('Skipping project save because the project never loaded.');
+      return;
+    }
     try {
       await _projectAutosaveCoordinator.flush();
       if (!_usingCompatibilityAudio) {
@@ -19423,7 +19490,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    await _saveProject(showSnackBar: false);
+    if (_loadedOnce) {
+      await _saveProject(showSnackBar: false);
+    } else {
+      debugPrint(
+        'Skipping project save on back because the project never loaded.',
+      );
+    }
     _setDawPanelVisible('add_actions', false);
     _setDawPanelVisible('chat_panel', false);
     _setDawPanelVisible('chat_input', false);
@@ -83081,6 +83154,69 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }());
   }
 
+  Widget _buildAudioStartupFailedBanner() {
+    return Material(
+      color: Colors.transparent,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color.fromRGBO(70, 80, 95, 0.97),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    L10n.translate(context, "Audio couldn't start."),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.2,
+                      color: Color(0xFFF4F4F4),
+                      letterSpacing: -0.05,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                TextButton(
+                  onPressed: _editorStartupInFlight
+                      ? null
+                      : () {
+                          debugPrint(
+                            'Retrying audio editor startup '
+                            'diagnosticCode=$_audioStartupDiagnosticCode',
+                          );
+                          unawaited(_startEditorSession());
+                        },
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFF4F4F4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: Text(
+                    L10n.translate(context, 'Retry'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String _localizedNoticeMessage(String message) {
     final exact = L10n.translate(context, message);
     if (exact != message) return exact;
@@ -87388,6 +87524,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       _buildTopBar(clock, editorLayoutSpec),
                                 ),
                               ),
+                              if (_audioStartupFailed)
+                                Positioned(
+                                  top: topBarReservedHeight + 8,
+                                  left: 16,
+                                  right: 16 + tabletRightPanelReservedWidth,
+                                  child: _buildAudioStartupFailedBanner(),
+                                ),
                               _buildTimelineHorizontalScrollbarOverlay(
                                 topBarReservedHeight: topBarReservedHeight,
                                 rightInset: tabletRightPanelReservedWidth,

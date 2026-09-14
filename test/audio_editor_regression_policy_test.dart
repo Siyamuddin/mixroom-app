@@ -9,7 +9,7 @@ void main() {
     test('editor initialization always clears the loading overlay', () {
       final source = File('lib/screens/audio_editor.dart').readAsStringSync();
       final initializationStart = source.indexOf(
-        'WidgetsBinding.instance.addPostFrameCallback((_) async {\n      try {',
+        'Future<void> _startEditorSession() async {',
       );
       final nextMethod = source.indexOf(
         '\n  Future<void> _runInitialActionIfNeeded()',
@@ -26,7 +26,7 @@ void main() {
         initialization,
         contains(
           'if (mounted && _isLoadingNextScreen) {\n'
-          '          setState(() => _isLoadingNextScreen = false);',
+          '        setState(() => _isLoadingNextScreen = false);',
         ),
       );
     });

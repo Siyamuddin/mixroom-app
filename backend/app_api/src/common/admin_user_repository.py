@@ -126,6 +126,11 @@ def _normalize_query(value: Any) -> str:
     return _safe_str(value).lower()
 
 
+def _normalize_subscription_filter(value: Any) -> str:
+    normalized = _safe_str(value).lower()
+    return normalized if normalized in {"paying", "granted"} else "all"
+
+
 def _limit_value(value: Any, default: int = 24, maximum: int = 100) -> int:
     try:
         numeric = int(value or default)
@@ -190,12 +195,21 @@ class AdminUserRepository:
         *,
         query: str = "",
         limit: int = 24,
+        subscription_filter: str = "all",
     ) -> Dict[str, Any]:
         normalized_query = _normalize_query(query)
+        normalized_subscription_filter = _normalize_subscription_filter(
+            subscription_filter
+        )
         result_limit = _limit_value(limit)
         warnings: list[str] = []
 
-        if normalized_query:
+        if normalized_subscription_filter != "all":
+            candidate_user_ids = self._list_subscription_candidate_user_ids(
+                normalized_subscription_filter,
+                warnings=warnings,
+            )
+        elif normalized_query:
             candidate_user_ids = self._search_candidate_user_ids(
                 normalized_query,
                 limit=result_limit,
@@ -236,6 +250,7 @@ class AdminUserRepository:
         return {
             "generated_at": _utc_now_iso(),
             "query": _safe_str(query),
+            "subscription_filter": normalized_subscription_filter,
             "limit": result_limit,
             "total_matches": len(records),
             "has_more": len(records) > result_limit,
@@ -1353,6 +1368,67 @@ class AdminUserRepository:
             seen.add(safe)
             result.append(safe)
             if len(result) >= max(limit * 2, 50):
+                break
+        return result
+
+    def _list_subscription_candidate_user_ids(
+        self,
+        subscription_filter: str,
+        *,
+        warnings: list[str],
+    ) -> list[str]:
+        if self._entitlements is None:
+            return []
+
+        normalized_filter = _normalize_subscription_filter(subscription_filter)
+        if normalized_filter == "all":
+            return []
+
+        result: list[str] = []
+        seen: set[str] = set()
+        start_key = None
+        while True:
+            try:
+                kwargs: dict[str, Any] = {
+                    "ProjectionExpression": (
+                        "user_id, plan_code, #status, source_provider"
+                    ),
+                    "ExpressionAttributeNames": {"#status": "status"},
+                }
+                if start_key:
+                    kwargs["ExclusiveStartKey"] = start_key
+                response = self._entitlements.scan(**kwargs)
+            except (BotoCoreError, ClientError) as exc:
+                warnings.append(
+                    f"subscription_filter_unavailable:{exc.__class__.__name__}"
+                )
+                return result
+
+            for item in response.get("Items", []):
+                user_id = _safe_str(item.get("user_id"))
+                plan_code = normalize_plan_code(item.get("plan_code") or "free")
+                status = normalize_status(_safe_str(item.get("status")))
+                provider = normalize_provider(_safe_str(item.get("source_provider")))
+                if (
+                    not user_id
+                    or user_id in seen
+                    or plan_code == "free"
+                    or not status_has_active_access(status)
+                ):
+                    continue
+
+                is_match = (
+                    provider == "admin_grant"
+                    if normalized_filter == "granted"
+                    else provider not in {"admin_grant", "unknown"}
+                    and status != "trialing"
+                )
+                if is_match:
+                    seen.add(user_id)
+                    result.append(user_id)
+
+            start_key = response.get("LastEvaluatedKey")
+            if not start_key:
                 break
         return result
 

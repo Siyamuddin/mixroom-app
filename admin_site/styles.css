@@ -756,7 +756,7 @@ ul {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -797,6 +797,10 @@ ul {
 
 .summary-paid {
   border-color: rgba(206, 184, 255, 0.18);
+}
+
+.summary-granted {
+  border-color: rgba(255, 196, 125, 0.22);
 }
 
 .panel-grid {
@@ -1661,6 +1665,14 @@ tbody tr[data-billing-selectable="true"] {
   background: rgba(10, 14, 21, 0.44);
 }
 
+.user-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+}
+
 .analytics-range-button {
   border: none;
   background: transparent;
@@ -1949,6 +1961,11 @@ tbody tr[data-billing-selectable="true"] {
     width: 100%;
     justify-content: flex-start;
     overflow-x: auto;
+  }
+
+  .user-filter-bar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .country-featured-grid {

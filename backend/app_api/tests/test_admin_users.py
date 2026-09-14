@@ -94,8 +94,14 @@ class _FakeRepo:
         self.grant_error = None
         self.override_error = None
 
-    def search_users(self, *, query="", limit=24):
-        self.search_calls.append({"query": query, "limit": limit})
+    def search_users(self, *, query="", limit=24, subscription_filter="all"):
+        self.search_calls.append(
+            {
+                "query": query,
+                "limit": limit,
+                "subscription_filter": subscription_filter,
+            }
+        )
         return dict(self.search_payload)
 
     def create_username_account(
@@ -260,7 +266,11 @@ class AdminUsersHandlerTests(unittest.TestCase):
             {
                 "rawPath": "/v1/internal/admin/users",
                 "requestContext": {"http": {"method": "GET"}},
-                "queryStringParameters": {"query": "user", "limit": "10"},
+                "queryStringParameters": {
+                    "query": "user",
+                    "limit": "10",
+                    "subscription_filter": "paying",
+                },
             },
             object(),
         )
@@ -269,6 +279,10 @@ class AdminUsersHandlerTests(unittest.TestCase):
         self.assertIn('"requested_email": "admin@example.com"', result["body"])
         self.assertIn('"total_matches": 1', result["body"])
         self.assertEqual(admin_module.repo.search_calls[0]["query"], "user")
+        self.assertEqual(
+            admin_module.repo.search_calls[0]["subscription_filter"],
+            "paying",
+        )
 
     def test_create_username_account_returns_payload(self):
         self._authenticate()
@@ -720,6 +734,50 @@ class AdminUserRepositoryTests(unittest.TestCase):
         )
 
         self.assertEqual(user_ids, ["native-user"])
+
+    def test_subscription_candidate_user_ids_separates_paying_and_granted(self):
+        repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)
+        repository._entitlements = mock.Mock()
+        repository._entitlements.scan.return_value = {
+            "Items": [
+                {
+                    "user_id": "paying-user",
+                    "plan_code": "producer",
+                    "status": "active",
+                    "source_provider": "apple",
+                },
+                {
+                    "user_id": "trial-user",
+                    "plan_code": "producer",
+                    "status": "trialing",
+                    "source_provider": "paddle",
+                },
+                {
+                    "user_id": "granted-user",
+                    "plan_code": "studio",
+                    "status": "active",
+                    "source_provider": "admin_grant",
+                },
+                {
+                    "user_id": "free-user",
+                    "plan_code": "free",
+                    "status": "active",
+                    "source_provider": "admin_grant",
+                },
+            ]
+        }
+
+        paying = repository._list_subscription_candidate_user_ids(
+            "paying",
+            warnings=[],
+        )
+        granted = repository._list_subscription_candidate_user_ids(
+            "granted",
+            warnings=[],
+        )
+
+        self.assertEqual(paying, ["paying-user"])
+        self.assertEqual(granted, ["granted-user"])
 
     def test_fallback_recent_user_ids_no_longer_reads_recent_cognito_users(self):
         repository = repo_module.AdminUserRepository.__new__(repo_module.AdminUserRepository)

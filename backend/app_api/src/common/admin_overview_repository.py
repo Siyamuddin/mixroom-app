@@ -283,17 +283,13 @@ class AdminOverviewRepository:
                     project["unique_user_count"] = len(users)
 
         tier_breakdown = self._build_tier_breakdown_fast(warnings)
-        paid_users = sum(
-            payload.get("active_user_count", 0)
-            for payload in tier_breakdown
-            if payload.get("plan_code") != "free"
-        )
-        active_subscriptions = sum(
-            payload.get("active_user_count", 0)
-            for payload in tier_breakdown
-        ) - next(
-            (payload.get("active_user_count", 0) for payload in tier_breakdown if payload.get("plan_code") == "free"),
-            0,
+        paid_access = self._build_paid_access_breakdown(warnings)
+        total_users = self._describe_item_count(config.USERS_TABLE, warnings)
+        paid_users = paid_access.get("paid_users")
+        paid_conversion_rate = (
+            round((_safe_int(paid_users) / total_users) * 100, 1)
+            if paid_users is not None and total_users > 0
+            else 0.0 if paid_users is not None else None
         )
 
         users = (
@@ -403,10 +399,17 @@ class AdminOverviewRepository:
             },
             "warnings": warnings,
             "summary": {
-                "total_users": self._describe_item_count(config.USERS_TABLE, warnings),
+                "total_users": total_users,
                 "tracked_users": self._describe_item_count(config.AI_USAGE_STATE_TABLE, warnings),
                 "paid_users": paid_users,
-                "active_subscriptions": active_subscriptions,
+                "active_subscriptions": paid_users,
+                "paid_conversion_rate": paid_conversion_rate,
+                "granted_premium_users": paid_access.get("granted_premium_users"),
+                "premium_users": paid_access.get("premium_users"),
+                "trial_users": paid_access.get("trial_users"),
+                "unattributed_premium_users": paid_access.get(
+                    "unattributed_premium_users"
+                ),
                 "ai_prompts_today": prompt_count_today if include_ai_usage else None,
                 "ai_prompts_week": prompt_count_week if include_ai_usage else None,
                 "ai_active_users_today": (
@@ -1048,6 +1051,78 @@ class AdminOverviewRepository:
             {"plan_code": tier, **payload}
             for tier, payload in counts.items()
         ]
+
+    def _build_paid_access_breakdown(
+        self,
+        warnings: list[str],
+    ) -> Dict[str, int | None]:
+        """Count active paid-plan access by its authoritative entitlement source."""
+        unavailable = {
+            "paid_users": None,
+            "granted_premium_users": None,
+            "unattributed_premium_users": None,
+            "trial_users": None,
+            "premium_users": None,
+        }
+        if self._entitlements is None:
+            return unavailable
+
+        paid_users = 0
+        granted_premium_users = 0
+        unattributed_premium_users = 0
+        trial_users = 0
+        start_key = None
+        while True:
+            try:
+                kwargs: dict[str, Any] = {
+                    "ProjectionExpression": "plan_code, #status, source_provider",
+                    "ExpressionAttributeNames": {"#status": "status"},
+                }
+                if start_key:
+                    kwargs["ExclusiveStartKey"] = start_key
+                response = self._entitlements.scan(**kwargs)
+            except (BotoCoreError, ClientError) as exc:
+                warnings.append(
+                    f"paid_access_breakdown_unavailable:{exc.__class__.__name__}"
+                )
+                return unavailable
+
+            for item in response.get("Items", []):
+                plan_code = normalize_plan_code(item.get("plan_code") or "free")
+                status = normalize_status(_safe_str(item.get("status")))
+                if plan_code == "free" or not status_has_active_access(status):
+                    continue
+                provider = normalize_provider(_safe_str(item.get("source_provider")))
+                if provider == "admin_grant":
+                    granted_premium_users += 1
+                elif status == "trialing":
+                    trial_users += 1
+                elif provider == "unknown":
+                    unattributed_premium_users += 1
+                else:
+                    paid_users += 1
+
+            start_key = response.get("LastEvaluatedKey")
+            if not start_key:
+                break
+
+        premium_users = (
+            paid_users
+            + granted_premium_users
+            + unattributed_premium_users
+            + trial_users
+        )
+        if unattributed_premium_users:
+            warnings.append(
+                f"premium_access_source_unknown:{unattributed_premium_users}"
+            )
+        return {
+            "paid_users": paid_users,
+            "granted_premium_users": granted_premium_users,
+            "unattributed_premium_users": unattributed_premium_users,
+            "trial_users": trial_users,
+            "premium_users": premium_users,
+        }
 
     def _build_tier_breakdown_fast(self, warnings: list[str]) -> list[Dict[str, Any]]:
         tiers = PLAN_CODES
