@@ -21,11 +21,12 @@ void main() {
     );
     const expectedLongPathEnabled = bool.fromEnvironment(
       'AI_V3_LONG_PATH_ENABLED',
-      defaultValue: false,
+      defaultValue: true,
     );
     const expectedLongApiBaseUrl = String.fromEnvironment(
       'AI_V3_LONG_API_BASE_URL',
-      defaultValue: '',
+      defaultValue:
+          'https://5px4k98xz2.execute-api.ap-northeast-2.amazonaws.com/prod',
     );
     expect(LlmConfig.aiV3PrimaryEnabled, expectedPrimary);
     expect(LlmConfig.aiV3ProxyPath, '/v1/llm/v3/responses');

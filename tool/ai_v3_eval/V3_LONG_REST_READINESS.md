@@ -125,19 +125,19 @@ spend on heavy requests unless a new runtime change warrants it. Observe both
 functions explicitly: the inspected alarms cover the original HTTP path, not
 a complete long-route monitoring policy.
 
-## Gate C — client activation, separately approved
+## Gate C — client activation
 
-Keep public builds at `AI_V3_LONG_PATH_ENABLED=false` and an empty
-`AI_V3_LONG_API_BASE_URL` until activation is approved. Backend deployment
-does not activate clients.
+Backend deployment and compatibility smoke checks passed before client
+activation was approved. Updated clients now default to the distinct HTTPS long
+API and its 130-second client window. A build-time
+`AI_V3_LONG_PATH_ENABLED=false` remains the kill switch; an empty or invalid URL
+also fails closed to the original route. Submitted requests are never retried
+through another route.
 
-A non-public approved build needs BOTH the enabled flag and the distinct HTTPS
-long API URL. Invalid settings fall back to the original route. Submitted
-requests must not be retried through another route. Internal success is not
-permission for public rollout. Review current capacity/traffic before enabling
-released clients; preserve the applied throttles unless explicitly changed.
-Existing installations retain their original route/deadline until intentionally
-updated; PRO-4 does not remove the old route's limit for them.
+Review capacity, errors, and throttling during the client rollout and preserve
+the applied backend throttles unless a separate change is approved. Existing
+installations retain their original route/deadline until intentionally updated;
+the original API and legacy contracts remain available for them.
 
 ## Stop and rollback
 

@@ -85,17 +85,20 @@ class LlmConfig {
     defaultValue: 35,
   );
 
-  /// Opt-in only. A URL is also required before V3 leaves the existing route.
+  /// Enabled for updated clients after the long route passed its backend and
+  /// compatibility rollout gates. Builds can set this to false as a kill
+  /// switch; a valid, distinct URL is still required before V3 changes route.
   static const bool aiV3LongPathEnabled = bool.fromEnvironment(
     'AI_V3_LONG_PATH_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
 
-  /// Intentionally has no production default. The isolated long-running REST
-  /// API must be supplied explicitly by an approved build.
+  /// Public endpoint only; provider credentials, prompts, schemas, model
+  /// settings, and repair logic remain in the backend.
   static const String aiV3LongApiBaseUrl = String.fromEnvironment(
     'AI_V3_LONG_API_BASE_URL',
-    defaultValue: '',
+    defaultValue:
+        'https://5px4k98xz2.execute-api.ap-northeast-2.amazonaws.com/prod',
   );
 
   static const int _aiV3LongRequestTimeoutSeconds = 130;
