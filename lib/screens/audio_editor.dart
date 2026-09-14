@@ -81,6 +81,7 @@ import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/remote_mixing_magnitude_predictor.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_execution_failure_message.dart';
+import 'package:mixroom/ai/v3/ai_v3_execution_expectations.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
@@ -50868,7 +50869,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (v3RuntimeExpectations != null) {
                 _addAiV3Expectation(
                   v3RuntimeExpectations,
-                  instrumentExpectation,
+                  aiV3RowInstrumentExpectationForFinalState(
+                    v3RuntimeExpectations,
+                    instrumentExpectation,
+                  ),
                 );
               }
               if (chatFlowId != null) {
@@ -70955,6 +70959,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   .toList(),
               'row': targetRow,
               if (target['row_id'] is int) 'row_id': target['row_id'],
+              if (target['resource_ref'] is Map)
+                'destination_row_ref': Map<String, dynamic>.from(
+                  target['resource_ref'] as Map,
+                ),
               'start': startMs / 1000.0,
               'length': lengthBeats * 60.0 / simulatedProjectTempo,
               'instrument_id':
@@ -70973,7 +70981,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   .toList(growable: false),
             });
             expectedNewClips += 1;
-            recordCreatedClipForRow(rowIdForIndex(targetRow), 1);
+            if (target['resource_ref'] == null) {
+              recordCreatedClipForRow(rowIdForIndex(targetRow), 1);
+            }
           }
           break;
         case 'sample_insert':
@@ -72777,16 +72787,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (clipIds.contains(expectation['clip_id'])) return true;
       if ((kind == 'clip_created' ||
               (kind == 'midi_clip_created' && expectation['row_id'] is! int)) &&
-          expectation['row'] == rowIndex) {
+          aiV3ExpectationMatchesDeletedStableRow(
+            expectation,
+            rowId: rowId,
+            rowIndex: rowIndex,
+          )) {
         final producerActionIndex = _toActionInt(
           expectation['producer_action_index'],
         );
         return producerActionIndex == null ||
             producerActionIndex <= deletionActionIndex;
       }
-      final matchesRow =
-          expectation['row_id'] == rowId ||
-          (expectation['row_id'] is! int && expectation['row'] == rowIndex);
+      final matchesRow = aiV3ExpectationMatchesDeletedStableRow(
+        expectation,
+        rowId: rowId,
+        rowIndex: rowIndex,
+      );
       if (!matchesRow) return false;
       return kind != 'row_deleted' &&
           kind != 'group_created' &&
@@ -74567,9 +74583,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         case 'mix_effects_empty':
         case 'mix_effect_parameter_resolved':
         case 'effect_parameter_value':
-          final effects = expectation['master'] == true
+          final master = expectation['master'] == true;
+          final forceIndividualRow =
+              expectation['force_individual_row'] == true;
+          var effects = master
               ? _aiV3MasterEffectsJson()
-              : expectation['force_individual_row'] == true
+              : forceIndividualRow
               ? await _aiV3NativeRowEffectChain(
                   _aiV3ExpectationRow(expectation),
                 )
@@ -74578,7 +74597,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               kind == 'mix_effect_parameter_resolved' ||
               (kind == 'mix_effect_presence' && expectation['present'] == true);
           if (requiresObservedEffect && effects.isEmpty) {
-            throw StateError('v3_effect_observation_missing');
+            final nativeNames = master
+                ? await JuceAudioEngine.getMasterEffects()
+                : await JuceAudioEngine.getTrackEffectsForRow(
+                    _aiV3ExpectationRow(expectation),
+                    forceIndividualRow: forceIndividualRow,
+                  );
+            effects = aiV3EffectObservationWithNativeFallback(
+              snapshotEffects: effects,
+              nativeEffectNames: nativeNames,
+              requiredNeedle: expectation['needle']?.toString() ?? '',
+            );
           }
           item['value'] = effects;
           break;

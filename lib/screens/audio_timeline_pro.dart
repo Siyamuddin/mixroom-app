@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_svg/svg.dart';
 import 'dart:math' as math;
@@ -1815,6 +1816,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   double? _cutPreviewMs;
 
   bool _magnetEnabled = true;
+  bool _topControlsPublishScheduled = false;
   TimelineGridMode _gridMode = TimelineGridMode.adaptive;
   int _fixedQuantizeDivisionsPerBar = 4;
   int? _highlightedSegmentRow;
@@ -1967,6 +1969,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   }
 
   void _publishTopControlsState() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      if (_topControlsPublishScheduled) return;
+      _topControlsPublishScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _topControlsPublishScheduled = false;
+        if (!mounted) return;
+        _publishTopControlsState();
+      });
+      return;
+    }
     widget.controller?._setTopControlsState(
       TimelineTopControlsState(
         magnetEnabled: _magnetEnabled,

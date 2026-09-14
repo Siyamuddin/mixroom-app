@@ -553,6 +553,8 @@ Widget _buildHarness({
   bool loopEnabled = false,
   int loopStartMs = 0,
   int loopEndMs = 0,
+  double bpm = 120.0,
+  int beatsPerBar = 4,
   VoidCallback? onTutorialTimelineScrolled,
   VoidCallback? onTutorialTimelineZoomed,
   ValueChanged<WaveformDetailViewport>? onWaveformDetailViewportSettled,
@@ -669,8 +671,8 @@ Widget _buildHarness({
           onScrubRequested: onScrubRequested ?? (_) {},
           isPlaying: isPlaying,
           maxDuration: const Duration(seconds: 30),
-          bpm: 120.0,
-          beatsPerBar: 4,
+          bpm: bpm,
+          beatsPerBar: beatsPerBar,
           selectedClipIndex: selectedClipIndex,
           selectedClipIndices: selectedClipIndices,
           isRecording: false,
@@ -1694,6 +1696,36 @@ void main() {
       _setTestTargetPlatform(null);
     }
   });
+
+  testWidgets(
+    'time signature update publishes top controls after the build phase',
+    (tester) async {
+      final clips = <AudioTrack>[await _buildClip()];
+      final controller = AudioCanvasTimelineController();
+
+      Widget buildHarness(int beatsPerBar) {
+        return ValueListenableBuilder<TimelineTopControlsState>(
+          valueListenable: controller.topControlsListenable,
+          builder: (context, controls, child) => _buildHarness(
+            clips: clips,
+            controller: controller,
+            beatsPerBar: beatsPerBar,
+            onMoveClipCommit: (_, __, ___) async {},
+          ),
+        );
+      }
+
+      await tester.pumpWidget(buildHarness(4));
+      await tester.pumpAndSettle();
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 4);
+
+      await tester.pumpWidget(buildHarness(8));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(controller.topControlsState.quantizeDivisionsPerBar, 8);
+    },
+  );
 
   testWidgets('waveform detail viewport waits for settled final zoom',
       (tester) async {
