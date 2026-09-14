@@ -71,10 +71,18 @@ normalized adjustment amount, replacing the old proposal multiplier. It learns
 continuous gain, pan and FX parameters. For an inserted effect, it learns the
 accepted parameter's position in its range without inventing an initial setting.
 
-Path-based plugin IDs use the same idempotent SHA-256 identity in Dart capture
-and Python inference. Existing hashed captures remain readable; the engine keeps
-its raw plugin identifiers. Shared fixtures and actual ONNX tests verify parity.
-Re-export training artifacts after this contract/identity update.
+New snapshots include `modelPluginId`, derived from the native JUCE descriptor's
+format, manufacturer, name, UID and version. The same plugin/version installed at
+different paths shares a model identity. Versions remain separate; parameter IDs,
+types, bounds and choices must still match. We do not identify plugins by filename.
+The engine keeps its original loading ID; no saved project IDs are rewritten.
+
+If a host cannot supply a usable descriptor, the existing path-hash identity remains
+the fallback. Runtime prefers a supported stable identity, then tries the exact old
+path identity for older models. Historical hashes alone cannot be migrated across
+machines without verified plugin metadata. Older clients without `modelPluginId`
+remain readable and abstain from unsupported stable-ID controls. ONNX regression
+tests cover different install paths, distinct identities and old model compatibility.
 
 Runtime preserves the proposal's direction and native bounds. Existing controls
 cannot exceed 3x the proposed change or a quarter of their range. Inserted settings

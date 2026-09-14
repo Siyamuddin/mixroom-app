@@ -4,7 +4,7 @@ import copy
 import hashlib
 import json
 import math
-from .plugin_identity import canonical_plugin_id
+from .plugin_identity import model_plugin_id, supported_descriptor
 from .mix_plugin_contract import bus_target, chain, parameter_target, extra_features
 
 CONTRACT = 'mix_magnitude_human_v3'
@@ -67,7 +67,7 @@ def parameter_descriptor(effect, parameter, *, inserted=False):
     choices = parameter.get('choices')
     if not isinstance(choices, list):
         choices = [parameter[k] for k in sorted((k for k in parameter if k.startswith('choice_') and k[7:].isdigit()), key=lambda k: int(k[7:]))]
-    return {'kind': 'parameter', 'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name'],
+    return {'kind': 'parameter', 'effect_id': model_plugin_id(effect), 'effect_name': effect['name'],
             'parameter_id': parameter['id'], 'parameter_name': parameter['name'],
             'type': parameter['type'], 'min': parameter.get('min'), 'max': parameter.get('max'),
             'choices': choices, 'inserted': inserted}
@@ -135,7 +135,7 @@ def runtime_target(project, action, actions, index, controls):
         if match:
             effect, parameter = match
             if effect.get('isBypassed') or parameter.get('type') != 'float': return None
-            d = parameter_descriptor(effect, parameter)
+            d = supported_descriptor(parameter_descriptor(effect, parameter), effect, controls)
             start = parameter.get('value'); proposal = proposed_value(parameter, data)
         else:
             ensure = 'ensure_master_effect' if scope['scope'] == 'master' else 'ensure_effect'

@@ -5074,7 +5074,7 @@ public:
                                  const juce::var &newValue,
                                  bool forceIndividualRow = false);
     juce::StringArray getTrackEffectsForRow(int trackRow, bool forceIndividualRow = false);
-    juce::StringArray getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow = false);
+    juce::StringArray getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow = false, bool modelIdentity = false);
     juce::StringArray getTrackEffectInstanceIdsForRow(int trackRow, bool forceIndividualRow = false);
     juce::Array<juce::NamedValueSet> getTrackPluginParameterInfo(int row, int effectIndex, bool forceIndividualRow = false);
     void bypassRowEffect(int rowIndex, int effectIndex, bool shouldBypass, bool forceIndividualRow = false);
@@ -5115,7 +5115,7 @@ public:
                                   const juce::String &paramName,
                                   const juce::var &newValue);
     juce::StringArray getMasterEffects();
-    juce::StringArray getMasterEffectIds();
+    juce::StringArray getMasterEffectIds(bool modelIdentity = false);
     juce::StringArray getMasterEffectInstanceIds();
     juce::Array<juce::NamedValueSet> getMasterPluginParameterInfo(int effectIndex);
     void bypassMasterEffect(int effectIndex, bool shouldBypass);

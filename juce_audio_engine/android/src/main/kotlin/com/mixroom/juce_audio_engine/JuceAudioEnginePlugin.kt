@@ -4557,7 +4557,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getTrackEffectsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow")))
         }
         "getTrackEffectIdsForRow" -> {
-          result.success(JuceBridge.getTrackEffectIdsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow")))
+          result.success(JuceBridge.getTrackEffectIdsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow"), args.boolValue("modelIdentity")))
         }
         "getTrackEffectInstanceIdsForRow" -> {
           result.success(JuceBridge.getTrackEffectInstanceIdsForRowJNI(args.intValue("row"), args.boolValue("forceIndividualRow")))
@@ -4693,7 +4693,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           result.success(JuceBridge.getMasterEffectInstanceIdsJNI())
         }
         "getMasterEffectIds" -> {
-          result.success(JuceBridge.getMasterEffectIdsJNI())
+          result.success(JuceBridge.getMasterEffectIdsJNI(args.boolValue("modelIdentity")))
         }
         "setMasterEffect" -> {
           val value = args["value"]

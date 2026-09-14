@@ -141,6 +141,7 @@ class HumanSelectionTests(unittest.TestCase):
             runner=CandidateRunner(output)
             project=copy.deepcopy(positive['episodes'][0]['state_before']['project_state'])
             project['rows'][0]['effects'][0]['effectId']=raw_id
+            project['rows'][0]['effects'][0]['modelPluginId']='plugin_uid_v1_' + 'a'*64
             action={'type':'adjust_effect_param_by_name','data':{'row':0,'effect_name_contains':'Compressor','param_name':'Threshold','mode':'set','value':-18}}
             response=MixResolveService(runner).resolve(project=project,goal={},actions=[action],strict=True)
             self.assertFalse(response['fallback_used'])
@@ -148,6 +149,42 @@ class HumanSelectionTests(unittest.TestCase):
             self.assertEqual(response['debug_entries'][0]['decision'],'human_magnitude')
             self.assertNotIn(raw_id,json.dumps(runner.selection_controls))
             self.assertNotIn(raw_id,json.dumps(runner.magnitude_controls))
+
+    def test_models_share_qualified_identity_across_install_paths(self):
+        from common.mix_magnitude_contract import runtime_target as amount_target
+        stable = 'plugin_uid_v1_' + 'b' * 64
+        positive = self.bundle()
+        positive['episodes'][0]['inference_traces'] = []
+        positive['episodes'][0]['actions_raw'] = []
+        negative = self.bundle(proposal=-6, final=-12)
+        negative['session_id'] = 'negative'
+        negative['episodes'][0]['producer_outcome'] = 'rejected'
+        for bundle in (positive, negative):
+            episode = bundle['episodes'][0]
+            snapshots = [episode[k]['project_state'] for k in ('state_before', 'state_after')]
+            snapshots += [t['project_state'] for t in episode['inference_traces']]
+            for project in snapshots:
+                effect = project['rows'][0]['effects'][0]
+                effect['effectId'] = canonical_plugin_id('/first/Example.vst3')
+                effect['modelPluginId'] = stable
+        choices = extract_selection(positive)[0] + extract_selection(negative)[0]
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'MIX_ALLOW_DEVELOPMENT_MODELS': 'true'}):
+            output = Path(tmp) / 'models'
+            train(extract(positive)[0], output, classifier=CLASSIFIER, development=True, selection_rows=choices)
+            runner = CandidateRunner(output)
+            project = copy.deepcopy(positive['episodes'][0]['state_before']['project_state'])
+            effect = project['rows'][0]['effects'][0]
+            effect['effectId'] = '/different/computer/Example.vst3'
+            action = {'type': 'adjust_effect_param_by_name', 'data': {
+                'row': 0, 'effect_name_contains': 'Compressor', 'param_name': 'Threshold', 'mode': 'set', 'value': -18}}
+            result = MixResolveService(runner).resolve(project=project, goal={}, actions=[action], strict=True)
+            self.assertFalse(result['fallback_used'])
+            self.assertTrue(result['debug_entries'][0]['selection_supported'])
+            self.assertEqual(result['debug_entries'][0]['decision'], 'human_magnitude')
+            # Same display name, different qualified plugin: never share the model.
+            effect['modelPluginId'] = 'plugin_uid_v1_' + 'c' * 64
+            self.assertIsNone(amount_target(project, action, [action], 0, runner.magnitude_controls))
+            self.assertIsNone(runtime_target(project, action, [action], 0, runner.selection_controls))
 
     def test_selection_evaluation_refuses_candidate_training_song_reuse(self):
         from evaluate_human_selection import evaluate

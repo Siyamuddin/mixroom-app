@@ -26,3 +26,15 @@ evaluation and listening tests. Keep production models unchanged until those pas
 
 Validation: 77 training tests, 11 resolver/API tests, 13 producer backend tests and
 26 Flutter capture tests passed. The macOS debug build also passed.
+
+## Plugin identity follow-up
+
+New snapshots carry a path-independent model identity qualified by native plugin
+format, vendor, name, UID and version. Engine loading IDs remain unchanged. The
+macOS native build passed; 78 training tests, 11 resolver/API tests and 28 Flutter
+capture tests passed. Regression tests exported both ONNX models from one install
+path and exercised them against another, rejected a distinct plugin identity, and
+verified older path-hash models still work when runtime supplies new metadata.
+Android and Windows bridge signatures were updated but not built on this Mac.
+A real third-party plugin installation test on each shipping platform remains part
+of release review; automated tests use controlled plugin metadata.

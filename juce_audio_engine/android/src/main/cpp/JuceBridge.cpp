@@ -2921,11 +2921,11 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectsForRowJNI(JNIEnv 
 }
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectIdsForRowJNI(JNIEnv *env, jclass, jint row, jboolean forceIndividualRow)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectIdsForRowJNI(JNIEnv *env, jclass, jint row, jboolean forceIndividualRow, jboolean modelIdentity)
 {
     juce::StringArray ids;
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { ids = JuceEngine::get().getTrackEffectIdsForRow((int)row, forceIndividualRow != JNI_FALSE); });
+                                                  { ids = JuceEngine::get().getTrackEffectIdsForRow((int)row, forceIndividualRow != JNI_FALSE, modelIdentity != JNI_FALSE); });
     return stringArrayToJavaList(env, ids);
 }
 
@@ -3136,11 +3136,11 @@ Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectInstanceIdsJNI(JN
 }
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectIdsJNI(JNIEnv *env, jclass)
+Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectIdsJNI(JNIEnv *env, jclass, jboolean modelIdentity)
 {
     juce::StringArray ids;
     juce::MessageManager::getInstance()->callSync([&]
-                                                  { ids = JuceEngine::get().getMasterEffectIds(); });
+                                                  { ids = JuceEngine::get().getMasterEffectIds(modelIdentity != JNI_FALSE); });
     return stringArrayToJavaList(env, ids);
 }
 

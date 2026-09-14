@@ -1,4 +1,5 @@
 #include "JuceEngine.h"
+#include "../../../../ios/Classes/ProducerPluginIdentity.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -7426,8 +7427,9 @@ juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow, bool forceIndi
     return names;
 }
 
-juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow)
+juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow, bool modelIdentity)
 {
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     juce::StringArray ids;
 
     if (trackRow < 0 || trackRow >= (int)rows.size())
@@ -7439,6 +7441,15 @@ juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIn
         return ids;
     auto &chain = *chainPtr;
     auto &fxIds = *idsPtr;
+    if (modelIdentity)
+    {
+        for (auto nodeId : chain)
+        {
+            auto node = graph.getNodeForId(nodeId);
+            ids.add(producerPluginIdentity(node != nullptr ? node->getProcessor() : nullptr));
+        }
+        return ids;
+    }
     if (fxIds.size() == chain.size())
         return fxIds;
 
@@ -9534,8 +9545,20 @@ juce::StringArray JuceEngine::getMasterEffectInstanceIds()
     return ids;
 }
 
-juce::StringArray JuceEngine::getMasterEffectIds()
+juce::StringArray JuceEngine::getMasterEffectIds(bool modelIdentity)
 {
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (modelIdentity)
+    {
+        juce::StringArray ids;
+        if (masterEffectChain != nullptr)
+            for (auto nodeId : *masterEffectChain)
+            {
+                auto node = graph.getNodeForId(nodeId);
+                ids.add(producerPluginIdentity(node != nullptr ? node->getProcessor() : nullptr));
+            }
+        return ids;
+    }
     if (masterEffectIds.size() == 0 && masterEffectChain != nullptr && masterEffectChain->size() > 0)
     {
         juce::StringArray ids;

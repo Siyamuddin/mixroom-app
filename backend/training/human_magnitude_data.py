@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'llm_proxy/src'))
 from common.mix_magnitude_contract import CONTRACT, features, fingerprint, parameter_descriptor, encode_target, control_action, starting_value
-from common.plugin_identity import canonical_plugin_id
+from common.plugin_identity import model_plugin_id
 from producer_capture_converter import _sha256, _split
 
 
@@ -93,7 +93,7 @@ def extract(bundle, *, include_discrete=False):
                 if previous and (previous.get('effectId') != effect['effectId'] or previous.get('isBypassed')):
                     exclusions['plugin_contract_changed'] += 1; continue
                 if inserted:
-                    add({'kind': 'insert', 'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'chosen_effect')
+                    add({'kind': 'insert', 'effect_id': model_plugin_id(effect), 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'chosen_effect')
                 old_params = {p.get('id'): p for p in previous.get('parameters', [])} if previous else {}
                 for parameter in effect.get('parameters', []):
                     if not parameter.get('id') or not parameter.get('name'): continue
@@ -108,7 +108,7 @@ def extract(bundle, *, include_discrete=False):
                     add(descriptor, scope, parameter.get('value'), 'chosen_preset_parameter' if inserted else 'settled_control_change')
             for effect in old:
                 if effect['instanceId'] not in new_by_id and effect.get('effectId'):
-                    add({'kind': 'remove', 'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'removed_effect')
+                    add({'kind': 'remove', 'effect_id': model_plugin_id(effect), 'effect_name': effect['name'], 'type': 'bool'}, scope, True, 'removed_effect')
             if old and not new:
                 add({'kind': 'reset', 'type': 'bool'}, scope, True, 'cleared_chain')
     return rows, exclusions

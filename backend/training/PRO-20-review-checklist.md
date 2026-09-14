@@ -5,5 +5,5 @@
 - [ ] Confirm the output contains two ONNX models, both models are retrained and classifier labels include observed positives/negatives, and feature/export parity checks pass.
 - [ ] Launch the local backend and app. Confirm `mix_magnitude_human_v3`, `human_magnitude` decisions, valid control values and no resolver fallback. Verify selection can reject an action and suppress dependent plugin edits. Check unknown effects and reset requests too.
 - [ ] Compare against the current model on independent songs, review coverage and errors, then blind-listen to identical requests. Small-corpus development results do not establish improvement.
-- [ ] Check third-party plugins: captured hashed IDs match raw runtime IDs, without leaking file paths.
+- [ ] Check third-party plugins: the same plugin/version at different install paths shares `modelPluginId`; distinct plugins/versions stay separate. Existing path-hash models still work for their original paths.
 - [ ] Run the documented regression tests. No backend deployment or model promotion is part of this local review.

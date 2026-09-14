@@ -567,7 +567,8 @@ class EffectParameterState {
 class EffectState {
   final int effectIndex; // Position in chain
   final String instanceId; // Runtime plugin-instance identity
-  final String effectId; // Stable plugin/catalog identity when available
+  final String effectId; // Engine loading/catalog identity, possibly a path
+  final String modelPluginId; // Path-independent host identity for training
   final String name; // Plugin name
   final bool isBypassed;
   final List<EffectParameterState> parameters;
@@ -576,6 +577,7 @@ class EffectState {
     required this.effectIndex,
     this.instanceId = '',
     this.effectId = '',
+    this.modelPluginId = '',
     required this.name,
     required this.isBypassed,
     required this.parameters,
@@ -586,6 +588,7 @@ class EffectState {
       effectIndex: m['effectIndex'] as int,
       instanceId: (m['instanceId'] as String?) ?? '',
       effectId: (m['effectId'] as String?) ?? '',
+      modelPluginId: (m['modelPluginId'] as String?) ?? '',
       name: m['name'] as String,
       isBypassed: m['isBypassed'] as bool? ?? false,
       parameters: (m['parameters'] as List<dynamic>? ?? [])
@@ -599,6 +602,7 @@ class EffectState {
         'effectIndex': effectIndex,
         'instanceId': instanceId,
         'effectId': effectId,
+        if (modelPluginId.isNotEmpty) 'modelPluginId': modelPluginId,
         'name': name,
         'isBypassed': isBypassed,
         'parameters': parameters.map((p) => p.toJson()).toList(),

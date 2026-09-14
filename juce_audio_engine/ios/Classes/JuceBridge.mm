@@ -4320,9 +4320,9 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return out;
 }
 
-+ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow
++ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow modelIdentity:(BOOL)modelIdentity
 {
-    auto ids = JuceEngine::get().getTrackEffectIdsForRow((int)trackRow, (bool)forceIndividualRow);
+    auto ids = JuceEngine::get().getTrackEffectIdsForRow((int)trackRow, (bool)forceIndividualRow, (bool)modelIdentity);
     NSMutableArray *out = [NSMutableArray array];
     for (auto &s : ids)
     {
@@ -4576,9 +4576,9 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     return out;
 }
 
-+ (NSArray<NSString *> *)getMasterEffectIdsObjC
++ (NSArray<NSString *> *)getMasterEffectIdsObjC:(BOOL)modelIdentity
 {
-    auto ids = JuceEngine::get().getMasterEffectIds();
+    auto ids = JuceEngine::get().getMasterEffectIds((bool)modelIdentity);
     NSMutableArray *out = [NSMutableArray array];
     for (auto &s : ids)
     {

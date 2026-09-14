@@ -2,14 +2,14 @@
 import math
 from .mix_magnitude_contract import features as amount_features, control_action, fingerprint, parameter_descriptor, encode_target, runtime_target as amount_target
 from .mix_plugin_contract import PARAM_ACTIONS, STRUCTURAL_ACTIONS, effect_target, bus_target, parameter_target, proposed_value, parameter_recreated
-from .plugin_identity import canonical_plugin_id
+from .plugin_identity import model_plugin_id, supported_descriptor
 
 CONTRACT = 'mix_selection_human_v1'
 FEATURE_COUNT = 208
 
 
 def structural_descriptor(kind, effect=None):
-    return {'kind': kind, 'type': 'bool', **({'effect_id': canonical_plugin_id(effect['effectId']), 'effect_name': effect['name']} if kind != 'reset' else {})}
+    return {'kind': kind, 'type': 'bool', **({'effect_id': model_plugin_id(effect), 'effect_name': effect['name']} if kind != 'reset' else {})}
 
 
 def choice_coordinate(descriptor, value):
@@ -53,7 +53,7 @@ def runtime_target(project, action, actions, index, controls):
         if match:
             effect, parameter = match
             if effect.get('isBypassed'): return None
-            d = parameter_descriptor(effect, parameter)
+            d = supported_descriptor(parameter_descriptor(effect, parameter), effect, controls)
             start = parameter.get('value')
             value = proposed_value(parameter, data) if d['type'] == 'float' else categorical_value(d, data, start)
             if encode_target(d, value) is None: return None
@@ -84,7 +84,7 @@ def runtime_target(project, action, actions, index, controls):
         d = matches[0]
     elif operation == 'remove':
         if effect is None or not effect.get('effectId'): return None
-        d = structural_descriptor(operation, effect)
+        d = supported_descriptor(structural_descriptor(operation, effect), effect, controls)
     else: d = structural_descriptor(operation)
     return (d, scope, 0, -1.0) if fingerprint(d) in controls else None
 

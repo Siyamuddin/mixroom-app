@@ -6492,7 +6492,7 @@ public:
                                  const juce::var &newValue,
                                  bool forceIndividualRow = false);
     juce::StringArray getTrackEffectsForRow(int trackRow, bool forceIndividualRow = false);
-    juce::StringArray getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow = false);
+    juce::StringArray getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow = false, bool modelIdentity = false);
     juce::StringArray getTrackEffectInstanceIdsForRow(int trackRow, bool forceIndividualRow = false);
     juce::String getTrackEffectStateBase64(int trackRow, int effectIndex, bool forceIndividualRow = false);
     bool setTrackEffectStateBase64(int trackRow,
@@ -6545,7 +6545,7 @@ public:
                                   const juce::String &paramName,
                                   const juce::var &newValue);
     juce::StringArray getMasterEffects();
-    juce::StringArray getMasterEffectIds();
+    juce::StringArray getMasterEffectIds(bool modelIdentity = false);
     juce::StringArray getMasterEffectInstanceIds();
     juce::String getMasterEffectStateBase64(int effectIndex);
     bool setMasterEffectStateBase64(int effectIndex,

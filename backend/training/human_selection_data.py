@@ -9,7 +9,7 @@ from human_magnitude_data import extract, historical_bundles
 from common.mix_magnitude_contract import fingerprint, control_action, starting_value, parameter_descriptor, encode_target
 from common.mix_selection_contract import features, runtime_target, structural_descriptor, choice_coordinate
 from common.mix_plugin_contract import bus_target, parameter_target, effect_target, chain, PARAM_ACTIONS, STRUCTURAL_ACTIONS
-from common.plugin_identity import canonical_plugin_id
+from common.plugin_identity import model_plugin_id
 from producer_capture_converter import _candidate_actions, _same_target, _sha256, _split
 
 INTENTS = {'level_balance':'balance', 'tone':'eq', 'masking':'eq', 'dynamics':'compressor', 'space_depth':'reverb', 'stereo_image':'pan'}
@@ -64,7 +64,7 @@ def final_supported(before, after, action, target):
         if match is None:
             token=action['data'].get('effect_name_contains','').lower()
             return 0 if not any(token in e.get('name','').lower() for e in final_chain) else None
-        return int(not match.get('isBypassed',False) and canonical_plugin_id(match.get('effectId',''))==d['effect_id'])
+        return int(not match.get('isBypassed',False) and model_plugin_id(match)==d['effect_id'])
     if d['kind']=='remove':
         initial=effect_target(before,action)
         if initial is None or not initial.get('instanceId'):return None

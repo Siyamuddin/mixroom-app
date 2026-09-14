@@ -2503,12 +2503,14 @@ class JuceAudioEngine {
   static Future<List<String>> getTrackEffectIdsForRow(
     int row, {
     bool forceIndividualRow = false,
+    bool modelIdentity = false,
   }) async {
     try {
       final list = await _ch.invokeListMethod<String>(
         'getTrackEffectIdsForRow',
         {
           'row': row,
+          if (modelIdentity) 'modelIdentity': true,
           if (forceIndividualRow) 'forceIndividualRow': true,
         },
       );
@@ -2922,9 +2924,9 @@ class JuceAudioEngine {
     }
   }
 
-  static Future<List<String>> getMasterEffectIds() async {
+  static Future<List<String>> getMasterEffectIds({bool modelIdentity = false}) async {
     try {
-      final list = await _ch.invokeListMethod<String>('getMasterEffectIds');
+      final list = await _ch.invokeListMethod<String>('getMasterEffectIds', {if (modelIdentity) 'modelIdentity': true});
       return list ?? <String>[];
     } on MissingPluginException catch (e) {
       _logError('getMasterEffectIds', e);

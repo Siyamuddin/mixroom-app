@@ -8490,7 +8490,8 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
         NSInteger row = [args[@"row"] integerValue];
         BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
         result([JuceBridge getTrackEffectIdsForRowObjC:row
-                                    forceIndividualRow:forceIndividualRow]);
+                                    forceIndividualRow:forceIndividualRow
+                                    modelIdentity:[args[@"modelIdentity"] boolValue]]);
     } else if ([call.method isEqualToString:@"getTrackEffectInstanceIdsForRow"]) {
         NSInteger row = [args[@"row"] integerValue];
         BOOL forceIndividualRow = [args[@"forceIndividualRow"] boolValue];
@@ -8677,7 +8678,7 @@ static JuceAudioEnginePlugin* _sharedInstance = nil;
     } else if ([call.method isEqualToString:@"getMasterEffectInstanceIds"]) {
         result([JuceBridge getMasterEffectInstanceIdsObjC]);
     } else if ([call.method isEqualToString:@"getMasterEffectIds"]) {
-        result([JuceBridge getMasterEffectIdsObjC]);
+        result([JuceBridge getMasterEffectIdsObjC:[args[@"modelIdentity"] boolValue]]);
     } else if ([call.method isEqualToString:@"getMasterEffectState"]) {
         NSInteger effect = [args[@"effect"] integerValue];
         result([JuceBridge getMasterEffectStateObjC:effect]);
