@@ -47,6 +47,7 @@ ios/Flutter/AppSecrets.xcconfig
 .venv/
 
 # Local/generated artifacts
+tool/daw_bridge/dist/
 .aws-sam/
 tool/ai_v3_captures.local/
 tools/live_chatbar_probe_v2_full_results.json
