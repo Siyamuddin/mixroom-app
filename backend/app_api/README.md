@@ -20,6 +20,7 @@ It still contains the in-house subscription core that normalizes Apple IAP, Goog
 - `GET /v1/feature-flags`
 - `POST /v1/producer-training/sessions/uploads`
 - `POST /v1/producer-training/sessions/{session_id}/complete`
+- `GET /v1/producer-training/sessions/{session_id}` (verification status)
 - `DELETE /v1/producer-training/sessions/{session_id}`
 - `GET /v1/billing/catalog`
 - `GET /v1/users/me`

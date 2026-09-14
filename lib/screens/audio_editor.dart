@@ -6266,11 +6266,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void>? _aiModelsWarmupFuture;
   late final ProducerDataCollector _producerCollector;
   late final ProducerTrainingUploadService _producerTrainingUploadService;
-  Timer? _producerUploadRetryTimer;
   final Object _producerAiMutationZone = Object();
   late final AuthService _producerCaptureAuth;
-  ProducerCaptureUploadState _producerCaptureUploadState =
-      ProducerCaptureUploadState.idle;
+  String? _producerUploadStage;
+  final _producerUploadProgress = ValueNotifier<double?>(null);
   final http.Client _producerCaptureAccessHttpClient = http.Client();
   bool _producerDataMode = false;
   bool _showProducerCaptureUi = false;
@@ -9583,26 +9582,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // Defer AI model loads until AI features are actually used.
     final authService = context.read<AuthService>();
     _producerCaptureAuth = authService;
-    _producerTrainingUploadService = ProducerTrainingUploadService();
-    _producerUploadRetryTimer = Timer.periodic(const Duration(seconds: 30), (
-      _,
-    ) {
-      unawaited(
-        _producerTrainingUploadService
-            .drainPending(
-              auth: _producerCaptureAuth,
-              collector: _producerCollector,
-            )
-            .catchError((Object _) {}),
-      );
+    _producerTrainingUploadService = ProducerTrainingUploadService(onProgress: (stage, progress) {
+      if (!mounted) return;
+      _producerUploadProgress.value = progress;
+      if (_producerUploadStage != stage) {
+        setState(() => _producerUploadStage = stage);
+      }
+      if (stage == 'uploaded') {
+        _showSmallNotice(L10n.translate(context, 'producer_capture_status_uploaded'));
+      }
     });
     _producerCollector = ProducerDataCollector(
       snapshotProvider: _buildProducerSnapshot,
       ownerIdProvider: () => authService.signedInUser?.userId,
-      onUploadStateChanged: (state) {
-        _producerCaptureUploadState = state;
-        if (mounted) setState(() {});
-      },
     );
     _producerCollector.configureProject(
       projectId: _projectId,
@@ -9613,7 +9605,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _producerTrainingUploadService.drainPending(
         auth: _producerCaptureAuth,
         collector: _producerCollector,
-      ),
+      ).catchError((Object _) {}),
     );
     final baseMagnitudePredictor = !kUseLearnedMagnitudePredictor
         ? const NoopMixingMagnitudePredictor()
@@ -13282,8 +13274,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _cloudAutoSyncTimer?.cancel();
     _cloudAutoSyncTimer = null;
     _projectAutosaveCoordinator.dispose();
-    _producerUploadRetryTimer?.cancel();
     _producerCaptureAccessHttpClient.close();
+    _producerUploadProgress.dispose();
     _copiedChatMessageTimer?.cancel();
     _copiedChatMessageTimer = null;
     _containedExportEllipsisTimer?.cancel();
@@ -14204,6 +14196,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _scheduleProjectAutosave();
     if (!allowlisted) {
       unawaited(_producerCollector.setEnabled(false));
+    } else {
+      unawaited(_producerCollector.discoverLegacyPendingUploads().then((_) =>
+        _producerTrainingUploadService.drainPending(auth: _producerCaptureAuth, collector: _producerCollector)
+      ).catchError((Object _) {}));
     }
   }
 
@@ -77964,6 +77960,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       if (enabled) {
         if (!await _ensureProducerTrainingConsent()) return;
         _producerDataMode = true;
+        if (_producerUploadStage == 'uploaded') {
+          _producerUploadStage = null;
+          _producerUploadProgress.value = null;
+        }
         _setDawPanelVisible('producer_capture', false);
         await _producerCollector.setEnabled(true);
         await _producerCollector.beginSession(
@@ -78167,43 +78167,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  String _producerCaptureStatusLabel() {
-    if (!_producerDataMode) {
-      return L10n.translate(context, 'producer_capture_status_off');
-    }
-    return switch (_producerCaptureUploadState) {
-      ProducerCaptureUploadState.uploading => L10n.translate(
-        context,
-        'producer_capture_status_uploading',
-      ),
-      ProducerCaptureUploadState.retryNeeded => L10n.translate(
-        context,
-        'producer_capture_status_retry',
-      ),
-      ProducerCaptureUploadState.uploaded => L10n.translate(
-        context,
-        'producer_capture_status_uploaded',
-      ),
-      _ => L10n.translate(context, 'producer_capture_status_recording'),
+  String? _producerUploadLabel() {
+    final key = switch (_producerUploadStage) {
+      'preparing' => 'producer_capture_preparing',
+      'uploading' => 'producer_capture_compact_uploading',
+      'verifying' => 'producer_capture_verifying',
+      'uploaded' => 'producer_capture_status_uploaded',
+      'retry_needed' => 'producer_capture_status_retry',
+      'failed' => 'producer_capture_upload_failed',
+      _ => null,
     };
+    if (key == null) return null;
+    final label = L10n.translate(context, key);
+    return _producerUploadStage == 'uploading' &&
+            _producerUploadProgress.value != null
+        ? '$label · ${(_producerUploadProgress.value! * 100).floor()}%'
+        : label;
   }
 
-  String _producerCaptureCompactStatusLabel() {
-    if (!_producerDataMode) {
-      return L10n.translate(context, 'producer_capture_compact_off');
-    }
-    return switch (_producerCaptureUploadState) {
-      ProducerCaptureUploadState.uploading => L10n.translate(
+  String _producerCaptureStatusLabel() =>
+      _producerUploadLabel() ??
+      L10n.translate(
         context,
-        'producer_capture_compact_uploading',
-      ),
-      ProducerCaptureUploadState.retryNeeded => L10n.translate(
+        _producerDataMode
+            ? 'producer_capture_status_recording'
+            : 'producer_capture_status_off',
+      );
+
+  String _producerCaptureCompactStatusLabel() =>
+      _producerUploadLabel() ??
+      L10n.translate(
         context,
-        'producer_capture_compact_retry',
-      ),
-      _ => L10n.translate(context, 'producer_capture_compact_recording'),
-    };
-  }
+        _producerDataMode
+            ? 'producer_capture_compact_recording'
+            : 'producer_capture_compact_off',
+      );
 
   _ProducerPromptTemplate? _producerPromptTemplateById(String id) {
     for (final template in _kProducerPromptTemplates) {
@@ -79760,7 +79758,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return (navInset + 8.0).clamp(0.0, 88.0).toDouble();
   }
 
-  Widget _buildProducerCaptureOverlay() {
+  Widget _buildProducerCaptureOverlay() => ValueListenableBuilder<double?>(
+    valueListenable: _producerUploadProgress,
+    builder: (_, __, ___) => _buildProducerCaptureOverlayContent(),
+  );
+
+  Widget _buildProducerCaptureOverlayContent() {
     return Tooltip(
       message: L10n.translate(context, 'producer_capture_toggle_tooltip'),
       preferBelow: false,
@@ -79785,7 +79788,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         label: _producerCaptureStatusLabel(),
         container: true,
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 220),
+          constraints: const BoxConstraints(maxWidth: 300),
           padding: const EdgeInsets.fromLTRB(10, 4, 5, 4),
           decoration: BoxDecoration(
             color: const Color.fromRGBO(30, 36, 42, 0.94),
@@ -79806,21 +79809,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                width: 7,
-                height: 7,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _producerDataMode
-                      ? const Color(0xFF4F95FF)
-                      : Colors.white.withValues(alpha: 0.42),
+              if (const {
+                'preparing',
+                'uploading',
+                'verifying',
+              }.contains(_producerUploadStage))
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: _producerUploadStage == 'uploading'
+                        ? _producerUploadProgress.value
+                        : null,
+                  ),
+                )
+              else if (_producerUploadStage == 'uploaded')
+                const Icon(
+                  Icons.check_circle_outline,
+                  size: 15,
+                  color: Color(0xFF77C99C),
+                )
+              else
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _producerDataMode
+                        ? const Color(0xFF4F95FF)
+                        : Colors.white.withValues(alpha: 0.42),
+                  ),
                 ),
-              ),
               const SizedBox(width: 7),
               Flexible(
                 child: Text(
                   _producerCaptureCompactStatusLabel(),
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.92),
@@ -79831,6 +79856,25 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   ),
                 ),
               ),
+              if (_producerUploadStage == 'failed' ||
+                  _producerUploadStage == 'retry_needed')
+                IconButton(
+                  tooltip: L10n.translate(
+                    context,
+                    'producer_capture_retry_upload',
+                  ),
+                  icon: const Icon(Icons.refresh, size: 17),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => unawaited(
+                    _producerTrainingUploadService
+                        .drainPending(
+                          auth: _producerCaptureAuth,
+                          collector: _producerCollector,
+                          retryFailed: true,
+                        )
+                        .catchError((Object _) {}),
+                  ),
+                ),
               const SizedBox(width: 3),
               Transform.scale(
                 scale: 0.76,
@@ -86439,7 +86483,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             : math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
         final chatTypingActive = _isChatTypingActive;
         final showProducerCapture =
-            _isProducerCaptureUiVisible &&
+            (_isProducerCaptureUiVisible || _producerUploadStage != null) &&
             !chatTypingActive &&
             !_chatExpanded &&
             !_showAddActionsPanel &&

@@ -44,6 +44,27 @@ class HumanMagnitudeTests(unittest.TestCase):
         self.assertAlmostEqual(rows[0]['target'],.7)
         self.assertIn('discrete_action_archived_not_magnitude',reasons)
 
+    def test_new_hosted_plugin_needs_loaded_identity_before_refinement(self):
+        from common.mix_selection_contract import runtime_target as selection_target, structural_descriptor
+        b = self.bundle()
+        episode = b['episodes'][0]
+        episode['state_before']['project_state']['rows'][0]['effects'] = []
+        for identity, can_refine in [('plugin_uid_v1_' + 'a' * 64, False), ('Compressor', True)]:
+            effect = episode['state_after']['project_state']['rows'][0]['effects'][0]
+            effect['effectId'] = identity
+            rows, _ = extract(b)
+            row = rows[0]
+            actions = probe(row)
+            descriptor = row['descriptor']
+            controls = {fingerprint(descriptor): descriptor}
+            args = (row['state_before'], actions[-1], actions, len(actions) - 1, controls)
+            self.assertEqual(runtime_target(*args) is not None, can_refine)
+            self.assertEqual(selection_target(*args) is not None, can_refine)
+            insertion = structural_descriptor('insert', effect)
+            target = selection_target(row['state_before'], actions[0], actions, 0,
+                                      {fingerprint(insertion): insertion})
+            self.assertEqual(target is not None, can_refine)
+
     def test_unknown_partial_and_undo_are_not_good_labels(self):
         for outcome in ('partial','rejected','not_evaluated','experimenting'):
             b=self.bundle();b['episodes'][0]['producer_outcome']=outcome

@@ -1015,6 +1015,8 @@ Resources:
             Status: Enabled
             Prefix: pending/
             ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
           - Id: ExpireProducerAudioRenders
             Status: Enabled
             Prefix: media/
@@ -1647,9 +1649,12 @@ Resources:
       Handler: handlers/api_producer_training.handler
       Environment:
         Variables:
+          PRODUCER_TRAINING_WORKER_ARN: !GetAtt ProducerTrainingVerifyFunction.Arn
           PRODUCER_TRAINING_BUCKET: !Ref ProducerTrainingBucket
           PRODUCER_TRAINING_SESSIONS_TABLE: !Ref ProducerTrainingSessionsTable
       Policies:
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ProducerTrainingVerifyFunction
         - Statement:
             - Effect: Allow
               Action:
@@ -1672,6 +1677,12 @@ Resources:
             TableName: !Ref ProducerTrainingSessionsTable
         - S3CrudPolicy:
             BucketName: !Ref ProducerTrainingBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListMultipartUploadParts
+                - s3:AbortMultipartUpload
+              Resource: !Sub '${ProducerTrainingBucket.Arn}/*'
         - !If
           - HasAppAuthSecretArn
           - Statement:
@@ -1693,12 +1704,41 @@ Resources:
             RestApiId: !Ref BillingApi
             Path: /v1/producer-training/sessions/{session_id}/complete
             Method: post
+        ProducerTrainingStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref BillingApi
+            Path: /v1/producer-training/sessions/{session_id}
+            Method: get
         ProducerTrainingDelete:
           Type: Api
           Properties:
             RestApiId: !Ref BillingApi
             Path: /v1/producer-training/sessions/{session_id}
             Method: delete
+
+  ProducerTrainingVerifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/api_producer_training.verify_worker
+      Timeout: 900
+      MemorySize: 1024
+      Environment:
+        Variables:
+          PRODUCER_TRAINING_BUCKET: !Ref ProducerTrainingBucket
+          PRODUCER_TRAINING_SESSIONS_TABLE: !Ref ProducerTrainingSessionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ProducerTrainingSessionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ProducerTrainingBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListMultipartUploadParts
+                - s3:AbortMultipartUpload
+              Resource: !Sub '${ProducerTrainingBucket.Arn}/*'
 
   SocialAuthApiFunction:
     Type: AWS::Serverless::Function

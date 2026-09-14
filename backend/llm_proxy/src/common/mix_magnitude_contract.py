@@ -4,7 +4,7 @@ import copy
 import hashlib
 import json
 import math
-from .plugin_identity import model_plugin_id, supported_descriptor
+from .plugin_identity import model_plugin_id, supported_descriptor, verified_unloaded_control
 from .mix_plugin_contract import bus_target, chain, parameter_target, extra_features
 
 CONTRACT = 'mix_magnitude_human_v3'
@@ -140,9 +140,9 @@ def runtime_target(project, action, actions, index, controls):
         else:
             ensure = 'ensure_master_effect' if scope['scope'] == 'master' else 'ensure_effect'
             if not any(a['type'] == ensure and all(a['data'].get(k) == data.get(k) for k in ('row', 'force_individual_row', 'effect_name_contains')) for a in actions[:index]): return None
-            # A newly inserted plugin has no initial snapshot. Only exact known
-            # plugin/parameter contracts can supply bounds, never fuzzy guesses.
-            found = [d for d in controls.values() if d['kind'] == 'parameter' and d.get('inserted') and d['type'] == 'float'
+            # An unloaded hosted plugin has no verified UID/version yet. Only
+            # fixed builtin catalog identities can supply inserted-preset bounds.
+            found = [d for d in controls.values() if verified_unloaded_control(d) and d['kind'] == 'parameter' and d.get('inserted') and d['type'] == 'float'
                      and d['effect_name'].lower() == str(data.get('effect_name_contains', '')).lower()
                      and d['parameter_name'].lower() == str(data.get('param_name', '')).lower()]
             if len(found) != 1 or data.get('mode') != 'set': return None

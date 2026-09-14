@@ -153,3 +153,34 @@ python3 tool/test_producer_plugin_identity_cache.py
 python -m unittest discover -s backend/training/tests -v
 python -m unittest discover -s backend/llm_proxy/tests -p '*mix_resolve*' -v
 ```
+
+## Upload transport checks
+
+Run from the repository root:
+
+```bash
+flutter test test/producer_training_upload_service_test.dart test/producer_data_collector_test.dart
+python -m unittest discover -s backend/app_api/tests -p '*producer_training*'
+```
+
+Install `backend/app_api/requirements.txt` for the backend tests. These tests use
+local storage and mocked HTTP/S3, including a 26 MB capture, interrupted multipart
+transfer, checksum validation, restart recovery and delayed server verification.
+They do not contact AWS. Training still reads the same JSON bundles.
+
+The app now keeps a small `.upload-queue.json` beside captures. Only allowlisted
+producers trigger one-time discovery of older exports. Completed files leave the
+queue; the 30-second retry runs only after an actual pending upload fails.
+Serialization and upload preparation run off the UI isolate. Manual edits append
+to the recovery journal; snapshots persist at episode boundaries rather than on
+every knob movement.
+
+For later staging deployment, update the app API SAM stack as well as its Python
+requirements: large uploads require multipart reservations, the authenticated
+status endpoint and `ProducerTrainingVerifyFunction`. The worker streams JSON
+validation outside the API timeout, then stores verified bundles at the existing
+`structured/` key. Uploads have a 5 GB limit; rejected captures remain local and
+stop automatic retries, with an explicit retry button. The UI distinguishes preparing, sending, verifying,
+confirmed upload, retry and failure in English, Korean and Japanese. Exercise a
+real signed S3 upload and worker completion in staging before production rollout;
+local mocks do not prove deployed IAM/network configuration.

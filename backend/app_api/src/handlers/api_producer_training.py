@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import logging
+import os
+import json
 import re
 from typing import Any, Dict
 
 from common.auth import extract_claims_from_event, json_response, unauthorized
 from common.events import RequestBodyError, parse_json_body
-from common.producer_training_repository import ProducerTrainingRepository
+from common.producer_training_repository import (
+    ProducerTrainingRepository,
+    MAX_CAPTURE_BYTES,
+    MULTIPART_THRESHOLD,
+)
 from common.rate_limits import RequestRateLimiter
 
 repo = ProducerTrainingRepository()
@@ -35,8 +41,8 @@ def _validated_fields(body: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("A valid session_id is required.")
     if not _SHA256_RE.fullmatch(checksum):
         raise ValueError("A valid sha256 checksum is required.")
-    if size_bytes <= 0 or size_bytes > 25_000_000:
-        raise ValueError("size_bytes must be between 1 and 25000000.")
+    if size_bytes <= 0 or size_bytes > MAX_CAPTURE_BYTES:
+        raise ValueError("size_bytes must be between 1 and 5000000000.")
     return {
         "session_id": session_id,
         "checksum": checksum,
@@ -47,9 +53,7 @@ def _validated_fields(body: Dict[str, Any]) -> Dict[str, Any]:
 def _validated_capture_contract(body: Dict[str, Any]) -> Dict[str, Any]:
     schema_version = str(body.get("schema_version") or "").strip()
     consent_version = str(body.get("consent_version") or "").strip()
-    feature_extractor_version = str(
-        body.get("feature_extractor_version") or ""
-    ).strip()
+    feature_extractor_version = str(body.get("feature_extractor_version") or "").strip()
     segmentation_version = str(body.get("segmentation_version") or "").strip()
     media_manifest = body.get("media_manifest")
     if schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
@@ -79,7 +83,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     if not user_id:
         return unauthorized()
     if not repo.is_configured:
-        return json_response(503, {"error": "Producer training storage is not configured."})
+        return json_response(
+            503, {"error": "Producer training storage is not configured."}
+        )
     decision = rate_limiter.enforce(
         scope_key=f"producer_training:{user_id}",
         limit=120,
@@ -100,6 +106,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 201,
                 repo.reserve_upload(
                     user_id=user_id,
+                    **(
+                        {"part_checksums": body["part_checksums"]}
+                        if "part_checksums" in body
+                        else {}
+                    ),
                     **fields,
                     **contract,
                 ),
@@ -114,6 +125,47 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     {**body, "session_id": suffix[: -len("/complete")]}
                 )
                 contract = _validated_capture_contract(body)
+                if fields["size_bytes"] > MULTIPART_THRESHOLD:
+                    repo.validate_reservation(user_id=user_id, **fields, **contract)
+                    status = repo.upload_status(
+                        user_id=user_id, session_id=fields["session_id"]
+                    )
+                    if status["status"] == "verified":
+                        return json_response(202, status)
+                    if status["status"] == "missing":
+                        return json_response(
+                            409, {"error": "Upload reservation is missing."}
+                        )
+                    if status["status"] != "verifying":
+                        import boto3
+
+                        if not repo.set_verification_status(
+                            user_id=user_id,
+                            session_id=fields["session_id"],
+                            status="verifying",
+                        ):
+                            return json_response(
+                                409,
+                                {"error": "Capture is already verified or deleted."},
+                            )
+                        try:
+                            boto3.client("lambda").invoke(
+                                FunctionName=os.environ["PRODUCER_TRAINING_WORKER_ARN"],
+                                InvocationType="Event",
+                                Payload=json.dumps(
+                                    {"user_id": user_id, **fields, **contract}
+                                ).encode(),
+                            )
+                        except Exception:
+                            repo.set_verification_status(
+                                user_id=user_id,
+                                session_id=fields["session_id"],
+                                status="reserved",
+                            )
+                            raise
+                    return json_response(
+                        202, {"accepted": False, "status": "verifying"}
+                    )
                 return json_response(
                     202,
                     repo.complete_upload(
@@ -122,11 +174,13 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                         **contract,
                     ),
                 )
+            if method == "GET" and _SESSION_ID_RE.fullmatch(suffix):
+                return json_response(
+                    200, repo.upload_status(user_id=user_id, session_id=suffix)
+                )
             if method == "DELETE" and suffix and "/" not in suffix:
                 count = repo.delete_session(user_id=user_id, session_id=suffix)
-                return json_response(
-                    200, {"deleted": True, "deleted_objects": count}
-                )
+                return json_response(200, {"deleted": True, "deleted_objects": count})
     except RequestBodyError as exc:
         return json_response(exc.status_code, {"error": exc.message})
     except ValueError as exc:
@@ -138,3 +192,21 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             503, {"error": "Producer training storage operation failed."}
         )
     return json_response(404, {"error": "Not found"})
+
+
+def verify_worker(event, _context):
+    """Invoked only by the upload API's Lambda role, never exposed over HTTP."""
+    try:
+        repo.complete_upload(**event)
+    except ValueError:
+        repo.set_verification_status(
+            user_id=event["user_id"], session_id=event["session_id"], status="failed"
+        )
+        logger.exception("Capture verification rejected the uploaded content")
+    except Exception:
+        repo.set_verification_status(
+            user_id=event["user_id"],
+            session_id=event["session_id"],
+            status="retry_needed",
+        )
+        raise

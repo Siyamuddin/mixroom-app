@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show compute;
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -18,6 +19,7 @@ enum ProducerCaptureUploadState {
   uploading,
   uploaded,
   retryNeeded,
+  failed,
 }
 
 /// Observation-only producer training capture.
@@ -70,6 +72,7 @@ class ProducerDataCollector {
   final Map<String, String> _historyEpisodes = {};
   String get inferenceCaptureToken =>
       '${activeSessionId ?? ''}:$_traceGeneration';
+  final Map<String, Map<String, dynamic>> _uploadQueues = {};
   Future<void> _ioTail = Future<void>.value();
   Future<void> _operations = Future<void>.value();
   final Object _operationZone = Object();
@@ -257,6 +260,7 @@ class ProducerDataCollector {
           latest.remove('ended_at');
         }
       }
+      final firstEditInBurst = _activeEpisode == null;
       _activeEpisode ??= _newEpisode(
         stateBefore: _checkpoint ?? const {},
         requestOrContext: const {'source': 'manual_work'},
@@ -295,7 +299,7 @@ class ProducerDataCollector {
         'action': action,
       });
       _armEpisodeTimer();
-      await _flush();
+      if (firstEditInBurst) await _flush();
     });
   }
 
@@ -572,6 +576,7 @@ class ProducerDataCollector {
       await _embedEventJournal();
       await _flush();
       final closed = _sessionFile;
+      await _queueUpload(closed!, 'pending');
       _setUploadState(ProducerCaptureUploadState.pending);
       _session = null;
       _sessionFile = null;
@@ -592,7 +597,9 @@ class ProducerDataCollector {
       for (final dir in roots) {
         if (!await dir.exists()) continue;
         await for (final entity in dir.list(followLinks: false)) {
-          if (entity is File && entity.path.endsWith('.json')) {
+          if (entity is File &&
+              !p.basename(entity.path).startsWith('.') &&
+              entity.path.endsWith('.json')) {
             files[p.normalize(entity.path)] = entity;
           }
         }
@@ -603,39 +610,99 @@ class ProducerDataCollector {
     });
   }
 
-  Future<List<File>> listPendingUploadFiles() async {
-    return _serialize(() async {
-      final pending = <File>[];
-      for (final file in await listSessionFiles()) {
-        try {
-          final document = jsonDecode(await file.readAsString()) as Map;
-          var status = ((document['upload'] as Map?)?['status'] ?? '')
-              .toString();
-          if (status == 'recording' && file.path != _sessionFile?.path) {
-            document['close_reason'] = 'interrupted_recovery';
-            document['ended_at'] = DateTime.now().toUtc().toIso8601String();
-            for (final episode
-                in (document['episodes'] as List? ?? const [])
-                    .whereType<Map>()) {
-              if (episode['status'] == 'active') {
-                episode['status'] = 'interrupted';
-                episode['capture_warning'] =
-                    'interrupted_before_final_snapshot';
-              }
-            }
-            document['upload'] = {'status': 'pending', 'attempts': 0};
-            await _writeDocument(file, document);
-            status = 'pending';
-          }
-          if (status == 'pending' ||
-              status == 'retry_needed' ||
-              status == 'uploading')
-            pending.add(file);
-        } catch (_) {}
-      }
-      return pending;
-    });
+  Future<List<Directory>> uploadQueueDirectories() async => [
+    await _applicationRootDir(),
+    if (_projectDir != null) await _rootDir(),
+  ];
+
+  Future<void> failUnreadableUpload(File file) => _serialize(() async {
+    await _queueUpload(file, 'failed');
+    _setUploadState(ProducerCaptureUploadState.failed);
+  });
+
+  Future<Map<String, dynamic>> _uploadQueue(Directory dir) async {
+    if (_uploadQueues.containsKey(dir.path)) return _uploadQueues[dir.path]!;
+    final file = File(p.join(dir.path, '.upload-queue.json'));
+    final queue = await file.exists()
+        ? (jsonDecode(await file.readAsString()) as Map).cast<String, dynamic>()
+        : <String, dynamic>{};
+    return _uploadQueues[dir.path] = queue;
   }
+
+  Future<void> _queueUpload(File file, String status) async {
+    await _discoverLegacyDirectory(file.parent);
+    final queue = await _uploadQueue(file.parent);
+    if (status == 'uploaded') {
+      queue.remove(p.basename(file.path));
+    } else {
+      queue[p.basename(file.path)] = status;
+    }
+    await _writeDocument(
+      File(p.join(file.parent.path, '.upload-queue.json')),
+      queue,
+    );
+  }
+
+  /// One-time discovery for existing producer exports, called only for producers.
+  Future<void> discoverLegacyPendingUploads() => _serialize(() async {
+    final roots = await uploadQueueDirectories();
+    for (final dir in roots) {
+      await _discoverLegacyDirectory(dir);
+    }
+  });
+
+  Future<void> _discoverLegacyDirectory(Directory dir) async {
+    if (!await dir.exists()) return;
+    final index = File(p.join(dir.path, '.upload-queue.json'));
+    if (await index.exists()) return;
+    final queue = <String, dynamic>{};
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is! File ||
+          p.basename(entity.path).startsWith('.') ||
+          !entity.path.endsWith('.json'))
+        continue;
+      final path = entity.path;
+      final status = await compute(readProducerUploadStatus, path);
+      if (const {
+        'recording',
+        'pending',
+        'uploading',
+        'retry_needed',
+      }.contains(status)) {
+        queue[p.basename(path)] = status;
+      }
+    }
+    _uploadQueues[dir.path] = queue;
+    await _writeDocument(index, queue);
+  }
+
+  Future<List<File>> listPendingUploadFiles({bool includeFailed = false}) =>
+      _serialize(() async {
+        final roots = await uploadQueueDirectories();
+        final pending = <File>[];
+        for (final dir in roots) {
+          final queue = await _uploadQueue(dir);
+          for (final entry in Map<String, dynamic>.from(queue).entries) {
+            if (p.basename(entry.key) != entry.key) continue;
+            final file = File(p.join(dir.path, entry.key));
+            if (entry.value == 'recording' && file.path != _sessionFile?.path) {
+              final path = file.path;
+              final recovered = await compute(recoverProducerDocument, path);
+              if (recovered) await _queueUpload(file, 'pending');
+            }
+            if ({
+                  'pending',
+                  'retry_needed',
+                  'uploading',
+                  if (includeFailed) 'failed',
+                }.contains(queue[entry.key]) &&
+                await file.exists()) {
+              pending.add(file);
+            }
+          }
+        }
+        return pending;
+      });
 
   Future<void> updateUploadStatus(
     File file,
@@ -643,29 +710,21 @@ class ProducerDataCollector {
     String? error,
   }) async {
     return _serialize(() async {
-      try {
-        final document = (jsonDecode(await file.readAsString()) as Map)
-            .cast<String, dynamic>();
-        final previous = ((document['upload'] as Map?) ?? const {})
-            .cast<String, dynamic>();
-        document['upload'] = {
-          ...previous,
-          'status': status,
-          'attempts':
-              ((previous['attempts'] as num?)?.toInt() ?? 0) +
-              (status == 'uploading' ? 1 : 0),
-          'updated_at': DateTime.now().toUtc().toIso8601String(),
-          if (error != null && error.isNotEmpty)
-            'last_error': _sanitizeText(error),
-        };
-        await _writeDocument(file, document);
-        _setUploadState(switch (status) {
-          'uploading' => ProducerCaptureUploadState.uploading,
-          'uploaded' => ProducerCaptureUploadState.uploaded,
-          'retry_needed' => ProducerCaptureUploadState.retryNeeded,
-          _ => ProducerCaptureUploadState.pending,
-        });
-      } catch (_) {}
+      final path = file.path;
+      final safeError = error == null ? null : _sanitizeText(error);
+      await compute(updateProducerDocumentStatus, {
+        'path': path,
+        'status': status,
+        'error': safeError,
+      });
+      await _queueUpload(file, status);
+      _setUploadState(switch (status) {
+        'uploading' => ProducerCaptureUploadState.uploading,
+        'uploaded' => ProducerCaptureUploadState.uploaded,
+        'retry_needed' => ProducerCaptureUploadState.retryNeeded,
+        'failed' => ProducerCaptureUploadState.failed,
+        _ => ProducerCaptureUploadState.pending,
+      });
     });
   }
 
@@ -705,6 +764,7 @@ class ProducerDataCollector {
     };
     _setUploadState(ProducerCaptureUploadState.recording);
     await _flush();
+    await _queueUpload(_sessionFile!, 'recording');
   }
 
   Map<String, dynamic> _newEpisode({
@@ -909,7 +969,11 @@ class ProducerDataCollector {
           .toList();
     }
     if (value is String &&
-        const {'effectid', 'effect_id', 'plugin_id'}.contains(key.toLowerCase())) {
+        const {
+          'effectid',
+          'effect_id',
+          'plugin_id',
+        }.contains(key.toLowerCase())) {
       return canonicalProducerPluginId(value);
     }
     if (value is String) return _sanitizeText(value, key: key);
@@ -1034,18 +1098,10 @@ class ProducerDataCollector {
   Future<void> _embedEventJournal() async {
     final journal = _journalFile;
     if (journal == null || !await journal.exists() || _session == null) return;
-    final events = <Map<String, dynamic>>[];
-    await for (final line
-        in journal
-            .openRead()
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
-      try {
-        final decoded = jsonDecode(line);
-        if (decoded is Map) events.add(decoded.cast<String, dynamic>());
-      } catch (_) {}
-    }
-    _session!['event_journal'] = events;
+    _session!['event_journal'] = await compute(
+      readProducerJournal,
+      journal.path,
+    );
   }
 
   Future<void> _flush() async {
@@ -1054,13 +1110,8 @@ class ProducerDataCollector {
   }
 
   Future<void> _writeDocument(File file, Map document) async {
-    final content = const JsonEncoder.withIndent('  ').convert(document);
-    await _write(() async {
-      await file.parent.create(recursive: true);
-      final temporary = File('${file.path}.tmp');
-      await temporary.writeAsString(content, flush: true);
-      await temporary.rename(file.path);
-    });
+    final path = file.path;
+    await _write(() => compute(writeProducerDocumentMessage, [path, document]));
   }
 
   List<Map<String, dynamic>> _episodes() =>
@@ -1292,4 +1343,118 @@ Map<String, dynamic> migrateProducerSessionV3(Map<String, dynamic> legacy) {
     'media_manifest': <Map<String, dynamic>>[],
     'upload': <String, dynamic>{'status': 'pending', 'attempts': 0},
   };
+}
+
+// Worker-isolate helpers. Never pass a collector or Flutter object into these.
+class _ProducerFileSink implements Sink<List<int>> {
+  _ProducerFileSink(this.file);
+  final RandomAccessFile file;
+  bool closed = false;
+  @override
+  void add(List<int> bytes) => file.writeFromSync(bytes);
+  @override
+  void close() {
+    if (closed) return;
+    closed = true;
+    try {
+      file.flushSync();
+    } finally {
+      file.closeSync();
+    }
+  }
+}
+
+Future<void> writeProducerDocumentMessage(List<dynamic> message) =>
+    writeProducerDocument(message[0] as String, message[1] as Map);
+
+Future<void> writeProducerDocument(String path, Map document) async {
+  final file = File(path);
+  file.parent.createSync(recursive: true);
+  final temporary = File('$path.tmp');
+  final sink = _ProducerFileSink(temporary.openSync(mode: FileMode.write));
+  try {
+    JsonUtf8Encoder('  ').startChunkedConversion(sink).add(document);
+  } finally {
+    sink.close();
+  }
+  temporary.renameSync(path);
+}
+
+Future<String?> readProducerUploadStatus(String path) async {
+  try {
+    final document = jsonDecode(await File(path).readAsString()) as Map;
+    return (document['upload'] as Map?)?['status']?.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<void> updateProducerDocumentStatus(Map<String, dynamic> args) async {
+  final path = args['path'] as String;
+  final document = (jsonDecode(await File(path).readAsString()) as Map)
+      .cast<String, dynamic>();
+  final previous = (document['upload'] as Map?) ?? const {};
+  document['upload'] = {
+    ...previous,
+    'status': args['status'],
+    'attempts':
+        ((previous['attempts'] as num?)?.toInt() ?? 0) +
+        (args['status'] == 'uploading' ? 1 : 0),
+    'updated_at': DateTime.now().toUtc().toIso8601String(),
+    if (args['error'] != null) 'last_error': args['error'],
+  };
+  await writeProducerDocument(path, document);
+}
+
+Future<bool> recoverProducerDocument(String path) async {
+  try {
+    final file = File(path);
+    final document = (jsonDecode(await file.readAsString()) as Map)
+        .cast<String, dynamic>();
+    document['close_reason'] = 'interrupted_recovery';
+    document['ended_at'] = DateTime.now().toUtc().toIso8601String();
+    for (final episode
+        in (document['episodes'] as List? ?? const []).whereType<Map>()) {
+      if (episode['status'] == 'active') {
+        episode['status'] = 'interrupted';
+        episode['capture_warning'] = 'interrupted_before_final_snapshot';
+      }
+    }
+    // Preserve the journal even when a crash interrupted a materialized checkpoint.
+    final journalName = document['event_journal_file']?.toString();
+    if (journalName != null && p.basename(journalName) == journalName) {
+      final journal = File(p.join(file.parent.path, journalName));
+      if (await journal.exists()) {
+        final events = <Object?>[];
+        await for (final line
+            in journal
+                .openRead()
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
+          try {
+            events.add(jsonDecode(line));
+          } catch (_) {}
+        }
+        document['event_journal'] = events;
+      }
+    }
+    document['upload'] = {'status': 'pending', 'attempts': 0};
+    await writeProducerDocument(path, document);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+Future<List<Map<String, dynamic>>> readProducerJournal(String path) async {
+  final events = <Map<String, dynamic>>[];
+  await for (final line in File(
+    path,
+  ).openRead().transform(utf8.decoder).transform(const LineSplitter())) {
+    try {
+      final decoded = jsonDecode(line);
+      if (decoded is Map) events.add(decoded.cast<String, dynamic>());
+    } catch (_) {}
+  }
+  return events;
 }

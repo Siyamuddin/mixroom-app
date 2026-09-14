@@ -9,6 +9,60 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
+    'knob edits append to the journal without rewriting the whole session',
+    () async {
+      final dir = await Directory.systemTemp.createTemp(
+        'producer_checkpoints_',
+      );
+      addTearDown(() => dir.delete(recursive: true));
+      var snapshot = _snapshot(gain: 1);
+      final collector = ProducerDataCollector(
+        snapshotProvider: () async => snapshot,
+      );
+      await collector.setEnabled(true);
+      await collector.beginSession(initialSnapshot: snapshot, projectDir: dir);
+      await collector.recordManualEdit(
+        kind: 'row_gain',
+        payload: {'row': 0, 'old_gain': 1.0, 'new_gain': 1.2},
+      );
+      final files = await Directory(
+        '${dir.path}/exports/producer_sessions',
+      ).list().toList();
+      final file = files.whereType<File>().singleWhere(
+        (f) =>
+            f.path.endsWith('.json') && !f.path.endsWith('.upload-queue.json'),
+      );
+      final checkpoint = await file.readAsString();
+      await collector.recordManualEdit(
+        kind: 'row_gain',
+        payload: {'row': 0, 'old_gain': 1.2, 'new_gain': 1.4},
+      );
+      expect(await file.readAsString(), checkpoint);
+      final journal = files.whereType<File>().singleWhere(
+        (f) => f.path.endsWith('.ndjson'),
+      );
+      final mutations = (await journal.readAsLines())
+          .map(jsonDecode)
+          .where((e) => e['type'] == 'mix_mutation')
+          .toList();
+      expect(mutations, hasLength(2));
+      snapshot = _snapshot(gain: 1.4);
+      await collector.closeSession();
+      final complete = jsonDecode(await file.readAsString());
+      expect(
+        complete['episodes'][0]['actions_raw'][0]['payload']['new_gain'],
+        1.4,
+      );
+      expect(
+        (complete['event_journal'] as List).where(
+          (e) => e['type'] == 'mix_mutation',
+        ),
+        hasLength(2),
+      );
+    },
+  );
+
+  test(
     'exports producer sessions into the project folder when available',
     () async {
       final projectDir = await Directory.systemTemp.createTemp(

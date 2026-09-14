@@ -1278,6 +1278,10 @@ class L10n {
       'producer_capture_status_retry':
           'Producer Capture: saved, upload retry pending',
       'producer_capture_status_uploaded': 'Producer Capture: uploaded',
+      'producer_capture_retry_upload': 'Retry upload',
+      'producer_capture_preparing': 'Preparing capture…',
+      'producer_capture_verifying': 'Verifying upload…',
+      'producer_capture_upload_failed': 'Upload failed. Capture saved locally.',
       'producer_capture_status_recording':
           'Producer Capture: recording automatically',
       'producer_capture_toggle_tooltip':
@@ -3455,6 +3459,10 @@ class L10n {
       'producer_capture_status_uploading': '프로듀서 캡처: 업로드 중',
       'producer_capture_status_retry': '프로듀서 캡처: 저장됨, 업로드 재시도 대기 중',
       'producer_capture_status_uploaded': '프로듀서 캡처: 업로드 완료',
+      'producer_capture_retry_upload': '업로드 재시도',
+      'producer_capture_preparing': '캡처 준비 중…',
+      'producer_capture_verifying': '업로드 확인 중…',
+      'producer_capture_upload_failed': '업로드 실패. 캡처는 기기에 저장되었습니다.',
       'producer_capture_status_recording': '프로듀서 캡처: 자동 기록 중',
       'producer_capture_toggle_tooltip':
           '캡처를 켜고 평소처럼 믹싱하세요. AI를 사용해도, 직접 조정해도 믹스 변경 내용이 자동으로 기록됩니다.\n\n작업이 끝나면 캡처를 끄세요. 피드백은 작성하거나 건너뛸 수 있습니다. 세션은 향후 믹싱 모델 개선을 위해 자동으로 업로드됩니다.',
@@ -6487,6 +6495,10 @@ class L10n {
       'producer_capture_status_uploading': 'プロデューサーキャプチャ：アップロード中',
       'producer_capture_status_retry': 'プロデューサーキャプチャ：保存済み、再試行待ち',
       'producer_capture_status_uploaded': 'プロデューサーキャプチャ：アップロード完了',
+      'producer_capture_retry_upload': 'アップロードを再試行',
+      'producer_capture_preparing': 'キャプチャを準備中…',
+      'producer_capture_verifying': 'アップロードを確認中…',
+      'producer_capture_upload_failed': 'アップロード失敗。キャプチャは端末に保存されています。',
       'producer_capture_status_recording': 'プロデューサーキャプチャ：自動記録中',
       'producer_capture_toggle_tooltip':
           'キャプチャをオンにして、いつもどおりミックスしてください。AIを使っても、手動で調整しても、ミックスの変更を自動で記録します。\n\n作業が終わったらオフにしてください。フィードバックは任意で、スキップもできます。セッションは今後のミキシングモデル改善のために自動でアップロードされます。',

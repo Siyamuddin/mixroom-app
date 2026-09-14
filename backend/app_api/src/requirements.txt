@@ -5,3 +5,5 @@ google-auth>=2.38.0
 posthoganalytics>=7.8.6
 requests>=2.32.0
 sentry-sdk>=2.52.0
+
+ijson>=3.3,<4

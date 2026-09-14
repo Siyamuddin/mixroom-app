@@ -2,7 +2,7 @@
 import math
 from .mix_magnitude_contract import features as amount_features, control_action, fingerprint, parameter_descriptor, encode_target, runtime_target as amount_target
 from .mix_plugin_contract import PARAM_ACTIONS, STRUCTURAL_ACTIONS, effect_target, bus_target, parameter_target, proposed_value, parameter_recreated
-from .plugin_identity import model_plugin_id, supported_descriptor
+from .plugin_identity import model_plugin_id, supported_descriptor, verified_unloaded_control
 
 CONTRACT = 'mix_selection_human_v1'
 FEATURE_COUNT = 208
@@ -66,7 +66,7 @@ def runtime_target(project, action, actions, index, controls):
             else:
                 ensure = 'ensure_master_effect' if scope['scope'] == 'master' else 'ensure_effect'
                 if not any(a['type'] == ensure and insertion_dependency(a, project) == insertion_dependency(action, project) for a in actions[:index]): return None
-                found = [d for d in controls.values() if d['kind']=='parameter' and d.get('inserted') and d['type'] in ('bool','choice')
+                found = [d for d in controls.values() if verified_unloaded_control(d) and d['kind']=='parameter' and d.get('inserted') and d['type'] in ('bool','choice')
                          and d['effect_name'].lower()==str(data.get('effect_name_contains','')).lower()
                          and d['parameter_name'].lower()==str(data.get('param_name','')).lower()]
                 if len(found)!=1 or data.get('mode')!='set': return None
@@ -79,7 +79,7 @@ def runtime_target(project, action, actions, index, controls):
     if operation == 'insert':
         if effect is not None: return None  # An already-present plugin is not a new choice.
         token = str(data.get('effect_name_contains', '')).lower()
-        matches = [d for d in controls.values() if d['kind'] == 'insert' and d['effect_name'].lower() == token]
+        matches = [d for d in controls.values() if verified_unloaded_control(d) and d['kind'] == 'insert' and d['effect_name'].lower() == token]
         if len(matches) != 1: return None
         d = matches[0]
     elif operation == 'remove':

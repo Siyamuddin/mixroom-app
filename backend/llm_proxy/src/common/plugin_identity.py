@@ -30,3 +30,17 @@ def supported_descriptor(descriptor, effect, controls):
         return descriptor
     legacy = dict(descriptor, effect_id=canonical_plugin_id(effect.get('effectId', '')))
     return legacy if fingerprint(legacy) in controls else descriptor
+
+
+# Builtin IDs are engine-defined catalog identities, not user installation names.
+_BUILTINS = frozenset({'EQ 3-Band', 'EQ Parametric', 'Compressor', 'Limiter', 'Clipper',
+    'Reverb', 'Delay', 'De-Esser', 'Distortion', 'Transient Shaper', 'Gate'})
+
+
+def verified_unloaded_control(descriptor):
+    """Hosted plugins require their actual instance metadata before refinement.
+
+    A display name alone cannot prove an installed plugin's UID or version.
+    Only the fixed builtin catalog has an identity available before insertion.
+    """
+    return descriptor.get('effect_id') in _BUILTINS and descriptor['effect_id'] == descriptor.get('effect_name')

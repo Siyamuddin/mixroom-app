@@ -38,3 +38,23 @@ verified older path-hash models still work when runtime supplies new metadata.
 Android and Windows bridge signatures were updated but not built on this Mac.
 A real third-party plugin installation test on each shipping platform remains part
 of release review; automated tests use controlled plugin metadata.
+
+## Upload and insertion follow-up, 2026-09-15
+
+- 148 targeted tests passed: 41 Flutter capture/upload/refinement/snapshot tests,
+  79 training tests, 17 capture API/storage tests and 11 resolver/API tests.
+- A 26 MB client fixture failed part two, restarted, resumed only missing parts,
+  preserved the payload checksum and waited for verified status before success.
+  Backend tests independently validated multipart assembly and identical JSON,
+  interrupted verification recovery, privacy checks and deletion during validation.
+- Queue tests confirm completed captures are not decoded and no idle retry timer
+  runs. Continuous edits append to the journal without rewriting the full session;
+  closing still preserves both the final values and complete mutation journal.
+- Unloaded hosted plugins cannot match learned insertion/preset controls by name.
+  Builtin insertion and loaded-plugin identity checks continue to pass.
+- macOS debug build and SAM template lint passed. Dart analysis reports no errors;
+  the editor retains existing unrelated warnings. No AWS deployment, live multipart
+  upload or Android/Windows build was performed in this follow-up.
+
+The upload changes preserve training JSON and do not change the earlier model
+quality assessment. A staging S3/worker smoke test remains necessary before release.
