@@ -374,10 +374,13 @@ class JuceAudioEngine {
   static const AudioRouteSnapshotProviderV2 _audioRouteSnapshotProviderV2 =
       MethodChannelAudioRouteSnapshotProviderV2();
   static AudioRouteSnapshotV2? _v2StartupSnapshot;
+  static AudioPlaybackStartupResultV2? _lastPlaybackStartupResultV2;
   static bool _v2BluetoothCommunicationQualityReduced = false;
 
   static bool get v2BluetoothCommunicationQualityReduced =>
       _v2BluetoothCommunicationQualityReduced;
+  static AudioPlaybackStartupResultV2? get lastPlaybackStartupResultV2 =>
+      _lastPlaybackStartupResultV2;
   static Future<void>? _shutdownInFlight;
 
   static final Stream<Map<String, dynamic>> _events = _eventCh
@@ -418,6 +421,7 @@ class JuceAudioEngine {
   // Core controls
   // -------------------------------
   static Future<bool> initialise() async {
+    _lastPlaybackStartupResultV2 = null;
     final shutdown = _shutdownInFlight;
     if (shutdown != null) await shutdown;
     try {
@@ -473,7 +477,7 @@ class JuceAudioEngine {
       _v2StartupSnapshot = result.success ? result.snapshot : null;
       _v2BluetoothCommunicationQualityReduced =
           result.success && result.bluetoothCommunicationQualityReduced;
-      return result;
+      return _rememberPlaybackStartupResultV2(result);
     } on MissingPluginException {
       _v2StartupSnapshot = null;
       _v2BluetoothCommunicationQualityReduced = false;
@@ -492,16 +496,25 @@ class JuceAudioEngine {
   static AudioPlaybackStartupResultV2 _unavailablePlaybackStartupV2([
     String diagnosticCode = 'actual_state_unavailable',
   ]) {
-    return AudioPlaybackStartupResultV2(
-      success: false,
-      diagnosticCode: diagnosticCode,
-      snapshot: AudioRouteSnapshotV2.fromMap(<String, dynamic>{
-        'captureConsistency': 'unavailable',
-        'unavailableReasons': const <String, String>{
-          'startup': 'nativeV2PlaybackUnavailable',
-        },
-      }),
+    return _rememberPlaybackStartupResultV2(
+      AudioPlaybackStartupResultV2(
+        success: false,
+        diagnosticCode: diagnosticCode,
+        snapshot: AudioRouteSnapshotV2.fromMap(<String, dynamic>{
+          'captureConsistency': 'unavailable',
+          'unavailableReasons': const <String, String>{
+            'startup': 'nativeV2PlaybackUnavailable',
+          },
+        }),
+      ),
     );
+  }
+
+  static AudioPlaybackStartupResultV2 _rememberPlaybackStartupResultV2(
+    AudioPlaybackStartupResultV2 result,
+  ) {
+    _lastPlaybackStartupResultV2 = result;
+    return result;
   }
 
   static Future<AudioRouteSnapshotV2> startAudioRouteMonitoringV2({
