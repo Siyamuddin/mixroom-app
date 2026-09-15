@@ -662,9 +662,15 @@ class ProjectManager {
 
   /// Smallest number not used by the Frozen mixes already in the family, so
   /// deleting "Frozen mix 2" and making another one gives "2" back.
+  ///
+  /// [allProjectNames] are the names of every local project. A number whose
+  /// default name is already taken by any of them is skipped too, so the copy
+  /// never collides with an unrelated project (or with an Original that
+  /// itself ends in "Frozen mix") and falls back to a "#1" folder name.
   static int nextFrozenMixIndex({
     required String originalName,
     required Iterable<String> existingFrozenNames,
+    required Iterable<String> allProjectNames,
   }) {
     final used = <int>{};
     for (final name in existingFrozenNames) {
@@ -674,8 +680,14 @@ class ProjectManager {
       );
       if (index != null) used.add(index);
     }
+    final takenNames = <String>{
+      for (final name in allProjectNames) name.trim().toLowerCase(),
+    };
     var next = 1;
-    while (used.contains(next)) {
+    while (used.contains(next) ||
+        takenNames.contains(
+          frozenMixDisplayName(originalName, index: next).toLowerCase(),
+        )) {
       next++;
     }
     return next;

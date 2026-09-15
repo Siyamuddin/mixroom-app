@@ -146,6 +146,17 @@ void main() {
     // folder is renamed, so copies never fall back to "#1" collision names.
     expect(fork, contains('_nextFrozenMixIndexForFamily(oldProjectDir)'));
     expect(fork, contains('index: frozenMixIndex'));
+    final nextIndex = _methodBody(
+      editor,
+      'Future<int> _nextFrozenMixIndexForFamily(Directory originalDir) async',
+    );
+    // Numbering also avoids names used by unrelated projects.
+    expect(
+      nextIndex,
+      contains(
+        'allProjectNames: <String>[for (final meta in projects) meta.name]',
+      ),
+    );
     expect(
       fork.indexOf('_nextFrozenMixIndexForFamily('),
       lessThan(fork.indexOf('duplicateProject(')),

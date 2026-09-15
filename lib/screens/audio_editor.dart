@@ -15467,6 +15467,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return ProjectManager.nextFrozenMixIndex(
         originalName: _projectName,
         existingFrozenNames: existingFrozenNames,
+        allProjectNames: <String>[for (final meta in projects) meta.name],
       );
     } catch (error) {
       debugPrint('Frozen mix numbering fell back to 1: $error');

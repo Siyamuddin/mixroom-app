@@ -103,6 +103,7 @@ void main() {
     int next(List<String> existing) => ProjectManager.nextFrozenMixIndex(
       originalName: 'Song',
       existingFrozenNames: existing,
+      allProjectNames: <String>['Song', ...existing],
     );
 
     expect(next(const <String>[]), 1);
@@ -112,6 +113,37 @@ void main() {
     expect(next(const <String>['Song Frozen mix', 'Song Frozen mix 3']), 2);
     // Custom names and legacy "#1" copies do not reserve a number.
     expect(next(const <String>['My custom copy', 'Song Frozen mix #1']), 1);
+  });
+
+  test('next frozen mix number skips names used by any project', () {
+    // An unrelated project already called "Song Frozen mix 2" (no family
+    // link) must not be overwritten or turned into a "#1" folder name.
+    expect(
+      ProjectManager.nextFrozenMixIndex(
+        originalName: 'Song',
+        existingFrozenNames: const <String>['Song Frozen mix'],
+        allProjectNames: const <String>[
+          'Song',
+          'Song Frozen mix',
+          'song frozen mix 2',
+        ],
+      ),
+      3,
+    );
+    // An Original that itself ends in "Frozen mix" collides with index 1,
+    // so its first copy is "Chill Frozen mix 2".
+    expect(
+      ProjectManager.nextFrozenMixIndex(
+        originalName: 'Chill Frozen mix',
+        existingFrozenNames: const <String>[],
+        allProjectNames: const <String>['Chill Frozen mix'],
+      ),
+      2,
+    );
+    expect(
+      ProjectManager.frozenMixDisplayName('Chill Frozen mix', index: 2),
+      'Chill Frozen mix 2',
+    );
   });
 
   test('frozen mix label keeps the number and drops the song name', () {
