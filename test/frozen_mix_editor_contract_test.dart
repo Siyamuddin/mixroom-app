@@ -52,7 +52,17 @@ void main() {
       'Future<void> _performAutosaveWrite() async',
     );
     expect(autosave, isNot(contains('_forkCompatibilityProjectForEdits')));
-    expect(autosave, contains('if (!_usingCompatibilityAudio)'));
+    // Listen-only never writes: the early return comes before any snapshot
+    // is built, so a background flush cannot leak in-memory edits into the
+    // prepared projection.
+    expect(autosave, isNot(contains('writeCompatibleProjection')));
+    expect(
+      autosave.indexOf('if (_usingCompatibilityAudio) return;'),
+      allOf(
+        greaterThanOrEqualTo(0),
+        lessThan(autosave.indexOf('_buildProjectJsonSnapshot()')),
+      ),
+    );
     expect(editor, contains('_scheduleListenOnlyEditAutosave('));
     expect(editor, contains('_listenOnlyInMemoryDirty = true'));
     expect(
@@ -91,6 +101,38 @@ void main() {
     expect(prompt, contains('_discardListenOnlyEdit()'));
     expect(prompt, contains('_canCreateFrozenMixCopy()'));
     expect(prompt, contains('_forkCompatibilityProjectForEdits()'));
+  });
+
+  test('manual save and back never write a listen-only mix', () {
+    final save = _methodBody(
+      editor,
+      'Future<void> _saveProject({bool showSnackBar = true}) async',
+    );
+    expect(save, isNot(contains('writeCompatibleProjection')));
+    // Dirty listen-only -> ask for a Frozen mix; clean -> just tell the user.
+    expect(save, contains('_listenOnlyInMemoryDirty'));
+    expect(save, contains('_confirmFrozenMixCopyForEdits()'));
+    expect(save, contains('Listen only. Make a Frozen mix to save changes.'));
+    expect(
+      save.indexOf('if (_usingCompatibilityAudio)'),
+      allOf(
+        greaterThanOrEqualTo(0),
+        lessThan(save.indexOf('_projectAutosaveCoordinator.flush()')),
+      ),
+    );
+
+    final back = _methodBody(editor, 'Future<void> _handleBackPressed() async');
+    expect(
+      back,
+      contains(
+        'if (_usingCompatibilityAudio) {\n'
+        '      // Listen-only: nothing is written on the way out.',
+      ),
+    );
+    expect(
+      back.indexOf('if (_usingCompatibilityAudio)'),
+      lessThan(back.indexOf('_saveProject(showSnackBar: false)')),
+    );
   });
 
   test('frozen mix fork writes a family link and never auto-syncs', () {

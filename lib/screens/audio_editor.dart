@@ -17699,28 +17699,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Skipping autosave because the project never loaded.');
       return;
     }
-    if (!_usingCompatibilityAudio) {
-      await _promoteCompatibilityAudioIntoCurrentProject();
-    }
+    // A listen-only mix has nothing to save. Every edit goes through the
+    // Frozen mix prompt first; a background flush or an early Back must not
+    // slip in-memory changes into the prepared projection on disk.
+    if (_usingCompatibilityAudio) return;
+    await _promoteCompatibilityAudioIntoCurrentProject();
     _syncEffectSnapshotCacheToCurrentRows();
     await _refreshHostedInstrumentStatesForPersistence(captureAll: false);
     final json = await _buildProjectJsonSnapshot();
     _attachPersistedUndoHistoryToProjectJson(json);
-    if (_usingCompatibilityAudio) {
-      await ProjectCompatibilityService.writeCompatibleProjection(
-        projectDir: _projectDir,
-        project: json,
-      );
-    } else {
-      await _projectPersistence.saveProjectState(
-        projectDir: _projectDir,
-        projectState: json,
-        mode: AudioProjectSaveMode.autosave,
-      );
-    }
-    if (!_usingCompatibilityAudio) {
-      await _refreshCompatibilityAudioStatus(project: json);
-    }
+    await _projectPersistence.saveProjectState(
+      projectDir: _projectDir,
+      projectState: json,
+      mode: AudioProjectSaveMode.autosave,
+    );
+    await _refreshCompatibilityAudioStatus(project: json);
     if (_isPlaying) {
       // _scheduleCloudAutoSync intentionally does not run while playing.
       // Retain the intent and schedule it when transport stops.
@@ -17728,12 +17721,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     } else if (!_cloudAutoSyncInFlight) {
       _scheduleCloudAutoSync(reason: 'autosave');
     }
-    if (!_usingCompatibilityAudio) {
-      _requestLocalVersionSnapshot(
-        reason: ProjectVersionReason.autosave,
-        minInterval: ProjectVersionStore.defaultPeriodicInterval,
-      );
-    }
+    _requestLocalVersionSnapshot(
+      reason: ProjectVersionReason.autosave,
+      minInterval: ProjectVersionStore.defaultPeriodicInterval,
+    );
     await _persistUndoHistory();
   }
 
@@ -19609,37 +19600,48 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Skipping project save because the project never loaded.');
       return;
     }
+    if (_usingCompatibilityAudio) {
+      // Listen-only: the prepared projection on disk is the source of truth.
+      // Unsaved in-memory edits can only be kept by making a Frozen mix.
+      if (_listenOnlyInMemoryDirty) {
+        final forked = await _confirmFrozenMixCopyForEdits();
+        if (!forked || !mounted) return;
+      } else {
+        if (mounted && showSnackBar) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                L10n.translate(
+                  context,
+                  'Listen only. Make a Frozen mix to save changes.',
+                ),
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    }
     try {
       await _projectAutosaveCoordinator.flush();
-      if (!_usingCompatibilityAudio) {
-        await _promoteCompatibilityAudioIntoCurrentProject();
-        await _normalizeProjectAudioAssetsForCheckpoint();
-      }
+      await _promoteCompatibilityAudioIntoCurrentProject();
+      await _normalizeProjectAudioAssetsForCheckpoint();
       await _refreshAllPersistedEffectSnapshots();
       await _refreshHostedInstrumentStatesForPersistence();
       final json = await _buildProjectJsonSnapshot();
       _attachPersistedUndoHistoryToProjectJson(json);
-      if (_usingCompatibilityAudio) {
-        await ProjectCompatibilityService.writeCompatibleProjection(
-          projectDir: _projectDir,
-          project: json,
-        );
-      } else {
-        await _projectPersistence.saveProjectState(
-          projectDir: _projectDir,
-          projectState: json,
-          mode: AudioProjectSaveMode.checkpoint,
-        );
-      }
+      await _projectPersistence.saveProjectState(
+        projectDir: _projectDir,
+        projectState: json,
+        mode: AudioProjectSaveMode.checkpoint,
+      );
       _projectAutosaveCoordinator.clearDirty();
       await _uploadProjectTelemetrySnapshot(json);
       _requestCloudAutoSyncNow('save');
-      if (!_usingCompatibilityAudio) {
-        _requestLocalVersionSnapshot(
-          reason: ProjectVersionReason.manualSave,
-          minInterval: ProjectVersionStore.defaultSaveInterval,
-        );
-      }
+      _requestLocalVersionSnapshot(
+        reason: ProjectVersionReason.manualSave,
+        minInterval: ProjectVersionStore.defaultSaveInterval,
+      );
       await _persistUndoHistory();
 
       if (mounted && showSnackBar) {
@@ -19796,7 +19798,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    if (_loadedOnce) {
+    if (_usingCompatibilityAudio) {
+      // Listen-only: nothing is written on the way out. Any in-memory edit
+      // that was not turned into a Frozen mix is discarded with the editor.
+      _listenOnlyInMemoryDirty = false;
+      _projectAutosaveCoordinator.clearDirty();
+    } else if (_loadedOnce) {
       await _saveProject(showSnackBar: false);
     } else {
       debugPrint(
