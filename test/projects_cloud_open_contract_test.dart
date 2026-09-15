@@ -94,46 +94,48 @@ void main() {
     expect(export, contains('checkCloud: false'));
   });
 
-  test('cloud matching prefers an exact cloudProjectId over localProjectId', () {
-    final localStart = projects.indexOf(
-      'ProjectMeta? _localProjectForCloud(CloudProjectAccessItem cloud)',
-    );
-    final cloudStart = projects.indexOf(
-      'CloudProjectAccessItem? _cloudProjectForLocal(ProjectMeta meta)',
-    );
-    expect(localStart, greaterThanOrEqualTo(0));
-    expect(cloudStart, greaterThan(localStart));
-    final localForCloud = projects.substring(localStart, cloudStart);
-    expect(
-      localForCloud.indexOf('project.cloudProjectId'),
-      lessThan(localForCloud.indexOf('cloud.localProjectId')),
-    );
-
-    final nextMethod = projects.indexOf(
-      'List<_CloudProjectDestination> _availableCloudDestinations',
-      cloudStart,
-    );
-    expect(nextMethod, greaterThan(cloudStart));
-    final cloudForLocal = projects.substring(cloudStart, nextMethod);
-    expect(
-      cloudForLocal.indexOf('cloudProjectId.isNotEmpty'),
-      lessThan(cloudForLocal.indexOf('project.localProjectId == meta.projectId')),
-    );
-  });
-
   test(
-    'cloud list refresh does not stamp a local fingerprint as synced',
+    'cloud matching prefers an exact cloudProjectId over localProjectId',
     () {
-      final persist = _methodBody(
-        projects,
-        'Future<void> _persistCloudLinksForLocalMatches() async',
+      final localStart = projects.indexOf(
+        'ProjectMeta? _localProjectForCloud(CloudProjectAccessItem cloud)',
       );
-      expect(persist, isNot(contains('cloudSourceFingerprint')));
-      expect(persist, isNot(contains('sourceFingerprint(')));
-      expect(persist, contains("json['cloudProjectId'] = cloud.projectId"));
-      expect(projects, contains("'Sync status unknown'"));
+      final cloudStart = projects.indexOf(
+        'CloudProjectAccessItem? _cloudProjectForLocal(ProjectMeta meta)',
+      );
+      expect(localStart, greaterThanOrEqualTo(0));
+      expect(cloudStart, greaterThan(localStart));
+      final localForCloud = projects.substring(localStart, cloudStart);
+      expect(
+        localForCloud.indexOf('project.cloudProjectId'),
+        lessThan(localForCloud.indexOf('cloud.localProjectId')),
+      );
+
+      final nextMethod = projects.indexOf(
+        'List<_CloudProjectDestination> _availableCloudDestinations',
+        cloudStart,
+      );
+      expect(nextMethod, greaterThan(cloudStart));
+      final cloudForLocal = projects.substring(cloudStart, nextMethod);
+      expect(
+        cloudForLocal.indexOf('cloudProjectId.isNotEmpty'),
+        lessThan(
+          cloudForLocal.indexOf('project.localProjectId == meta.projectId'),
+        ),
+      );
     },
   );
+
+  test('cloud list refresh does not stamp a local fingerprint as synced', () {
+    final persist = _methodBody(
+      projects,
+      'Future<void> _persistCloudLinksForLocalMatches() async',
+    );
+    expect(persist, isNot(contains('cloudSourceFingerprint')));
+    expect(persist, isNot(contains('sourceFingerprint(')));
+    expect(persist, contains("json['cloudProjectId'] = cloud.projectId"));
+    expect(projects, contains("'Sync status unknown'"));
+  });
 
   test(
     'cloud tab reuses the local open dispatcher instead of detaching a stale copy',

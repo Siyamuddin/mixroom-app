@@ -2150,7 +2150,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         } else if (entry.isCloudProject) {
           continue;
         } else {
-          for (final project in entry.family?.members ?? const <ProjectMeta>[]) {
+          for (final project
+              in entry.family?.members ?? const <ProjectMeta>[]) {
             _selectedProjectPaths.add(_projectSelectionKey(project));
           }
         }

@@ -91,10 +91,7 @@ void main() {
   });
 
   test('frozen mixes cannot be synced to Cloud as a separate project', () {
-    final menu = _methodBody(
-      projects,
-      'Future<void> _showProjectItemMenu({',
-    );
+    final menu = _methodBody(projects, 'Future<void> _showProjectItemMenu({');
     expect(menu, contains('!projectIsFrozenMix(project)'));
 
     final sync = _methodBody(

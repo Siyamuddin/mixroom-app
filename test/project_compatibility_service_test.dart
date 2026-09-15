@@ -271,11 +271,9 @@ void main() {
         'metronomeVolume': 0.5,
       },
     };
-    final looped =
-        jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
+    final looped = jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
     (looped['ui'] as Map)['loopEnabled'] = true;
-    final metronome =
-        jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
+    final metronome = jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
     (metronome['ui'] as Map)['metronomeEnabled'] = true;
 
     expect(

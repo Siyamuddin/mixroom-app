@@ -16239,9 +16239,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final sourceForPublish = await ProjectManager.readProjectJson(
         _projectDir,
       );
-      final sourceFingerprint = ProjectCompatibilityService.cloudChangeFingerprint(
-        sourceForPublish,
-      );
+      final sourceFingerprint =
+          ProjectCompatibilityService.cloudChangeFingerprint(sourceForPublish);
       final projectId = _projectId.trim().isNotEmpty
           ? _projectId.trim()
           : await ProjectManager.ensureProjectId(_projectDir);
@@ -48532,9 +48531,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       return;
     }
-    if (enabled &&
-        Platform.isMacOS &&
-        !await _validateMacRecordingChannels()) {
+    if (enabled && Platform.isMacOS && !await _validateMacRecordingChannels()) {
       return;
     }
     if (enabled &&
@@ -91907,10 +91904,7 @@ class EditorUndoManager extends ChangeNotifier {
     _pendingGatedActions.clear();
   }
 
-  bool _allowMutation(
-    EditorUndoAction action, {
-    required bool queueIfBlocked,
-  }) {
+  bool _allowMutation(EditorUndoAction action, {required bool queueIfBlocked}) {
     final gate = mutationGate;
     if (gate == null || gate(action)) return true;
     if (queueIfBlocked && !_pendingGatedActions.contains(action)) {

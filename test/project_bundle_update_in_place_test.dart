@@ -264,7 +264,8 @@ void main() {
       );
 
       final destJson = await ProjectManager.readProjectJson(destDir);
-      final tracks = (destJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
+      final tracks =
+          (destJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
       expect(tracks, hasLength(1));
       expect(tracks.first['fileName'], 'tone.wav');
       expect(
