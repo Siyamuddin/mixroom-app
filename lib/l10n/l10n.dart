@@ -2019,6 +2019,8 @@ class L10n {
           'You can play this mix. Editing needs a Frozen mix copy.',
       'Original': 'Original',
       'Frozen mix': 'Frozen mix',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.',
       'Could not make a Frozen mix.': 'Could not make a Frozen mix.',
       'Listen only. Make a Frozen mix to save changes.':
           'Listen only. Make a Frozen mix to save changes.',
@@ -4127,6 +4129,8 @@ class L10n {
           '이 믹스는 재생할 수 있습니다. 편집하려면 Frozen mix 사본이 필요합니다.',
       'Original': '원본',
       'Frozen mix': 'Frozen mix',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          '이 믹스는 이 기기에서 듣기 전용입니다. 어시스턴트가 변경할 수 있도록 Frozen mix를 만드세요. 변경된 내용은 없습니다.',
       'Could not make a Frozen mix.': 'Frozen mix를 만들 수 없습니다.',
       'Listen only. Make a Frozen mix to save changes.':
           '듣기 전용입니다. 변경 사항을 저장하려면 Frozen mix를 만드세요.',
@@ -4890,6 +4894,8 @@ class L10n {
           '可以播放此混音。编辑需要 Frozen mix 副本。',
       'Original': '原版',
       'Frozen mix': 'Frozen mix',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          '此混音在此设备上仅可试听。请创建 Frozen mix 以便助手进行更改。未做任何更改。',
       'Could not make a Frozen mix.': '无法创建 Frozen mix。',
       'Listen only. Make a Frozen mix to save changes.':
           '仅试听。要保存更改，请创建 Frozen mix。',
@@ -7169,6 +7175,8 @@ class L10n {
           'このミックスは再生できます。編集するには Frozen mix のコピーが必要です。',
       'Original': 'オリジナル',
       'Frozen mix': 'Frozen mix',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          'このミックスはこのデバイスでは試聴のみです。アシスタントが変更できるように Frozen mix を作成してください。変更はありません。',
       'Could not make a Frozen mix.': 'Frozen mix を作成できませんでした。',
       'Listen only. Make a Frozen mix to save changes.':
           '試聴のみです。変更を保存するには Frozen mix を作成してください。',

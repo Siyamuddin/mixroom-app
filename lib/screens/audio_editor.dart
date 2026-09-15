@@ -70962,6 +70962,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+    if (_usingCompatibilityAudio) {
+      // Listen-only mix: the assistant may only change a Frozen mix copy.
+      // Ask first, exactly like a manual edit would. The fork keeps rows,
+      // clips and groups identical, so the prepared plan still applies.
+      final forked = await _confirmFrozenMixCopyForEdits();
+      if (!mounted) return;
+      if (!forked) {
+        _insertAiFailureSystemText(
+          L10n.translate(
+            context,
+            'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.',
+          ),
+        );
+        return;
+      }
+    }
     _setV3ExecutionInProgress(true);
     try {
       await _executePreparedAiV3Bundle(

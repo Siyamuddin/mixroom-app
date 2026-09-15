@@ -182,6 +182,32 @@ void main() {
     );
   });
 
+  test('AI changes on a listen-only mix ask for a Frozen mix first', () {
+    final handoff = _methodBody(
+      editor,
+      'Future<void> _presentAiV3Handoff(\n'
+      '    Map<String, dynamic> handoff, {\n'
+      '    int? chatFlowId,\n'
+      '  }) async',
+    );
+    final gate = handoff.indexOf('if (_usingCompatibilityAudio)');
+    final start = handoff.indexOf('_setV3ExecutionInProgress(true)');
+    expect(gate, greaterThanOrEqualTo(0));
+    expect(start, greaterThan(gate));
+    // The prompt is the same one manual edits use, and a "No" tells the
+    // user in chat that nothing changed.
+    final gateBody = handoff.substring(gate, start);
+    expect(gateBody, contains('await _confirmFrozenMixCopyForEdits()'));
+    expect(gateBody, contains('_insertAiFailureSystemText('));
+    expect(
+      gateBody,
+      contains(
+        'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.',
+      ),
+    );
+    expect(handoff, isNot(contains('_forkCompatibilityProjectForEdits(')));
+  });
+
   test('a failed frozen mix fork cleans up and drops the queued edits', () {
     final fork = _methodBody(
       editor,
