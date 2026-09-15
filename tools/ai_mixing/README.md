@@ -2,6 +2,11 @@
 
 This folder contains an end-to-end offline pipeline for training learned magnitude models from producer-captured sessions.
 
+For automatic PRO-20 capture, use the [current training guide](../../backend/training/README.md).
+The scripts here retain historical producer-capture support. The
+[compatibility guide](../../backend/training/PRO-20-compatibility.md) explains how
+to import that data into the validated trainer and export the existing 77-feature models.
+
 ## Inputs
 - Session JSON files exported by in-app Producer Data Mode (`/producer on`).
 - Each session includes:

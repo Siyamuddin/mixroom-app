@@ -391,6 +391,71 @@ paths:
       responses:
         '200':
           description: Feedback accepted
+  /v1/producer-training/sessions/uploads:
+    post:
+      summary: Reserve an idempotent encrypted producer-training bundle upload
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerTrainingUploadContract'
+      responses:
+        '201':
+          description: Signed S3 URL, missing multipart parts (8 MiB each), or already_completed. Captures over 25 MB require per-part SHA-256 checksums.
+        '400':
+          description: Invalid capture contract
+        '409':
+          description: Session ID was previously reserved with different content
+  /v1/producer-training/sessions/{session_id}/complete:
+    post:
+      summary: Verify and promote an uploaded producer-training bundle
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProducerTrainingUploadContract'
+      responses:
+        '202':
+          description: accepted true after verification, or status verifying while a large bundle is checked asynchronously. Poll GET session status until verified.
+  /v1/producer-training/sessions/{session_id}:
+    get:
+      summary: Read authenticated upload verification status
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: status is reserved, verifying, verified, retry_needed, failed, deleted, or missing; accepted is true only for verified
+    delete:
+      summary: Revoke and delete a producer-training session and its media
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Session objects deleted and deletion status recorded
   /v1/internal/admin/overview:
     get:
       summary: Internal admin dashboard overview
@@ -1000,6 +1065,48 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ProducerTrainingUploadContract:
+      type: object
+      required:
+        - size_bytes
+        - sha256
+        - schema_version
+        - consent_version
+        - feature_extractor_version
+        - segmentation_version
+        - media_manifest
+      properties:
+        session_id:
+          type: string
+          pattern: '^[A-Za-z0-9._-]{1,128}$'
+        size_bytes:
+          type: integer
+          minimum: 1
+          maximum: 5000000000
+        sha256:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        part_checksums:
+          type: array
+          description: Required on reservation above 25 MB. One lowercase SHA-256 per consecutive 8 MiB part; the last part may be shorter.
+          maxItems: 597
+          items:
+            type: string
+            pattern: '^[a-f0-9]{64}$'
+        schema_version:
+          type: string
+          enum: [producer_training_capture_v4]
+        consent_version:
+          type: string
+        feature_extractor_version:
+          type: string
+        segmentation_version:
+          type: string
+        media_manifest:
+          type: array
+          maxItems: 20
+          items:
+            type: object
     UserProfile:
       type: object
       required:

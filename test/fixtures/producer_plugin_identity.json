@@ -1,0 +1,34 @@
+[
+  {
+    "raw": "Compressor",
+    "canonical": "Compressor"
+  },
+  {
+    "raw": "AudioUnit:vendor:compressor",
+    "canonical": "AudioUnit:vendor:compressor"
+  },
+  {
+    "raw": "/Library/Audio/Plug-Ins/VST3/Example.vst3",
+    "canonical": "plugin_8784f94ec94a7c0203f6fcbbe81ee57e83a34f68df30c9764cdc003e81c94630"
+  },
+  {
+    "raw": "/Users/producer/Audio/Space Plugin.vst3",
+    "canonical": "plugin_2b3da13e55b4ccb0aa867f30d43ee268acadfbfecfe97bab39097dd8256536b2"
+  },
+  {
+    "raw": "C:\\Program Files\\VST3\\Example.vst3",
+    "canonical": "plugin_09c15310e86f940cbbe1873149e4dce9992c08607ee61d99efbaa97e83e3d78f"
+  },
+  {
+    "raw": "file:///Library/Audio/Plug-Ins/Components/Example.component",
+    "canonical": "plugin_d89b1f2c5f8af09c7cc2e7dc19d9dee88308bef656af835a39002aaf5cac6411"
+  },
+  {
+    "raw": "/opt/plugins/例.vst3",
+    "canonical": "plugin_c523fa9497e978607aee6fb3bcb1f1bd3c6ec966199113d05e6045a6cc354309"
+  },
+  {
+    "raw": "plugin_8784f94ec94a7c0203f6fcbbe81ee57e83a34f68df30c9764cdc003e81c94630",
+    "canonical": "plugin_8784f94ec94a7c0203f6fcbbe81ee57e83a34f68df30c9764cdc003e81c94630"
+  }
+]

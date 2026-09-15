@@ -15,6 +15,14 @@ class AiV3RequestRoute {
 class LlmConfig {
   const LlmConfig._();
 
+  /// Keep local refinement testing independent of the hosted chat planner.
+  static String get effectiveMixResolveBaseUrl {
+    const local = String.fromEnvironment('MIXROOM_LOCAL_REFINE_URL');
+    return kDebugMode && local.trim().isNotEmpty
+        ? local.trim().replaceFirst(RegExp(r'/+$'), '')
+        : effectiveProxyApiBaseUrl;
+  }
+
   static const String _defaultProxyApiBaseUrl =
       'https://3mbfa2dx50.execute-api.ap-northeast-2.amazonaws.com/prod';
 

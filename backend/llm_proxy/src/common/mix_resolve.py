@@ -13,6 +13,14 @@ from typing import Any, Protocol
 from urllib.parse import urlparse
 from urllib.request import urlopen
 
+from .mix_selection_contract import CONTRACT as SELECTION_CONTRACT, FEATURE_COUNT as SELECTION_FEATURE_COUNT, runtime_target as selection_target, features as selection_features, insertion_dependency, execution_scope
+from .mix_magnitude_contract import CONTRACT as HUMAN_CONTRACT, FEATURE_COUNT as HUMAN_FEATURE_COUNT, runtime_target, features as human_features, refine_amount
+
+from .mix_plugin_contract import (
+    CONTRACT as PLUGIN_CONTRACT, FEATURE_COUNT as PLUGIN_FEATURE_COUNT,
+    extra_features, parameter_target, is_continuous, proposed_value, bus_target, STRUCTURAL_ACTIONS, parameter_recreated,
+)
+
 _DEFAULT_APPLY_MODEL_FILENAME = (
     "mix_apply_classifier_official_sessions_20260330_seed1.onnx"
 )
@@ -113,6 +121,14 @@ class OnnxMixModelRunner:
             or _DEFAULT_BUNDLE_VERSION
         )
 
+    def feature_contract(self) -> str:
+        self._ensure_sessions()
+        return self._feature_contract
+
+    def magnitude_contract(self) -> str:
+        self._ensure_sessions()
+        return self._magnitude_contract
+
     def predict_apply_score(self, features: list[float]) -> float | None:
         self._ensure_sessions()
         named_outputs = self._run_named_outputs(self._apply_session, features)
@@ -140,10 +156,12 @@ class OnnxMixModelRunner:
         )
         context = {
             "mix_magnitude_model_source": self._model_source,
+            "mix_feature_contract_version": getattr(self, "_feature_contract", _CONTRACT_VERSION),
+            "mix_magnitude_feature_contract_version": getattr(self, "_magnitude_contract", _CONTRACT_VERSION),
+            "mix_magnitude_development_only": getattr(self, "_development_only", False),
             "mix_magnitude_model_bundle_version": self._bundle_version,
             "mix_apply_model_version": apply_version,
             "mix_magnitude_regressor_version": magnitude_version,
-            "mix_feature_contract_version": _CONTRACT_VERSION,
         }
         if self._model_fetch_ms > 0:
             context["mix_model_fetch_ms"] = self._model_fetch_ms
@@ -175,6 +193,64 @@ class OnnxMixModelRunner:
                     sess_options=options,
                     providers=["CPUExecutionProvider"],
                 )
+                contracts = []
+                for session in (self._apply_session, self._magnitude_session):
+                    metadata = session.get_modelmeta().custom_metadata_map
+                    contract = metadata.get("mix_feature_contract_version", _CONTRACT_VERSION)
+                    expected = {_CONTRACT_VERSION: _FEATURE_COUNT, PLUGIN_CONTRACT: PLUGIN_FEATURE_COUNT, HUMAN_CONTRACT: HUMAN_FEATURE_COUNT, SELECTION_CONTRACT: SELECTION_FEATURE_COUNT}.get(contract)
+                    if expected is None or session.get_inputs()[0].shape[-1] != expected:
+                        raise ValueError("Mix model feature metadata/shape mismatch")
+                    contracts.append(contract)
+                if contracts[0] not in {_CONTRACT_VERSION, PLUGIN_CONTRACT, SELECTION_CONTRACT}:
+                    raise ValueError("Unsupported classifier contract")
+                if contracts[1] != HUMAN_CONTRACT and len(set(contracts)) != 1:
+                    raise ValueError("Apply and magnitude models use different contracts")
+                if contracts[0] == SELECTION_CONTRACT and contracts[1] != HUMAN_CONTRACT:
+                    raise ValueError("Human selection requires the compatible magnitude decoder")
+                self._feature_contract, self._magnitude_contract = contracts
+                metadata = self._magnitude_session.get_modelmeta().custom_metadata_map
+                if "training_group_ids" in metadata:
+                    self.training_groups = set(json.loads(metadata["training_group_ids"]))
+                self._development_only = metadata.get("development_only") == "true"
+                if self._development_only and os.environ.get("MIX_ALLOW_DEVELOPMENT_MODELS") != "true":
+                    raise ValueError("Development model requires explicit local allowance")
+                self.selection_controls = {}
+                if self._feature_contract == SELECTION_CONTRACT:
+                    from .mix_magnitude_contract import fingerprint
+                    selection_metadata = self._apply_session.get_modelmeta().custom_metadata_map
+                    self._development_only |= selection_metadata.get("development_only") == "true"
+                    if self._development_only and os.environ.get("MIX_ALLOW_DEVELOPMENT_MODELS") != "true":
+                        raise ValueError("Development classifier requires explicit local allowance")
+                    if selection_metadata.get("output_contract") != "observed_action_acceptance_v1":
+                        raise ValueError("Unknown classifier output contract")
+                    selection_outputs = self._apply_session.get_outputs()
+                    if len(selection_outputs) != 2 or selection_outputs[1].type != "tensor(float)" or selection_outputs[1].shape[-1] != 2:
+                        raise ValueError("Classifier must output two class probabilities")
+                    self.training_groups = getattr(self, "training_groups", set()) | set(json.loads(selection_metadata["training_group_ids"]))
+                    controls = json.loads(selection_metadata["control_contracts"])
+                    support = json.loads(selection_metadata["control_song_counts"])
+                    for key, descriptor in controls.items():
+                        if key != fingerprint(descriptor) or descriptor.get("kind") not in {"gain", "pan", "parameter", "insert", "remove", "reset"}:
+                            raise ValueError("Invalid selection control identity")
+                        if self._development_only or support.get(key, 0) >= 3:
+                            self.selection_controls[key] = descriptor
+                self.magnitude_controls = {}
+                if self._magnitude_contract == HUMAN_CONTRACT:
+                    outputs = self._magnitude_session.get_outputs()
+                    if len(outputs) != 1 or outputs[0].type != "tensor(float)" or len(outputs[0].shape) != 2 or outputs[0].shape[-1] != 1:
+                        raise ValueError("Magnitude model must output one float per action")
+                    if metadata.get("output_contract") != "normalized_human_amount_v1":
+                        raise ValueError("Unknown magnitude output contract")
+                    from .mix_magnitude_contract import fingerprint
+                    controls = json.loads(metadata["control_contracts"])
+                    support = json.loads(metadata["control_song_counts"])
+                    for key, descriptor in controls.items():
+                        if key != fingerprint(descriptor) or descriptor.get("type") != "float":
+                            raise ValueError("Invalid continuous control identity")
+                        if not all(isinstance(descriptor.get(k), (int, float)) and math.isfinite(descriptor[k]) for k in ("min", "max")) or descriptor["max"] <= descriptor["min"]:
+                            raise ValueError("Invalid continuous control bounds")
+                        if self._development_only or support.get(key, 0) >= 3:
+                            self.magnitude_controls[key] = descriptor
                 self._np = np
                 self._ort = ort
                 self._apply_path = str(resolved.apply_path)
@@ -427,9 +503,15 @@ class MixResolveService:
                     fallback_reason="feature_contract_mismatch",
                 )
 
+            model_contract = self._runner.feature_contract() if hasattr(self._runner, "feature_contract") else _CONTRACT_VERSION
+            if model_contract not in {_CONTRACT_VERSION, PLUGIN_CONTRACT, SELECTION_CONTRACT}:
+                raise ValueError("Unsupported model feature contract")
+            magnitude_contract = self._runner.magnitude_contract() if hasattr(self._runner, "magnitude_contract") else model_contract
             onnx_started_at = time.perf_counter()
             refined_actions: list[dict[str, Any]] = []
             debug_entries: list[dict[str, Any]] = []
+            blocked_insertions = set()
+            blocked_resets = set()
 
             for index, action in enumerate(normalized_actions):
                 features = [
@@ -442,13 +524,76 @@ class MixResolveService:
                         fallback_reason="feature_contract_mismatch",
                     )
 
-                apply_score = self._runner.predict_apply_score(features)
+                if model_contract == PLUGIN_CONTRACT:
+                    features.extend(extra_features(normalized_project, action))
+                selection = None
+                if model_contract == SELECTION_CONTRACT:
+                    selection = selection_target(normalized_project, action, normalized_actions, index, self._runner.selection_controls)
+                    if selection is not None:
+                        d, scope, direction, choice = selection
+                        apply_score = self._runner.predict_apply_score(selection_features(normalized_project, d, scope, direction, choice, normalized_goal))
+                    else:
+                        apply_score = 1.0  # Explicit abstention, not a learned approval.
+                else:
+                    apply_score = self._runner.predict_apply_score(features)
+                if magnitude_contract == HUMAN_CONTRACT:
+                    target = runtime_target(normalized_project, action, normalized_actions, index, self._runner.magnitude_controls)
+                    permitted = (_goal_execution_profile(normalized_goal) == "producer_safe" and
+                                 _goal_audibility(normalized_goal) == "noticeable" and not normalized_goal.get("style_tags"))
+                    raw_amount = None
+                    refined = action
+                    decision = ("human_selection_keep" if permitted else "selection_request_bypass") if selection is not None else "unchanged_unsupported_magnitude"
+                    if apply_score is None or not math.isfinite(apply_score):
+                        raise ValueError("Invalid classifier output")
+                    dependency_blocked = (
+                        ("effect" in action["type"] and insertion_dependency(action, normalized_project) in blocked_insertions)
+                        or (("effect" in action["type"] or action["type"].startswith("hard_reset")) and execution_scope(normalized_project, action) in blocked_resets))
+                    dropped = ((selection is not None and apply_score < .5 and permitted) or dependency_blocked
+                               if model_contract == SELECTION_CONTRACT else apply_score < .15 and not strict)
+                    if dropped and action["type"] in {"ensure_effect", "ensure_master_effect", "delete_effect", "delete_master_effect"}:
+                        blocked_insertions.add(insertion_dependency(action, normalized_project))
+                    if dropped and action["type"].startswith("hard_reset"):
+                        blocked_resets.add(execution_scope(normalized_project, action))
+                    if dropped:
+                        decision = "dependent_action_drop" if dependency_blocked else "human_selection_drop" if model_contract == SELECTION_CONTRACT else "drop"
+                    elif target is not None and permitted:
+                        d, scope, start, proposal, direction = target
+                        raw_amount = self._runner.predict_scalar(human_features(normalized_project, d, scope, direction))
+                        if raw_amount is None or not math.isfinite(raw_amount):
+                            raise ValueError("Invalid magnitude output")
+                        refined = refine_amount(action, target, raw_amount, apply_score)
+                        decision = "human_magnitude"
+                    if not dropped: refined_actions.append(refined)
+                    debug_entries.append({"action_index": index, "action_type": action["type"],
+                        "before": action, "after": None if dropped else refined,
+                        "apply_score": apply_score if model_contract != SELECTION_CONTRACT or selection is not None else None,
+                        "selection_supported": selection is not None, "selection_applied": selection is not None and permitted, "raw_magnitude": raw_amount,
+                        "magnitude_output_contract": "normalized_human_amount_v1",
+                        "decision": decision, "dropped": dropped})
+                    continue
                 raw_magnitude = self._runner.predict_scalar(features)
                 if apply_score is None or raw_magnitude is None:
                     return self._fallback_result(
                         normalized_actions,
                         fallback_reason="inference_failed",
                     )
+
+                parameter = parameter_target(normalized_project, action) if action["type"] in {"adjust_effect_param_by_name", "adjust_master_effect_param_by_name"} else None
+                categorical = action["type"] in STRUCTURAL_ACTIONS or (parameter is not None and not is_continuous(parameter[1]))
+                if model_contract == PLUGIN_CONTRACT and categorical:
+                    # A choice or insertion cannot be attenuated by a magnitude.
+                    # Its apply model must make an actual keep/drop decision.
+                    dropped = apply_score < 0.5
+                    if not dropped:
+                        refined_actions.append(action)
+                    debug_entries.append({
+                        "action_index": index, "action_type": action["type"],
+                        "before": action, "after": None if dropped else action,
+                        "apply_score": apply_score, "raw_magnitude": raw_magnitude,
+                        "final_scale": 0.0 if dropped else 1.0,
+                        "decision": "drop_discrete" if dropped else "keep_discrete", "dropped": dropped,
+                    })
+                    continue
 
                 predicted_scale = max(0.0, min(3.0, float(raw_magnitude)))
                 decision = "keep"
@@ -491,6 +636,8 @@ class MixResolveService:
                     normalized_project,
                     action,
                     predicted_scale,
+                    plugin_contract=model_contract == PLUGIN_CONTRACT,
+                    defer_parameter=model_contract == PLUGIN_CONTRACT and parameter_recreated(normalized_actions, index),
                 )
                 refined_actions.append(refined_action)
                 debug_entries.append(
@@ -510,6 +657,7 @@ class MixResolveService:
             observability = {
                 **self._runner.observability_context(),
                 "mix_model_onnx_ms": int((time.perf_counter() - onnx_started_at) * 1000),
+
             }
             return {
                 "actions": refined_actions,
@@ -523,6 +671,40 @@ class MixResolveService:
                 normalized_actions,
                 fallback_reason="inference_failed",
             )
+
+    def build_training_feature_vector(
+        self,
+        *,
+        project: dict[str, Any],
+        goal: dict[str, Any],
+        action: dict[str, Any],
+        strict: bool = False,
+        candidate_actions: list[dict[str, Any]] | None = None,
+    ) -> list[float]:
+        """Build the exact production feature vector without running ONNX.
+
+        Offline dataset conversion calls this method so training and inference
+        cannot independently redefine the mix_refine_v1 feature contract.
+        """
+        normalized_project = _normalize_project(project)
+        normalized_goal = _normalize_goal(goal)
+        normalized_action = _normalize_actions([action])[0]
+        features = [
+            *self._build_context_features(
+                project=normalized_project,
+                goal=normalized_goal,
+                actions=_normalize_actions(candidate_actions) if candidate_actions is not None else [normalized_action],
+                strict=strict,
+            ),
+            *self._build_action_features(normalized_project, normalized_action),
+        ]
+        if len(features) != _FEATURE_COUNT:
+            raise MixResolveValidationError(
+                f"Expected {_FEATURE_COUNT} features, received {len(features)}."
+            )
+        if not all(math.isfinite(value) for value in features):
+            raise MixResolveValidationError("Feature vector contains non-finite values.")
+        return features
 
     def _fallback_result(
         self,
@@ -1201,11 +1383,46 @@ def _scale_action(
     project: dict[str, Any],
     action: dict[str, Any],
     scale: float,
+    *, plugin_contract: bool = False, defer_parameter: bool = False,
 ) -> dict[str, Any]:
     if abs(scale - 1.0) < 0.03:
         return action
 
+    target = parameter_target(project, action) if action["type"] in {"adjust_effect_param_by_name", "adjust_master_effect_param_by_name"} else None
+    if target is not None and not is_continuous(target[1]):
+        return action
     data = dict(action["data"])
+    if plugin_contract and (target is None or defer_parameter) and action["type"] in {"adjust_effect_param_by_name", "adjust_master_effect_param_by_name"}:
+        # A preceding ensure action can create this plugin during execution.
+        # Apply the scalar there, once the engine exposes its real coordinates.
+        # Never assume a zero/default parameter value or multiply raw Hz/dB.
+        data["refinement_scale"] = max(0.0, min(3.0, scale))
+        return {"type": action["type"], "data": data}
+    bus = bus_target(project, action) if plugin_contract else None
+    if bus is not None and action["type"] in {"set_row_gain", "set_row_pan"}:
+        key = "gain" if action["type"].endswith("gain") else "pan"
+        current = bus.get(key)
+        if not isinstance(current, (int, float)):
+            return action
+        mode = data.get("mode", "delta")
+        value = data.get("value") if mode == "set" else data.get("delta")
+        if not isinstance(value, (int, float)):
+            return action
+        delta = value - current if mode == "set" else value
+        data.update(mode="set", value=max(0.0, min(3.0 if key == "gain" else 1.0, current + delta * scale)))
+        data.pop("delta", None)
+        return {"type": action["type"], "data": data}
+    if plugin_contract and target is not None:
+        parameter = target[1]
+        proposal = proposed_value(parameter, data)
+        if proposal is None:
+            return action
+        current = float(parameter["value"])
+        data["value"] = max(parameter["min"], min(parameter["max"], current + (proposal - current) * scale))
+        data["mode"] = "set"
+        for key in ("value_norm", "delta_norm", "delta", "refinement_scale"):
+            data.pop(key, None)
+        return {"type": action["type"], "data": data}
     mode = str(data.get("mode") or "delta").strip().lower()
 
     def scale_key(key: str) -> None:
