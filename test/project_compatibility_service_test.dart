@@ -431,6 +431,117 @@ void main() {
     },
   );
 
+  test(
+    'unready plugin catalog is not treated as every plugin being available',
+    () {
+      expect(
+        ProjectCompatibilityService.isPlayableOnThisDevice(
+          sourceProject: _sourceProject(),
+          usingCompatibleAudio: false,
+          canHostExternalPlugins: true,
+          hasPlugin: (_) => true,
+          pluginCatalogReady: false,
+        ),
+        isFalse,
+      );
+      expect(
+        ProjectCompatibilityService.isPlayableOnThisDevice(
+          sourceProject: _sourceProject(),
+          usingCompatibleAudio: true,
+          canHostExternalPlugins: true,
+          hasPlugin: (_) => true,
+          pluginCatalogReady: false,
+        ),
+        isTrue,
+      );
+    },
+  );
+
+  test(
+    'unready catalog still prefers a current sidecar and blocks raw plugin source',
+    () async {
+      final projectDir = await Directory.systemTemp.createTemp(
+        'mixroom_compat_unready_',
+      );
+      try {
+        final source = _sourceProject();
+        await File(
+          p.join(projectDir.path, 'project.json'),
+        ).writeAsString(_json(source));
+        final openedSource = await ProjectCompatibilityService.resolveForOpen(
+          projectDir: projectDir,
+          sourceProject: source,
+          canHostExternalPlugins: true,
+          hasPlugin: (_) => true,
+          pluginCatalogReady: false,
+        );
+        expect(openedSource.usingCompatibleAudio, isFalse);
+        expect(openedSource.playableOnThisDevice, isFalse);
+
+        final dependencies = ProjectCompatibilityService.inspect(
+          source,
+        ).dependencies;
+        final audioDir = ProjectCompatibilityService.audioDirectoryFor(
+          projectDir,
+        );
+        await audioDir.create(recursive: true);
+        final artifacts = <ProjectCompatibilityArtifact>[];
+        var referenceMixFileName = '';
+        for (var index = 0; index < dependencies.length; index++) {
+          final fileName = 'compatibility/audio/frozen_$index.wav';
+          await File(p.join(projectDir.path, fileName)).writeAsBytes(<int>[1]);
+          if (dependencies[index].scope == ProjectCompatibilityScope.master) {
+            referenceMixFileName = fileName;
+          }
+          artifacts.add(
+            ProjectCompatibilityArtifact(
+              dependencyKey: dependencies[index].key,
+              fileName: fileName,
+              fingerprint: ProjectCompatibilityService.artifactFingerprint(
+                source,
+                dependencies[index],
+              ),
+              trackJson:
+                  dependencies[index].scope ==
+                      ProjectCompatibilityScope.instrument
+                  ? <String, dynamic>{
+                      'fileName': fileName,
+                      'label': 'Frozen synth',
+                      'clipType': 'audio',
+                      'rowIndex': 0,
+                      'clipId': 'clip-1',
+                    }
+                  : null,
+              replacementRows:
+                  dependencies[index].scope ==
+                      ProjectCompatibilityScope.instrument
+                  ? const <int>[0]
+                  : const <int>[],
+            ),
+          );
+        }
+        await ProjectCompatibilityService.writeCompatibleCopy(
+          projectDir: projectDir,
+          sourceProject: source,
+          artifacts: artifacts,
+          referenceMixFileName: referenceMixFileName,
+        );
+
+        final openedSidecar = await ProjectCompatibilityService.resolveForOpen(
+          projectDir: projectDir,
+          sourceProject: source,
+          canHostExternalPlugins: true,
+          hasPlugin: (_) => true,
+          pluginCatalogReady: false,
+        );
+        expect(openedSidecar.usingCompatibleAudio, isTrue);
+        expect(openedSidecar.playableOnThisDevice, isTrue);
+      } finally {
+        await projectDir.delete(recursive: true);
+      }
+    },
+  );
+
   test('stale sidecar on a plugin-less host is not a playable open', () async {
     final projectDir = await Directory.systemTemp.createTemp(
       'mixroom_compat_stale_',

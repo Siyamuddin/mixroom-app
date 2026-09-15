@@ -14296,37 +14296,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final loadResult = await _projectPersistence.loadProjectState(
         _projectDir,
       );
-      // Project opening is never allowed to scan every third-party plug-in
-      // installed on the machine. It uses the persisted catalog only; a full
-      // scan is an explicit Plug-in Settings action. This keeps an unrelated
-      // unhealthy VST from preventing a project from opening.
+      // Project opening never force-rescans every installed plug-in. A full
+      // rescan stays an explicit Plug-in Settings action. If this Mac has
+      // never loaded a catalog, a cached scan is used so missing plugins
+      // are not treated as available.
+      final sourceInspect = ProjectCompatibilityService.inspect(
+        loadResult.projectState,
+      );
+      var pluginCatalogReady =
+          !_platformCapabilities.externalPluginHosting ||
+          _desktopPluginCatalogLoadAttempted;
+      if (_platformCapabilities.externalPluginHosting &&
+          !pluginCatalogReady &&
+          sourceInspect.needsPluginAudio) {
+        await _scanDesktopPlugins();
+        pluginCatalogReady = _desktopPluginCatalogLoadAttempted;
+      }
       final compatibilityOpen =
           await ProjectCompatibilityService.resolveForOpen(
             projectDir: _projectDir,
             sourceProject: loadResult.projectState,
             canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
             hasPlugin: _isKnownDesktopPluginId,
+            pluginCatalogReady: pluginCatalogReady,
           );
-      final sourceInspect = ProjectCompatibilityService.inspect(
-        loadResult.projectState,
-      );
       _sourceRequiresUnhostedPlugins =
           sourceInspect.needsPluginAudio &&
           (!_platformCapabilities.externalPluginHosting ||
-              (_desktopPluginCatalogLoadAttempted &&
-                  sourceInspect.dependencies.any(
-                    (dependency) =>
-                        !_isKnownDesktopPluginId(dependency.pluginId),
-                  )));
+              sourceInspect.dependencies.any(
+                (dependency) => !_isKnownDesktopPluginId(dependency.pluginId),
+              ));
       final playableOnThisDevice =
           ProjectCompatibilityService.isPlayableOnThisDevice(
             sourceProject: loadResult.projectState,
             usingCompatibleAudio: compatibilityOpen.usingCompatibleAudio,
             canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
             hasPlugin: _isKnownDesktopPluginId,
-            pluginCatalogReady:
-                !_platformCapabilities.externalPluginHosting ||
-                _desktopPluginCatalogLoadAttempted,
+            pluginCatalogReady: pluginCatalogReady,
           );
       if (!playableOnThisDevice) {
         _loadedOnce = false;

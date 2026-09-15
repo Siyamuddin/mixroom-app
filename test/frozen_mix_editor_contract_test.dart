@@ -38,6 +38,8 @@ void main() {
     expect(load, contains('_queuePluginMixUnavailableNotice()'));
     expect(load, contains('_loadedOnce = false'));
     expect(load, contains('_pluginMixOpenBlocked = true'));
+    expect(load, contains('pluginCatalogReady:'));
+    expect(load, contains('_scanDesktopPlugins()'));
     expect(
       load.indexOf('isPlayableOnThisDevice('),
       lessThan(load.indexOf('_restoreChatHistoryFromProjectJson(json)')),

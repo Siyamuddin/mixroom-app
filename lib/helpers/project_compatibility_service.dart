@@ -1013,7 +1013,7 @@ class ProjectCompatibilityService {
     final inspected = inspect(sourceProject);
     if (!inspected.needsPluginAudio) return true;
     if (!canHostExternalPlugins) return false;
-    if (!pluginCatalogReady) return true;
+    if (!pluginCatalogReady) return false;
     return inspected.dependencies.every(
       (dependency) => hasPlugin(dependency.pluginId),
     );
@@ -1024,11 +1024,13 @@ class ProjectCompatibilityService {
     required Map<String, dynamic> sourceProject,
     required bool canHostExternalPlugins,
     required bool Function(String pluginId) hasPlugin,
+    bool pluginCatalogReady = true,
   }) async {
     final manifest = await readManifest(projectDir);
     final sourceFingerprintValue = sourceFingerprint(sourceProject);
     final allPluginsAvailable =
         canHostExternalPlugins &&
+        pluginCatalogReady &&
         (manifest?.dependencies.every(
               (dependency) => hasPlugin(dependency.pluginId),
             ) ??
@@ -1045,6 +1047,7 @@ class ProjectCompatibilityService {
           usingCompatibleAudio: usingCompatibleAudio,
           canHostExternalPlugins: canHostExternalPlugins,
           hasPlugin: hasPlugin,
+          pluginCatalogReady: pluginCatalogReady,
         ),
       );
     }
