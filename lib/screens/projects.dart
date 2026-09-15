@@ -865,6 +865,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
     final json = await ProjectManager.readProjectJson(renamedDir);
     ProjectManager.stripCloudSyncMetadata(json);
+    ProjectManager.stripFamilyMetadata(json);
+    ProjectManager.assignFreshProjectId(json);
     await ProjectManager.writeProjectJson(renamedDir, json);
     await _refresh();
     if (!mounted) return;
@@ -1332,6 +1334,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if ((project.cloudProjectId ?? '').trim() == cloud.projectId) {
         return project;
       }
+    }
+    for (final project in _projects) {
       if (project.projectId.trim().isNotEmpty &&
           project.projectId == cloud.localProjectId) {
         return project;
@@ -1346,11 +1350,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   CloudProjectAccessItem? _cloudProjectForLocal(ProjectMeta meta) {
     final cloudProjectId = (meta.cloudProjectId ?? '').trim();
+    if (cloudProjectId.isNotEmpty) {
+      for (final project in _cloudProjects) {
+        if (!project.isBundleStorage) continue;
+        if (project.projectId == cloudProjectId) {
+          return project;
+        }
+      }
+    }
     for (final project in _cloudProjects) {
       if (!project.isBundleStorage) continue;
-      if (cloudProjectId.isNotEmpty && project.projectId == cloudProjectId) {
-        return project;
-      }
       if (meta.projectId.trim().isNotEmpty &&
           project.localProjectId == meta.projectId) {
         return project;

@@ -24,6 +24,22 @@ void main() {
     expect(fork['projectId'], 'fork-999');
   });
 
+  test('assignFreshProjectId replaces both projectId keys', () {
+    final json = <String, dynamic>{
+      'projectId': 'old-id',
+      'project_id': 'legacy-id',
+      'name': 'Song',
+    };
+
+    final next = ProjectManager.assignFreshProjectId(json);
+
+    expect(next, isNotEmpty);
+    expect(next, isNot(equals('old-id')));
+    expect(json['projectId'], next);
+    expect(json.containsKey('project_id'), isFalse);
+    expect(json['name'], 'Song');
+  });
+
   test('manual duplicate strips family fields', () {
     final json = <String, dynamic>{
       'name': 'Night Song Copy',

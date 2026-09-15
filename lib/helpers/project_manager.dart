@@ -452,8 +452,7 @@ class ProjectManager {
     stripCloudSyncMetadata(duplicateJson);
     stripFamilyMetadata(duplicateJson);
     duplicateJson["name"] = p.basename(duplicateDir.path);
-    duplicateJson["projectId"] = _nextProjectId();
-    duplicateJson.remove("project_id");
+    assignFreshProjectId(duplicateJson);
     duplicateJson["createdAt"] = now;
     duplicateJson["lastOpenedAt"] = now;
     await writeProjectJson(duplicateDir, duplicateJson);
@@ -507,14 +506,19 @@ class ProjectManager {
     return (jsonDecode(await f.readAsString()) as Map<String, dynamic>);
   }
 
+  static String assignFreshProjectId(Map<String, dynamic> json) {
+    final next = _nextProjectId();
+    json['projectId'] = next;
+    json.remove('project_id');
+    return next;
+  }
+
   static String ensureProjectIdInJson(Map<String, dynamic> json) {
     final existing = (json['projectId'] ?? json['project_id'] ?? '')
         .toString()
         .trim();
     if (existing.isNotEmpty) return existing;
-    final next = _nextProjectId();
-    json['projectId'] = next;
-    return next;
+    return assignFreshProjectId(json);
   }
 
   static Map<int, int> persistedRowOrderIndexById(

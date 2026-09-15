@@ -86,10 +86,39 @@ void main() {
     );
     expect(keepBoth, contains('canCreateNew'));
     expect(keepBoth, contains('stripCloudSyncMetadata'));
+    expect(keepBoth, contains('stripFamilyMetadata'));
+    expect(keepBoth, contains('assignFreshProjectId'));
     expect(keepBoth, contains('_downloadAndOpenNewCloudCopy('));
 
     final export = _methodBody(projects, 'Future<void> _startProjectExport(');
     expect(export, contains('checkCloud: false'));
+  });
+
+  test('cloud matching prefers an exact cloudProjectId over localProjectId', () {
+    final localStart = projects.indexOf(
+      'ProjectMeta? _localProjectForCloud(CloudProjectAccessItem cloud)',
+    );
+    final cloudStart = projects.indexOf(
+      'CloudProjectAccessItem? _cloudProjectForLocal(ProjectMeta meta)',
+    );
+    expect(localStart, greaterThanOrEqualTo(0));
+    expect(cloudStart, greaterThan(localStart));
+    final localForCloud = projects.substring(localStart, cloudStart);
+    expect(
+      localForCloud.indexOf('project.cloudProjectId'),
+      lessThan(localForCloud.indexOf('cloud.localProjectId')),
+    );
+
+    final nextMethod = projects.indexOf(
+      'List<_CloudProjectDestination> _availableCloudDestinations',
+      cloudStart,
+    );
+    expect(nextMethod, greaterThan(cloudStart));
+    final cloudForLocal = projects.substring(cloudStart, nextMethod);
+    expect(
+      cloudForLocal.indexOf('cloudProjectId.isNotEmpty'),
+      lessThan(cloudForLocal.indexOf('project.localProjectId == meta.projectId')),
+    );
   });
 
   test(
