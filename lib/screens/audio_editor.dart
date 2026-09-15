@@ -15788,8 +15788,55 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _discardListenOnlyEdit();
       return false;
     }
+    if (!await _canCreateFrozenMixCopy()) {
+      await _showFrozenMixProjectLimitDialog();
+      await _discardListenOnlyEdit();
+      return false;
+    }
     await _forkCompatibilityProjectForEdits();
     return !_usingCompatibilityAudio;
+  }
+
+  int _localProjectLimit() {
+    try {
+      final entitlementService = context.read<EntitlementService>();
+      return SubscriptionLimits.localProjectLimitForService(
+        isEnforcementEnabled: entitlementService.isEnforcementEnabled,
+        entitlement: entitlementService.entitlement,
+      );
+    } catch (_) {
+      return SubscriptionLimits.paidLocalProjects;
+    }
+  }
+
+  Future<bool> _canCreateFrozenMixCopy() async {
+    return ProjectManager.canCreateNew(maxProjects: _localProjectLimit());
+  }
+
+  Future<void> _showFrozenMixProjectLimitDialog() async {
+    if (!mounted) return;
+    final limit = _localProjectLimit();
+    if (limit == SubscriptionLimits.freeLocalProjects) {
+      await showAppUpgradeDialog(
+        context: context,
+        title: 'Upgrade for more projects',
+        message:
+            'Free includes 10 local projects. Export or delete one, or upgrade for more.',
+        icon: Icons.folder_off_outlined,
+        onUpgrade: widget.onUpgradeRequested,
+      );
+      return;
+    }
+    await showAppMessageDialog(
+      context: context,
+      title: L10n.translate(context, 'Project limit reached'),
+      message: L10n.translate(
+        context,
+        'Delete a project to create or import a new one.',
+      ),
+      buttonLabel: L10n.translate(context, 'OK'),
+      icon: Icons.folder_off_outlined,
+    );
   }
 
   Future<void> _discardListenOnlyEdit() async {

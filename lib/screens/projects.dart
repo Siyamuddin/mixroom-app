@@ -4936,11 +4936,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   int _localProjectLimit() {
     final entitlementService = context.read<EntitlementService>();
-    if (!entitlementService.isEnforcementEnabled) {
-      return SubscriptionLimits.paidLocalProjects;
-    }
-    return SubscriptionLimits.localProjectLimitFor(
-      entitlementService.entitlement,
+    return SubscriptionLimits.localProjectLimitForService(
+      isEnforcementEnabled: entitlementService.isEnforcementEnabled,
+      entitlement: entitlementService.entitlement,
     );
   }
 

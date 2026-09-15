@@ -58,6 +58,14 @@ class SubscriptionLimits {
     return isFreePlan(entitlement) ? freeLocalProjects : paidLocalProjects;
   }
 
+  static int localProjectLimitForService({
+    required bool isEnforcementEnabled,
+    required EntitlementSnapshot? entitlement,
+  }) {
+    if (!isEnforcementEnabled) return paidLocalProjects;
+    return localProjectLimitFor(entitlement);
+  }
+
   static int? rowCreationLimitFor(EntitlementSnapshot? entitlement) {
     return isFreePlan(entitlement) ? freeRowsPerProject : null;
   }

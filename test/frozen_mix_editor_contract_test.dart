@@ -71,6 +71,7 @@ void main() {
       ),
     );
     expect(prompt, contains('_discardListenOnlyEdit()'));
+    expect(prompt, contains('_canCreateFrozenMixCopy()'));
     expect(prompt, contains('_forkCompatibilityProjectForEdits()'));
   });
 

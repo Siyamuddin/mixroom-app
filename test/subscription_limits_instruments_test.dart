@@ -69,4 +69,21 @@ void main() {
       isTrue,
     );
   });
+
+  test('enforcement off uses the paid local project limit', () {
+    expect(
+      SubscriptionLimits.localProjectLimitForService(
+        isEnforcementEnabled: false,
+        entitlement: null,
+      ),
+      SubscriptionLimits.paidLocalProjects,
+    );
+    expect(
+      SubscriptionLimits.localProjectLimitForService(
+        isEnforcementEnabled: true,
+        entitlement: null,
+      ),
+      SubscriptionLimits.freeLocalProjects,
+    );
+  });
 }
