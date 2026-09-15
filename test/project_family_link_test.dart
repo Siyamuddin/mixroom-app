@@ -1,8 +1,97 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
+import 'package:path/path.dart' as p;
+
+Future<ProjectMeta> _writeProject(
+  Directory root,
+  String folder,
+  Map<String, dynamic> json,
+) async {
+  final dir = Directory(p.join(root.path, folder));
+  await dir.create(recursive: true);
+  await File(
+    p.join(dir.path, 'project.json'),
+  ).writeAsString(jsonEncode(json), flush: true);
+  return ProjectMeta(
+    dir: dir,
+    name: json['name'] as String,
+    projectId: json['projectId'] as String,
+    createdAt: DateTime(2026, 1, 1),
+    lastOpenedAt: DateTime(2026, 1, 1),
+    familyId: json['familyId'] as String?,
+    mixKind: json['mixKind'] as String?,
+    forkedFromProjectId: json['forkedFromProjectId'] as String?,
+  );
+}
 
 void main() {
+  test('relinkFrozenMixFamily moves only the family\'s frozen mixes', () async {
+    final root = await Directory.systemTemp.createTemp('mixroom_relink_');
+    try {
+      final frozenA = await _writeProject(root, 'a', <String, dynamic>{
+        'name': 'Song Frozen mix',
+        'projectId': 'fork-1',
+        'familyId': 'orig-1',
+        'mixKind': ProjectManager.mixKindFrozen,
+        'forkedFromProjectId': 'orig-1',
+      });
+      final frozenB = await _writeProject(root, 'b', <String, dynamic>{
+        'name': 'Song Frozen mix 2',
+        'projectId': 'fork-2',
+        'familyId': 'orig-1',
+        'mixKind': ProjectManager.mixKindFrozen,
+        'forkedFromProjectId': 'orig-1',
+      });
+      final otherFamily = await _writeProject(root, 'c', <String, dynamic>{
+        'name': 'Other Frozen mix',
+        'projectId': 'fork-3',
+        'familyId': 'orig-2',
+        'mixKind': ProjectManager.mixKindFrozen,
+        'forkedFromProjectId': 'orig-2',
+      });
+      final original = await _writeProject(root, 'd', <String, dynamic>{
+        'name': 'Song (this device)',
+        'projectId': 'new-1',
+        'familyId': 'new-1',
+        'mixKind': ProjectManager.mixKindOriginal,
+      });
+
+      final relinked = await ProjectManager.relinkFrozenMixFamily(
+        oldFamilyId: 'orig-1',
+        newProjectId: 'new-1',
+        projects: <ProjectMeta>[frozenA, frozenB, otherFamily, original],
+      );
+
+      expect(relinked, 2);
+      for (final meta in <ProjectMeta>[frozenA, frozenB]) {
+        final json = await ProjectManager.readProjectJson(meta.dir);
+        expect(json['familyId'], 'new-1');
+        expect(json['forkedFromProjectId'], 'new-1');
+        expect(json['mixKind'], ProjectManager.mixKindFrozen);
+        expect(json['projectId'], meta.projectId);
+      }
+      final untouched = await ProjectManager.readProjectJson(otherFamily.dir);
+      expect(untouched['familyId'], 'orig-2');
+      final originalJson = await ProjectManager.readProjectJson(original.dir);
+      expect(originalJson['mixKind'], ProjectManager.mixKindOriginal);
+
+      expect(
+        await ProjectManager.relinkFrozenMixFamily(
+          oldFamilyId: 'orig-1',
+          newProjectId: 'orig-1',
+          projects: <ProjectMeta>[frozenA],
+        ),
+        0,
+      );
+    } finally {
+      await root.delete(recursive: true);
+    }
+  });
+
   test('frozen mix fork writes family fields without grouping by name', () {
     final original = <String, dynamic>{
       'name': 'Night Song',

@@ -859,9 +859,25 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
     final json = await ProjectManager.readProjectJson(renamedDir);
     ProjectManager.stripCloudSyncMetadata(json);
-    ProjectManager.stripFamilyMetadata(json);
-    ProjectManager.assignFreshProjectId(json);
+    final oldFamilyId = (json['familyId'] ?? '').toString().trim();
+    final newProjectId = ProjectManager.assignFreshProjectId(json);
+    if (oldFamilyId.isEmpty || projectIsFrozenMix(local)) {
+      ProjectManager.stripFamilyMetadata(json);
+    } else {
+      // The local Original keeps its Frozen mixes: move the family onto the
+      // fresh id so the copies do not attach to the Cloud download instead.
+      json['familyId'] = newProjectId;
+      json['mixKind'] = ProjectManager.mixKindOriginal;
+      json.remove('forkedFromProjectId');
+    }
     await ProjectManager.writeProjectJson(renamedDir, json);
+    if (oldFamilyId.isNotEmpty && !projectIsFrozenMix(local)) {
+      await ProjectManager.relinkFrozenMixFamily(
+        oldFamilyId: oldFamilyId,
+        newProjectId: newProjectId,
+        projects: await ProjectManager.listProjects(),
+      );
+    }
     await _refresh();
     if (!mounted) return;
     await _downloadAndOpenNewCloudCopy(cloud);

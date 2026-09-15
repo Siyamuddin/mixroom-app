@@ -89,6 +89,23 @@ void main() {
     expect(keepBoth, contains('stripFamilyMetadata'));
     expect(keepBoth, contains('assignFreshProjectId'));
     expect(keepBoth, contains('_downloadAndOpenNewCloudCopy('));
+    // A local Original keeps its Frozen mixes: the family moves to the fresh
+    // id instead of being stripped, and the copies are pointed at it.
+    expect(keepBoth, contains("json['familyId'] = newProjectId"));
+    expect(
+      keepBoth,
+      contains("json['mixKind'] = ProjectManager.mixKindOriginal"),
+    );
+    expect(keepBoth, contains('relinkFrozenMixFamily('));
+    expect(keepBoth, contains('oldFamilyId: oldFamilyId'));
+    expect(keepBoth, contains('newProjectId: newProjectId'));
+    expect(
+      keepBoth.indexOf('relinkFrozenMixFamily('),
+      allOf(
+        greaterThan(keepBoth.indexOf('writeProjectJson(renamedDir, json)')),
+        lessThan(keepBoth.indexOf('_downloadAndOpenNewCloudCopy(')),
+      ),
+    );
 
     final export = _methodBody(projects, 'Future<void> _startProjectExport(');
     expect(export, contains('checkCloud: false'));

@@ -720,6 +720,33 @@ class ProjectManager {
     forkJson['forkedFromProjectId'] = originalProjectId;
   }
 
+  /// Points every local Frozen mix of [oldFamilyId] at [newProjectId].
+  ///
+  /// Used when the Original gets a fresh id (Keep both) so the copies made on
+  /// this device stay grouped with the local Original instead of the fresh
+  /// Cloud download. Returns how many Frozen mixes were rewritten.
+  static Future<int> relinkFrozenMixFamily({
+    required String oldFamilyId,
+    required String newProjectId,
+    required Iterable<ProjectMeta> projects,
+  }) async {
+    final from = oldFamilyId.trim();
+    final to = newProjectId.trim();
+    if (from.isEmpty || to.isEmpty || from == to) return 0;
+    var relinked = 0;
+    for (final meta in projects) {
+      if ((meta.familyId ?? '').trim() != from) continue;
+      if ((meta.mixKind ?? '').trim() != mixKindFrozen) continue;
+      final json = await readProjectJson(meta.dir);
+      json['familyId'] = to;
+      json['mixKind'] = mixKindFrozen;
+      json['forkedFromProjectId'] = to;
+      await writeProjectJson(meta.dir, json);
+      relinked++;
+    }
+    return relinked;
+  }
+
   static Directory audioDir(Directory dir) => _audioDir(dir);
 
   static bool isBundledDemoAssetPath(String assetPath) {
