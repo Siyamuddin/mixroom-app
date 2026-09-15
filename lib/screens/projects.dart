@@ -2404,7 +2404,24 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<_FamilyDeleteScope?> _showDeleteMixOrSongDialog({
     required String songName,
+    required int frozenMixCount,
   }) async {
+    final several = frozenMixCount > 1;
+    final question = several
+        ? L10n.translate(
+            context,
+            'Delete only this mix, or the original and {count} Frozen mixes?',
+          ).replaceAll('{count}', '$frozenMixCount')
+        : L10n.translate(
+            context,
+            'Delete only this mix, or the original and Frozen mix?',
+          );
+    final wholeSongLabel = several
+        ? L10n.translate(
+            context,
+            'Whole song ({count} projects)',
+          ).replaceAll('{count}', '${frozenMixCount + 1}')
+        : L10n.translate(context, 'Whole song');
     return showDialog<_FamilyDeleteScope>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.58),
@@ -2482,7 +2499,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '“$songName”. ${L10n.translate(dialogContext, 'Delete only this mix, or the original and Frozen mix?')}',
+                    '“$songName”. $question',
                     style: TextStyle(
                       fontFamily: 'Pretendard',
                       color: Colors.white.withValues(alpha: 0.84),
@@ -2561,7 +2578,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           borderRadius: BorderRadius.circular(16),
                         ),
                       ),
-                      child: Text(L10n.translate(dialogContext, 'Whole song')),
+                      child: Text(wholeSongLabel),
                     ),
                   ),
                 ],
@@ -3466,6 +3483,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (deletingOriginalWithSibling) {
       final scope = await _showDeleteMixOrSongDialog(
         songName: group.displayProject.name,
+        frozenMixCount: group.members.where(projectIsFrozenMix).length,
       );
       if (scope == null) return;
       if (scope == _FamilyDeleteScope.song) {

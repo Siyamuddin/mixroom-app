@@ -2028,6 +2028,9 @@ class L10n {
       'This mix': 'This mix',
       'Whole song': 'Whole song',
       'Delete song?': 'Delete song?',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          'Delete only this mix, or the original and {count} Frozen mixes?',
+      'Whole song ({count} projects)': 'Whole song ({count} projects)',
       'Delete only this mix, or the original and Frozen mix?':
           'Delete only this mix, or the original and Frozen mix?',
       'Mix not ready on this device': 'Mix not ready on this device',
@@ -4133,6 +4136,9 @@ class L10n {
       'This mix': '이 믹스만',
       'Whole song': '곡 전체',
       'Delete song?': '이 곡을 삭제할까요?',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          '이 믹스만 삭제할까요, 아니면 원본과 Frozen mix {count}개를 함께 삭제할까요?',
+      'Whole song ({count} projects)': '곡 전체 (프로젝트 {count}개)',
       'Delete only this mix, or the original and Frozen mix?':
           '이 믹스만 삭제할까요, 아니면 원본과 Frozen mix를 함께 삭제할까요?',
       'Mix not ready on this device': '이 기기에서는 믹스를 열 수 없습니다',
@@ -4893,6 +4899,9 @@ class L10n {
       'This mix': '仅此混音',
       'Whole song': '整首歌',
       'Delete song?': '要删除这首歌吗？',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          '只删除此混音，还是同时删除原版和 {count} 个 Frozen mix？',
+      'Whole song ({count} projects)': '整首歌（{count} 个项目）',
       'Delete only this mix, or the original and Frozen mix?':
           '只删除此混音，还是同时删除原版和 Frozen mix？',
       'Mix not ready on this device': '此设备上还不能打开该混音',
@@ -7169,6 +7178,9 @@ class L10n {
       'This mix': 'このミックスだけ',
       'Whole song': '曲全体',
       'Delete song?': 'この曲を削除しますか？',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          'このミックスだけ削除しますか？それともオリジナルと {count} 個の Frozen mix をまとめて削除しますか？',
+      'Whole song ({count} projects)': '曲全体（{count} 個のプロジェクト）',
       'Delete only this mix, or the original and Frozen mix?':
           'このミックスだけ削除しますか？それともオリジナルと Frozen mix をまとめて削除しますか？',
       'Mix not ready on this device': 'このデバイスではミックスを開けません',

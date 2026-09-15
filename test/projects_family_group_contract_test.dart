@@ -74,6 +74,35 @@ void main() {
       projects,
       contains('Delete only this mix, or the original and Frozen mix?'),
     );
+
+    // The dialog knows how many Frozen mixes go with the song and says so
+    // when there is more than one, on both the question and the red button.
+    expect(
+      delete,
+      contains(
+        'frozenMixCount: group.members.where(projectIsFrozenMix).length',
+      ),
+    );
+    final dialog = _methodBody(
+      projects,
+      'Future<_FamilyDeleteScope?> _showDeleteMixOrSongDialog({',
+    );
+    expect(
+      projects,
+      contains(
+        'Future<_FamilyDeleteScope?> _showDeleteMixOrSongDialog({\n'
+        '    required String songName,\n'
+        '    required int frozenMixCount,\n',
+      ),
+    );
+    expect(
+      dialog,
+      contains(
+        'Delete only this mix, or the original and {count} Frozen mixes?',
+      ),
+    );
+    expect(dialog, contains('Whole song ({count} projects)'));
+    expect(dialog, contains("replaceAll('{count}', '\${frozenMixCount + 1}')"));
   });
 
   test('cloud tiles stay one song and surface a local Frozen mix action', () {
