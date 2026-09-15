@@ -577,8 +577,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (local == null) continue;
       final currentCloudProjectId = (local.cloudProjectId ?? '').trim();
       if (currentCloudProjectId == cloud.projectId &&
-          local.cloudDocumentRevision == cloud.documentRevision &&
-          (local.cloudSourceFingerprint ?? '').trim().isNotEmpty) {
+          local.cloudDocumentRevision == cloud.documentRevision) {
         continue;
       }
       try {
@@ -593,11 +592,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             ? rawJsonCloudRevision.toInt()
             : int.tryParse((rawJsonCloudRevision ?? '').toString().trim());
         if (jsonCloudProjectId == cloud.projectId &&
-            jsonCloudRevision == cloud.documentRevision &&
-            (json['cloudSourceFingerprint'] ?? '')
-                .toString()
-                .trim()
-                .isNotEmpty) {
+            jsonCloudRevision == cloud.documentRevision) {
           continue;
         }
         // A cloud-list refresh only discovers that a newer revision exists.
@@ -614,8 +609,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         json['cloudSyncedAt'] = (cloud.updatedAt ?? DateTime.now())
             .toUtc()
             .toIso8601String();
-        json['cloudSourceFingerprint'] =
-            ProjectCompatibilityService.sourceFingerprint(json);
         await ProjectManager.writeProjectJson(local.dir, json);
       } catch (error) {
         debugPrint('Failed to persist local cloud project link: $error');
@@ -1844,7 +1837,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         icon = Icons.cloud_outlined;
         color = const Color(0xFFC7B8FF);
       case ProjectCloudFreshness.linkedUnknown:
-        baseLabel = L10n.translate(context, 'Not synced');
+        baseLabel = L10n.translate(context, 'Sync status unknown');
         icon = Icons.cloud_outlined;
         color = const Color(0xFFC7B8FF);
       case ProjectCloudFreshness.synced:

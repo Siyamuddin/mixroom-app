@@ -86,6 +86,10 @@ ProjectCloudFreshness resolveProjectCloudFreshness({
       latestCloudRevision != null &&
       (project.cloudDocumentRevision == null ||
           latestCloudRevision != project.cloudDocumentRevision);
+  if (syncedFingerprint.isEmpty) {
+    if (cloudAhead) return ProjectCloudFreshness.cloudAhead;
+    return ProjectCloudFreshness.linkedUnknown;
+  }
   if (cloudAhead && hasLocalChanges) return ProjectCloudFreshness.diverged;
   if (cloudAhead) return ProjectCloudFreshness.cloudAhead;
   if (hasLocalChanges) return ProjectCloudFreshness.localChanges;

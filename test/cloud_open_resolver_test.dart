@@ -135,6 +135,16 @@ void main() {
     },
   );
 
+  test('opens local when an older link has no fingerprint and revisions match', () {
+    expect(
+      resolveLocalOpenAction(
+        project: project(syncedFingerprint: ''),
+        cloud: cloud(revision: 4),
+      ),
+      LocalOpenAction.openLocal,
+    );
+  });
+
   test('classifies offline and timeout failures as network-unavailable', () {
     expect(isNetworkUnavailableError(const SocketException('offline')), isTrue);
     expect(

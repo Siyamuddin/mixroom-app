@@ -1992,6 +1992,7 @@ class L10n {
       'Cloud sync failed': 'Cloud sync failed',
       'Cloud synced': 'Cloud synced',
       'Not synced': 'Not synced',
+      'Sync status unknown': 'Sync status unknown',
       'Cloud update available': 'Cloud update available',
       'Downloading update…': 'Downloading update…',
       "Couldn't check for cloud updates. Opened the copy on this device.":
@@ -4094,6 +4095,7 @@ class L10n {
       'Cloud sync failed': '클라우드 동기화 실패',
       'Cloud synced': '클라우드 동기화 완료',
       'Not synced': '동기화되지 않음',
+      'Sync status unknown': '동기화 상태 알 수 없음',
       'Cloud update available': '클라우드 업데이트 있음',
       'Downloading update…': '업데이트 다운로드 중…',
       "Couldn't check for cloud updates. Opened the copy on this device.":
@@ -7123,6 +7125,7 @@ class L10n {
       'Cloud sync failed': 'クラウド同期に失敗しました',
       'Cloud synced': 'クラウド同期済み',
       'Not synced': '未同期',
+      'Sync status unknown': '同期状態不明',
       'Cloud update available': 'クラウド更新あり',
       'Downloading update…': '更新をダウンロード中…',
       "Couldn't check for cloud updates. Opened the copy on this device.":

@@ -122,6 +122,20 @@ void main() {
   });
 
   test(
+    'cloud list refresh does not stamp a local fingerprint as synced',
+    () {
+      final persist = _methodBody(
+        projects,
+        'Future<void> _persistCloudLinksForLocalMatches() async',
+      );
+      expect(persist, isNot(contains('cloudSourceFingerprint')));
+      expect(persist, isNot(contains('sourceFingerprint(')));
+      expect(persist, contains("json['cloudProjectId'] = cloud.projectId"));
+      expect(projects, contains("'Sync status unknown'"));
+    },
+  );
+
+  test(
     'cloud tab reuses the local open dispatcher instead of detaching a stale copy',
     () {
       final openCloud = _methodBody(
