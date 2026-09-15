@@ -138,7 +138,7 @@ void main() {
   test('frozen mix fork writes a family link and never auto-syncs', () {
     final fork = _methodBody(
       editor,
-      'Future<void> _forkCompatibilityProjectForEdits() async',
+      'Future<bool> _forkCompatibilityProjectForEdits() async',
     );
     expect(fork, contains('applyFrozenMixFamily('));
     expect(fork, contains('frozenMixDisplayName('));
@@ -169,5 +169,59 @@ void main() {
       projectManager.indexOf('static Future<Directory> duplicateProject('),
       lessThan(projectManager.indexOf('stripFamilyMetadata(duplicateJson)')),
     );
+  });
+
+  test('a failed frozen mix fork cleans up and drops the queued edits', () {
+    final fork = _methodBody(
+      editor,
+      'Future<bool> _forkCompatibilityProjectForEdits() async',
+    );
+    // The half-made copy is removed only while the editor still points at
+    // the original; once switched, the copy is the live project.
+    expect(fork, contains('} catch (e, stack) {'));
+    expect(fork, contains('if (!switched && copyDir != null)'));
+    expect(fork, contains('copyDir.delete(recursive: true)'));
+    expect(
+      fork.indexOf('copyDir = duplicated;'),
+      allOf(
+        greaterThan(fork.indexOf('duplicateProject(')),
+        lessThan(fork.indexOf('renameProject(')),
+      ),
+    );
+    expect(
+      fork.indexOf('switched = true;'),
+      greaterThan(fork.indexOf('_projectDir = forkDir;')),
+    );
+
+    final prompt = _methodBody(
+      editor,
+      'Future<bool> _promptFrozenMixCopyForEdits() async',
+    );
+    final forkCall = prompt.indexOf(
+      'final forked = await _forkCompatibilityProjectForEdits();',
+    );
+    expect(forkCall, greaterThanOrEqualTo(0));
+    expect(
+      prompt.indexOf('Could not make a Frozen mix.'),
+      greaterThan(forkCall),
+    );
+    expect(
+      prompt.lastIndexOf('_discardListenOnlyEdit()'),
+      greaterThan(forkCall),
+    );
+
+    // Both unawaited entry points swallow errors and drop the queued actions.
+    for (final signature in [
+      'Future<void> _confirmFrozenMixCopyForEditsAndReplay() async',
+      'Future<void> _scheduleListenOnlyEditAutosave({',
+    ]) {
+      final body = _methodBody(editor, signature);
+      expect(body, contains('} catch (e, stack) {'), reason: signature);
+      expect(
+        body.lastIndexOf('_undoManager.dropPendingGatedActions()'),
+        greaterThan(body.indexOf('} catch (e, stack) {')),
+        reason: signature,
+      );
+    }
   });
 }

@@ -15354,13 +15354,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Future<void> _forkCompatibilityProjectForEdits() async {
-    if (!_usingCompatibilityAudio || _compatibilityForkInFlight) return;
+  /// Makes a Frozen mix copy of the listen-only project and switches the
+  /// editor to it. Returns true only when the editor now points at the copy.
+  /// On failure the half-made copy is removed and the editor stays on the
+  /// listen-only original.
+  Future<bool> _forkCompatibilityProjectForEdits() async {
+    if (!_usingCompatibilityAudio || _compatibilityForkInFlight) return false;
     _compatibilityForkInFlight = true;
+    Directory? copyDir;
+    var switched = false;
     try {
       final oldProjectDir = _projectDir;
       final frozenMixIndex = await _nextFrozenMixIndexForFamily(oldProjectDir);
       final duplicated = await ProjectManager.duplicateProject(oldProjectDir);
+      copyDir = duplicated;
       final forkDir = await ProjectManager.renameProject(
         duplicated,
         ProjectManager.frozenMixDisplayName(
@@ -15368,6 +15375,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           index: frozenMixIndex,
         ),
       );
+      copyDir = forkDir;
       final originalJson = await ProjectManager.readProjectJson(oldProjectDir);
       final forkJson = await ProjectManager.readProjectJson(forkDir);
       ProjectManager.applyFrozenMixFamily(
@@ -15382,6 +15390,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         newProjectDir: forkDir,
       );
       _projectDir = forkDir;
+      switched = true;
       _projectName = (forkJson['name'] ?? p.basename(forkDir.path))
           .toString()
           .trim();
@@ -15418,6 +15427,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ),
         );
       }
+      return true;
+    } catch (e, stack) {
+      debugPrint('Frozen mix fork failed: $e\n$stack');
+      if (!switched && copyDir != null) {
+        try {
+          if (await copyDir.exists()) {
+            await copyDir.delete(recursive: true);
+          }
+          ProjectManager.notifyProjectLibraryChanged();
+        } catch (cleanupError) {
+          debugPrint('Frozen mix fork cleanup failed: $cleanupError');
+        }
+      }
+      return switched;
     } finally {
       _compatibilityForkInFlight = false;
     }
@@ -15798,27 +15821,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _confirmFrozenMixCopyForEditsAndReplay() async {
-    final allowed = await _confirmFrozenMixCopyForEdits();
-    if (!allowed || !mounted) return;
-    final pending = _undoManager.takePendingGatedActions();
-    for (final action in pending) {
-      await _undoManager.execute(action);
+    // Called unawaited from the mutation gate: nothing may escape.
+    try {
+      final allowed = await _confirmFrozenMixCopyForEdits();
+      if (!allowed || !mounted) {
+        _undoManager.dropPendingGatedActions();
+        return;
+      }
+      final pending = _undoManager.takePendingGatedActions();
+      for (final action in pending) {
+        await _undoManager.execute(action);
+      }
+    } catch (e, stack) {
+      debugPrint('Listen-only edit replay failed: $e\n$stack');
+      _undoManager.dropPendingGatedActions();
     }
   }
 
   Future<void> _scheduleListenOnlyEditAutosave({
     required Duration debounce,
   }) async {
-    final allowed = await _confirmFrozenMixCopyForEdits();
-    if (!allowed || !mounted || !_loadedOnce || _isProjectLoading) return;
-    if (_isRecording ||
-        _recordStartVisualPending ||
-        _isMidiClipRecording ||
-        _recordTransitionInFlight) {
-      _projectAutosaveCoordinator.markDirty();
-      return;
+    // Called unawaited from _markProjectDirty: nothing may escape.
+    try {
+      final allowed = await _confirmFrozenMixCopyForEdits();
+      if (!allowed || !mounted || !_loadedOnce || _isProjectLoading) return;
+      if (_isRecording ||
+          _recordStartVisualPending ||
+          _isMidiClipRecording ||
+          _recordTransitionInFlight) {
+        _projectAutosaveCoordinator.markDirty();
+        return;
+      }
+      _projectAutosaveCoordinator.schedule(debounce: debounce);
+    } catch (e, stack) {
+      debugPrint('Listen-only edit prompt failed: $e\n$stack');
+      _undoManager.dropPendingGatedActions();
     }
-    _projectAutosaveCoordinator.schedule(debounce: debounce);
   }
 
   Future<bool> _confirmFrozenMixCopyForEdits() async {
@@ -15852,8 +15890,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _discardListenOnlyEdit();
       return false;
     }
-    await _forkCompatibilityProjectForEdits();
-    return !_usingCompatibilityAudio;
+    final forked = await _forkCompatibilityProjectForEdits();
+    if (forked && !_usingCompatibilityAudio) return true;
+    // The copy could not be made. Treat it like "No": drop the queued
+    // actions and put the editor back on the prepared projection.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            L10n.translate(context, 'Could not make a Frozen mix.'),
+          ),
+        ),
+      );
+    }
+    await _discardListenOnlyEdit();
+    return false;
   }
 
   int _localProjectLimit() {
@@ -19600,29 +19651,30 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Skipping project save because the project never loaded.');
       return;
     }
-    if (_usingCompatibilityAudio) {
-      // Listen-only: the prepared projection on disk is the source of truth.
-      // Unsaved in-memory edits can only be kept by making a Frozen mix.
-      if (_listenOnlyInMemoryDirty) {
-        final forked = await _confirmFrozenMixCopyForEdits();
-        if (!forked || !mounted) return;
-      } else {
-        if (mounted && showSnackBar) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                L10n.translate(
-                  context,
-                  'Listen only. Make a Frozen mix to save changes.',
+    try {
+      if (_usingCompatibilityAudio) {
+        // Listen-only: the prepared projection on disk is the source of
+        // truth. Unsaved in-memory edits can only be kept by making a
+        // Frozen mix.
+        if (_listenOnlyInMemoryDirty) {
+          final forked = await _confirmFrozenMixCopyForEdits();
+          if (!forked || !mounted) return;
+        } else {
+          if (mounted && showSnackBar) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  L10n.translate(
+                    context,
+                    'Listen only. Make a Frozen mix to save changes.',
+                  ),
                 ),
               ),
-            ),
-          );
+            );
+          }
+          return;
         }
-        return;
       }
-    }
-    try {
       await _projectAutosaveCoordinator.flush();
       await _promoteCompatibilityAudioIntoCurrentProject();
       await _normalizeProjectAudioAssetsForCheckpoint();
