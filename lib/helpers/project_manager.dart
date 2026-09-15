@@ -1290,6 +1290,10 @@ class ProjectBundleImport {
         jsonMap['createdAt'] = localJson['createdAt'];
       }
       jsonMap['lastOpenedAt'] = DateTime.now().millisecondsSinceEpoch;
+      // Frozen mixes never sync, so the family link between this project and
+      // a Frozen mix made on this device only exists here. Keep it, otherwise
+      // the Cloud copy would split the pair back into two unrelated projects.
+      _preserveLocalFamilyMetadata(localJson: localJson, incoming: jsonMap);
       ProjectManager.stripCloudSyncMetadata(jsonMap);
 
       await _swapDirectory(incoming: stagedAudioDir, dest: liveAudioDir);
@@ -1353,6 +1357,29 @@ class ProjectBundleImport {
         await output.close();
         item.clear();
       }
+    }
+  }
+
+  static void _preserveLocalFamilyMetadata({
+    required Map<String, dynamic> localJson,
+    required Map<String, dynamic> incoming,
+  }) {
+    final localFamilyId = (localJson['familyId'] ?? '').toString().trim();
+    if (localFamilyId.isEmpty) return;
+    incoming['familyId'] = localFamilyId;
+    final localMixKind = (localJson['mixKind'] ?? '').toString().trim();
+    if (localMixKind.isNotEmpty) {
+      incoming['mixKind'] = localMixKind;
+    } else {
+      incoming.remove('mixKind');
+    }
+    final localForkedFrom = (localJson['forkedFromProjectId'] ?? '')
+        .toString()
+        .trim();
+    if (localForkedFrom.isNotEmpty) {
+      incoming['forkedFromProjectId'] = localForkedFrom;
+    } else {
+      incoming.remove('forkedFromProjectId');
     }
   }
 

@@ -362,6 +362,51 @@ void main() {
     },
   );
 
+  test(
+    'keeps the local Frozen mix family link across a cloud update',
+    () async {
+      final sourceDir = await _createProjectWithTone(
+        name: 'Source Mix',
+        fileName: 'tone.wav',
+        label: 'Tone',
+        bytes: _buildTestWavBytes(),
+      );
+      final destDir = await _createProjectWithTone(
+        name: 'Local Mix',
+        fileName: 'old.wav',
+        label: 'Old',
+        bytes: _buildTestWavBytes(frequencyHz: 220.0),
+      );
+      // A Frozen mix was made on this device, so the local original carries
+      // the family link. The cloud copy coming from another device does not.
+      final localJson = await ProjectManager.readProjectJson(destDir);
+      final localProjectId = ProjectManager.ensureProjectIdInJson(localJson);
+      localJson['familyId'] = localProjectId;
+      localJson['mixKind'] = ProjectManager.mixKindOriginal;
+      await ProjectManager.writeProjectJson(destDir, localJson);
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: sourceDir,
+        audioMode: BundleAudioMode.preserveAsIs,
+      );
+
+      await ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: destDir,
+        bundleFile: File(bundlePath),
+        audioStrategy: ImportAudioStrategy.keepAsBundled,
+      );
+
+      final destJson = await ProjectManager.readProjectJson(destDir);
+      expect(destJson['projectId'], localProjectId);
+      expect(destJson['familyId'], localProjectId);
+      expect(destJson['mixKind'], ProjectManager.mixKindOriginal);
+      expect(destJson.containsKey('forkedFromProjectId'), isFalse);
+      final tracks =
+          (destJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
+      expect(tracks.single['fileName'], 'tone.wav');
+    },
+  );
+
   test('failed ffmpeg conversion leaves the live project unchanged', () async {
     final sourceBytes = _buildTestWavBytes();
     final sourceDir = await _createProjectWithTone(
