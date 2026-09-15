@@ -3,7 +3,9 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mixroom/helpers/audio_project_persistence.dart';
 import 'package:mixroom/helpers/project_manager.dart';
+import 'package:mixroom/helpers/project_undo_history_store.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
@@ -469,5 +471,95 @@ void main() {
       ).exists(),
       isFalse,
     );
+  });
+
+  test(
+    'a committed update clears stale undo history and recovery snapshots',
+    () async {
+      final sourceDir = await _createProjectWithTone(
+        name: 'Source Mix',
+        fileName: 'tone.wav',
+        label: 'Tone',
+        bytes: _buildTestWavBytes(),
+      );
+      final destDir = await _createProjectWithTone(
+        name: 'Local Mix',
+        fileName: 'old.wav',
+        label: 'Old',
+        bytes: _buildTestWavBytes(frequencyHz: 220.0),
+      );
+      final undoDir = ProjectUndoHistoryStore.directoryFor(destDir);
+      final recoveryDir = JsonAudioProjectPersistence.recoveryDirectoryFor(
+        destDir,
+      );
+      expect(p.basename(undoDir.path), '.mixroom_undo');
+      expect(p.basename(recoveryDir.path), '.mixroom_recovery');
+      await undoDir.create(recursive: true);
+      await File(p.join(undoDir.path, 'history.json')).writeAsString('{}');
+      await Directory(
+        p.join(recoveryDir.path, 'autosave'),
+      ).create(recursive: true);
+      await File(
+        p.join(recoveryDir.path, 'autosave', 'snap.json'),
+      ).writeAsString('{}');
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: sourceDir,
+        audioMode: BundleAudioMode.preserveAsIs,
+      );
+
+      await ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: destDir,
+        bundleFile: File(bundlePath),
+        audioStrategy: ImportAudioStrategy.keepAsBundled,
+      );
+
+      // Both describe the old project and could put it back over the new one.
+      expect(await undoDir.exists(), isFalse);
+      expect(await recoveryDir.exists(), isFalse);
+    },
+  );
+
+  test('a failed update keeps undo history and recovery snapshots', () async {
+    final sourceDir = await _createProjectWithTone(
+      name: 'Source Mix',
+      fileName: 'tone.wav',
+      label: 'Tone',
+      bytes: _buildTestWavBytes(),
+    );
+    final destDir = await _createProjectWithTone(
+      name: 'Local Mix',
+      fileName: 'old.wav',
+      label: 'Old',
+      bytes: _buildTestWavBytes(frequencyHz: 220.0),
+    );
+    final undoDir = ProjectUndoHistoryStore.directoryFor(destDir);
+    final recoveryDir = JsonAudioProjectPersistence.recoveryDirectoryFor(
+      destDir,
+    );
+    await undoDir.create(recursive: true);
+    final undoMarker = File(p.join(undoDir.path, 'history.json'));
+    await undoMarker.writeAsString('{"keep":true}');
+    await recoveryDir.create(recursive: true);
+    final recoveryMarker = File(p.join(recoveryDir.path, 'snap.json'));
+    await recoveryMarker.writeAsString('{"keep":true}');
+
+    final bundlePath = await ProjectBundle.exportMixroomBundle(
+      projectDir: sourceDir,
+      audioMode: BundleAudioMode.flacLossless,
+    );
+    fakeFfmpegKit.failNext();
+
+    await expectLater(
+      ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: destDir,
+        bundleFile: File(bundlePath),
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      ),
+      throwsA(isA<ProcessException>()),
+    );
+
+    expect(await undoMarker.readAsString(), '{"keep":true}');
+    expect(await recoveryMarker.readAsString(), '{"keep":true}');
   });
 }

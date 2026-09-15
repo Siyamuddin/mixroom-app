@@ -22,19 +22,20 @@ class ProjectUndoSnapshotRecord {
   final Map<String, dynamic>? command;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'description': description,
-        'timestampMs': timestampMs,
-        'before': before,
-        'after': after,
-        if (command != null) 'command': command,
-      };
+    'id': id,
+    'description': description,
+    'timestampMs': timestampMs,
+    'before': before,
+    'after': after,
+    if (command != null) 'command': command,
+  };
 
   factory ProjectUndoSnapshotRecord.fromJson(Map<String, dynamic> json) {
     return ProjectUndoSnapshotRecord(
       id: (json['id'] ?? '').toString(),
       description: (json['description'] ?? '').toString(),
-      timestampMs: (json['timestampMs'] as num?)?.toInt() ??
+      timestampMs:
+          (json['timestampMs'] as num?)?.toInt() ??
           DateTime.now().millisecondsSinceEpoch,
       before: ((json['before'] as Map?) ?? const <String, dynamic>{})
           .cast<String, dynamic>(),
@@ -46,10 +47,7 @@ class ProjectUndoSnapshotRecord {
 }
 
 class ProjectUndoHistorySnapshot {
-  const ProjectUndoHistorySnapshot({
-    required this.undo,
-    required this.redo,
-  });
+  const ProjectUndoHistorySnapshot({required this.undo, required this.redo});
 
   final List<ProjectUndoSnapshotRecord> undo;
   final List<ProjectUndoSnapshotRecord> redo;
@@ -62,12 +60,14 @@ class ProjectUndoHistorySnapshot {
     return <String, dynamic>{
       'schemaVersion': 1,
       'savedAt': DateTime.now().millisecondsSinceEpoch,
-      'undo': ProjectUndoHistoryStore.tailRecords(undo, maxEntries)
-          .map((record) => record.toJson())
-          .toList(),
-      'redo': ProjectUndoHistoryStore.tailRecords(redo, maxEntries)
-          .map((record) => record.toJson())
-          .toList(),
+      'undo': ProjectUndoHistoryStore.tailRecords(
+        undo,
+        maxEntries,
+      ).map((record) => record.toJson()).toList(),
+      'redo': ProjectUndoHistoryStore.tailRecords(
+        redo,
+        maxEntries,
+      ).map((record) => record.toJson()).toList(),
     };
   }
 
@@ -144,9 +144,9 @@ class ProjectUndoHistoryStore {
       if (item is Map<String, dynamic>) {
         output.add(ProjectUndoSnapshotRecord.fromJson(item));
       } else if (item is Map) {
-        output.add(ProjectUndoSnapshotRecord.fromJson(
-          item.cast<String, dynamic>(),
-        ));
+        output.add(
+          ProjectUndoSnapshotRecord.fromJson(item.cast<String, dynamic>()),
+        );
       }
     }
     return output;
@@ -160,9 +160,12 @@ class ProjectUndoHistoryStore {
     return records.sublist(records.length - maxEntries);
   }
 
-  Directory _historyDir(Directory projectDir) {
+  /// Folder that holds the persisted undo history of [projectDir].
+  static Directory directoryFor(Directory projectDir) {
     return Directory(p.join(projectDir.path, _dirName));
   }
+
+  Directory _historyDir(Directory projectDir) => directoryFor(projectDir);
 
   File _manifestFile(Directory projectDir) {
     return File(p.join(_historyDir(projectDir).path, _manifestName));

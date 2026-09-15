@@ -5,16 +5,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-enum AudioProjectSaveMode {
-  autosave,
-  checkpoint,
-}
+enum AudioProjectSaveMode { autosave, checkpoint }
 
-enum AudioProjectLoadSource {
-  primary,
-  autosaveBackup,
-  checkpointBackup,
-}
+enum AudioProjectLoadSource { primary, autosaveBackup, checkpointBackup }
 
 class AudioProjectRecoverySnapshot {
   const AudioProjectRecoverySnapshot({
@@ -138,13 +131,13 @@ class JsonAudioProjectPersistence implements AudioProjectPersistence {
     );
   }
 
-  Directory _recoveryDir(
-    Directory projectDir,
-    AudioProjectSaveMode mode,
-  ) {
-    return Directory(
-      p.join(projectDir.path, _recoveryDirName, mode.name),
-    );
+  /// Folder that holds every recovery snapshot of [projectDir].
+  static Directory recoveryDirectoryFor(Directory projectDir) {
+    return Directory(p.join(projectDir.path, _recoveryDirName));
+  }
+
+  Directory _recoveryDir(Directory projectDir, AudioProjectSaveMode mode) {
+    return Directory(p.join(recoveryDirectoryFor(projectDir).path, mode.name));
   }
 
   Future<List<AudioProjectRecoverySnapshot>> _listRecoverySnapshots(
@@ -202,9 +195,7 @@ class JsonAudioProjectPersistence implements AudioProjectPersistence {
         .where((entity) => entity is File)
         .cast<File>()
         .toList();
-    files.sort(
-      (a, b) => b.path.toLowerCase().compareTo(a.path.toLowerCase()),
-    );
+    files.sort((a, b) => b.path.toLowerCase().compareTo(a.path.toLowerCase()));
     final maxCount = switch (mode) {
       AudioProjectSaveMode.autosave => _autosaveHistoryLimit,
       AudioProjectSaveMode.checkpoint => _checkpointHistoryLimit,
@@ -226,10 +217,7 @@ class AutosaveCoordinator {
   bool _inFlight = false;
   Completer<void>? _activeSaveCompleter;
 
-  AutosaveCoordinator({
-    required this.performSave,
-    this.onError,
-  });
+  AutosaveCoordinator({required this.performSave, this.onError});
 
   bool get isDirty => _dirty;
   bool get isInFlight => _inFlight;
@@ -244,9 +232,7 @@ class AutosaveCoordinator {
     _timer = null;
   }
 
-  void schedule({
-    Duration debounce = const Duration(seconds: 1),
-  }) {
+  void schedule({Duration debounce = const Duration(seconds: 1)}) {
     _dirty = true;
     _timer?.cancel();
     _timer = Timer(debounce, () {

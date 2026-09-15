@@ -25,7 +25,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive_io.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
+import 'package:mixroom/helpers/audio_project_persistence.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
+import 'package:mixroom/helpers/project_undo_history_store.dart';
 import 'package:mixroom/models/models.dart';
 
 class ProjectMeta {
@@ -1407,6 +1409,12 @@ class ProjectBundleImport {
 
       await ProjectManager.writeProjectJson(projectDir, jsonMap);
 
+      // The update is committed. Undo history and recovery snapshots still
+      // describe the old project, so an undo or a recovery prompt could put
+      // it back over the new one. Only clear them after the commit so a
+      // failed update leaves them intact.
+      await _clearStaleEditorStateAfterUpdate(projectDir);
+
       if (await liveCompatibilityDir.exists()) {
         await ProjectCompatibilityService.rebaseForImportedProject(
           projectDir: projectDir,
@@ -1572,6 +1580,23 @@ class ProjectBundleImport {
       final file = File(p.join(audioDir.path, p.basename(fileName)));
       if (!await file.exists() || file.lengthSync() <= 0) {
         throw Exception('Bundle audio is missing $fileName');
+      }
+    }
+  }
+
+  static Future<void> _clearStaleEditorStateAfterUpdate(
+    Directory projectDir,
+  ) async {
+    for (final dir in <Directory>[
+      ProjectUndoHistoryStore.directoryFor(projectDir),
+      JsonAudioProjectPersistence.recoveryDirectoryFor(projectDir),
+    ]) {
+      try {
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      } catch (error) {
+        debugPrint('Could not clear ${p.basename(dir.path)}: $error');
       }
     }
   }
