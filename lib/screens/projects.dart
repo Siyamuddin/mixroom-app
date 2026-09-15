@@ -621,6 +621,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     AudioEditorInitialAction? initialAction,
     bool checkCloud = true,
   }) async {
+    // A Cloud update that was cut off (crash, kill) leaves repair markers in
+    // the folder. Fix them before the editor reads anything.
+    try {
+      await ProjectBundleImport.recoverInterruptedUpdate(dir);
+    } catch (error) {
+      debugPrint('Interrupted update recovery failed: $error');
+    }
     if (!checkCloud || initialAction != null) {
       await _pushEditor(dir, initialAction: initialAction);
       return;

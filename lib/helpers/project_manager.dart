@@ -1257,6 +1257,7 @@ class ProjectBundleImport {
 
   static const String incomingUpdateDirectoryName = '.incoming_update';
   static const String outgoingUpdateSuffix = '.outgoing_update';
+  static const String incomingProjectJsonName = 'project.json.incoming';
   static const String _stagedAudioReadyDirectoryName = '_audio_ready';
 
   static Future<Directory> importMixroomBundle({
@@ -1339,10 +1340,9 @@ class ProjectBundleImport {
       throw Exception("project.json missing in ${projectDir.path}");
     }
 
-    await _recoverInterruptedUpdate(projectDir);
+    await recoverInterruptedUpdate(projectDir);
 
     final localJson = await ProjectManager.readProjectJson(projectDir);
-    final originalJsonBytes = await existingJsonFile.readAsBytes();
     final liveAudioDir = ProjectManager.audioDir(projectDir);
     final liveCompatibilityDir = ProjectCompatibilityService.directoryFor(
       projectDir,
@@ -1351,9 +1351,14 @@ class ProjectBundleImport {
       p.join(projectDir.path, incomingUpdateDirectoryName),
     );
     await stagingDir.create(recursive: true);
+    final incomingJsonFile = File(
+      p.join(projectDir.path, incomingProjectJsonName),
+    );
 
-    var audioSwapped = false;
-    var compatibilitySwapped = false;
+    // Commit point: renaming project.json.incoming over project.json. Until
+    // then every step can be undone from the *.outgoing_update folders; after
+    // it the new project is the truth and only cleanup remains.
+    var committed = false;
     try {
       await _extractValidatedArchive(
         bundleFile: bundleFile,
@@ -1397,17 +1402,18 @@ class ProjectBundleImport {
       _preserveLocalFamilyMetadata(localJson: localJson, incoming: jsonMap);
       ProjectManager.stripCloudSyncMetadata(jsonMap);
 
+      await incomingJsonFile.writeAsString(jsonEncode(jsonMap), flush: true);
+
       await _swapDirectory(incoming: stagedAudioDir, dest: liveAudioDir);
-      audioSwapped = true;
       await _swapDirectory(
         incoming: Directory(
           p.join(stagingDir.path, ProjectCompatibilityService.directoryName),
         ),
         dest: liveCompatibilityDir,
       );
-      compatibilitySwapped = true;
 
-      await ProjectManager.writeProjectJson(projectDir, jsonMap);
+      await _renameOver(incomingJsonFile, existingJsonFile);
+      committed = true;
 
       // The update is committed. Undo history and recovery snapshots still
       // describe the old project, so an undo or a recovery prompt could put
@@ -1422,15 +1428,15 @@ class ProjectBundleImport {
         );
       }
     } catch (error) {
-      if (compatibilitySwapped) {
+      if (!committed) {
         await _restoreOutgoingDirectory(liveCompatibilityDir);
-      }
-      if (audioSwapped) {
         await _restoreOutgoingDirectory(liveAudioDir);
+        try {
+          if (await incomingJsonFile.exists()) {
+            await incomingJsonFile.delete();
+          }
+        } catch (_) {}
       }
-      try {
-        await existingJsonFile.writeAsBytes(originalJsonBytes, flush: true);
-      } catch (_) {}
       rethrow;
     } finally {
       await _deleteOutgoingDirectory(liveAudioDir);
@@ -1440,6 +1446,17 @@ class ProjectBundleImport {
           await stagingDir.delete(recursive: true);
         }
       } catch (_) {}
+    }
+  }
+
+  static Future<void> _renameOver(File source, File target) async {
+    try {
+      await source.rename(target.path);
+    } on FileSystemException {
+      if (await target.exists()) {
+        await target.delete();
+      }
+      await source.rename(target.path);
     }
   }
 
@@ -1601,17 +1618,48 @@ class ProjectBundleImport {
     }
   }
 
-  static Future<void> _recoverInterruptedUpdate(Directory projectDir) async {
+  /// Repairs a project folder after a Cloud update was interrupted (crash,
+  /// kill, power loss). Safe to call on a healthy folder: it does nothing.
+  ///
+  /// - `project.json.incoming` still present -> the update never committed:
+  ///   put every `*.outgoing_update` folder back and drop the incoming file.
+  /// - no incoming file -> the update committed (or never started): drop any
+  ///   leftover `*.outgoing_update` folders.
+  /// - incoming present but `project.json` missing -> the commit rename was
+  ///   cut in half; the folders are already the new ones, so finish it.
+  static Future<void> recoverInterruptedUpdate(Directory projectDir) async {
+    if (!await projectDir.exists()) return;
     final stagingDir = Directory(
       p.join(projectDir.path, incomingUpdateDirectoryName),
     );
-    if (await stagingDir.exists()) {
-      await stagingDir.delete(recursive: true);
-    }
-    await _recoverOutgoingOrClean(ProjectManager.audioDir(projectDir));
-    await _recoverOutgoingOrClean(
+    try {
+      if (await stagingDir.exists()) {
+        await stagingDir.delete(recursive: true);
+      }
+    } catch (_) {}
+
+    final liveDirs = <Directory>[
+      ProjectManager.audioDir(projectDir),
       ProjectCompatibilityService.directoryFor(projectDir),
+    ];
+    final incomingJsonFile = File(
+      p.join(projectDir.path, incomingProjectJsonName),
     );
+    final projectJsonFile = File(p.join(projectDir.path, 'project.json'));
+
+    if (await incomingJsonFile.exists()) {
+      if (await projectJsonFile.exists()) {
+        for (final dir in liveDirs) {
+          await _restoreOutgoingDirectory(dir);
+        }
+        await incomingJsonFile.delete();
+      } else {
+        await incomingJsonFile.rename(projectJsonFile.path);
+      }
+    }
+    for (final dir in liveDirs) {
+      await _deleteOutgoingDirectory(dir);
+    }
   }
 
   static Future<void> _swapDirectory({
@@ -1657,16 +1705,6 @@ class ProjectBundleImport {
     if (await outgoing.exists()) {
       await outgoing.delete(recursive: true);
     }
-  }
-
-  static Future<void> _recoverOutgoingOrClean(Directory dest) async {
-    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
-    if (!await outgoing.exists()) return;
-    if (!await dest.exists()) {
-      await outgoing.rename(dest.path);
-      return;
-    }
-    await outgoing.delete(recursive: true);
   }
 
   static Future<void> _copyIncomingCompatibilityIfPresent({

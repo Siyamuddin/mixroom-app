@@ -40,6 +40,15 @@ void main() {
       final openProject = _methodBody(projects, 'Future<void> _openProject(');
       expect(openProject, contains('checkCloud'));
       expect(openProject, contains('_openLinkedLocalProject('));
+      // An interrupted Cloud update is repaired before anything is read,
+      // on every open path (cloud check or not).
+      expect(
+        openProject.indexOf('recoverInterruptedUpdate(dir)'),
+        allOf(
+          greaterThanOrEqualTo(0),
+          lessThan(openProject.indexOf('_pushEditor(')),
+        ),
+      );
 
       final linkedOpen = _methodBody(
         projects,
@@ -180,9 +189,22 @@ void main() {
     );
     expect(update, contains("jsonMap['projectId'] = localProjectId"));
     expect(update, contains("jsonMap['name'] = p.basename(projectDir.path)"));
-    expect(update, contains('writeProjectJson(projectDir, jsonMap)'));
+    // The new JSON is staged next to project.json and only replaces it by a
+    // rename after both folder swaps: that rename is the commit point.
+    expect(update, contains('incomingProjectJsonName'));
+    expect(update, contains('_renameOver(incomingJsonFile, existingJsonFile)'));
+    expect(update, isNot(contains('writeProjectJson(projectDir, jsonMap)')));
     expect(update, contains('_swapDirectory'));
     expect(update, contains('_restoreOutgoingDirectory'));
+    expect(
+      update.indexOf('_renameOver(incomingJsonFile, existingJsonFile)'),
+      greaterThan(update.lastIndexOf('_swapDirectory(')),
+    );
+    expect(
+      update.indexOf('committed = true;'),
+      greaterThan(update.indexOf('_renameOver(')),
+    );
+    expect(update, contains('if (!committed)'));
     expect(projectManager, contains('_runFfmpegOrThrow'));
     expect(projectManager, contains('getReturnCode()'));
   });

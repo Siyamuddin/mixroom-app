@@ -520,6 +520,158 @@ void main() {
     },
   );
 
+  test(
+    'recovery restores old folders when the update never committed',
+    () async {
+      final destDir = await _createProjectWithTone(
+        name: 'Local Mix',
+        fileName: 'old.wav',
+        label: 'Old',
+        bytes: _buildTestWavBytes(frequencyHz: 220.0),
+      );
+      final jsonFile = File(p.join(destDir.path, 'project.json'));
+      final originalJsonBytes = await jsonFile.readAsBytes();
+      final audioDir = ProjectManager.audioDir(destDir);
+      final oldAudioBytes = await File(
+        p.join(audioDir.path, 'old.wav'),
+      ).readAsBytes();
+
+      // Simulate a crash after the audio swap but before the commit rename:
+      // new audio is live, old audio sits in *.outgoing_update, and the
+      // incoming project.json is still waiting.
+      final outgoingAudio = Directory(
+        '${audioDir.path}${ProjectBundleImport.outgoingUpdateSuffix}',
+      );
+      await audioDir.rename(outgoingAudio.path);
+      await audioDir.create(recursive: true);
+      await File(p.join(audioDir.path, 'new.wav')).writeAsBytes(<int>[9, 9, 9]);
+      final incomingJson = File(
+        p.join(destDir.path, ProjectBundleImport.incomingProjectJsonName),
+      );
+      await incomingJson.writeAsString('{"name":"new"}', flush: true);
+      final staging = Directory(
+        p.join(destDir.path, ProjectBundleImport.incomingUpdateDirectoryName),
+      );
+      await staging.create(recursive: true);
+
+      await ProjectBundleImport.recoverInterruptedUpdate(destDir);
+
+      expect(await jsonFile.readAsBytes(), originalJsonBytes);
+      expect(await incomingJson.exists(), isFalse);
+      expect(await outgoingAudio.exists(), isFalse);
+      expect(await staging.exists(), isFalse);
+      expect(await File(p.join(audioDir.path, 'new.wav')).exists(), isFalse);
+      expect(
+        await File(p.join(audioDir.path, 'old.wav')).readAsBytes(),
+        oldAudioBytes,
+      );
+    },
+  );
+
+  test('recovery keeps the new folders when the update committed', () async {
+    final destDir = await _createProjectWithTone(
+      name: 'Local Mix',
+      fileName: 'new.wav',
+      label: 'New',
+      bytes: _buildTestWavBytes(),
+    );
+    final jsonFile = File(p.join(destDir.path, 'project.json'));
+    final jsonBytes = await jsonFile.readAsBytes();
+    final audioDir = ProjectManager.audioDir(destDir);
+    final newAudioBytes = await File(
+      p.join(audioDir.path, 'new.wav'),
+    ).readAsBytes();
+
+    // Simulate a crash after the commit rename but before cleanup: no
+    // incoming file, but the old audio is still in *.outgoing_update.
+    final outgoingAudio = Directory(
+      '${audioDir.path}${ProjectBundleImport.outgoingUpdateSuffix}',
+    );
+    await outgoingAudio.create(recursive: true);
+    await File(p.join(outgoingAudio.path, 'old.wav')).writeAsBytes(<int>[1]);
+
+    await ProjectBundleImport.recoverInterruptedUpdate(destDir);
+
+    expect(await jsonFile.readAsBytes(), jsonBytes);
+    expect(await outgoingAudio.exists(), isFalse);
+    expect(
+      await File(p.join(audioDir.path, 'new.wav')).readAsBytes(),
+      newAudioBytes,
+    );
+  });
+
+  test('recovery finishes a commit rename that was cut in half', () async {
+    final destDir = await _createProjectWithTone(
+      name: 'Local Mix',
+      fileName: 'new.wav',
+      label: 'New',
+      bytes: _buildTestWavBytes(),
+    );
+    final jsonFile = File(p.join(destDir.path, 'project.json'));
+    final incomingJson = File(
+      p.join(destDir.path, ProjectBundleImport.incomingProjectJsonName),
+    );
+    await jsonFile.rename(incomingJson.path);
+    expect(await jsonFile.exists(), isFalse);
+
+    await ProjectBundleImport.recoverInterruptedUpdate(destDir);
+
+    expect(await jsonFile.exists(), isTrue);
+    expect(await incomingJson.exists(), isFalse);
+    final json = await ProjectManager.readProjectJson(destDir);
+    expect(json['name'], 'Local Mix');
+  });
+
+  test(
+    'recovery is a no-op on a healthy project and a missing folder',
+    () async {
+      final destDir = await _createProjectWithTone(
+        name: 'Local Mix',
+        fileName: 'tone.wav',
+        label: 'Tone',
+        bytes: _buildTestWavBytes(),
+      );
+      final before = await ProjectManager.readProjectJson(destDir);
+      await ProjectBundleImport.recoverInterruptedUpdate(destDir);
+      expect(await ProjectManager.readProjectJson(destDir), before);
+      await ProjectBundleImport.recoverInterruptedUpdate(
+        Directory(p.join(sandboxRoot.path, 'does_not_exist')),
+      );
+    },
+  );
+
+  test('a successful update leaves no incoming file behind', () async {
+    final sourceDir = await _createProjectWithTone(
+      name: 'Source Mix',
+      fileName: 'tone.wav',
+      label: 'Tone',
+      bytes: _buildTestWavBytes(),
+    );
+    final destDir = await _createProjectWithTone(
+      name: 'Local Mix',
+      fileName: 'old.wav',
+      label: 'Old',
+      bytes: _buildTestWavBytes(frequencyHz: 220.0),
+    );
+    final bundlePath = await ProjectBundle.exportMixroomBundle(
+      projectDir: sourceDir,
+      audioMode: BundleAudioMode.preserveAsIs,
+    );
+    await ProjectBundleImport.updateProjectFromMixroomBundle(
+      projectDir: destDir,
+      bundleFile: File(bundlePath),
+      audioStrategy: ImportAudioStrategy.keepAsBundled,
+    );
+    expect(
+      await File(
+        p.join(destDir.path, ProjectBundleImport.incomingProjectJsonName),
+      ).exists(),
+      isFalse,
+    );
+    final json = await ProjectManager.readProjectJson(destDir);
+    expect((json['tracks'] as List).single['fileName'], 'tone.wav');
+  });
+
   test('a failed update keeps undo history and recovery snapshots', () async {
     final sourceDir = await _createProjectWithTone(
       name: 'Source Mix',
