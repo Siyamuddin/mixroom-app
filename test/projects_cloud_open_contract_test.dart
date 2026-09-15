@@ -148,5 +148,9 @@ void main() {
     expect(update, contains("jsonMap['projectId'] = localProjectId"));
     expect(update, contains("jsonMap['name'] = p.basename(projectDir.path)"));
     expect(update, contains('writeProjectJson(projectDir, jsonMap)'));
+    expect(update, contains('_swapDirectory'));
+    expect(update, contains('_restoreOutgoingDirectory'));
+    expect(projectManager, contains('_runFfmpegOrThrow'));
+    expect(projectManager, contains('getReturnCode()'));
   });
 }

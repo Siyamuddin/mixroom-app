@@ -7,6 +7,8 @@ import 'package:mixroom/helpers/project_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
+import 'support/fake_ffmpeg_kit.dart';
+
 class _FakePathProviderPlatform extends PathProviderPlatform {
   _FakePathProviderPlatform({
     required this.temporaryPath,
@@ -102,6 +104,7 @@ void main() {
   late Directory sandboxRoot;
   late Directory tempDir;
   late Directory docsDir;
+  late FakeFfmpegKit fakeFfmpegKit;
 
   setUp(() async {
     originalPathProvider = PathProviderPlatform.instance;
@@ -120,9 +123,14 @@ void main() {
       Directory(p.join(docsDir.path, 'mixroom_projects'))
         ..createSync(recursive: true),
     );
+    fakeFfmpegKit = FakeFfmpegKit(
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger,
+    );
+    fakeFfmpegKit.install();
   });
 
   tearDown(() async {
+    fakeFfmpegKit.uninstall();
     ProjectManager.setRootDirectoryForTesting(null);
     PathProviderPlatform.instance = originalPathProvider;
     if (await sandboxRoot.exists()) {
@@ -217,6 +225,135 @@ void main() {
     expect(
       await Directory(
         p.join(destDir.path, ProjectBundleImport.incomingUpdateDirectoryName),
+      ).exists(),
+      isFalse,
+    );
+  });
+
+  test(
+    'flac conversion remaps audio and removes files not in the bundle',
+    () async {
+      final sourceBytes = _buildTestWavBytes();
+      final sourceDir = await _createProjectWithTone(
+        name: 'Source Mix',
+        fileName: 'tone.wav',
+        label: 'Tone',
+        bytes: sourceBytes,
+      );
+      final destBytes = _buildTestWavBytes(frequencyHz: 220.0);
+      final destDir = await _createProjectWithTone(
+        name: 'Local Mix',
+        fileName: 'old.wav',
+        label: 'Old',
+        bytes: destBytes,
+      );
+      final leftover = File(
+        p.join(ProjectManager.audioDir(destDir).path, 'leftover.wav'),
+      );
+      await leftover.writeAsBytes(destBytes, flush: true);
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: sourceDir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+
+      await ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: destDir,
+        bundleFile: File(bundlePath),
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+
+      final destJson = await ProjectManager.readProjectJson(destDir);
+      final tracks = (destJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
+      expect(tracks, hasLength(1));
+      expect(tracks.first['fileName'], 'tone.wav');
+      expect(
+        await File(
+          p.join(ProjectManager.audioDir(destDir).path, 'tone.wav'),
+        ).exists(),
+        isTrue,
+      );
+      expect(await leftover.exists(), isFalse);
+      expect(
+        await File(
+          p.join(ProjectManager.audioDir(destDir).path, 'old.wav'),
+        ).exists(),
+        isFalse,
+      );
+      expect(
+        await Directory(
+          p.join(destDir.path, ProjectBundleImport.incomingUpdateDirectoryName),
+        ).exists(),
+        isFalse,
+      );
+      expect(
+        await Directory(
+          '${ProjectManager.audioDir(destDir).path}${ProjectBundleImport.outgoingUpdateSuffix}',
+        ).exists(),
+        isFalse,
+      );
+    },
+  );
+
+  test('failed ffmpeg conversion leaves the live project unchanged', () async {
+    final sourceBytes = _buildTestWavBytes();
+    final sourceDir = await _createProjectWithTone(
+      name: 'Source Mix',
+      fileName: 'tone.wav',
+      label: 'Tone',
+      bytes: sourceBytes,
+    );
+    final destBytes = _buildTestWavBytes(frequencyHz: 220.0);
+    final destDir = await _createProjectWithTone(
+      name: 'Local Mix',
+      fileName: 'old.wav',
+      label: 'Old',
+      bytes: destBytes,
+    );
+    final jsonFile = File(p.join(destDir.path, 'project.json'));
+    final originalJsonBytes = await jsonFile.readAsBytes();
+    final oldAudio = File(
+      p.join(ProjectManager.audioDir(destDir).path, 'old.wav'),
+    );
+    final originalAudioBytes = await oldAudio.readAsBytes();
+    final compatDir = Directory(p.join(destDir.path, 'compatibility'));
+    await compatDir.create(recursive: true);
+    final compatMarker = File(p.join(compatDir.path, 'keep.txt'));
+    await compatMarker.writeAsString('keep', flush: true);
+
+    final bundlePath = await ProjectBundle.exportMixroomBundle(
+      projectDir: sourceDir,
+      audioMode: BundleAudioMode.flacLossless,
+    );
+    fakeFfmpegKit.failNext();
+
+    await expectLater(
+      ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: destDir,
+        bundleFile: File(bundlePath),
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      ),
+      throwsA(isA<ProcessException>()),
+    );
+
+    expect(await jsonFile.readAsBytes(), originalJsonBytes);
+    expect(await oldAudio.readAsBytes(), originalAudioBytes);
+    expect(await compatMarker.readAsString(), 'keep');
+    expect(
+      await Directory(
+        p.join(destDir.path, ProjectBundleImport.incomingUpdateDirectoryName),
+      ).exists(),
+      isFalse,
+    );
+    expect(
+      await Directory(
+        '${ProjectManager.audioDir(destDir).path}${ProjectBundleImport.outgoingUpdateSuffix}',
+      ).exists(),
+      isFalse,
+    );
+    expect(
+      await Directory(
+        '${compatDir.path}${ProjectBundleImport.outgoingUpdateSuffix}',
       ).exists(),
       isFalse,
     );

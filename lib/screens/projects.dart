@@ -807,7 +807,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
+        '${L10n.translate(context, 'Cloud download failed. Your project was left unchanged')}: ${_cleanCloudError(e)}',
         tone: AppPopupTone.error,
       );
     } finally {

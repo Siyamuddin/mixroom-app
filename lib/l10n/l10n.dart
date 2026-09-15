@@ -1983,6 +1983,8 @@ class L10n {
       'Clip source set to': 'Clip source set to',
       'Cloud delete failed': 'Cloud delete failed',
       'Cloud download failed': 'Cloud download failed',
+      'Cloud download failed. Your project was left unchanged':
+          'Cloud download failed. Your project was left unchanged',
       'Cloud file browser': 'Cloud file browser',
       'Cloud project deleted': 'Cloud project deleted',
       'Cloud projects': 'Cloud projects',
@@ -4081,6 +4083,8 @@ class L10n {
       'Clip source set to': '클립 소스 설정:',
       'Cloud delete failed': '클라우드 삭제 실패',
       'Cloud download failed': '클라우드 다운로드 실패',
+      'Cloud download failed. Your project was left unchanged':
+          '클라우드 다운로드에 실패했습니다. 이 기기의 프로젝트는 그대로입니다',
       'Cloud file browser': '클라우드 파일 브라우저',
       'Cloud project deleted': '클라우드 프로젝트가 삭제되었습니다',
       'Cloud projects': '클라우드 프로젝트',
@@ -7104,6 +7108,8 @@ class L10n {
       'Clone': '複製',
       'Cloud delete failed': 'クラウド削除に失敗しました',
       'Cloud download failed': 'クラウドダウンロードに失敗しました',
+      'Cloud download failed. Your project was left unchanged':
+          'クラウドのダウンロードに失敗しました。このデバイスのプロジェクトはそのままです',
       'Cloud file browser': 'クラウドファイルブラウザー',
       'Cloud project deleted': 'クラウドプロジェクトを削除しました',
       'Cloud projects': 'クラウドプロジェクト',

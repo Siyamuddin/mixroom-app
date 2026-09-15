@@ -1088,7 +1088,25 @@ class ProjectBundle {
     // FLAC is lossless. This preserves audio quality; it just compresses storage.
     // You can add -ar 48000 if you WANT to standardize, but it’s not required.
     final cmd = '-y -i "$inPath" -c:a flac "$outPath"';
-    await FFmpegKit.execute(cmd);
+    await _runFfmpegOrThrow(command: cmd, outputPath: outPath);
+  }
+
+  static Future<void> _runFfmpegOrThrow({
+    required String command,
+    required String outputPath,
+  }) async {
+    final session = await FFmpegKit.execute(command);
+    final code = await session.getReturnCode();
+    final output = File(outputPath);
+    if (!ReturnCode.isSuccess(code) ||
+        !output.existsSync() ||
+        output.lengthSync() <= 44) {
+      throw ProcessException(
+        'ffmpeg',
+        <String>[],
+        'Failed to convert audio for the project bundle.',
+      );
+    }
   }
 
   static String _sanitizeFileName(String s) {
@@ -1129,6 +1147,8 @@ class ProjectBundleImport {
   };
 
   static const String incomingUpdateDirectoryName = '.incoming_update';
+  static const String outgoingUpdateSuffix = '.outgoing_update';
+  static const String _stagedAudioReadyDirectoryName = '_audio_ready';
 
   static Future<Directory> importMixroomBundle({
     required File bundleFile,
@@ -1210,15 +1230,21 @@ class ProjectBundleImport {
       throw Exception("project.json missing in ${projectDir.path}");
     }
 
+    await _recoverInterruptedUpdate(projectDir);
+
     final localJson = await ProjectManager.readProjectJson(projectDir);
+    final originalJsonBytes = await existingJsonFile.readAsBytes();
+    final liveAudioDir = ProjectManager.audioDir(projectDir);
+    final liveCompatibilityDir = ProjectCompatibilityService.directoryFor(
+      projectDir,
+    );
     final stagingDir = Directory(
       p.join(projectDir.path, incomingUpdateDirectoryName),
     );
-    if (await stagingDir.exists()) {
-      await stagingDir.delete(recursive: true);
-    }
     await stagingDir.create(recursive: true);
 
+    var audioSwapped = false;
+    var compatibilitySwapped = false;
     try {
       await _extractValidatedArchive(
         bundleFile: bundleFile,
@@ -1226,15 +1252,19 @@ class ProjectBundleImport {
       );
       final jsonMap = await _readIncomingProjectJson(stagingDir);
 
+      final stagedReadyRoot = Directory(
+        p.join(stagingDir.path, _stagedAudioReadyDirectoryName),
+      );
       await _materializeImportedAudio(
         unpackDir: stagingDir,
-        destProjectDir: projectDir,
+        destProjectDir: stagedReadyRoot,
         jsonMap: jsonMap,
         audioStrategy: audioStrategy,
       );
-      await _replaceCompatibilityDirectory(
-        projectDir: projectDir,
-        stagingDir: stagingDir,
+      final stagedAudioDir = Directory(p.join(stagedReadyRoot.path, 'audio'));
+      await _verifyImportedTrackFiles(
+        audioDir: stagedAudioDir,
+        jsonMap: jsonMap,
       );
 
       final localProjectId = (localJson['projectId'] ?? localJson['project_id'])
@@ -1253,18 +1283,38 @@ class ProjectBundleImport {
       jsonMap['lastOpenedAt'] = DateTime.now().millisecondsSinceEpoch;
       ProjectManager.stripCloudSyncMetadata(jsonMap);
 
+      await _swapDirectory(incoming: stagedAudioDir, dest: liveAudioDir);
+      audioSwapped = true;
+      await _swapDirectory(
+        incoming: Directory(
+          p.join(stagingDir.path, ProjectCompatibilityService.directoryName),
+        ),
+        dest: liveCompatibilityDir,
+      );
+      compatibilitySwapped = true;
+
       await ProjectManager.writeProjectJson(projectDir, jsonMap);
 
-      final destCompatibility = ProjectCompatibilityService.directoryFor(
-        projectDir,
-      );
-      if (await destCompatibility.exists()) {
+      if (await liveCompatibilityDir.exists()) {
         await ProjectCompatibilityService.rebaseForImportedProject(
           projectDir: projectDir,
           sourceProject: jsonMap,
         );
       }
+    } catch (error) {
+      if (compatibilitySwapped) {
+        await _restoreOutgoingDirectory(liveCompatibilityDir);
+      }
+      if (audioSwapped) {
+        await _restoreOutgoingDirectory(liveAudioDir);
+      }
+      try {
+        await existingJsonFile.writeAsBytes(originalJsonBytes, flush: true);
+      } catch (_) {}
+      rethrow;
     } finally {
+      await _deleteOutgoingDirectory(liveAudioDir);
+      await _deleteOutgoingDirectory(liveCompatibilityDir);
       try {
         if (await stagingDir.exists()) {
           await stagingDir.delete(recursive: true);
@@ -1334,7 +1384,10 @@ class ProjectBundleImport {
           final outWav = File(p.join(dstAudioDir.path, outName));
           final cmd =
               '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
-          await FFmpegKit.execute(cmd);
+          await ProjectBundle._runFfmpegOrThrow(
+            command: cmd,
+            outputPath: outWav.path,
+          );
           fileNameRemap[p.basename(f.path)] = outName;
         } else {
           final outName = p.basename(f.path);
@@ -1357,6 +1410,90 @@ class ProjectBundleImport {
     }
   }
 
+  static Future<void> _verifyImportedTrackFiles({
+    required Directory audioDir,
+    required Map<String, dynamic> jsonMap,
+  }) async {
+    final tracks = (jsonMap['tracks'] as List?) ?? const [];
+    for (final t in tracks) {
+      if (t is! Map) continue;
+      final fileName = (t['fileName'] ?? '').toString().trim();
+      if (fileName.isEmpty) continue;
+      final file = File(p.join(audioDir.path, p.basename(fileName)));
+      if (!await file.exists() || file.lengthSync() <= 0) {
+        throw Exception('Bundle audio is missing $fileName');
+      }
+    }
+  }
+
+  static Future<void> _recoverInterruptedUpdate(Directory projectDir) async {
+    final stagingDir = Directory(
+      p.join(projectDir.path, incomingUpdateDirectoryName),
+    );
+    if (await stagingDir.exists()) {
+      await stagingDir.delete(recursive: true);
+    }
+    await _recoverOutgoingOrClean(ProjectManager.audioDir(projectDir));
+    await _recoverOutgoingOrClean(
+      ProjectCompatibilityService.directoryFor(projectDir),
+    );
+  }
+
+  static Future<void> _swapDirectory({
+    required Directory incoming,
+    required Directory dest,
+  }) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (await outgoing.exists()) {
+      await outgoing.delete(recursive: true);
+    }
+
+    if (!await incoming.exists()) {
+      if (await dest.exists()) {
+        await dest.rename(outgoing.path);
+      }
+      return;
+    }
+
+    if (await dest.exists()) {
+      await dest.rename(outgoing.path);
+    }
+    try {
+      await incoming.rename(dest.path);
+    } catch (_) {
+      if (await outgoing.exists() && !await dest.exists()) {
+        await outgoing.rename(dest.path);
+      }
+      rethrow;
+    }
+  }
+
+  static Future<void> _restoreOutgoingDirectory(Directory dest) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (!await outgoing.exists()) return;
+    if (await dest.exists()) {
+      await dest.delete(recursive: true);
+    }
+    await outgoing.rename(dest.path);
+  }
+
+  static Future<void> _deleteOutgoingDirectory(Directory dest) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (await outgoing.exists()) {
+      await outgoing.delete(recursive: true);
+    }
+  }
+
+  static Future<void> _recoverOutgoingOrClean(Directory dest) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (!await outgoing.exists()) return;
+    if (!await dest.exists()) {
+      await outgoing.rename(dest.path);
+      return;
+    }
+    await outgoing.delete(recursive: true);
+  }
+
   static Future<void> _copyIncomingCompatibilityIfPresent({
     required Directory unpackDir,
     required Directory destProjectDir,
@@ -1376,42 +1513,6 @@ class ProjectBundleImport {
       projectDir: destProjectDir,
       sourceProject: sourceProject,
     );
-  }
-
-  static Future<void> _replaceCompatibilityDirectory({
-    required Directory projectDir,
-    required Directory stagingDir,
-  }) async {
-    final incoming = Directory(
-      p.join(stagingDir.path, ProjectCompatibilityService.directoryName),
-    );
-    final dest = ProjectCompatibilityService.directoryFor(projectDir);
-    final outgoing = Directory('${dest.path}.outgoing_update');
-    if (await outgoing.exists()) {
-      await outgoing.delete(recursive: true);
-    }
-
-    if (await incoming.exists()) {
-      if (await dest.exists()) {
-        await dest.rename(outgoing.path);
-      }
-      try {
-        await incoming.rename(dest.path);
-      } catch (_) {
-        if (await outgoing.exists() && !await dest.exists()) {
-          await outgoing.rename(dest.path);
-        }
-        rethrow;
-      }
-      if (await outgoing.exists()) {
-        await outgoing.delete(recursive: true);
-      }
-      return;
-    }
-
-    if (await dest.exists()) {
-      await dest.delete(recursive: true);
-    }
   }
 
   static Archive _decodeValidatedArchive(File bundleFile) {

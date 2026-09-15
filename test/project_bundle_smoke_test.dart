@@ -3,17 +3,13 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
-const _ffmpegMethodChannel = MethodChannel('flutter.arthenica.com/ffmpeg_kit');
-const _ffmpegEventMethodChannel = MethodChannel(
-  'flutter.arthenica.com/ffmpeg_kit_event',
-);
+import 'support/fake_ffmpeg_kit.dart';
 
 class _FakePathProviderPlatform extends PathProviderPlatform {
   _FakePathProviderPlatform({
@@ -78,92 +74,6 @@ Uint8List _buildTestWavBytes({
   return bytes;
 }
 
-class _FakeFfmpegKit {
-  _FakeFfmpegKit(this._binaryMessenger);
-
-  final TestDefaultBinaryMessenger _binaryMessenger;
-  final Map<int, List<String>> _sessionArgs = <int, List<String>>{};
-  final List<List<String>> executedCommands = <List<String>>[];
-  int _nextSessionId = 1;
-
-  void install() {
-    _binaryMessenger.setMockMethodCallHandler(
-      _ffmpegMethodChannel,
-      _handleMethodCall,
-    );
-    _binaryMessenger.setMockMethodCallHandler(
-      _ffmpegEventMethodChannel,
-      _handleEventCall,
-    );
-  }
-
-  void uninstall() {
-    _binaryMessenger.setMockMethodCallHandler(_ffmpegMethodChannel, null);
-    _binaryMessenger.setMockMethodCallHandler(_ffmpegEventMethodChannel, null);
-  }
-
-  Future<Object?> _handleEventCall(MethodCall call) async {
-    if (call.method == 'listen' || call.method == 'cancel') {
-      return null;
-    }
-    throw MissingPluginException(
-      'Unhandled ffmpeg event method ${call.method}',
-    );
-  }
-
-  Future<Object?> _handleMethodCall(MethodCall call) async {
-    switch (call.method) {
-      case 'getLogLevel':
-        return 0;
-      case 'getPlatform':
-        return 'test';
-      case 'getArch':
-        return 'x86_64';
-      case 'getPackageName':
-        return 'mock-package';
-      case 'enableRedirection':
-        return null;
-      case 'isLTSBuild':
-        return false;
-      case 'setLogLevel':
-        return null;
-      case 'ffmpegSession':
-        final args = ((call.arguments as Map)['arguments'] as List)
-            .cast<String>();
-        final sessionId = _nextSessionId++;
-        _sessionArgs[sessionId] = List<String>.from(args);
-        return <String, Object>{
-          'sessionId': sessionId,
-          'createTime': DateTime.now().millisecondsSinceEpoch,
-          'startTime': DateTime.now().millisecondsSinceEpoch,
-          'command': args.join(' '),
-        };
-      case 'ffmpegSessionExecute':
-        final sessionId = (call.arguments as Map)['sessionId'] as int;
-        final args = _sessionArgs[sessionId];
-        if (args == null) {
-          throw StateError('Missing mock ffmpeg session $sessionId');
-        }
-        executedCommands.add(List<String>.from(args));
-        await _executeFfmpegCommand(args);
-        return null;
-    }
-
-    throw MissingPluginException('Unhandled ffmpeg method ${call.method}');
-  }
-
-  Future<void> _executeFfmpegCommand(List<String> args) async {
-    final inputFlagIndex = args.indexOf('-i');
-    if (inputFlagIndex < 0 || inputFlagIndex + 1 >= args.length) {
-      throw StateError('Mock ffmpeg command missing input: $args');
-    }
-    final inputPath = args[inputFlagIndex + 1];
-    final outputPath = args.last;
-    await File(outputPath).parent.create(recursive: true);
-    await File(inputPath).copy(outputPath);
-  }
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -171,7 +81,7 @@ void main() {
   late Directory sandboxRoot;
   late Directory tempDir;
   late Directory docsDir;
-  late _FakeFfmpegKit fakeFfmpegKit;
+  late FakeFfmpegKit fakeFfmpegKit;
 
   setUp(() async {
     originalPathProvider = PathProviderPlatform.instance;
@@ -186,7 +96,7 @@ void main() {
       temporaryPath: tempDir.path,
       applicationDocumentsPath: docsDir.path,
     );
-    fakeFfmpegKit = _FakeFfmpegKit(
+    fakeFfmpegKit = FakeFfmpegKit(
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger,
     );
     fakeFfmpegKit.install();
