@@ -76,6 +76,40 @@ void main() {
     expect(groups.every((group) => group.canExpand), isFalse);
   });
 
+  test('frozen mixes without their original are shown as plain projects', () {
+    final frozenA = _meta(
+      name: 'Night Song Frozen mix',
+      projectId: 'fork-1',
+      familyId: 'orig-1',
+      mixKind: ProjectManager.mixKindFrozen,
+    );
+    final frozenB = _meta(
+      name: 'Night Song Frozen mix 2',
+      projectId: 'fork-2',
+      familyId: 'orig-1',
+      mixKind: ProjectManager.mixKindFrozen,
+    );
+    final unrelated = _meta(name: 'Other', projectId: 'other-1');
+
+    final groups = groupProjectsByFamily(<ProjectMeta>[
+      frozenA,
+      unrelated,
+      frozenB,
+    ]);
+
+    // No Original on this device -> no group; each copy is its own row.
+    expect(groups, hasLength(3));
+    expect(groups.every((group) => group.canExpand), isFalse);
+    expect(
+      groups.map((group) => group.displayProject.name),
+      containsAll(<String>[
+        'Night Song Frozen mix',
+        'Night Song Frozen mix 2',
+        'Other',
+      ]),
+    );
+  });
+
   test('search matches a collapsed frozen mix member', () {
     final group = ProjectFamilyGroup(
       members: <ProjectMeta>[

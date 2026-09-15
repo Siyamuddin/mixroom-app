@@ -70,10 +70,20 @@ List<ProjectFamilyGroup> groupProjectsByFamily(Iterable<ProjectMeta> projects) {
     }
     grouped.putIfAbsent(familyId, () => <ProjectMeta>[]).add(project);
   }
-  return <ProjectFamilyGroup>[
-    for (final members in grouped.values) ProjectFamilyGroup(members: members),
-    ...ungrouped,
-  ];
+  final groups = <ProjectFamilyGroup>[];
+  for (final members in grouped.values) {
+    // A family is only a group when its Original is here. Frozen mixes left
+    // on their own (Original deleted or never on this device) are shown as
+    // plain projects with their full name.
+    if (members.any((member) => !projectIsFrozenMix(member))) {
+      groups.add(ProjectFamilyGroup(members: members));
+      continue;
+    }
+    for (final member in members) {
+      groups.add(ProjectFamilyGroup(members: <ProjectMeta>[member]));
+    }
+  }
+  return <ProjectFamilyGroup>[...groups, ...ungrouped];
 }
 
 /// True when [frozenName] is still a default name for [originalName]
