@@ -1,0 +1,123 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+String _methodBody(String source, String signature) {
+  final start = source.indexOf(signature);
+  expect(start, greaterThanOrEqualTo(0), reason: signature);
+  final asyncBrace = source.indexOf('async {', start);
+  expect(asyncBrace, greaterThan(start), reason: signature);
+  final openBrace = source.indexOf('{', asyncBrace);
+  expect(openBrace, greaterThan(start), reason: signature);
+  var depth = 0;
+  for (var i = openBrace; i < source.length; i++) {
+    final ch = source[i];
+    if (ch == '{') depth++;
+    if (ch == '}') {
+      depth--;
+      if (depth == 0) {
+        return source.substring(openBrace, i + 1);
+      }
+    }
+  }
+  fail('Unclosed method: $signature');
+}
+
+void main() {
+  late String projects;
+  late String projectManager;
+
+  setUpAll(() {
+    projects = File('lib/screens/projects.dart').readAsStringSync();
+    projectManager = File(
+      'lib/helpers/project_manager.dart',
+    ).readAsStringSync();
+  });
+
+  test(
+    'opening a local project checks the cloud before pushing the editor',
+    () {
+      final openProject = _methodBody(projects, 'Future<void> _openProject(');
+      expect(openProject, contains('checkCloud'));
+      expect(openProject, contains('_openLinkedLocalProject('));
+
+      final linkedOpen = _methodBody(
+        projects,
+        'Future<void> _openLinkedLocalProject(ProjectMeta meta) async',
+      );
+      expect(linkedOpen, contains('_applyLocalOpenAction('));
+      expect(linkedOpen, contains('kCloudOpenCheckTimeout'));
+      expect(linkedOpen, contains('isNetworkUnavailableError('));
+      expect(
+        linkedOpen,
+        contains(
+          "Couldn't check for cloud updates. Opened the copy on this device.",
+        ),
+      );
+
+      final apply = _methodBody(
+        projects,
+        'Future<void> _applyLocalOpenAction({',
+      );
+      expect(
+        apply,
+        contains('resolveLocalOpenAction(project: meta, cloud: cloud)'),
+      );
+      expect(apply, contains('_updateLocalProjectFromCloud('));
+      expect(apply, contains('_showLocalCloudConflictDialog('));
+    },
+  );
+
+  test('in-place cloud updates skip the local project limit', () {
+    final update = _methodBody(
+      projects,
+      'Future<void> _updateLocalProjectFromCloud({',
+    );
+    expect(update, contains('updateProjectFromMixroomBundle('));
+    expect(update, contains('ProjectVersionReason.cloudUpdate'));
+    expect(update, isNot(contains('canCreateNew')));
+    expect(update, contains('_cloudProjectsInFlight'));
+  });
+
+  test('keep both needs a free slot and unlinks the local copy', () {
+    final keepBoth = _methodBody(
+      projects,
+      'Future<void> _keepBothLocalAndCloud({',
+    );
+    expect(keepBoth, contains('canCreateNew'));
+    expect(keepBoth, contains('stripCloudSyncMetadata'));
+    expect(keepBoth, contains('_downloadAndOpenNewCloudCopy('));
+
+    final export = _methodBody(projects, 'Future<void> _startProjectExport(');
+    expect(export, contains('checkCloud: false'));
+  });
+
+  test(
+    'cloud tab reuses the local open dispatcher instead of detaching a stale copy',
+    () {
+      final openCloud = _methodBody(
+        projects,
+        'Future<void> _openCloudProject(CloudProjectAccessItem cloud) async',
+      );
+      expect(openCloud, contains('_applyLocalOpenAction('));
+      expect(openCloud, contains('_downloadAndOpenNewCloudCopy('));
+      expect(openCloud, isNot(contains("staleJson.remove('cloudProjectId')")));
+      expect(openCloud, isNot(contains('importMixroomBundle')));
+    },
+  );
+
+  test('bundle import can update an existing project folder in place', () {
+    expect(
+      projectManager,
+      contains('static Future<void> updateProjectFromMixroomBundle({'),
+    );
+    expect(projectManager, contains('incomingUpdateDirectoryName'));
+    final update = _methodBody(
+      projectManager,
+      'static Future<void> updateProjectFromMixroomBundle({',
+    );
+    expect(update, contains("jsonMap['projectId'] = localProjectId"));
+    expect(update, contains("jsonMap['name'] = p.basename(projectDir.path)"));
+    expect(update, contains('writeProjectJson(projectDir, jsonMap)'));
+  });
+}

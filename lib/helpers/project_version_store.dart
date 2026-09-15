@@ -7,11 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:path/path.dart' as p;
 
-enum ProjectVersionReason {
-  autosave,
-  manualSave,
-  background,
-}
+enum ProjectVersionReason { autosave, manualSave, background, cloudUpdate }
 
 class ProjectVersionEntry {
   const ProjectVersionEntry({
@@ -57,7 +53,8 @@ class ProjectVersionEntry {
     final createdAtRaw = (json['createdAt'] ?? '').toString().trim();
     return ProjectVersionEntry(
       id: (json['id'] ?? '').toString(),
-      createdAt: DateTime.tryParse(createdAtRaw)?.toUtc() ??
+      createdAt:
+          DateTime.tryParse(createdAtRaw)?.toUtc() ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
       reason: reason,
       sizeBytes: (json['sizeBytes'] as num?)?.toInt() ?? 0,
@@ -110,8 +107,9 @@ class ProjectVersionStore {
     }
 
     final projectJson = await ProjectManager.readProjectJson(projectDir);
-    final projectName =
-        (projectJson['name'] ?? p.basename(projectDir.path)).toString().trim();
+    final projectName = (projectJson['name'] ?? p.basename(projectDir.path))
+        .toString()
+        .trim();
     final id = _versionId(now);
     final snapshotFileName = '$id.json';
     final snapshotsDir = await _ensureSnapshotsDir(projectDir);
@@ -119,10 +117,7 @@ class ProjectVersionStore {
     if (await destination.exists()) {
       await destination.delete();
     }
-    await destination.writeAsString(
-      jsonEncode(projectJson),
-      flush: true,
-    );
+    await destination.writeAsString(jsonEncode(projectJson), flush: true);
     final sizeBytes = await destination.length();
     final entry = ProjectVersionEntry(
       id: id,
@@ -166,8 +161,9 @@ class ProjectVersionStore {
       throw StateError('Version snapshot is invalid.');
     }
     final json = decoded.cast<String, dynamic>();
-    final timestamp =
-        DateFormat('yyyy-MM-dd HH.mm').format(entry.createdAt.toLocal());
+    final timestamp = DateFormat(
+      'yyyy-MM-dd HH.mm',
+    ).format(entry.createdAt.toLocal());
     final baseName = entry.projectName.trim().isEmpty
         ? p.basename(projectDir.path)
         : entry.projectName.trim();
@@ -196,10 +192,12 @@ class ProjectVersionStore {
         final files = <File>[
           if (entry.snapshotFileName.isNotEmpty)
             File(
-                p.join(_snapshotsDir(projectDir).path, entry.snapshotFileName)),
+              p.join(_snapshotsDir(projectDir).path, entry.snapshotFileName),
+            ),
           if (entry.legacyBundleFileName.isNotEmpty)
-            File(p.join(
-                _bundlesDir(projectDir).path, entry.legacyBundleFileName)),
+            File(
+              p.join(_bundlesDir(projectDir).path, entry.legacyBundleFileName),
+            ),
         ];
         for (final file in files) {
           if (await file.exists()) {
@@ -259,7 +257,8 @@ class ProjectVersionStore {
   }
 
   List<ProjectVersionEntry> _entriesFromManifest(
-      Map<String, dynamic> manifest) {
+    Map<String, dynamic> manifest,
+  ) {
     final rawEntries = manifest['entries'];
     if (rawEntries is! List) return <ProjectVersionEntry>[];
     final entries = <ProjectVersionEntry>[];
@@ -297,10 +296,7 @@ class ProjectVersionStore {
     }
   }
 
-  Future<void> _trim(
-    Directory projectDir, {
-    required int maxEntries,
-  }) async {
+  Future<void> _trim(Directory projectDir, {required int maxEntries}) async {
     final entries = await listVersions(projectDir);
     if (entries.length <= maxEntries) return;
     final keep = entries.take(maxEntries).toList();
@@ -311,7 +307,8 @@ class ProjectVersionStore {
           File(p.join(_snapshotsDir(projectDir).path, entry.snapshotFileName)),
         if (entry.legacyBundleFileName.isNotEmpty)
           File(
-              p.join(_bundlesDir(projectDir).path, entry.legacyBundleFileName)),
+            p.join(_bundlesDir(projectDir).path, entry.legacyBundleFileName),
+          ),
       ];
       for (final file in files) {
         if (await file.exists()) {
@@ -328,8 +325,9 @@ class ProjectVersionStore {
     required Directory projectDir,
     required ProjectVersionEntry entry,
   }) async {
-    final bundle =
-        File(p.join(_bundlesDir(projectDir).path, entry.legacyBundleFileName));
+    final bundle = File(
+      p.join(_bundlesDir(projectDir).path, entry.legacyBundleFileName),
+    );
     if (!await bundle.exists()) {
       throw StateError('Version bundle is missing.');
     }
@@ -337,8 +335,9 @@ class ProjectVersionStore {
       bundleFile: bundle,
       audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
     );
-    final timestamp =
-        DateFormat('yyyy-MM-dd HH.mm').format(entry.createdAt.toLocal());
+    final timestamp = DateFormat(
+      'yyyy-MM-dd HH.mm',
+    ).format(entry.createdAt.toLocal());
     final baseName = entry.projectName.trim().isEmpty
         ? p.basename(projectDir.path)
         : entry.projectName.trim();
@@ -368,8 +367,9 @@ class ProjectVersionStore {
     }
     await for (final entity in sourceDir.list(followLinks: false)) {
       if (entity is! File) continue;
-      final destination =
-          File(p.join(destinationDir.path, p.basename(entity.path)));
+      final destination = File(
+        p.join(destinationDir.path, p.basename(entity.path)),
+      );
       await entity.copy(destination.path);
     }
   }
@@ -388,9 +388,11 @@ class ProjectVersionStore {
       files.sort((a, b) => p.basename(a.path).compareTo(p.basename(b.path)));
       for (final file in files) {
         final stat = await file.stat();
-        bytes.add(utf8.encode(
-          '${p.basename(file.path)}:${stat.size}:${stat.modified.toUtc().millisecondsSinceEpoch}\n',
-        ));
+        bytes.add(
+          utf8.encode(
+            '${p.basename(file.path)}:${stat.size}:${stat.modified.toUtc().millisecondsSinceEpoch}\n',
+          ),
+        );
       }
     }
     return sha256.convert(bytes.takeBytes()).toString();

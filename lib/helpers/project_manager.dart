@@ -1077,6 +1077,8 @@ class ProjectBundleImport {
     'meta.json',
   };
 
+  static const String incomingUpdateDirectoryName = '.incoming_update';
+
   static Future<Directory> importMixroomBundle({
     required File bundleFile,
     required ImportAudioStrategy audioStrategy,
@@ -1096,35 +1098,11 @@ class ProjectBundleImport {
     var importCompleted = false;
 
     try {
-      final archive = _decodeValidatedArchive(bundleFile);
-      for (final item in archive) {
-        final outPath = _resolveExtractPath(unpackDir, item.name);
-        if (item.isDirectory) {
-          await Directory(outPath).create(recursive: true);
-          continue;
-        }
-
-        final outFile = File(outPath);
-        await outFile.parent.create(recursive: true);
-        final output = OutputFileStream(outFile.path);
-        try {
-          item.writeContent(output);
-        } finally {
-          await output.close();
-          item.clear();
-        }
-      }
-
-      final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
-      if (!incomingJsonFile.existsSync()) {
-        throw Exception("Bundle missing project.json");
-      }
-
-      final decoded = jsonDecode(incomingJsonFile.readAsStringSync());
-      if (decoded is! Map) {
-        throw Exception("Bundle project.json is invalid");
-      }
-      final jsonMap = Map<String, dynamic>.from(decoded);
+      await _extractValidatedArchive(
+        bundleFile: bundleFile,
+        unpackDir: unpackDir,
+      );
+      final jsonMap = await _readIncomingProjectJson(unpackDir);
       final incomingName = (jsonMap["name"] as String?) ?? "Imported Project";
 
       destProjectDir = await ProjectManager.createNewProjectDir(
@@ -1136,65 +1114,22 @@ class ProjectBundleImport {
       jsonMap["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
       ProjectManager.stripCloudSyncMetadata(jsonMap);
 
-      final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
-      final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
-      await dstAudioDir.create(recursive: true);
-      final fileNameRemap = <String, String>{};
-
-      if (await srcAudioDir.exists()) {
-        final files = srcAudioDir
-            .listSync(followLinks: false)
-            .whereType<File>();
-        for (final f in files) {
-          final ext = p.extension(f.path).toLowerCase();
-          final base = p.basenameWithoutExtension(f.path);
-
-          if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
-              ext == ".flac") {
-            final outName = "$base.wav";
-            final outWav = File(p.join(dstAudioDir.path, outName));
-            final cmd =
-                '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
-            await FFmpegKit.execute(cmd);
-            fileNameRemap[p.basename(f.path)] = outName;
-          } else {
-            final outName = p.basename(f.path);
-            await f.copy(p.join(dstAudioDir.path, outName));
-            fileNameRemap[p.basename(f.path)] = outName;
-          }
-        }
-      }
-
-      final tracks = (jsonMap["tracks"] as List?) ?? const [];
-      for (final t in tracks) {
-        final track = (t as Map).cast<String, dynamic>();
-        final original = track["fileName"] as String?;
-        if (original == null) continue;
-        final remapped = fileNameRemap[original];
-        if (remapped != null) {
-          track["fileName"] = remapped;
-        }
-      }
+      await _materializeImportedAudio(
+        unpackDir: unpackDir,
+        destProjectDir: destProjectDir,
+        jsonMap: jsonMap,
+        audioStrategy: audioStrategy,
+      );
 
       await File(
         p.join(destProjectDir.path, "project.json"),
       ).writeAsString(jsonEncode(jsonMap));
 
-      final sourceCompatibilityDir = Directory(
-        p.join(unpackDir.path, ProjectCompatibilityService.directoryName),
+      await _copyIncomingCompatibilityIfPresent(
+        unpackDir: unpackDir,
+        destProjectDir: destProjectDir,
+        sourceProject: jsonMap,
       );
-      if (await sourceCompatibilityDir.exists()) {
-        final destinationCompatibilityDir =
-            ProjectCompatibilityService.directoryFor(destProjectDir);
-        await ProjectBundle._copyDirectory(
-          sourceCompatibilityDir,
-          destinationCompatibilityDir,
-        );
-        await ProjectCompatibilityService.rebaseForImportedProject(
-          projectDir: destProjectDir,
-          sourceProject: jsonMap,
-        );
-      }
 
       importCompleted = true;
       return destProjectDir;
@@ -1207,6 +1142,224 @@ class ProjectBundleImport {
           await destProjectDir.delete(recursive: true);
         } catch (_) {}
       }
+    }
+  }
+
+  static Future<void> updateProjectFromMixroomBundle({
+    required Directory projectDir,
+    required File bundleFile,
+    required ImportAudioStrategy audioStrategy,
+  }) async {
+    if (!bundleFile.existsSync()) throw Exception("Bundle file missing");
+    if (!await projectDir.exists()) {
+      throw Exception("Project folder missing");
+    }
+    final existingJsonFile = File(p.join(projectDir.path, "project.json"));
+    if (!await existingJsonFile.exists()) {
+      throw Exception("project.json missing in ${projectDir.path}");
+    }
+
+    final localJson = await ProjectManager.readProjectJson(projectDir);
+    final stagingDir = Directory(
+      p.join(projectDir.path, incomingUpdateDirectoryName),
+    );
+    if (await stagingDir.exists()) {
+      await stagingDir.delete(recursive: true);
+    }
+    await stagingDir.create(recursive: true);
+
+    try {
+      await _extractValidatedArchive(
+        bundleFile: bundleFile,
+        unpackDir: stagingDir,
+      );
+      final jsonMap = await _readIncomingProjectJson(stagingDir);
+
+      await _materializeImportedAudio(
+        unpackDir: stagingDir,
+        destProjectDir: projectDir,
+        jsonMap: jsonMap,
+        audioStrategy: audioStrategy,
+      );
+      await _replaceCompatibilityDirectory(
+        projectDir: projectDir,
+        stagingDir: stagingDir,
+      );
+
+      final localProjectId = (localJson['projectId'] ?? localJson['project_id'])
+          ?.toString()
+          .trim();
+      if (localProjectId != null && localProjectId.isNotEmpty) {
+        jsonMap['projectId'] = localProjectId;
+        jsonMap.remove('project_id');
+      } else {
+        ProjectManager.ensureProjectIdInJson(jsonMap);
+      }
+      jsonMap['name'] = p.basename(projectDir.path);
+      if (localJson.containsKey('createdAt')) {
+        jsonMap['createdAt'] = localJson['createdAt'];
+      }
+      jsonMap['lastOpenedAt'] = DateTime.now().millisecondsSinceEpoch;
+      ProjectManager.stripCloudSyncMetadata(jsonMap);
+
+      await ProjectManager.writeProjectJson(projectDir, jsonMap);
+
+      final destCompatibility = ProjectCompatibilityService.directoryFor(
+        projectDir,
+      );
+      if (await destCompatibility.exists()) {
+        await ProjectCompatibilityService.rebaseForImportedProject(
+          projectDir: projectDir,
+          sourceProject: jsonMap,
+        );
+      }
+    } finally {
+      try {
+        if (await stagingDir.exists()) {
+          await stagingDir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+  }
+
+  static Future<void> _extractValidatedArchive({
+    required File bundleFile,
+    required Directory unpackDir,
+  }) async {
+    final archive = _decodeValidatedArchive(bundleFile);
+    for (final item in archive) {
+      final outPath = _resolveExtractPath(unpackDir, item.name);
+      if (item.isDirectory) {
+        await Directory(outPath).create(recursive: true);
+        continue;
+      }
+
+      final outFile = File(outPath);
+      await outFile.parent.create(recursive: true);
+      final output = OutputFileStream(outFile.path);
+      try {
+        item.writeContent(output);
+      } finally {
+        await output.close();
+        item.clear();
+      }
+    }
+  }
+
+  static Future<Map<String, dynamic>> _readIncomingProjectJson(
+    Directory unpackDir,
+  ) async {
+    final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
+    if (!incomingJsonFile.existsSync()) {
+      throw Exception("Bundle missing project.json");
+    }
+    final decoded = jsonDecode(incomingJsonFile.readAsStringSync());
+    if (decoded is! Map) {
+      throw Exception("Bundle project.json is invalid");
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  static Future<void> _materializeImportedAudio({
+    required Directory unpackDir,
+    required Directory destProjectDir,
+    required Map<String, dynamic> jsonMap,
+    required ImportAudioStrategy audioStrategy,
+  }) async {
+    final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
+    final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
+    await dstAudioDir.create(recursive: true);
+    final fileNameRemap = <String, String>{};
+
+    if (await srcAudioDir.exists()) {
+      final files = srcAudioDir.listSync(followLinks: false).whereType<File>();
+      for (final f in files) {
+        final ext = p.extension(f.path).toLowerCase();
+        final base = p.basenameWithoutExtension(f.path);
+
+        if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
+            ext == ".flac") {
+          final outName = "$base.wav";
+          final outWav = File(p.join(dstAudioDir.path, outName));
+          final cmd =
+              '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
+          await FFmpegKit.execute(cmd);
+          fileNameRemap[p.basename(f.path)] = outName;
+        } else {
+          final outName = p.basename(f.path);
+          await f.copy(p.join(dstAudioDir.path, outName));
+          fileNameRemap[p.basename(f.path)] = outName;
+        }
+      }
+    }
+
+    if (fileNameRemap.isEmpty) return;
+    final tracks = (jsonMap["tracks"] as List?) ?? const [];
+    for (final t in tracks) {
+      final track = (t as Map).cast<String, dynamic>();
+      final original = track["fileName"] as String?;
+      if (original == null) continue;
+      final remapped = fileNameRemap[original];
+      if (remapped != null) {
+        track["fileName"] = remapped;
+      }
+    }
+  }
+
+  static Future<void> _copyIncomingCompatibilityIfPresent({
+    required Directory unpackDir,
+    required Directory destProjectDir,
+    required Map<String, dynamic> sourceProject,
+  }) async {
+    final sourceCompatibilityDir = Directory(
+      p.join(unpackDir.path, ProjectCompatibilityService.directoryName),
+    );
+    if (!await sourceCompatibilityDir.exists()) return;
+    final destinationCompatibilityDir =
+        ProjectCompatibilityService.directoryFor(destProjectDir);
+    await ProjectBundle._copyDirectory(
+      sourceCompatibilityDir,
+      destinationCompatibilityDir,
+    );
+    await ProjectCompatibilityService.rebaseForImportedProject(
+      projectDir: destProjectDir,
+      sourceProject: sourceProject,
+    );
+  }
+
+  static Future<void> _replaceCompatibilityDirectory({
+    required Directory projectDir,
+    required Directory stagingDir,
+  }) async {
+    final incoming = Directory(
+      p.join(stagingDir.path, ProjectCompatibilityService.directoryName),
+    );
+    final dest = ProjectCompatibilityService.directoryFor(projectDir);
+    final outgoing = Directory('${dest.path}.outgoing_update');
+    if (await outgoing.exists()) {
+      await outgoing.delete(recursive: true);
+    }
+
+    if (await incoming.exists()) {
+      if (await dest.exists()) {
+        await dest.rename(outgoing.path);
+      }
+      try {
+        await incoming.rename(dest.path);
+      } catch (_) {
+        if (await outgoing.exists() && !await dest.exists()) {
+          await outgoing.rename(dest.path);
+        }
+        rethrow;
+      }
+      if (await outgoing.exists()) {
+        await outgoing.delete(recursive: true);
+      }
+      return;
+    }
+
+    if (await dest.exists()) {
+      await dest.delete(recursive: true);
     }
   }
 

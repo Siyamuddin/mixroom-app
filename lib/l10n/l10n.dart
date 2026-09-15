@@ -441,6 +441,7 @@ class L10n {
       'Autosave': 'Autosave',
       'Manual save': 'Manual save',
       'Background save': 'Background save',
+      'Cloud update': 'Cloud update',
       'Restore Copy': 'Restore Copy',
       'Restoring version…': 'Restoring version…',
       'Restored project copy created.': 'Restored project copy created.',
@@ -1990,6 +1991,21 @@ class L10n {
       'Cloud synced': 'Cloud synced',
       'Not synced': 'Not synced',
       'Cloud update available': 'Cloud update available',
+      'Downloading update…': 'Downloading update…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          "Couldn't check for cloud updates. Opened the copy on this device.",
+      'Project versions differ': 'Project versions differ',
+      'This project changed on this device and in the cloud.':
+          'This project changed on this device and in the cloud.',
+      'Keep this device': 'Keep this device',
+      'Open the copy on this device.': 'Open the copy on this device.',
+      'Take the cloud version': 'Take the cloud version',
+      'Replace this copy with the cloud version.':
+          'Replace this copy with the cloud version.',
+      'Keep both': 'Keep both',
+      'Save this copy as a second project, then open the cloud version.':
+          'Save this copy as a second project, then open the cloud version.',
+      ' (this device)': ' (this device)',
       'Compliance controls': 'Compliance controls',
       'Create sampler': 'Create sampler',
       'Custom AI models': 'Custom AI models',
@@ -2595,6 +2611,7 @@ class L10n {
       'Autosave': '자동 저장',
       'Manual save': '수동 저장',
       'Background save': '백그라운드 저장',
+      'Cloud update': '클라우드 업데이트',
       'Restore Copy': '복사본 복원',
       'Restoring version…': '버전을 복원하는 중…',
       'Restored project copy created.': '복원된 프로젝트 복사본을 만들었습니다.',
@@ -2889,7 +2906,8 @@ class L10n {
           '{email} 초대를 만들었지만 이메일을 보낼 수 없습니다. 학생 목록에서 초대 링크를 복사하세요.',
       'Could not create invite. Check available student seats and try again.':
           '초대를 만들 수 없습니다. 사용 가능한 학생 좌석을 확인한 뒤 다시 시도하세요.',
-      'Paste a valid education invite link or code.': '올바른 교육 초대 링크 또는 코드를 붙여넣으세요.',
+      'Paste a valid education invite link or code.':
+          '올바른 교육 초대 링크 또는 코드를 붙여넣으세요.',
       'Education student seat activated.': '교육 학생 좌석이 활성화되었습니다.',
       'Education access activated.': '교육 이용 권한이 활성화되었습니다.',
       'Could not accept this invite. It may have expired or already been used.':
@@ -4052,6 +4070,20 @@ class L10n {
       'Cloud synced': '클라우드 동기화 완료',
       'Not synced': '동기화되지 않음',
       'Cloud update available': '클라우드 업데이트 있음',
+      'Downloading update…': '업데이트 다운로드 중…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          '클라우드 업데이트를 확인할 수 없습니다. 이 기기의 사본을 열었습니다.',
+      'Project versions differ': '프로젝트 버전이 다릅니다',
+      'This project changed on this device and in the cloud.':
+          '이 기기와 클라우드에서 프로젝트가 서로 다르게 변경되었습니다.',
+      'Keep this device': '이 기기 버전 유지',
+      'Open the copy on this device.': '이 기기의 사본을 엽니다.',
+      'Take the cloud version': '클라우드 버전 사용',
+      'Replace this copy with the cloud version.': '이 사본을 클라우드 버전으로 바꿉니다.',
+      'Keep both': '둘 다 유지',
+      'Save this copy as a second project, then open the cloud version.':
+          '이 사본을 두 번째 프로젝트로 저장한 다음 클라우드 버전을 엽니다.',
+      ' (this device)': ' (이 기기)',
       'Compliance controls': '규정 준수 제어',
       'Create sampler': '샘플러 만들기',
       'Custom AI models': '사용자 지정 AI 모델',
@@ -4413,6 +4445,7 @@ class L10n {
       'Autosave': '自动保存',
       'Manual save': '手动保存',
       'Background save': '后台保存',
+      'Cloud update': '云端更新',
       'Restore Copy': '恢复副本',
       'Restoring version…': '正在恢复版本…',
       'Restored project copy created.': '已创建恢复的项目副本。',
@@ -4773,6 +4806,20 @@ class L10n {
       'Gain:': '增益:',
       'Project saved': '项目已保存',
       "Audio couldn't start.": '无法启动音频。',
+      'Downloading update…': '正在下载更新…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          '无法检查云端更新。已打开此设备上的副本。',
+      'Project versions differ': '项目版本不一致',
+      'This project changed on this device and in the cloud.':
+          '此设备和云端上的项目都有不同的更改。',
+      'Keep this device': '保留此设备版本',
+      'Open the copy on this device.': '打开此设备上的副本。',
+      'Take the cloud version': '使用云端版本',
+      'Replace this copy with the cloud version.': '将此副本替换为云端版本。',
+      'Keep both': '两个都保留',
+      'Save this copy as a second project, then open the cloud version.':
+          '将此副本另存为第二个项目，然后打开云端版本。',
+      ' (this device)': ' (此设备)',
       'Retry': '重试',
       'Save failed': '保存失败',
       'Usage': '用量',
@@ -5557,6 +5604,7 @@ class L10n {
       'Autosave': '自動保存',
       'Manual save': '手動保存',
       'Background save': 'バックグラウンド保存',
+      'Cloud update': 'クラウド更新',
       'Restore Copy': 'コピーを復元',
       'Restoring version…': 'バージョンを復元中…',
       'Restored project copy created.': '復元したプロジェクトのコピーを作成しました。',
@@ -5847,7 +5895,8 @@ class L10n {
           '{email}への招待を作成しましたが、メールを送信できませんでした。学生一覧から招待リンクをコピーしてください。',
       'Could not create invite. Check available student seats and try again.':
           '招待を作成できませんでした。利用可能な学生席を確認してもう一度お試しください。',
-      'Paste a valid education invite link or code.': '有効な教育招待リンクまたはコードを貼り付けてください。',
+      'Paste a valid education invite link or code.':
+          '有効な教育招待リンクまたはコードを貼り付けてください。',
       'Education student seat activated.': '教育学生席が有効になりました。',
       'Education access activated.': '教育アクセスが有効になりました。',
       'Could not accept this invite. It may have expired or already been used.':
@@ -7006,6 +7055,20 @@ class L10n {
       'Cloud synced': 'クラウド同期済み',
       'Not synced': '未同期',
       'Cloud update available': 'クラウド更新あり',
+      'Downloading update…': '更新をダウンロード中…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          'クラウドの更新を確認できませんでした。このデバイスのコピーを開きました。',
+      'Project versions differ': 'プロジェクトのバージョンが異なります',
+      'This project changed on this device and in the cloud.':
+          'このデバイスとクラウドの両方でプロジェクトが変更されています。',
+      'Keep this device': 'このデバイスの版を残す',
+      'Open the copy on this device.': 'このデバイスのコピーを開きます。',
+      'Take the cloud version': 'クラウド版を使う',
+      'Replace this copy with the cloud version.': 'このコピーをクラウド版で置き換えます。',
+      'Keep both': '両方残す',
+      'Save this copy as a second project, then open the cloud version.':
+          'このコピーを別プロジェクトとして保存し、クラウド版を開きます。',
+      ' (this device)': ' (このデバイス)',
       'Compliance controls': 'コンプライアンス管理',
       'Copy': 'コピー',
       'Copy range': '範囲をコピー',

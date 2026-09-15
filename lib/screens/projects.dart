@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
+import 'package:mixroom/helpers/cloud_open_resolver.dart';
 import 'package:mixroom/helpers/cloud_project_service.dart';
 import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
@@ -74,6 +75,8 @@ const double _kProjectLibrarySideRailInset = 8;
 enum _ProjectSortMode { recent, alphabetical }
 
 enum _ProjectLibraryTab { yourProjects, cloudProjects, demoProjects }
+
+enum _LocalCloudConflictChoice { keepDevice, takeCloud, keepBoth }
 
 class _LocalCloudStatusPresentation {
   const _LocalCloudStatusPresentation({
@@ -617,8 +620,44 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _openProject(
     Directory dir, {
     AudioEditorInitialAction? initialAction,
+    bool checkCloud = true,
   }) async {
-    // 1. Show loading spinner immediately
+    if (!checkCloud || initialAction != null) {
+      await _pushEditor(dir, initialAction: initialAction);
+      return;
+    }
+
+    final meta = _projectMetaForDirectory(dir);
+    final linkedCloudProjectId = (meta?.cloudProjectId ?? '').trim();
+    var signedIn = false;
+    try {
+      signedIn = context.read<AuthService>().isSignedIn;
+    } catch (_) {}
+
+    if (meta == null ||
+        linkedCloudProjectId.isEmpty ||
+        !_cloudProjectsFeatureEnabled ||
+        !signedIn) {
+      await _pushEditor(dir);
+      return;
+    }
+
+    await _openLinkedLocalProject(meta);
+  }
+
+  ProjectMeta? _projectMetaForDirectory(Directory dir) {
+    final path = p.normalize(dir.path);
+    for (final project in _projects) {
+      if (p.normalize(project.dir.path) == path) return project;
+    }
+    return null;
+  }
+
+  Future<void> _pushEditor(
+    Directory dir, {
+    AudioEditorInitialAction? initialAction,
+    bool includeCloud = false,
+  }) async {
     showLoadingDialog(
       context,
       message: L10n.translate(
@@ -627,12 +666,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       ),
     );
 
-    // 2. Let UI render the dialog
     // TODO: also an arbitrary delay to hide the blocking UI lag involved in opening the project
     await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
-    // 3. Push editor
     await Navigator.push(
       context,
       _NoSwipeMaterialPageRoute(
@@ -646,13 +683,258 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
     if (!mounted) return;
 
-    // 4. Close spinner (safe even if already closed)
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
 
-    // 5. Refresh project list
+    await _refresh(includeCloud: includeCloud);
+  }
+
+  Future<void> _openLinkedLocalProject(ProjectMeta meta) async {
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Checking for updates…'),
+    );
+    CloudProjectAccessItem? cloud;
+    try {
+      final auth = context.read<AuthService>();
+      final snapshot = await _cloudProjectService
+          .listProjects(auth: auth)
+          .timeout(kCloudOpenCheckTimeout);
+      if (!mounted) return;
+      setState(() {
+        _cloudProjects = snapshot.cloudProjects;
+        _cloudStorage = snapshot.storage;
+        _cloudError = null;
+      });
+      cloud = _cloudProjectForLocal(meta);
+    } catch (error) {
+      debugPrint('Cloud update check failed: $error');
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          "Couldn't check for cloud updates. Opened the copy on this device.",
+        ),
+        tone: AppPopupTone.warning,
+      );
+      if (!isNetworkUnavailableError(error)) {
+        debugPrint('Cloud update check failed with non-network error: $error');
+      }
+      await _pushEditor(meta.dir);
+      return;
+    }
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    if (!mounted) return;
+    await _applyLocalOpenAction(meta: meta, cloud: cloud);
+  }
+
+  Future<void> _applyLocalOpenAction({
+    required ProjectMeta meta,
+    required CloudProjectAccessItem? cloud,
+  }) async {
+    switch (resolveLocalOpenAction(project: meta, cloud: cloud)) {
+      case LocalOpenAction.openLocal:
+        await _pushEditor(meta.dir);
+      case LocalOpenAction.updateInPlace:
+        await _updateLocalProjectFromCloud(local: meta, cloud: cloud!);
+      case LocalOpenAction.askUser:
+        final choice = await _showLocalCloudConflictDialog();
+        if (!mounted) return;
+        switch (choice) {
+          case _LocalCloudConflictChoice.keepDevice:
+            await _pushEditor(meta.dir);
+          case _LocalCloudConflictChoice.takeCloud:
+            await _updateLocalProjectFromCloud(local: meta, cloud: cloud!);
+          case _LocalCloudConflictChoice.keepBoth:
+            await _keepBothLocalAndCloud(local: meta, cloud: cloud!);
+          case null:
+            return;
+        }
+    }
+  }
+
+  Future<void> _updateLocalProjectFromCloud({
+    required ProjectMeta local,
+    required CloudProjectAccessItem cloud,
+  }) async {
+    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Downloading update…'),
+    );
+    try {
+      await _projectVersionStore.maybeCreateSnapshot(
+        projectDir: local.dir,
+        reason: ProjectVersionReason.cloudUpdate,
+        minInterval: Duration.zero,
+      );
+      if (!mounted) return;
+      final auth = context.read<AuthService>();
+      final downloaded = await _cloudProjectService.downloadBundle(
+        auth: auth,
+        project: cloud,
+      );
+      await ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: local.dir,
+        bundleFile: downloaded.file,
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+      await _writeCloudLinkMetadata(
+        projectDir: local.dir,
+        cloud: downloaded.project,
+      );
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await _pushEditor(local.dir, includeCloud: true);
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
+      } else {
+        _cloudProjectsInFlight.remove(cloud.projectId);
+      }
+    }
+  }
+
+  Future<void> _writeCloudLinkMetadata({
+    required Directory projectDir,
+    required CloudProjectAccessItem cloud,
+  }) async {
+    final json = await ProjectManager.readProjectJson(projectDir);
+    json['cloudProjectId'] = cloud.projectId;
+    if (cloud.workspaceId.trim().isNotEmpty) {
+      json['cloudWorkspaceId'] = cloud.workspaceId.trim();
+    } else {
+      json.remove('cloudWorkspaceId');
+    }
+    if (cloud.organizationId.trim().isNotEmpty) {
+      json['cloudOrganizationId'] = cloud.organizationId.trim();
+    } else {
+      json.remove('cloudOrganizationId');
+    }
+    json['cloudDocumentRevision'] = cloud.documentRevision;
+    json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+    json['cloudSourceFingerprint'] =
+        ProjectCompatibilityService.sourceFingerprint(json);
+    await ProjectManager.writeProjectJson(projectDir, json);
+    await ProjectCompatibilityService.rebaseForImportedProject(
+      projectDir: projectDir,
+      sourceProject: json,
+    );
+  }
+
+  Future<void> _keepBothLocalAndCloud({
+    required ProjectMeta local,
+    required CloudProjectAccessItem cloud,
+  }) async {
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
+    if (!mounted) return;
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+    final suffix = L10n.translate(context, ' (this device)');
+    final renamedDir = await ProjectManager.renameProject(
+      local.dir,
+      '${local.name}$suffix',
+    );
+    final json = await ProjectManager.readProjectJson(renamedDir);
+    ProjectManager.stripCloudSyncMetadata(json);
+    await ProjectManager.writeProjectJson(renamedDir, json);
     await _refresh();
+    if (!mounted) return;
+    await _downloadAndOpenNewCloudCopy(cloud);
+  }
+
+  Future<void> _downloadAndOpenNewCloudCopy(
+    CloudProjectAccessItem cloud,
+  ) async {
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
+    if (!mounted) return;
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Downloading from cloud…'),
+    );
+    try {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      final auth = context.read<AuthService>();
+      final downloaded = await _cloudProjectService.downloadBundle(
+        auth: auth,
+        project: cloud,
+      );
+      final newDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: downloaded.file,
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+      final json = await ProjectManager.readProjectJson(newDir);
+      json['name'] = _downloadedCloudProjectDisplayName(
+        cloud: cloud,
+        resolvedName: (json['name'] ?? cloud.name).toString(),
+      );
+      await ProjectManager.writeProjectJson(newDir, json);
+      await _writeCloudLinkMetadata(
+        projectDir: newDir,
+        cloud: downloaded.project,
+      );
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await Navigator.push(
+        context,
+        _NoSwipeMaterialPageRoute(
+          builder: (_) => AudioEditorScreen(
+            mode: 'Pro',
+            projectDir: newDir,
+            onUpgradeRequested: widget.onUpgradeRequested,
+          ),
+        ),
+      );
+      if (!mounted) return;
+      await _refresh(includeCloud: true);
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
+      } else {
+        _cloudProjectsInFlight.remove(cloud.projectId);
+      }
+    }
   }
 
   Future<FilePickerResult?> _pickFilesSafely({
@@ -2178,6 +2460,167 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return result == true;
   }
 
+  Future<_LocalCloudConflictChoice?> _showLocalCloudConflictDialog() {
+    return showDialog<_LocalCloudConflictChoice>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        Widget option({
+          required _LocalCloudConflictChoice choice,
+          required IconData icon,
+          required String title,
+          required String subtitle,
+        }) {
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => Navigator.of(dialogContext).pop(choice),
+              borderRadius: BorderRadius.circular(18),
+              splashColor: Colors.white.withValues(alpha: 0.12),
+              highlightColor: Colors.white.withValues(alpha: 0.08),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 13,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color.fromRGBO(244, 244, 244, 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(112, 139, 166, 0.28),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        icon,
+                        color: const Color(0xFFF4F4F4),
+                        size: 19,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            L10n.translate(dialogContext, title),
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            L10n.translate(dialogContext, subtitle),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.66),
+                              fontSize: 12,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(dialogContext, 'Project versions differ'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    L10n.translate(
+                      dialogContext,
+                      'This project changed on this device and in the cloud.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.70),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  option(
+                    choice: _LocalCloudConflictChoice.keepDevice,
+                    icon: Icons.phone_iphone_rounded,
+                    title: 'Keep this device',
+                    subtitle: 'Open the copy on this device.',
+                  ),
+                  const SizedBox(height: 10),
+                  option(
+                    choice: _LocalCloudConflictChoice.takeCloud,
+                    icon: Icons.cloud_download_rounded,
+                    title: 'Take the cloud version',
+                    subtitle: 'Replace this copy with the cloud version.',
+                  ),
+                  const SizedBox(height: 10),
+                  option(
+                    choice: _LocalCloudConflictChoice.keepBoth,
+                    icon: Icons.copy_all_rounded,
+                    title: 'Keep both',
+                    subtitle:
+                        'Save this copy as a second project, then open the cloud version.',
+                  ),
+                  const SizedBox(height: 14),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: Text(L10n.translate(dialogContext, 'Cancel')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   bool _isCloudRevisionConflict(Object error) {
     if (error is CloudProjectApiException) {
       final detail = '${error.message} ${error.body}'.toLowerCase();
@@ -3114,121 +3557,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       return;
     }
     final local = _localProjectForCloud(cloud);
-    if (local != null &&
-        local.cloudDocumentRevision == cloud.documentRevision) {
-      await _openProject(local.dir);
-      return;
-    }
-    final canCreate = await ProjectManager.canCreateNew(
-      maxProjects: _localProjectLimit(),
-    );
-    if (!mounted) return;
-    if (!canCreate) {
-      _showProjectLimitDialog();
-      return;
-    }
-
-    // Preserve an out-of-date local copy as an unlinked local project rather
-    // than silently overwriting user work. The freshly downloaded revision
-    // becomes the cloud-linked copy opened below.
     if (local != null) {
-      try {
-        final staleJson = await ProjectManager.readProjectJson(local.dir);
-        staleJson.remove('cloudProjectId');
-        staleJson.remove('cloud_project_id');
-        staleJson.remove('cloudWorkspaceId');
-        staleJson.remove('cloudOrganizationId');
-        staleJson.remove('cloudDocumentRevision');
-        staleJson.remove('cloud_document_revision');
-        staleJson.remove('cloudSyncedAt');
-        await ProjectManager.writeProjectJson(local.dir, staleJson);
-      } catch (error) {
-        debugPrint('Failed to detach stale local cloud project: $error');
-      }
+      await _applyLocalOpenAction(meta: local, cloud: cloud);
+      return;
     }
-    final auth = context.read<AuthService>();
-    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
-    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
-    showLoadingDialog(
-      context,
-      message: L10n.translate(context, 'Downloading from cloud…'),
-    );
-    try {
-      await Future.delayed(const Duration(milliseconds: 200));
-      final downloaded = await _cloudProjectService.downloadBundle(
-        auth: auth,
-        project: cloud,
-      );
-      final newDir = await ProjectBundleImport.importMixroomBundle(
-        bundleFile: downloaded.file,
-        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
-      );
-      final json = await ProjectManager.readProjectJson(newDir);
-      json['name'] = _downloadedCloudProjectDisplayName(
-        cloud: cloud,
-        resolvedName: (json['name'] ?? cloud.name).toString(),
-      );
-      json['cloudProjectId'] = cloud.projectId;
-      if (cloud.workspaceId.trim().isNotEmpty) {
-        json['cloudWorkspaceId'] = cloud.workspaceId.trim();
-      } else {
-        json.remove('cloudWorkspaceId');
-      }
-      if (cloud.organizationId.trim().isNotEmpty) {
-        json['cloudOrganizationId'] = cloud.organizationId.trim();
-      } else {
-        json.remove('cloudOrganizationId');
-      }
-      json['cloudDocumentRevision'] = cloud.documentRevision;
-      json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
-      json['cloudSourceFingerprint'] =
-          ProjectCompatibilityService.sourceFingerprint(json);
-      await ProjectManager.writeProjectJson(newDir, json);
-      // The cloud library assigns a local display name after bundle import.
-      // Keep the copied compatibility manifest and projection anchored to the
-      // final canonical project JSON before the editor chooses its variant.
-      await ProjectCompatibilityService.rebaseForImportedProject(
-        projectDir: newDir,
-        sourceProject: json,
-      );
-      if (!mounted) return;
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      await Navigator.push(
-        context,
-        _NoSwipeMaterialPageRoute(
-          builder: (_) => AudioEditorScreen(
-            mode: 'Pro',
-            projectDir: newDir,
-            onUpgradeRequested: widget.onUpgradeRequested,
-          ),
-        ),
-      );
-      if (!mounted) return;
-      await _refresh(includeCloud: true);
-    } catch (e) {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
-        tone: AppPopupTone.error,
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
-      } else {
-        _cloudProjectsInFlight.remove(cloud.projectId);
-      }
-    }
+    await _downloadAndOpenNewCloudCopy(cloud);
   }
 
   Future<void> _startProjectExport(
     ProjectMeta meta,
     AudioEditorInitialAction action,
   ) async {
-    await _openProject(meta.dir, initialAction: action);
+    await _openProject(meta.dir, initialAction: action, checkCloud: false);
   }
 
   Future<void> _importProjectFromIncomingFile(File bundleFile) async {
@@ -3717,6 +4057,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       ProjectVersionReason.autosave => 'Autosave',
       ProjectVersionReason.manualSave => 'Manual save',
       ProjectVersionReason.background => 'Background save',
+      ProjectVersionReason.cloudUpdate => 'Cloud update',
     });
   }
 
