@@ -2014,6 +2014,14 @@ class L10n {
       'Listen only': 'Listen only',
       'You can play this mix. Editing needs a Frozen mix copy.':
           'You can play this mix. Editing needs a Frozen mix copy.',
+      'Original': 'Original',
+      'Frozen mix': 'Frozen mix',
+      'Original · Frozen mix': 'Original · Frozen mix',
+      'This mix': 'This mix',
+      'Whole song': 'Whole song',
+      'Delete song?': 'Delete song?',
+      'Delete only this mix, or the original and Frozen mix?':
+          'Delete only this mix, or the original and Frozen mix?',
       'Mix not ready on this device': 'Mix not ready on this device',
       'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
           'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
@@ -4103,6 +4111,14 @@ class L10n {
       'Listen only': '듣기 전용',
       'You can play this mix. Editing needs a Frozen mix copy.':
           '이 믹스는 재생할 수 있습니다. 편집하려면 Frozen mix 사본이 필요합니다.',
+      'Original': '원본',
+      'Frozen mix': 'Frozen mix',
+      'Original · Frozen mix': '원본 · Frozen mix',
+      'This mix': '이 믹스만',
+      'Whole song': '곡 전체',
+      'Delete song?': '이 곡을 삭제할까요?',
+      'Delete only this mix, or the original and Frozen mix?':
+          '이 믹스만 삭제할까요, 아니면 원본과 Frozen mix를 함께 삭제할까요?',
       'Mix not ready on this device': '이 기기에서는 믹스를 열 수 없습니다',
       'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
           '이 프로젝트는 이 기기에 없는 플러그인을 사용합니다. 플러그인이 있는 Mac에서 한 번 연 다음, 프로젝트 설정에서 Prepare로 재생 가능한 믹스를 만들어 주세요.',
@@ -4850,6 +4866,14 @@ class L10n {
       'Listen only': '仅试听',
       'You can play this mix. Editing needs a Frozen mix copy.':
           '可以播放此混音。编辑需要 Frozen mix 副本。',
+      'Original': '原版',
+      'Frozen mix': 'Frozen mix',
+      'Original · Frozen mix': '原版 · Frozen mix',
+      'This mix': '仅此混音',
+      'Whole song': '整首歌',
+      'Delete song?': '要删除这首歌吗？',
+      'Delete only this mix, or the original and Frozen mix?':
+          '只删除此混音，还是同时删除原版和 Frozen mix？',
       'Mix not ready on this device': '此设备上还不能打开该混音',
       'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
           '此项目使用了此设备上没有的插件。请先在装有这些插件的 Mac 上打开一次，并在项目设置中选择 Prepare。',
@@ -7110,6 +7134,14 @@ class L10n {
       'Listen only': '試聴のみ',
       'You can play this mix. Editing needs a Frozen mix copy.':
           'このミックスは再生できます。編集するには Frozen mix のコピーが必要です。',
+      'Original': 'オリジナル',
+      'Frozen mix': 'Frozen mix',
+      'Original · Frozen mix': 'オリジナル · Frozen mix',
+      'This mix': 'このミックスだけ',
+      'Whole song': '曲全体',
+      'Delete song?': 'この曲を削除しますか？',
+      'Delete only this mix, or the original and Frozen mix?':
+          'このミックスだけ削除しますか？それともオリジナルと Frozen mix をまとめて削除しますか？',
       'Mix not ready on this device': 'このデバイスではミックスを開けません',
       'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
           'このプロジェクトは、このデバイスにないプラグインを使っています。プラグインがある Mac で一度開き、プロジェクト設定の Prepare で再生用ミックスを作成してください。',

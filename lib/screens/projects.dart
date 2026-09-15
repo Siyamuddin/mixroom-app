@@ -20,6 +20,7 @@ import 'package:mixroom/models/entitlement_models.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
+import 'package:mixroom/helpers/project_family.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
@@ -78,6 +79,8 @@ enum _ProjectLibraryTab { yourProjects, cloudProjects, demoProjects }
 
 enum _LocalCloudConflictChoice { keepDevice, takeCloud, keepBoth }
 
+enum _FamilyDeleteScope { mix, song }
+
 class _LocalCloudStatusPresentation {
   const _LocalCloudStatusPresentation({
     required this.label,
@@ -93,22 +96,22 @@ class _LocalCloudStatusPresentation {
 }
 
 class _ProjectListEntry {
-  const _ProjectListEntry.project(this.project)
+  _ProjectListEntry.family(this.family)
     : bundledDemo = null,
       cloudProject = null,
       isBundledDemo = false;
 
   const _ProjectListEntry.bundledDemo(this.bundledDemo)
-    : project = null,
+    : family = null,
       cloudProject = null,
       isBundledDemo = true;
 
   const _ProjectListEntry.cloud(this.cloudProject)
-    : project = null,
+    : family = null,
       bundledDemo = null,
       isBundledDemo = false;
 
-  final ProjectMeta? project;
+  final ProjectFamilyGroup? family;
   final BundledDemoProjectAsset? bundledDemo;
   final CloudProjectAccessItem? cloudProject;
   final bool isBundledDemo;
@@ -156,6 +159,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _deleteDialogKey = ValueKey('projects_delete_dialog');
   static const Key _deleteCancelKey = ValueKey('projects_delete_cancel');
   static const Key _deleteConfirmKey = ValueKey('projects_delete_confirm');
+  static const Key _deleteThisMixKey = ValueKey('projects_delete_this_mix');
+  static const Key _deleteWholeSongKey = ValueKey('projects_delete_whole_song');
   static List<ProjectMeta>? _cachedProjects;
   static List<BundledDemoProjectAsset>? _cachedBundledDemoProjects;
   List<ProjectMeta> _projects = [];
@@ -191,6 +196,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   _ProjectLibraryTab _libraryTab = _ProjectLibraryTab.yourProjects;
   final Set<String> _selectedProjectPaths = <String>{};
   final Set<String> _selectedBundledDemoAssetPaths = <String>{};
+  final Set<String> _expandedFamilyIds = <String>{};
   final Set<String> _cloudProjectsInFlight = <String>{};
   final ProjectVersionStore _projectVersionStore = const ProjectVersionStore();
   bool _selectionModePinned = false;
@@ -1195,6 +1201,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           meta.dir,
           newName,
         );
+        if (!projectIsFrozenMix(meta)) {
+          await _renameLinkedFrozenMixIfFollowing(
+            original: meta,
+            oldName: meta.name,
+            newName: newName,
+          );
+        }
         await _restoreCloudScopedDisplayNameIfAllowed(
           original: meta,
           renamedDir: renamedDir,
@@ -1237,23 +1250,69 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   bool get _selectionMode => _selectionModePinned || _selectedEntryCount > 0;
 
-  List<ProjectMeta> _visibleProjects() {
-    final query = _searchController.text.trim().toLowerCase();
-    final filtered = _projects.where((project) {
-      if (query.isEmpty) return true;
-      return project.name.toLowerCase().contains(query);
-    }).toList();
+  List<ProjectFamilyGroup> _visibleProjectGroups() {
+    final query = _searchController.text.trim();
+    final filtered = groupProjectsByFamily(
+      _projects,
+    ).where((group) => group.matchesQuery(query)).toList();
     switch (_sortMode) {
       case _ProjectSortMode.alphabetical:
         filtered.sort(
-          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          (a, b) => a.displayProject.name.toLowerCase().compareTo(
+            b.displayProject.name.toLowerCase(),
+          ),
         );
         break;
       case _ProjectSortMode.recent:
-        filtered.sort((a, b) => b.lastOpenedAt.compareTo(a.lastOpenedAt));
+        filtered.sort((a, b) => b.sortOpenedAt.compareTo(a.sortOpenedAt));
         break;
     }
     return filtered;
+  }
+
+  ProjectFamilyGroup _familyGroupContaining(ProjectMeta meta) {
+    for (final group in groupProjectsByFamily(_projects)) {
+      if (group.members.any((member) => member.dir.path == meta.dir.path)) {
+        return group;
+      }
+    }
+    return ProjectFamilyGroup(members: <ProjectMeta>[meta]);
+  }
+
+  void _toggleFamilyExpansion(ProjectFamilyGroup group) {
+    final familyId = group.familyId;
+    if (familyId == null || !group.canExpand) return;
+    setState(() {
+      if (_expandedFamilyIds.contains(familyId)) {
+        _expandedFamilyIds.remove(familyId);
+      } else {
+        _expandedFamilyIds.add(familyId);
+      }
+    });
+  }
+
+  bool _isFamilyExpanded(ProjectFamilyGroup group) {
+    final familyId = group.familyId;
+    if (familyId == null) return false;
+    return _expandedFamilyIds.contains(familyId);
+  }
+
+  bool _isFamilySelected(ProjectFamilyGroup group) {
+    return group.members.every(_isSelected);
+  }
+
+  void _toggleFamilySelection(ProjectFamilyGroup group) {
+    setState(() {
+      final selected = _isFamilySelected(group);
+      for (final member in group.members) {
+        final key = _projectSelectionKey(member);
+        if (selected) {
+          _selectedProjectPaths.remove(key);
+        } else {
+          _selectedProjectPaths.add(key);
+        }
+      }
+    });
   }
 
   List<BundledDemoProjectAsset> _visibleBundledDemoProjects() {
@@ -1943,7 +2002,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         return false;
       }
       if (query.isEmpty) return true;
-      return project.name.toLowerCase().contains(query);
+      if (project.name.toLowerCase().contains(query)) return true;
+      final frozen = localFrozenMixSibling(
+        projects: _projects,
+        localProject: _localProjectForCloud(project),
+      );
+      return frozen != null && frozen.name.toLowerCase().contains(query);
     }).toList();
     int compareLocation(CloudProjectAccessItem a, CloudProjectAccessItem b) {
       final aLabel = _destinationForCloudProject(a, entitlement).label;
@@ -1979,7 +2043,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   List<_ProjectListEntry> _visibleEntriesForTab(_ProjectLibraryTab tab) {
     switch (tab) {
       case _ProjectLibraryTab.yourProjects:
-        return _visibleProjects().map(_ProjectListEntry.project).toList();
+        return _visibleProjectGroups().map(_ProjectListEntry.family).toList();
       case _ProjectLibraryTab.cloudProjects:
         if (!_cloudProjectsFeatureEnabled) return const <_ProjectListEntry>[];
         return _visibleCloudProjects().map(_ProjectListEntry.cloud).toList();
@@ -2083,8 +2147,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         } else if (entry.isCloudProject) {
           continue;
         } else {
-          final project = entry.project!;
-          _selectedProjectPaths.add(_projectSelectionKey(project));
+          for (final project in entry.family?.members ?? const <ProjectMeta>[]) {
+            _selectedProjectPaths.add(_projectSelectionKey(project));
+          }
         }
       }
     });
@@ -2331,6 +2396,177 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       },
     );
     return result == true;
+  }
+
+  Future<_FamilyDeleteScope?> _showDeleteMixOrSongDialog({
+    required String songName,
+  }) async {
+    return showDialog<_FamilyDeleteScope>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          key: _deleteDialogKey,
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(255, 119, 119, 0.16),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Color(0xFFFF8D8D),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              L10n.translate(dialogContext, 'Delete song?'),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              L10n.translate(
+                                dialogContext,
+                                'This action cannot be undone.',
+                              ),
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.68),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '“$songName”. ${L10n.translate(dialogContext, 'Delete only this mix, or the original and Frozen mix?')}',
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.84),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      key: _deleteCancelKey,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFF4F4F4),
+                        backgroundColor: const Color.fromRGBO(
+                          244,
+                          244,
+                          244,
+                          0.08,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.10),
+                          ),
+                        ),
+                      ),
+                      child: Text(L10n.translate(dialogContext, 'Cancel')),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      key: _deleteThisMixKey,
+                      onPressed: () => Navigator.of(
+                        dialogContext,
+                      ).pop(_FamilyDeleteScope.mix),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color.fromRGBO(
+                          244,
+                          244,
+                          244,
+                          0.18,
+                        ),
+                        foregroundColor: const Color(0xFFF4F4F4),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(L10n.translate(dialogContext, 'This mix')),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      key: _deleteWholeSongKey,
+                      onPressed: () => Navigator.of(
+                        dialogContext,
+                      ).pop(_FamilyDeleteScope.song),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color.fromRGBO(
+                          196,
+                          74,
+                          74,
+                          0.92,
+                        ),
+                        foregroundColor: const Color(0xFFFDF4F4),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(L10n.translate(dialogContext, 'Whole song')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<bool> _showReplaceCloudVersionDialog() async {
@@ -2824,7 +3060,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             );
           }
           if (entry.isCloudProject) return true;
-          return _selectedProjectPaths.contains(entry.project!.dir.path);
+          final members = entry.family?.members ?? const <ProjectMeta>[];
+          if (members.isEmpty) return true;
+          return members.every(
+            (project) => _selectedProjectPaths.contains(project.dir.path),
+          );
         });
     final selected = await _showAnchoredShellMenu<String>(
       anchorKey: _projectToolsButtonKey,
@@ -3189,18 +3429,61 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
-  Future<void> _deleteProject(ProjectMeta meta) async {
-    final cloudBacked = _hasCloudReference(meta);
-    final ok = await _showDeleteProjectsDialog(
-      message: cloudBacked
-          ? '“${meta.name}” ${L10n.translate(context, 'will be deleted from this device. The cloud copy will remain available.')}'
-          : '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
-      dialogKey: _deleteDialogKey,
-      cancelKey: _deleteCancelKey,
-      confirmKey: _deleteConfirmKey,
+  Future<void> _renameLinkedFrozenMixIfFollowing({
+    required ProjectMeta original,
+    required String oldName,
+    required String newName,
+  }) async {
+    final familyId = projectFamilyId(original);
+    if (familyId == null) return;
+    ProjectMeta? frozen;
+    for (final project in _projects) {
+      if (projectFamilyId(project) != familyId) continue;
+      if (!projectIsFrozenMix(project)) continue;
+      frozen = project;
+      break;
+    }
+    if (frozen == null) return;
+    if (!frozenMixNameFollowsOriginal(
+      originalName: oldName,
+      frozenName: frozen.name,
+    )) {
+      return;
+    }
+    await ProjectManager.renameProject(
+      frozen.dir,
+      ProjectManager.frozenMixDisplayName(newName),
     );
+  }
 
-    if (!ok) return;
+  Future<void> _deleteProject(ProjectMeta meta) async {
+    final group = _familyGroupContaining(meta);
+    final deletingOriginalWithSibling =
+        group.canExpand && !projectIsFrozenMix(meta);
+    if (deletingOriginalWithSibling) {
+      final scope = await _showDeleteMixOrSongDialog(
+        songName: group.displayProject.name,
+      );
+      if (scope == null) return;
+      if (scope == _FamilyDeleteScope.song) {
+        for (final member in group.members) {
+          await ProjectManager.deleteProject(member.dir);
+        }
+        await _refresh();
+        return;
+      }
+    } else {
+      final cloudBacked = _hasCloudReference(meta);
+      final ok = await _showDeleteProjectsDialog(
+        message: cloudBacked
+            ? '“${meta.name}” ${L10n.translate(context, 'will be deleted from this device. The cloud copy will remain available.')}'
+            : '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
+        dialogKey: _deleteDialogKey,
+        cancelKey: _deleteCancelKey,
+        confirmKey: _deleteConfirmKey,
+      );
+      if (!ok) return;
+    }
     await ProjectManager.deleteProject(meta.dir);
     await _refresh();
   }
@@ -4261,6 +4544,337 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  Color? _projectTileOverlayColor(Set<WidgetState> states) {
+    if (states.contains(WidgetState.pressed)) {
+      return Colors.white.withValues(alpha: 0.14);
+    }
+    if (states.contains(WidgetState.hovered)) {
+      return Colors.white.withValues(alpha: 0.08);
+    }
+    if (states.contains(WidgetState.focused)) {
+      return Colors.white.withValues(alpha: 0.10);
+    }
+    return Colors.transparent;
+  }
+
+  String _familyMemberLabel(ProjectMeta member) {
+    if (projectIsFrozenMix(member)) {
+      return L10n.translate(context, 'Frozen mix');
+    }
+    return L10n.translate(context, 'Original');
+  }
+
+  Widget _buildOnDeviceFamilyTile({
+    required ProjectFamilyGroup group,
+    required bool compact,
+  }) {
+    final project = group.displayProject;
+    final expandable = group.canExpand;
+    final expanded = expandable && _isFamilyExpanded(group);
+    final selected = _isFamilySelected(group);
+    final cloud = _cloudProjectForLocal(project);
+    final cloudLinked =
+        cloud != null || (project.cloudProjectId ?? '').trim().isNotEmpty;
+    final cloudInFlight = _localCloudSyncInFlight(project, cloud);
+    final cloudStatus = cloudLinked
+        ? _localCloudStatus(project, cloud, syncInProgress: cloudInFlight)
+        : null;
+    final localSubtitle = expandable
+        ? L10n.translate(context, 'Original · Frozen mix')
+        : '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
+    final openedSubtitle =
+        '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(group.sortOpenedAt)}';
+    final keyToken = _projectActionKeyToken(
+      '${project.name}_${project.projectId}',
+    );
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final expandDuration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 200);
+
+    void handleTileTap() {
+      if (_selectionMode) {
+        _toggleFamilySelection(group);
+        return;
+      }
+      if (expandable) {
+        _toggleFamilyExpansion(group);
+        return;
+      }
+      _openProject(project.dir);
+    }
+
+    return Semantics(
+      button: true,
+      enabled: true,
+      label:
+          'Open project ${project.name}, $localSubtitle${cloudLinked ? ', ${cloudStatus!.label}' : ''}',
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onLongPress: () => _toggleFamilySelection(group),
+            onTap: handleTileTap,
+            splashFactory: InkRipple.splashFactory,
+            splashColor: Colors.white.withValues(alpha: 0.12),
+            highlightColor: Colors.white.withValues(alpha: 0.04),
+            overlayColor: WidgetStateProperty.resolveWith<Color?>(
+              _projectTileOverlayColor,
+            ),
+            child: MixroomShellSurface(
+              padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
+              color: selected
+                  ? const Color.fromRGBO(193, 221, 249, 0.34)
+                  : const Color.fromRGBO(244, 244, 244, 0.30),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    project.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Color(0xFFF4F4F4),
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      height: 22 / 15,
+                                    ),
+                                  ),
+                                ),
+                                if (cloudLinked) ...[
+                                  const SizedBox(width: 8),
+                                  _buildLocalCloudStatusIcon(cloudStatus!),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              height: 1,
+                              color: Colors.white.withValues(alpha: 0.22),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              localSubtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.80),
+                                fontSize: 12,
+                                height: 22 / 12,
+                              ),
+                            ),
+                            if (expandable) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                openedSubtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11,
+                                  height: 17 / 11,
+                                ),
+                              ),
+                            ],
+                            if (cloudLinked) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                cloudStatus!.label,
+                                softWrap: true,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11,
+                                  height: 17 / 11,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_selectionMode)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: selected
+                              ? SvgPicture.asset(
+                                  kMixroomShellCheckboxCheckedAsset,
+                                  width: 22,
+                                  height: 22,
+                                )
+                              : Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                        )
+                      else if (cloudInFlight)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 10),
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      else
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (expandable)
+                              MixroomShellRoundButton(
+                                size: 40,
+                                iconExtent: 18,
+                                icon: AnimatedRotation(
+                                  turns: expanded ? 0.5 : 0,
+                                  duration: expandDuration,
+                                  child: const Icon(
+                                    Icons.expand_more_rounded,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                                onTap: () => _toggleFamilyExpansion(group),
+                              ),
+                            if (!expanded) ...[
+                              if (expandable) const SizedBox(width: 6),
+                              _buildProjectTrailingActions(
+                                context: context,
+                                project: project,
+                                keyToken: keyToken,
+                                compact: compact,
+                              ),
+                            ],
+                          ],
+                        ),
+                    ],
+                  ),
+                  AnimatedSize(
+                    duration: expandDuration,
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: expanded
+                        ? Column(
+                            children: [
+                              for (final member in group.members)
+                                _buildFamilyMemberRow(
+                                  member: member,
+                                  compact: compact,
+                                ),
+                            ],
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFamilyMemberRow({
+    required ProjectMeta member,
+    required bool compact,
+  }) {
+    final subtitle =
+        '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(member.lastOpenedAt)}';
+    final keyToken = _projectActionKeyToken(
+      '${member.name}_${member.projectId}_member',
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            if (_selectionMode) {
+              _toggleSelection(member);
+              return;
+            }
+            _openProject(member.dir);
+          },
+          splashFactory: InkRipple.splashFactory,
+          splashColor: Colors.white.withValues(alpha: 0.12),
+          highlightColor: Colors.white.withValues(alpha: 0.04),
+          overlayColor: WidgetStateProperty.resolveWith<Color?>(
+            _projectTileOverlayColor,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _familyMemberLabel(member),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 20 / 14,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.62),
+                          fontSize: 11,
+                          height: 17 / 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!_selectionMode)
+                  _buildProjectTrailingActions(
+                    context: context,
+                    project: member,
+                    keyToken: keyToken,
+                    compact: compact,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildProjectTrailingActions({
     required BuildContext context,
     required ProjectMeta project,
@@ -5239,6 +5853,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final local = _localProjectForCloud(
                                             cloud,
                                           );
+                                          final frozenMix =
+                                              localFrozenMixSibling(
+                                                projects: _projects,
+                                                localProject: local,
+                                              );
                                           final inFlight = local == null
                                               ? _cloudProjectsInFlight.contains(
                                                       cloud.projectId,
@@ -5483,6 +6102,73 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                                           11,
                                                                     ),
                                                                   ),
+                                                                  if (frozenMix !=
+                                                                      null) ...[
+                                                                    const SizedBox(
+                                                                      height: 8,
+                                                                    ),
+                                                                    Material(
+                                                                      color: Colors
+                                                                          .transparent,
+                                                                      borderRadius:
+                                                                          BorderRadius.circular(
+                                                                            14,
+                                                                          ),
+                                                                      clipBehavior:
+                                                                          Clip.antiAlias,
+                                                                      child: InkWell(
+                                                                        onTap: () => _openProject(
+                                                                          frozenMix
+                                                                              .dir,
+                                                                        ),
+                                                                        splashFactory:
+                                                                            InkRipple.splashFactory,
+                                                                        splashColor: Colors
+                                                                            .white
+                                                                            .withValues(
+                                                                              alpha: 0.12,
+                                                                            ),
+                                                                        child: Padding(
+                                                                          padding: const EdgeInsets.symmetric(
+                                                                            vertical:
+                                                                                6,
+                                                                          ),
+                                                                          child: Row(
+                                                                            children: [
+                                                                              Expanded(
+                                                                                child: Text(
+                                                                                  L10n.translate(
+                                                                                    context,
+                                                                                    'Frozen mix',
+                                                                                  ),
+                                                                                  maxLines: 1,
+                                                                                  overflow: TextOverflow.ellipsis,
+                                                                                  style: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    color: Colors.white.withValues(
+                                                                                      alpha: 0.86,
+                                                                                    ),
+                                                                                    fontSize: 12,
+                                                                                    fontWeight: FontWeight.w600,
+                                                                                    height:
+                                                                                        18 /
+                                                                                        12,
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                              Icon(
+                                                                                Icons.chevron_right_rounded,
+                                                                                size: 18,
+                                                                                color: Colors.white.withValues(
+                                                                                  alpha: 0.64,
+                                                                                ),
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ],
                                                                 ],
                                                               ),
                                                             ],
@@ -5536,279 +6222,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           );
                                         }
 
-                                        final project = entry.project!;
-                                        final cloud = _cloudProjectForLocal(
-                                          project,
-                                        );
-                                        final cloudLinked =
-                                            cloud != null ||
-                                            (project.cloudProjectId ?? '')
-                                                .trim()
-                                                .isNotEmpty;
-                                        final cloudInFlight =
-                                            _localCloudSyncInFlight(
-                                              project,
-                                              cloud,
-                                            );
-                                        final cloudStatus = cloudLinked
-                                            ? _localCloudStatus(
-                                                project,
-                                                cloud,
-                                                syncInProgress: cloudInFlight,
-                                              )
-                                            : null;
-                                        final localSubtitle =
-                                            '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
-                                        final keyToken = _projectActionKeyToken(
-                                          project.name,
-                                        );
-                                        final selected = _isSelected(project);
-                                        return Semantics(
-                                          button: true,
-                                          enabled: true,
-                                          label:
-                                              'Open project ${project.name}, $localSubtitle${cloudLinked ? ', ${cloudStatus!.label}' : ''}',
-                                          child: ExcludeSemantics(
-                                            child: Material(
-                                              color: Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(24),
-                                              clipBehavior: Clip.antiAlias,
-                                              child: InkWell(
-                                                onLongPress: () =>
-                                                    _toggleSelection(project),
-                                                onTap: () {
-                                                  if (_selectionMode) {
-                                                    _toggleSelection(project);
-                                                    return;
-                                                  }
-                                                  _openProject(project.dir);
-                                                },
-                                                splashFactory:
-                                                    InkRipple.splashFactory,
-                                                splashColor: Colors.white
-                                                    .withValues(alpha: 0.12),
-                                                highlightColor: Colors.white
-                                                    .withValues(alpha: 0.04),
-                                                overlayColor:
-                                                    WidgetStateProperty.resolveWith<
-                                                      Color?
-                                                    >((states) {
-                                                      if (states.contains(
-                                                        WidgetState.pressed,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                              alpha: 0.14,
-                                                            );
-                                                      }
-                                                      if (states.contains(
-                                                        WidgetState.hovered,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                              alpha: 0.08,
-                                                            );
-                                                      }
-                                                      if (states.contains(
-                                                        WidgetState.focused,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                              alpha: 0.10,
-                                                            );
-                                                      }
-                                                      return Colors.transparent;
-                                                    }),
-                                                child: MixroomShellSurface(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                        18,
-                                                        16,
-                                                        12,
-                                                        16,
-                                                      ),
-                                                  color: selected
-                                                      ? const Color.fromRGBO(
-                                                          193,
-                                                          221,
-                                                          249,
-                                                          0.34,
-                                                        )
-                                                      : const Color.fromRGBO(
-                                                          244,
-                                                          244,
-                                                          244,
-                                                          0.30,
-                                                        ),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Expanded(
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Row(
-                                                              children: [
-                                                                Expanded(
-                                                                  child: Text(
-                                                                    project
-                                                                        .name,
-                                                                    maxLines: 1,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style: const TextStyle(
-                                                                      fontFamily:
-                                                                          'Pretendard',
-                                                                      color: Color(
-                                                                        0xFFF4F4F4,
-                                                                      ),
-                                                                      fontSize:
-                                                                          15,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                      height:
-                                                                          22 /
-                                                                          15,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                                if (cloudLinked) ...[
-                                                                  const SizedBox(
-                                                                    width: 8,
-                                                                  ),
-                                                                  _buildLocalCloudStatusIcon(
-                                                                    cloudStatus!,
-                                                                  ),
-                                                                ],
-                                                              ],
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 8,
-                                                            ),
-                                                            Container(
-                                                              height: 1,
-                                                              color: Colors
-                                                                  .white
-                                                                  .withValues(
-                                                                    alpha: 0.22,
-                                                                  ),
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 8,
-                                                            ),
-                                                            Text(
-                                                              localSubtitle,
-                                                              maxLines: 1,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                              style: TextStyle(
-                                                                fontFamily:
-                                                                    'Pretendard',
-                                                                color: Colors
-                                                                    .white
-                                                                    .withValues(
-                                                                      alpha:
-                                                                          0.80,
-                                                                    ),
-                                                                fontSize: 12,
-                                                                height: 22 / 12,
-                                                              ),
-                                                            ),
-                                                            if (cloudLinked) ...[
-                                                              const SizedBox(
-                                                                height: 2,
-                                                              ),
-                                                              Text(
-                                                                cloudStatus!
-                                                                    .label,
-                                                                softWrap: true,
-                                                                style: TextStyle(
-                                                                  fontFamily:
-                                                                      'Pretendard',
-                                                                  color: Colors
-                                                                      .white
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.62,
-                                                                      ),
-                                                                  fontSize: 11,
-                                                                  height:
-                                                                      17 / 11,
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ],
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 8),
-                                                      if (_selectionMode)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                top: 12,
-                                                              ),
-                                                          child: selected
-                                                              ? SvgPicture.asset(
-                                                                  kMixroomShellCheckboxCheckedAsset,
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                )
-                                                              : Container(
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                  decoration: BoxDecoration(
-                                                                    shape: BoxShape
-                                                                        .circle,
-                                                                    border: Border.all(
-                                                                      color: Colors
-                                                                          .white
-                                                                          .withValues(
-                                                                            alpha:
-                                                                                0.6,
-                                                                          ),
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                        )
-                                                      else if (cloudInFlight)
-                                                        const Padding(
-                                                          padding:
-                                                              EdgeInsets.only(
-                                                                top: 10,
-                                                              ),
-                                                          child: SizedBox(
-                                                            width: 22,
-                                                            height: 22,
-                                                            child:
-                                                                CircularProgressIndicator(
-                                                                  strokeWidth:
-                                                                      2,
-                                                                ),
-                                                          ),
-                                                        )
-                                                      else
-                                                        _buildProjectTrailingActions(
-                                                          context: context,
-                                                          project: project,
-                                                          keyToken: keyToken,
-                                                          compact:
-                                                              useCompactProjectMenus,
-                                                        ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
+                                        final family = entry.family;
+                                        if (family != null) {
+                                          return _buildOnDeviceFamilyTile(
+                                            group: family,
+                                            compact: useCompactProjectMenus,
+                                          );
+                                        }
+                                        return const SizedBox.shrink();
                                       },
                                     ),
                                   );
