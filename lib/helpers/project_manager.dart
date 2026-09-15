@@ -627,11 +627,71 @@ class ProjectManager {
     json.remove('forkedFromProjectId');
   }
 
-  static String frozenMixDisplayName(String originalName) {
+  static const String frozenMixSuffix = 'Frozen mix';
+
+  /// Default name for the [index]-th Frozen mix of [originalName].
+  ///
+  /// The first one is `Song Frozen mix`; later ones are `Song Frozen mix 2`,
+  /// `Song Frozen mix 3`, and so on, like Finder's "copy 2".
+  static String frozenMixDisplayName(String originalName, {int index = 1}) {
     final trimmed = originalName.trim();
-    if (trimmed.isEmpty) return 'Frozen mix';
-    if (trimmed.toLowerCase().endsWith('frozen mix')) return trimmed;
-    return '$trimmed Frozen mix';
+    final base = trimmed.isEmpty
+        ? frozenMixSuffix
+        : trimmed.toLowerCase().endsWith(frozenMixSuffix.toLowerCase())
+        ? trimmed
+        : '$trimmed $frozenMixSuffix';
+    return index <= 1 ? base : '$base $index';
+  }
+
+  /// Returns the number of a Frozen mix that still follows the default name
+  /// for [originalName], or null when the user gave it a custom name.
+  ///
+  /// `Song Frozen mix` returns 1, `Song Frozen mix 3` returns 3.
+  static int? frozenMixIndexFromName({
+    required String originalName,
+    required String frozenName,
+  }) {
+    final base = frozenMixDisplayName(originalName).toLowerCase();
+    final candidate = frozenName.trim().toLowerCase();
+    if (candidate == base) return 1;
+    if (!candidate.startsWith('$base ')) return null;
+    final index = int.tryParse(candidate.substring(base.length + 1));
+    if (index == null || index < 2) return null;
+    return index;
+  }
+
+  /// Smallest number not used by the Frozen mixes already in the family, so
+  /// deleting "Frozen mix 2" and making another one gives "2" back.
+  static int nextFrozenMixIndex({
+    required String originalName,
+    required Iterable<String> existingFrozenNames,
+  }) {
+    final used = <int>{};
+    for (final name in existingFrozenNames) {
+      final index = frozenMixIndexFromName(
+        originalName: originalName,
+        frozenName: name,
+      );
+      if (index != null) used.add(index);
+    }
+    var next = 1;
+    while (used.contains(next)) {
+      next++;
+    }
+    return next;
+  }
+
+  /// Short label for a Frozen mix row: `Frozen mix` or `Frozen mix N`.
+  /// Works from the project name alone so a renamed copy that still ends in
+  /// "Frozen mix 3" keeps its number.
+  static String frozenMixLabel(String frozenName) {
+    final match = RegExp(
+      r'frozen mix(?:\s+(\d+))?\s*$',
+      caseSensitive: false,
+    ).firstMatch(frozenName.trim());
+    final number = match?.group(1);
+    if (number == null || number == '1') return frozenMixSuffix;
+    return '$frozenMixSuffix $number';
   }
 
   static void applyFrozenMixFamily({

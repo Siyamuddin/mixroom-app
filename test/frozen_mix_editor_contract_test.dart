@@ -100,6 +100,14 @@ void main() {
     );
     expect(fork, contains('applyFrozenMixFamily('));
     expect(fork, contains('frozenMixDisplayName('));
+    // Each new copy gets the next free number in its family before the
+    // folder is renamed, so copies never fall back to "#1" collision names.
+    expect(fork, contains('_nextFrozenMixIndexForFamily(oldProjectDir)'));
+    expect(fork, contains('index: frozenMixIndex'));
+    expect(
+      fork.indexOf('_nextFrozenMixIndexForFamily('),
+      lessThan(fork.indexOf('duplicateProject(')),
+    );
     expect(fork, contains('ProjectManager.mixKindFrozen'));
     expect(fork, contains('stripCloudSyncMetadata('));
     expect(

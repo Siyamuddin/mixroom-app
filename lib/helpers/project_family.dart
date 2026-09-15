@@ -76,11 +76,32 @@ List<ProjectFamilyGroup> groupProjectsByFamily(Iterable<ProjectMeta> projects) {
   ];
 }
 
+/// True when [frozenName] is still a default name for [originalName]
+/// (`Song Frozen mix`, `Song Frozen mix 2`, ...), so it should follow the
+/// original when the original is renamed.
 bool frozenMixNameFollowsOriginal({
   required String originalName,
   required String frozenName,
 }) {
-  return frozenName.trim() == ProjectManager.frozenMixDisplayName(originalName);
+  return ProjectManager.frozenMixIndexFromName(
+        originalName: originalName,
+        frozenName: frozenName,
+      ) !=
+      null;
+}
+
+/// Every Frozen mix that belongs to the same family as [original].
+List<ProjectMeta> localFrozenMixesOf({
+  required Iterable<ProjectMeta> projects,
+  required ProjectMeta original,
+}) {
+  final familyId = projectFamilyId(original);
+  if (familyId == null) return const <ProjectMeta>[];
+  return <ProjectMeta>[
+    for (final project in projects)
+      if (projectFamilyId(project) == familyId && projectIsFrozenMix(project))
+        project,
+  ];
 }
 
 ProjectMeta? localFrozenMixSibling({
@@ -103,6 +124,12 @@ List<ProjectMeta> _sortedMembers(List<ProjectMeta> members) {
     final aFrozen = projectIsFrozenMix(a);
     final bFrozen = projectIsFrozenMix(b);
     if (aFrozen != bFrozen) return aFrozen ? 1 : -1;
+    // Frozen mixes are snapshots, so list them in the order they were made.
+    // A name sort would put "Frozen mix 10" before "Frozen mix 2".
+    if (aFrozen && bFrozen) {
+      final byCreated = a.createdAt.compareTo(b.createdAt);
+      if (byCreated != 0) return byCreated;
+    }
     return a.name.toLowerCase().compareTo(b.name.toLowerCase());
   });
   return sorted;

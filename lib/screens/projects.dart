@@ -3439,26 +3439,24 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     required String oldName,
     required String newName,
   }) async {
-    final familyId = projectFamilyId(original);
-    if (familyId == null) return;
-    ProjectMeta? frozen;
-    for (final project in _projects) {
-      if (projectFamilyId(project) != familyId) continue;
-      if (!projectIsFrozenMix(project)) continue;
-      frozen = project;
-      break;
-    }
-    if (frozen == null) return;
-    if (!frozenMixNameFollowsOriginal(
-      originalName: oldName,
-      frozenName: frozen.name,
-    )) {
-      return;
-    }
-    await ProjectManager.renameProject(
-      frozen.dir,
-      ProjectManager.frozenMixDisplayName(newName),
+    // Every Frozen mix that still uses its default name follows the original.
+    // Each keeps its own number so "Song Frozen mix 3" becomes
+    // "New name Frozen mix 3". Custom-named copies are left alone.
+    final frozenMixes = localFrozenMixesOf(
+      projects: _projects,
+      original: original,
     );
+    for (final frozen in frozenMixes) {
+      final index = ProjectManager.frozenMixIndexFromName(
+        originalName: oldName,
+        frozenName: frozen.name,
+      );
+      if (index == null) continue;
+      await ProjectManager.renameProject(
+        frozen.dir,
+        ProjectManager.frozenMixDisplayName(newName, index: index),
+      );
+    }
   }
 
   Future<void> _deleteProject(ProjectMeta meta) async {
@@ -4576,7 +4574,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   String _familyMemberLabel(ProjectMeta member) {
     if (projectIsFrozenMix(member)) {
-      return L10n.translate(context, 'Frozen mix');
+      final label = ProjectManager.frozenMixLabel(member.name);
+      final translated = L10n.translate(context, 'Frozen mix');
+      // Keep the number when the copy is "Frozen mix 2", "Frozen mix 3", ...
+      return label.replaceFirst(ProjectManager.frozenMixSuffix, translated);
     }
     return L10n.translate(context, 'Original');
   }
@@ -4817,8 +4818,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     required ProjectMeta member,
     required bool compact,
   }) {
-    final subtitle =
-        '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(member.lastOpenedAt)}';
+    // A Frozen mix is a snapshot, so the time it was made tells copies apart.
+    // The original keeps showing when it was last opened.
+    final subtitle = projectIsFrozenMix(member)
+        ? '${L10n.translate(context, 'Created')} : ${_formatLastOpened(member.createdAt)}'
+        : '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(member.lastOpenedAt)}';
     final keyToken = _projectActionKeyToken(
       '${member.name}_${member.projectId}_member',
     );

@@ -9,13 +9,14 @@ ProjectMeta _meta({
   required String projectId,
   String? familyId,
   String? mixKind,
+  DateTime? createdAt,
   DateTime? lastOpenedAt,
 }) {
   return ProjectMeta(
     dir: Directory('/tmp/$projectId'),
     name: name,
     projectId: projectId,
-    createdAt: DateTime(2026, 1, 1),
+    createdAt: createdAt ?? DateTime(2026, 1, 1),
     lastOpenedAt: lastOpenedAt ?? DateTime(2026, 1, 2),
     familyId: familyId,
     mixKind: mixKind,
@@ -159,6 +160,96 @@ void main() {
         frozenName: 'Custom frozen label',
       ),
       isFalse,
+    );
+  });
+
+  test('numbered frozen mixes still follow the original name', () {
+    expect(
+      frozenMixNameFollowsOriginal(
+        originalName: 'Song',
+        frozenName: 'Song Frozen mix 2',
+      ),
+      isTrue,
+    );
+    expect(
+      frozenMixNameFollowsOriginal(
+        originalName: 'Song',
+        frozenName: 'Song Frozen mix #1',
+      ),
+      isFalse,
+    );
+  });
+
+  test('frozen mixes are listed in creation order, original first', () {
+    final original = _meta(
+      name: 'Song',
+      projectId: 'orig-1',
+      familyId: 'orig-1',
+      mixKind: ProjectManager.mixKindOriginal,
+      createdAt: DateTime(2026, 1, 1),
+    );
+    ProjectMeta frozen(String name, String id, int day) => _meta(
+      name: name,
+      projectId: id,
+      familyId: 'orig-1',
+      mixKind: ProjectManager.mixKindFrozen,
+      createdAt: DateTime(2026, 1, day),
+    );
+    final group = ProjectFamilyGroup(
+      members: <ProjectMeta>[
+        frozen('Song Frozen mix 10', 'fork-10', 12),
+        frozen('Song Frozen mix 2', 'fork-2', 3),
+        original,
+        frozen('Song Frozen mix', 'fork-1', 2),
+      ],
+    );
+
+    expect(group.members.map((member) => member.projectId).toList(), <String>[
+      'orig-1',
+      'fork-1',
+      'fork-2',
+      'fork-10',
+    ]);
+    expect(group.displayProject.projectId, 'orig-1');
+  });
+
+  test('all frozen mixes of a family are found by familyId', () {
+    final original = _meta(
+      name: 'Song',
+      projectId: 'orig-1',
+      familyId: 'orig-1',
+      mixKind: ProjectManager.mixKindOriginal,
+    );
+    final projects = <ProjectMeta>[
+      _meta(
+        name: 'Song Frozen mix',
+        projectId: 'fork-1',
+        familyId: 'orig-1',
+        mixKind: ProjectManager.mixKindFrozen,
+      ),
+      _meta(name: 'Song Frozen mix 2', projectId: 'unrelated'),
+      _meta(
+        name: 'Custom label',
+        projectId: 'fork-2',
+        familyId: 'orig-1',
+        mixKind: ProjectManager.mixKindFrozen,
+      ),
+      original,
+    ];
+
+    expect(
+      localFrozenMixesOf(
+        projects: projects,
+        original: original,
+      ).map((member) => member.projectId).toList(),
+      <String>['fork-1', 'fork-2'],
+    );
+    expect(
+      localFrozenMixesOf(
+        projects: projects,
+        original: _meta(name: 'Loose', projectId: 'loose'),
+      ),
+      isEmpty,
     );
   });
 }

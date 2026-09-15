@@ -15359,10 +15359,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _compatibilityForkInFlight = true;
     try {
       final oldProjectDir = _projectDir;
+      final frozenMixIndex = await _nextFrozenMixIndexForFamily(oldProjectDir);
       final duplicated = await ProjectManager.duplicateProject(oldProjectDir);
       final forkDir = await ProjectManager.renameProject(
         duplicated,
-        ProjectManager.frozenMixDisplayName(_projectName),
+        ProjectManager.frozenMixDisplayName(
+          _projectName,
+          index: frozenMixIndex,
+        ),
       );
       final originalJson = await ProjectManager.readProjectJson(oldProjectDir);
       final forkJson = await ProjectManager.readProjectJson(forkDir);
@@ -15416,6 +15420,34 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
     } finally {
       _compatibilityForkInFlight = false;
+    }
+  }
+
+  /// Picks the number for the next Frozen mix of this project by looking at
+  /// the Frozen mixes already in its family, so a second copy becomes
+  /// "Song Frozen mix 2" instead of a folder-collision name like "#1".
+  Future<int> _nextFrozenMixIndexForFamily(Directory originalDir) async {
+    try {
+      final originalJson = await ProjectManager.readProjectJson(originalDir);
+      final familyId = (originalJson['familyId'] ?? '').toString().trim();
+      final originalProjectId = ProjectManager.ensureProjectIdInJson(
+        originalJson,
+      );
+      final lookupFamilyId = familyId.isEmpty ? originalProjectId : familyId;
+      final projects = await ProjectManager.listProjects();
+      final existingFrozenNames = <String>[
+        for (final meta in projects)
+          if ((meta.familyId ?? '').trim() == lookupFamilyId &&
+              (meta.mixKind ?? '').trim() == ProjectManager.mixKindFrozen)
+            meta.name,
+      ];
+      return ProjectManager.nextFrozenMixIndex(
+        originalName: _projectName,
+        existingFrozenNames: existingFrozenNames,
+      );
+    } catch (error) {
+      debugPrint('Frozen mix numbering fell back to 1: $error');
+      return 1;
     }
   }
 

@@ -66,6 +66,65 @@ void main() {
     expect(ProjectManager.frozenMixDisplayName('  '), 'Frozen mix');
   });
 
+  test('later frozen mixes are numbered from 2', () {
+    expect(
+      ProjectManager.frozenMixDisplayName('Song', index: 1),
+      'Song Frozen mix',
+    );
+    expect(
+      ProjectManager.frozenMixDisplayName('Song', index: 2),
+      'Song Frozen mix 2',
+    );
+    expect(
+      ProjectManager.frozenMixDisplayName('Song', index: 10),
+      'Song Frozen mix 10',
+    );
+    expect(ProjectManager.frozenMixDisplayName('  ', index: 3), 'Frozen mix 3');
+  });
+
+  test('frozen mix index is read back from default names only', () {
+    int? indexOf(String frozenName) => ProjectManager.frozenMixIndexFromName(
+      originalName: 'Song',
+      frozenName: frozenName,
+    );
+
+    expect(indexOf('Song Frozen mix'), 1);
+    expect(indexOf('song frozen mix'), 1);
+    expect(indexOf('Song Frozen mix 2'), 2);
+    expect(indexOf('Song Frozen mix 12'), 12);
+    expect(indexOf('Song Frozen mix #1'), isNull);
+    expect(indexOf('Song Frozen mix 1'), isNull);
+    expect(indexOf('Song Frozen mix 0'), isNull);
+    expect(indexOf('Custom frozen label'), isNull);
+    expect(indexOf('Other Song Frozen mix 2'), isNull);
+  });
+
+  test('next frozen mix number is the smallest unused one', () {
+    int next(List<String> existing) => ProjectManager.nextFrozenMixIndex(
+      originalName: 'Song',
+      existingFrozenNames: existing,
+    );
+
+    expect(next(const <String>[]), 1);
+    expect(next(const <String>['Song Frozen mix']), 2);
+    expect(next(const <String>['Song Frozen mix', 'Song Frozen mix 2']), 3);
+    // Deleting "2" and making another copy gives "2" back, not "4".
+    expect(next(const <String>['Song Frozen mix', 'Song Frozen mix 3']), 2);
+    // Custom names and legacy "#1" copies do not reserve a number.
+    expect(next(const <String>['My custom copy', 'Song Frozen mix #1']), 1);
+  });
+
+  test('frozen mix label keeps the number and drops the song name', () {
+    expect(ProjectManager.frozenMixLabel('Song Frozen mix'), 'Frozen mix');
+    expect(ProjectManager.frozenMixLabel('Song Frozen mix 2'), 'Frozen mix 2');
+    expect(
+      ProjectManager.frozenMixLabel('Renamed thing Frozen mix 7'),
+      'Frozen mix 7',
+    );
+    expect(ProjectManager.frozenMixLabel('Custom frozen label'), 'Frozen mix');
+    expect(ProjectManager.frozenMixLabel('Song Frozen mix #1'), 'Frozen mix');
+  });
+
   test(
     'family link metadata does not invalidate the playable mix fingerprint',
     () {
