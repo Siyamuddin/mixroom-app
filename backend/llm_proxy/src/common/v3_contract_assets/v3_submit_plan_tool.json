@@ -2071,7 +2071,7 @@
                       "type": "array",
                       "minItems": 1,
                       "maxItems": 256,
-                      "description": "The complete replacement note set. Every note must end within the existing clip length. This edits the target in place and produces no output; later commands reuse the same clip_ref.",
+                      "description": "The complete replacement note set. Each note start_beat is relative to this clip, never the project timeline, and start_beat + length_beats must be at most this clip's supplied length_beats. For later sections, target or create later clips instead of using their timeline beats here. This edits the target in place and produces no output; later commands reuse the same clip_ref.",
                       "items": {
                         "type": "object",
                         "properties": {

@@ -1,0 +1,7 @@
+{
+  "policy": "notes_512_v1",
+  "counts": [256, 257, 512, 513],
+  "legacy_limit": 256,
+  "updated_limit": 512,
+  "note": {"pitch": 60, "start_beat": 0, "length_beats": 0.5, "velocity": 0.8}
+}

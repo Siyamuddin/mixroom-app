@@ -1034,16 +1034,32 @@ private:
     struct AssignedBuffer
     {
         NodeAndChannel channel;
+        int lastConsumerIndex = -1;
 
-        static AssignedBuffer createReadOnlyEmpty() noexcept    { return { { zeroNodeID(), 0 } }; }
-        static AssignedBuffer createFree() noexcept             { return { { freeNodeID(), 0 } }; }
+        static AssignedBuffer createReadOnlyEmpty() noexcept    { return { { zeroNodeID(), 0 }, -1 }; }
+        static AssignedBuffer createFree() noexcept             { return { { freeNodeID(), 0 }, -1 }; }
 
         bool isReadOnlyEmpty() const noexcept                   { return channel.nodeID == zeroNodeID(); }
         bool isFree() const noexcept                            { return channel.nodeID == freeNodeID(); }
         bool isAssigned() const noexcept                        { return ! (isReadOnlyEmpty() || isFree()); }
 
-        void setFree() noexcept                                 { channel = { freeNodeID(), 0 }; }
-        void setAssignedToNonExistentNode() noexcept            { channel = { anonNodeID(), 0 }; }
+        void setFree() noexcept
+        {
+            channel = { freeNodeID(), 0 };
+            lastConsumerIndex = -1;
+        }
+
+        void setAssigned (NodeAndChannel newChannel, int newLastConsumerIndex) noexcept
+        {
+            channel = newChannel;
+            lastConsumerIndex = newLastConsumerIndex;
+        }
+
+        void setAssignedToNonExistentNode() noexcept
+        {
+            channel = { anonNodeID(), 0 };
+            lastConsumerIndex = -1;
+        }
 
     private:
         static NodeID anonNodeID() { return NodeID (0x7ffffffd); }
@@ -1056,6 +1072,18 @@ private:
     enum { readOnlyEmptyBufferIndex = 0 };
 
     std::unordered_map<uint32, int> delays;
+    struct NodeAndChannelHash
+    {
+        size_t operator() (const NodeAndChannel& value) const noexcept
+        {
+            const auto node = static_cast<uint64> (value.nodeID.uid);
+            const auto channel = static_cast<uint32> (value.channelIndex);
+            return std::hash<uint64>{} ((node << 32) | channel);
+        }
+    };
+
+    std::unordered_map<NodeAndChannel, int, NodeAndChannelHash> lastConsumerIndices;
+    std::unordered_set<NodeAndChannel, NodeAndChannelHash> unresolvedConsumerSources;
     int totalLatency = 0;
 
     int getNodeDelay (NodeID nodeID) const noexcept
@@ -1406,7 +1434,7 @@ private:
             audioChannelsToUse.add (index);
 
             if (inputChan < numOuts)
-                audioBuffers.getReference (index).channel = { node.nodeID, inputChan };
+                assignBufferToOutput (audioBuffers.getReference (index), { node.nodeID, inputChan });
         }
 
         for (int outputChan = numIns; outputChan < numOuts; ++outputChan)
@@ -1415,13 +1443,13 @@ private:
             jassert (index != 0);
             audioChannelsToUse.add (index);
 
-            audioBuffers.getReference (index).channel = { node.nodeID, outputChan };
+            assignBufferToOutput (audioBuffers.getReference (index), { node.nodeID, outputChan });
         }
 
         auto midiBufferToUse = findBufferForInputMidiChannel (c, reversed, sequence, node, ourRenderingIndex);
 
         if (processor.producesMidi())
-            midiBuffers.getReference (midiBufferToUse).channel = { node.nodeID, midiChannelIndex };
+            assignBufferToOutput (midiBuffers.getReference (midiBufferToUse), { node.nodeID, midiChannelIndex });
 
         const auto thisNodeLatency = maxInputLatency + processor.getLatencySamples();
         delays[node.nodeID.uid] = thisNodeLatency;
@@ -1463,14 +1491,32 @@ private:
                                      const int stepIndex)
     {
         for (auto& b : buffers)
-            if (b.isAssigned() && ! isBufferNeededLater (c, stepIndex, -1, b.channel))
+        {
+            if (! b.isAssigned())
+                continue;
+
+            const auto unresolved = unresolvedConsumerSources.find (b.channel)
+                                  != unresolvedConsumerSources.cend();
+            if (unresolved)
+                jassertfalse;
+
+            const auto needed = unresolved
+                              ? isBufferNeededLaterSlow (c, stepIndex, -1, b.channel)
+                              : b.lastConsumerIndex >= stepIndex;
+
+           #if defined (MIXROOM_VERIFY_GRAPH_LIVENESS) && MIXROOM_VERIFY_GRAPH_LIVENESS
+            jassert (needed == isBufferNeededLaterSlow (c, stepIndex, -1, b.channel));
+           #endif
+
+            if (! needed)
                 b.setFree();
+        }
     }
 
-    bool isBufferNeededLater (const Connections::DestinationsForSources& c,
-                              const int stepIndexToSearchFrom,
-                              const int inputChannelOfIndexToIgnore,
-                              const NodeAndChannel output) const
+    bool isBufferNeededLaterSlow (const Connections::DestinationsForSources& c,
+                                  const int stepIndexToSearchFrom,
+                                  const int inputChannelOfIndexToIgnore,
+                                  const NodeAndChannel output) const
     {
         if (orderedNodes.size() <= stepIndexToSearchFrom)
             return false;
@@ -1488,10 +1534,97 @@ private:
         });
     }
 
+    bool isBufferNeededLater (const Connections::DestinationsForSources& c,
+                              const int stepIndexToSearchFrom,
+                              const int inputChannelOfIndexToIgnore,
+                              const NodeAndChannel output) const
+    {
+        if (orderedNodes.size() <= stepIndexToSearchFrom)
+            return false;
+
+        if (unresolvedConsumerSources.find (output) != unresolvedConsumerSources.cend())
+        {
+            jassertfalse;
+            return isBufferNeededLaterSlow (c,
+                                            stepIndexToSearchFrom,
+                                            inputChannelOfIndexToIgnore,
+                                            output);
+        }
+
+        const auto consumer = lastConsumerIndices.find (output);
+        const auto lastConsumerIndex = consumer != lastConsumerIndices.cend() ? consumer->second : -1;
+        bool result = false;
+
+        if (lastConsumerIndex > stepIndexToSearchFrom)
+        {
+            result = true;
+        }
+        else if (lastConsumerIndex == stepIndexToSearchFrom)
+        {
+            result = c.isSourceConnectedToDestinationNodeIgnoringChannel (
+                output,
+                orderedNodes.getUnchecked (stepIndexToSearchFrom)->nodeID,
+                inputChannelOfIndexToIgnore);
+        }
+
+       #if defined (MIXROOM_VERIFY_GRAPH_LIVENESS) && MIXROOM_VERIFY_GRAPH_LIVENESS
+        jassert (result == isBufferNeededLaterSlow (c,
+                                                    stepIndexToSearchFrom,
+                                                    inputChannelOfIndexToIgnore,
+                                                    output));
+       #endif
+
+        return result;
+    }
+
+    int getLastConsumerIndex (const NodeAndChannel output) const noexcept
+    {
+        if (const auto consumer = lastConsumerIndices.find (output);
+            consumer != lastConsumerIndices.cend())
+        {
+            return consumer->second;
+        }
+
+        return -1;
+    }
+
+    void assignBufferToOutput (AssignedBuffer& buffer, const NodeAndChannel output) const noexcept
+    {
+        buffer.setAssigned (output, getLastConsumerIndex (output));
+    }
+
+    void buildLastConsumerIndices (const Connections& c)
+    {
+        std::unordered_map<uint32, int> nodeIndices;
+        nodeIndices.reserve ((size_t) orderedNodes.size());
+        for (int index = 0; index < orderedNodes.size(); ++index)
+            nodeIndices.emplace (orderedNodes.getUnchecked (index)->nodeID.uid, index);
+
+        const auto allConnections = c.getConnections();
+        lastConsumerIndices.reserve (allConnections.size());
+        unresolvedConsumerSources.reserve (allConnections.size());
+        for (const auto& connection : allConnections)
+        {
+            if (const auto destination = nodeIndices.find (connection.destination.nodeID.uid);
+                destination != nodeIndices.cend())
+            {
+                auto [consumer, inserted] = lastConsumerIndices.emplace (connection.source,
+                                                                         destination->second);
+                if (! inserted)
+                    consumer->second = jmax (consumer->second, destination->second);
+            }
+            else
+            {
+                unresolvedConsumerSources.insert (connection.source);
+            }
+        }
+    }
+
     template <typename RenderSequence>
     RenderSequenceBuilder (const Nodes& n, const Connections& c, RenderSequence& sequence)
         : orderedNodes (createOrderedNodeList (n, c))
     {
+        buildLastConsumerIndices (c);
         audioBuffers.add (AssignedBuffer::createReadOnlyEmpty()); // first buffer is read-only zeros
         midiBuffers .add (AssignedBuffer::createReadOnlyEmpty());
 

@@ -3,6 +3,7 @@
 #include "MixroomIOSAudioSessionPolicy.h"
 #endif
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <unordered_set>
 
@@ -1831,8 +1832,8 @@ JuceEngine &JuceEngine::get()
 JuceEngine::JuceEngine()
 {
     // Nothing heavy here – all real init happens in initialiseEngine()
-    rows.reserve(kMaxRows);
-    clips.reserve(kMaxClips);
+    rows.reserve(kInitialRowReserve);
+    clips.reserve(kInitialClipReserve);
     for (std::size_t i = 0; i < liveMidiInputAudioQueue.size(); ++i)
         liveMidiInputAudioQueue[i].sequence.store(i, std::memory_order_relaxed);
 }
@@ -2950,7 +2951,7 @@ bool JuceEngine::quiescePlaybackRouteV2(bool closeRemovedDevice)
 
 bool JuceEngine::pausePlaybackForRouteChangeV2()
 {
-#if JUCE_IOS
+#if (JUCE_MAC && !JUCE_IOS) || JUCE_IOS
     if (!engineInitialized || !isV2PlaybackSession())
         return false;
 
@@ -3515,34 +3516,23 @@ void JuceEngine::attachRowBusNodes(RowState &r,
     r.inputProc = ti.get();
     r.inputNode = graph.addNode(std::move(ti), std::nullopt, updateKind);
 
-    auto ap = std::make_unique<VolumeAutomationProcessor>();
-    r.automationProc = ap.get();
-    r.automationNode = graph.addNode(std::move(ap), std::nullopt, updateKind);
-
-    auto tg = std::make_unique<SimpleGainProcessor>();
-    r.gainProc = tg.get();
-    r.gainNode = graph.addNode(std::move(tg), std::nullopt, updateKind);
-    r.gainProc->gain->setValueNotifyingHost(
-        juce::jlimit(kGainUiMin, kGainUiMax, r.gainUi) / kGainUiMax);
-    r.gainProc->setMuted(r.muted);
-
-    auto tp = std::make_unique<StereoPanProcessor>();
-    r.panProc = tp.get();
-    r.panNode = graph.addNode(std::move(tp), std::nullopt, updateKind);
-    r.panProc->pan->setValueNotifyingHost(panUIToNormalized(r.panUi));
-
     if (r.meter == nullptr)
         r.meter = std::make_shared<StereoMeterState>();
 
-    auto mt = std::make_unique<MeterTapProcessor>(
-        &r.meter->peakL,
-        &r.meter->peakR,
-        &r.meter->rmsL,
-        &r.meter->rmsR,
+    auto post = std::make_unique<RowPostProcessor>(
+        r.meter,
         &rowMetersEnabled);
+    r.postProc = post.get();
+    r.automationProc = &post->automationProcessor();
+    r.gainProc = &post->gainProcessor();
+    r.panProc = &post->panProcessor();
+    r.meterTapProc = &post->meterProcessor();
+    r.postNode = graph.addNode(std::move(post), std::nullopt, updateKind);
 
-    r.meterTapProc = mt.get();
-    r.meterTapNode = graph.addNode(std::move(mt), std::nullopt, updateKind);
+    r.gainProc->gain->setValueNotifyingHost(
+        juce::jlimit(kGainUiMin, kGainUiMax, r.gainUi) / kGainUiMax);
+    r.gainProc->setMuted(r.muted);
+    r.panProc->pan->setValueNotifyingHost(panUIToNormalized(r.panUi));
 
     if (r.automationProc != nullptr)
     {
@@ -3556,12 +3546,7 @@ void JuceEngine::attachRowBusNodes(RowState &r,
     }
 
     for (int ch = 0; ch < 2; ++ch)
-    {
-        graph.addConnection({{r.inputNode->nodeID, ch}, {r.automationNode->nodeID, ch}}, updateKind);
-        graph.addConnection({{r.automationNode->nodeID, ch}, {r.gainNode->nodeID, ch}}, updateKind);
-        graph.addConnection({{r.gainNode->nodeID, ch}, {r.panNode->nodeID, ch}}, updateKind);
-        graph.addConnection({{r.panNode->nodeID, ch}, {r.meterTapNode->nodeID, ch}}, updateKind);
-    }
+        graph.addConnection({{r.inputNode->nodeID, ch}, {r.postNode->nodeID, ch}}, updateKind);
 
     reconnectAllRowOutputsToBuses(updateKind);
 }
@@ -3580,8 +3565,7 @@ void JuceEngine::ensureRowBusNodesAttached(int rowIndex,
         return;
 
     auto &r = rows[(size_t)rowIndex];
-    if (r.inputNode != nullptr && r.automationNode != nullptr &&
-        r.gainNode != nullptr && r.panNode != nullptr && r.meterTapNode != nullptr)
+    if (r.inputNode != nullptr && r.postNode != nullptr)
         return;
 
     attachRowBusNodes(r, updateKind);
@@ -3606,7 +3590,7 @@ void JuceEngine::retargetRowMeterTapPointers()
 
         if (r.meterTapProc != nullptr)
         {
-            r.meterTapProc->setMeterTargets(
+            r.meterTapProc->assertMeterTargets(
                 &r.meter->peakL,
                 &r.meter->peakR,
                 &r.meter->rmsL,
@@ -3621,7 +3605,7 @@ void JuceEngine::retargetRowMeterTapPointers()
 
         if (group.meterTapProc != nullptr)
         {
-            group.meterTapProc->setMeterTargets(
+            group.meterTapProc->assertMeterTargets(
                 &group.meter->peakL,
                 &group.meter->peakR,
                 &group.meter->rmsL,
@@ -3750,10 +3734,7 @@ void JuceEngine::attachTrackGroupBusNodes(
             group.meter = std::make_shared<StereoMeterState>();
 
         auto meterTap = std::make_unique<MeterTapProcessor>(
-            &group.meter->peakL,
-            &group.meter->peakR,
-            &group.meter->rmsL,
-            &group.meter->rmsR,
+            group.meter,
             &rowMetersEnabled);
         group.meterTapProc = meterTap.get();
         group.meterTapNode = graph.addNode(std::move(meterTap), std::nullopt, updateKind);
@@ -3893,15 +3874,33 @@ std::shared_ptr<DecodedClipAudioAsset> JuceEngine::prepareClipAudioAsset(const j
 bool JuceEngine::loadClip(int clipId, int rowId, const juce::File &file,
                           double startSec, double lengthSec, double inFileOffsetSec)
 {
-    auto decodedAsset = prepareClipAudioAsset(file);
-    return loadClipWithPreparedAudioAsset(
-        clipId,
-        rowId,
-        file,
-        std::move(decodedAsset),
-        startSec,
-        lengthSec,
-        inFileOffsetSec);
+    return loadClipDetailed(clipId, rowId, file, startSec, lengthSec,
+                            inFileOffsetSec) == MutationResult::success;
+}
+
+JuceEngine::MutationResult JuceEngine::loadClipDetailed(
+    int clipId, int rowId, const juce::File &file,
+    double startSec, double lengthSec, double inFileOffsetSec)
+{
+    if (isApplicationTerminating() || clipId < 0 || rowId < 0)
+        return MutationResult::invalidInput;
+    try
+    {
+        auto decodedAsset = prepareClipAudioAsset(file);
+        if (decodedAsset == nullptr)
+            return MutationResult::missingMedia;
+        return loadClipWithPreparedAudioAssetDetailed(
+            clipId, rowId, file, std::move(decodedAsset), startSec, lengthSec,
+            inFileOffsetSec);
+    }
+    catch (const std::bad_alloc &)
+    {
+        return MutationResult::resourceExhausted;
+    }
+    catch (...)
+    {
+        return MutationResult::internalFailure;
+    }
 }
 
 bool JuceEngine::loadClipWithPreparedAudioAsset(
@@ -3913,11 +3912,28 @@ bool JuceEngine::loadClipWithPreparedAudioAsset(
     double lengthSec,
     double inFileOffsetSec)
 {
-    if (isApplicationTerminating() || clipId < 0 || clipId >= kMaxClips)
-        return false;
+    return loadClipWithPreparedAudioAssetDetailed(
+               clipId, rowId, file, std::move(decodedAsset), startSec,
+               lengthSec, inFileOffsetSec) == MutationResult::success;
+}
+
+JuceEngine::MutationResult JuceEngine::loadClipWithPreparedAudioAssetDetailed(
+    int clipId,
+    int rowId,
+    const juce::File &file,
+    std::shared_ptr<DecodedClipAudioAsset> decodedAsset,
+    double startSec,
+    double lengthSec,
+    double inFileOffsetSec)
+{
+    if (isApplicationTerminating() || clipId < 0 || rowId < 0)
+        return MutationResult::invalidInput;
 
     if (decodedAsset == nullptr)
-        return false;
+        return MutationResult::missingMedia;
+
+    try
+    {
 
     auto totalLength = (juce::int64)decodedAsset->audio.getNumSamples();
     const double fileSr = decodedAsset->sampleRate > 0.0 ? decodedAsset->sampleRate : 44100.0;
@@ -3942,26 +3958,33 @@ bool JuceEngine::loadClipWithPreparedAudioAsset(
     player->setPlayConfigDetails(0, 2, prepareSampleRate, prepareBlockSize);
     player->prepareToPlay(prepareSampleRate, prepareBlockSize);
 
-    std::shared_ptr<juce::AudioProcessor> detachedProcessor;
+    ClipState previousClip;
+    bool hadPreviousClip = false;
+    bool previousHadGraphNodes = false;
+    bool routedPublicationFailed = false;
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
-        if (clips.empty())
-            clips.resize(kMaxClips);
-        if (rows.empty())
-            addRow("Row 1", 0);
+        if (clipId >= (int)clips.size())
+            clips.resize((size_t)clipId + 1);
+        if (rows.empty() && addRow("Row 1", 0) < 0)
+            return MutationResult::resourceExhausted;
 
         ensureBusGraphInitialised();
-        beginRoutedClipScheduleMutationLocked();
-        if (clips[(size_t)clipId].alive)
+        const bool freshAdmission = !clips[(size_t)clipId].alive;
+        if (!freshAdmission)
         {
-            const bool hadGraphNodes =
-                !clips[(size_t)clipId].fxChain.isEmpty() ||
-                clips[(size_t)clipId].playerNode != nullptr;
-            detachedProcessor = clearClipGraphNodes(clipId, kBatchGraphUpdate);
-            if (hadGraphNodes)
-                commitClipGraphMutationLocked();
+            previousClip = clips[(size_t)clipId];
+            hadPreviousClip = true;
+            previousHadGraphNodes =
+                !previousClip.fxChain.isEmpty() || previousClip.playerNode != nullptr;
         }
+        beginRoutedClipScheduleMutationLocked();
+        bool mutationOpen = true;
+        try
+        {
+            if (hadPreviousClip)
+                removeClipFromRowIndex(previousClip.rowId, clipId);
 
         // store state
         ClipState &c = clips[clipId];
@@ -4005,16 +4028,92 @@ bool JuceEngine::loadClipWithPreparedAudioAsset(
             p->setGainUi(kGainUiUnity);
             p->setPanNormalized(0.0f);
         }
-        endRoutedClipScheduleMutationLocked();
+            routedPublicationFailed = !endRoutedClipScheduleMutationLocked();
+            mutationOpen = false;
+            if (routedPublicationFailed)
+            {
+                beginRoutedClipScheduleMutationLocked();
+                removeClipFromRowIndex(c.rowId, clipId);
+                std::atomic_store_explicit(
+                    &c.playerProcessor,
+                    std::shared_ptr<juce::AudioProcessor>{},
+                    std::memory_order_release);
+                if (hadPreviousClip)
+                {
+                    c = std::move(previousClip);
+                    addClipToRowIndex(c.rowId, clipId);
+                }
+                else
+                {
+                    c = ClipState{};
+                }
+                (void)endRoutedClipScheduleMutationLocked();
+            }
+        }
+        catch (...)
+        {
+            auto &failedClip = clips[(size_t)clipId];
+            removeClipFromRowIndex(failedClip.rowId, clipId);
+            std::atomic_store_explicit(
+                &failedClip.playerProcessor,
+                std::shared_ptr<juce::AudioProcessor>{},
+                std::memory_order_release);
+            if (hadPreviousClip)
+            {
+                failedClip = std::move(previousClip);
+                addClipToRowIndex(failedClip.rowId, clipId);
+            }
+            else
+            {
+                failedClip = ClipState{};
+            }
+            if (mutationOpen)
+                (void)endRoutedClipScheduleMutationLocked();
+            throw;
+        }
     }
+
+    if (routedPublicationFailed)
+        return MutationResult::resourceExhausted;
 
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
-        retireLiveClipProcessorLocked(std::move(detachedProcessor));
+        if (hadPreviousClip)
+        {
+            auto previousProcessor = std::atomic_exchange_explicit(
+                &previousClip.playerProcessor,
+                std::shared_ptr<juce::AudioProcessor>{},
+                std::memory_order_acq_rel);
+            if (auto *processor = dynamic_cast<TimelineClipProcessorBase *>(
+                    previousProcessor.get()))
+            {
+                processor->requestLiveMidiPanic(LiveMidiPanicMode::liveOnly);
+            }
+            for (auto id : previousClip.fxChain)
+                graph.removeNode(id, kBatchGraphUpdate);
+            closePluginEditorWindowForKey(pluginEditorWindowKeyForClip(clipId));
+            if (previousClip.playerNode != nullptr)
+            {
+                closePluginEditorWindowForNode(previousClip.playerNode->nodeID);
+                graph.removeNode(previousClip.playerNode->nodeID, kBatchGraphUpdate);
+            }
+            if (previousHadGraphNodes)
+                commitClipGraphMutationLocked();
+            retireLiveClipProcessorLocked(std::move(previousProcessor));
+        }
         drainRetiredLiveClipProcessorsLocked();
     }
 
-    return true;
+    return MutationResult::success;
+    }
+    catch (const std::bad_alloc &)
+    {
+        return MutationResult::resourceExhausted;
+    }
+    catch (...)
+    {
+        return MutationResult::internalFailure;
+    }
 }
 
 bool JuceEngine::prepareMidiClipSampleAssets(const juce::String &instrumentId,
@@ -4064,7 +4163,7 @@ JuceEngine::PreparedMidiClipLoadPtr JuceEngine::prepareBuiltInMidiClipLoad(
             engineLifecycleGeneration.load(std::memory_order_acquire);
     }
     if (isApplicationTerminating() ||
-        clipId < 0 || clipId >= kMaxClips ||
+        clipId < 0 ||
         !isBuiltInMidiInstrumentIdentifier(instrumentId) ||
         isMidiClipLoadRequestCancelled(clipId, loadRequestId))
     {
@@ -4076,8 +4175,6 @@ JuceEngine::PreparedMidiClipLoadPtr JuceEngine::prepareBuiltInMidiClipLoad(
     juce::String preparationStage = "sample assets";
     try
     {
-        juceLogToFlutter(
-            ("MidiLoad built-in prepare start " + requestLabel).toRawUTF8());
         if (!prepareMidiClipSampleAssets(instrumentId, instrumentName, notes))
             return nullptr;
 
@@ -4161,8 +4258,6 @@ JuceEngine::PreparedMidiClipLoadPtr JuceEngine::prepareBuiltInMidiClipLoad(
         prepared->loadRequestId = loadRequestId;
         prepared->engineGeneration = engineGeneration;
         prepared->processor = std::move(processor);
-        juceLogToFlutter(
-            ("MidiLoad built-in prepare done " + requestLabel).toRawUTF8());
         return prepared;
     }
     catch (const std::exception &exception)
@@ -4193,13 +4288,12 @@ bool JuceEngine::loadMidiClip(int clipId,
                               double inFileOffsetSec,
                               std::int64_t loadRequestId)
 {
-    if (isApplicationTerminating() || clipId < 0 || clipId >= kMaxClips)
+    if (isApplicationTerminating() || clipId < 0)
         return false;
 
     const auto requestLabel =
         "clip=" + juce::String(clipId) +
         " request=" + juce::String((juce::int64)loadRequestId);
-    juceLogToFlutter(("MidiLoad start " + requestLabel).toRawUTF8());
 
     if (isApplicationTerminating() ||
         isMidiClipLoadRequestCancelled(clipId, loadRequestId))
@@ -4298,7 +4392,7 @@ bool JuceEngine::installPreparedMidiClipLoad(
           preparedLoad->engineGeneration !=
               engineLifecycleGeneration.load(std::memory_order_acquire))) ||
         isApplicationTerminating() ||
-        clipId < 0 || clipId >= kMaxClips ||
+        clipId < 0 ||
         isMidiClipLoadRequestCancelled(clipId, loadRequestId))
     {
         juceLogToFlutter(
@@ -4306,7 +4400,12 @@ bool JuceEngine::installPreparedMidiClipLoad(
         return false;
     }
 
-    std::shared_ptr<juce::AudioProcessor> detachedProcessor;
+    ClipState previousClip;
+    bool hadPreviousClip = false;
+    bool previousHadGraphNodes = false;
+    bool routedPublicationFailed = false;
+    try
+    {
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -4317,22 +4416,26 @@ bool JuceEngine::installPreparedMidiClipLoad(
             return false;
         }
 
-        if (clips.empty())
-            clips.resize(kMaxClips);
-        if (rows.empty())
-            addRow("Row 1", 0);
+        if (clipId >= (int)clips.size())
+            clips.resize((size_t)clipId + 1);
+        if (rows.empty() && addRow("Row 1", 0) < 0)
+            return false;
 
         ensureBusGraphInitialised();
-        beginRoutedClipScheduleMutationLocked();
-        if (clips[(size_t)clipId].alive)
+        const bool freshAdmission = !clips[(size_t)clipId].alive;
+        if (!freshAdmission)
         {
-            const bool hadGraphNodes =
-                !clips[(size_t)clipId].fxChain.isEmpty() ||
-                clips[(size_t)clipId].playerNode != nullptr;
-            detachedProcessor = clearClipGraphNodes(clipId, kBatchGraphUpdate);
-            if (hadGraphNodes)
-                commitClipGraphMutationLocked();
+            previousClip = clips[(size_t)clipId];
+            hadPreviousClip = true;
+            previousHadGraphNodes =
+                !previousClip.fxChain.isEmpty() || previousClip.playerNode != nullptr;
         }
+        beginRoutedClipScheduleMutationLocked();
+        bool mutationOpen = true;
+        try
+        {
+            if (hadPreviousClip)
+                removeClipFromRowIndex(previousClip.rowId, clipId);
 
         ClipState &c = clips[clipId];
         c.alive = true;
@@ -4374,22 +4477,93 @@ bool JuceEngine::installPreparedMidiClipLoad(
             p->setGainUi(kGainUiUnity);
             p->setPanNormalized(0.0f);
         }
-        endRoutedClipScheduleMutationLocked();
+            routedPublicationFailed = !endRoutedClipScheduleMutationLocked();
+            mutationOpen = false;
+            if (routedPublicationFailed)
+            {
+                beginRoutedClipScheduleMutationLocked();
+                removeClipFromRowIndex(c.rowId, clipId);
+                std::atomic_store_explicit(
+                    &c.playerProcessor,
+                    std::shared_ptr<juce::AudioProcessor>{},
+                    std::memory_order_release);
+                if (hadPreviousClip)
+                {
+                    c = std::move(previousClip);
+                    addClipToRowIndex(c.rowId, clipId);
+                }
+                else
+                {
+                    c = ClipState{};
+                }
+                (void)endRoutedClipScheduleMutationLocked();
+            }
+        }
+        catch (...)
+        {
+            auto &failedClip = clips[(size_t)clipId];
+            removeClipFromRowIndex(failedClip.rowId, clipId);
+            std::atomic_store_explicit(
+                &failedClip.playerProcessor,
+                std::shared_ptr<juce::AudioProcessor>{},
+                std::memory_order_release);
+            if (hadPreviousClip)
+            {
+                failedClip = std::move(previousClip);
+                addClipToRowIndex(failedClip.rowId, clipId);
+            }
+            else
+            {
+                failedClip = ClipState{};
+            }
+            if (mutationOpen)
+                (void)endRoutedClipScheduleMutationLocked();
+            throw;
+        }
     }
+
+    if (routedPublicationFailed)
+        return false;
 
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
-        retireLiveClipProcessorLocked(std::move(detachedProcessor));
+        if (hadPreviousClip)
+        {
+            auto previousProcessor = std::atomic_exchange_explicit(
+                &previousClip.playerProcessor,
+                std::shared_ptr<juce::AudioProcessor>{},
+                std::memory_order_acq_rel);
+            if (auto *processor = dynamic_cast<TimelineClipProcessorBase *>(
+                    previousProcessor.get()))
+            {
+                processor->requestLiveMidiPanic(LiveMidiPanicMode::liveOnly);
+            }
+            for (auto id : previousClip.fxChain)
+                graph.removeNode(id, kBatchGraphUpdate);
+            closePluginEditorWindowForKey(pluginEditorWindowKeyForClip(clipId));
+            if (previousClip.playerNode != nullptr)
+            {
+                closePluginEditorWindowForNode(previousClip.playerNode->nodeID);
+                graph.removeNode(previousClip.playerNode->nodeID, kBatchGraphUpdate);
+            }
+            if (previousHadGraphNodes)
+                commitClipGraphMutationLocked();
+            retireLiveClipProcessorLocked(std::move(previousProcessor));
+        }
         drainRetiredLiveClipProcessorsLocked();
     }
 
-    juceLogToFlutter(("MidiLoad installed " + requestLabel).toRawUTF8());
     return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 bool JuceEngine::cancelMidiClipLoad(int clipId, std::int64_t loadRequestId)
 {
-    if (clipId < 0 || clipId >= kMaxClips || loadRequestId <= 0)
+    if (clipId < 0 || loadRequestId <= 0)
         return false;
 
     {
@@ -4428,6 +4602,8 @@ void JuceEngine::beginProjectClipLoad()
             engineInitialized &&
             metronomeCallback != nullptr &&
             !projectClipLoadDetachedAudioCallback;
+        if (projectClipLoadDepth == 0)
+            projectClipLoadAutomationSnapshotDirty = false;
         ++projectClipLoadDepth;
         depth = projectClipLoadDepth;
         if (shouldDetachAudioCallback)
@@ -4435,10 +4611,18 @@ void JuceEngine::beginProjectClipLoad()
     }
     if (shouldDetachAudioCallback)
         deviceManager.removeAudioCallback(metronomeCallback.get());
-    juceLogToFlutter(("ProjectClipLoad begin depth=" + juce::String(depth)).toRawUTF8());
+    juceLogToFlutter(("ProjectClipLoad begin depth=" + juce::String(depth) +
+                      " callbackDetachCount=" +
+                      juce::String(shouldDetachAudioCallback ? 1 : 0))
+                         .toRawUTF8());
 }
 
 void JuceEngine::endProjectClipLoad()
+{
+    (void)endProjectClipLoadDetailed();
+}
+
+JuceEngine::MutationResult JuceEngine::endProjectClipLoadDetailed()
 {
     juceLogToFlutter("ProjectClipLoad end start");
     bool rebuiltGraph = false;
@@ -4446,14 +4630,24 @@ void JuceEngine::endProjectClipLoad()
     bool publishedRoutes = false;
     bool completed = false;
     bool shouldRestoreAudioCallback = false;
+    bool callbackRestored = false;
+    bool routedPublicationFailed = false;
+    try
+    {
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
         if (projectClipLoadDepth <= 0)
-            return;
+            return MutationResult::invalidInput;
 
         --projectClipLoadDepth;
         if (projectClipLoadDepth > 0)
-            return;
+            return MutationResult::success;
+
+        if (projectClipLoadAutomationSnapshotDirty)
+        {
+            projectClipLoadAutomationSnapshotDirty = false;
+            publishAutomationSnapshotLocked();
+        }
 
         if (projectClipLoadNeedsGraphRebuild)
         {
@@ -4488,8 +4682,8 @@ void JuceEngine::endProjectClipLoad()
         if (routedClipSchedulePublishPending)
         {
             routedClipSchedulePublishPending = false;
-            publishRoutedClipSchedulesLocked();
-            publishedRoutes = true;
+            routedPublicationFailed = !publishRoutedClipSchedulesLocked();
+            publishedRoutes = !routedPublicationFailed;
         }
         shouldRestoreAudioCallback = projectClipLoadDetachedAudioCallback;
         projectClipLoadDetachedAudioCallback = false;
@@ -4497,15 +4691,49 @@ void JuceEngine::endProjectClipLoad()
     }
     if (shouldRestoreAudioCallback && engineInitialized &&
         !isApplicationTerminating() && metronomeCallback != nullptr)
-        attachAudioCallbackIfAllowed(metronomeCallback.get());
+        callbackRestored = attachAudioCallbackIfAllowed(metronomeCallback.get());
     if (completed)
         juceLogToFlutter(("ProjectClipLoad end done rebuilt=" +
                           juce::String(rebuiltGraph ? "true" : "false") +
                           " outputSafety=" +
                           juce::String(armedOutputSafety ? "true" : "false") +
                           " routes=" +
-                          juce::String(publishedRoutes ? "true" : "false"))
+                          juce::String(publishedRoutes ? "true" : "false") +
+                          " graphPublicationCount=" +
+                          juce::String(rebuiltGraph ? 1 : 0) +
+                          " callbackAttachCount=" +
+                          juce::String(callbackRestored ? 1 : 0))
                              .toRawUTF8());
+    return routedPublicationFailed
+               ? MutationResult::resourceExhausted
+               : MutationResult::success;
+    }
+    catch (const std::bad_alloc &)
+    {
+        shouldRestoreAudioCallback = false;
+        {
+            const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+            shouldRestoreAudioCallback = projectClipLoadDetachedAudioCallback;
+            projectClipLoadDetachedAudioCallback = false;
+        }
+        if (shouldRestoreAudioCallback && engineInitialized &&
+            !isApplicationTerminating() && metronomeCallback != nullptr)
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
+        return MutationResult::resourceExhausted;
+    }
+    catch (...)
+    {
+        shouldRestoreAudioCallback = false;
+        {
+            const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+            shouldRestoreAudioCallback = projectClipLoadDetachedAudioCallback;
+            projectClipLoadDetachedAudioCallback = false;
+        }
+        if (shouldRestoreAudioCallback && engineInitialized &&
+            !isApplicationTerminating() && metronomeCallback != nullptr)
+            attachAudioCallbackIfAllowed(metronomeCallback.get());
+        return MutationResult::internalFailure;
+    }
 }
 
 void JuceEngine::markGraphMutationBatchRowFxDirtyLocked(int rowIndex)
@@ -4806,13 +5034,12 @@ void JuceEngine::requestLiveMidiPanicForAll(
     if (snapshot == nullptr)
         return;
 
-    for (int clipId = 0; clipId < kMaxClips; ++clipId)
+    for (const auto &item : snapshot->itemsById)
     {
-        const auto *item = snapshot->findClip(clipId);
-        if (item == nullptr || !item->isMidi || item->processor == nullptr)
+        if (!item.isMidi || item.processor == nullptr)
             continue;
         if (auto *processor = dynamic_cast<TimelineClipProcessorBase *>(
-                item->processor.get()))
+                item.processor.get()))
         {
             processor->requestLiveMidiPanic(mode);
         }
@@ -5498,25 +5725,41 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
     if (clipIds.isEmpty())
         return 0;
 
+    juce::Array<int> uniqueClipIds;
     std::vector<std::shared_ptr<juce::AudioProcessor>> detachedProcessors;
+    try
+    {
+        uniqueClipIds.ensureStorageAllocated(clipIds.size());
+        for (const int clipId : clipIds)
+            uniqueClipIds.addIfNotAlreadyThere(clipId);
+        detachedProcessors.reserve((size_t)uniqueClipIds.size());
+    }
+    catch (...)
+    {
+        return -1;
+    }
     int removed = 0;
+    bool routedPublicationSucceeded = true;
 
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
         if (clips.empty())
-            return 0;
+            return -1;
+
+        // Validate the complete batch before changing any clip. This keeps a
+        // bad/stale ID from producing a partially applied deletion.
+        for (const int clipId : uniqueClipIds)
+        {
+            if (clipId < 0 || clipId >= (int)clips.size() ||
+                !clips[(size_t)clipId].alive)
+                return -1;
+        }
 
         bool graphChanged = false;
         beginRoutedClipScheduleMutationLocked();
-        for (const int clipId : clipIds)
+        for (const int clipId : uniqueClipIds)
         {
-            if (clipId < 0 || clipId >= (int)clips.size())
-                continue;
-
             ClipState &clip = clips[(size_t)clipId];
-            if (!clip.alive)
-                continue;
-
             midiClipPluginAutomationLanes.erase(
                 std::remove_if(
                     midiClipPluginAutomationLanes.begin(),
@@ -5532,7 +5775,7 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
                 detachedProcessors.push_back(std::move(processor));
             ++removed;
         }
-        endRoutedClipScheduleMutationLocked();
+        routedPublicationSucceeded = endRoutedClipScheduleMutationLocked();
 
         if (removed > 0)
             publishAutomationSnapshotLocked();
@@ -5549,7 +5792,7 @@ int JuceEngine::unloadClips(const juce::Array<int> &clipIds)
         drainRetiredLiveClipProcessorsLocked();
     }
 
-    return removed;
+    return routedPublicationSucceeded ? removed : -1;
 }
 
 std::shared_ptr<juce::AudioProcessor> JuceEngine::clearClipGraphNodes(
@@ -6261,6 +6504,14 @@ struct OfflineClipRenderState
     juce::AudioProcessorGraph::Node::Ptr playerNode;
 };
 
+struct OfflineStereoMeterState
+{
+    std::atomic<float> peakL{0.0f};
+    std::atomic<float> peakR{0.0f};
+    std::atomic<float> rmsL{0.0f};
+    std::atomic<float> rmsR{0.0f};
+};
+
 struct OfflineRowRenderState
 {
     int rowId = 0;
@@ -6271,6 +6522,7 @@ struct OfflineRowRenderState
     SimpleGainProcessor *gainProc = nullptr;
     StereoPanProcessor *panProc = nullptr;
     juce::AudioProcessorGraph::Node::Ptr inputNode;
+    juce::AudioProcessorGraph::Node::Ptr postNode;
     std::vector<AutomationPoint> automationPoints;
     std::vector<AutomationPoint> gainAutomationPoints;
     std::vector<AutomationPoint> panAutomationPoints;
@@ -7169,28 +7421,17 @@ bool buildOfflineExportContext(
             std::nullopt,
             kBatchGraphUpdate);
 
-        auto automationProcessor = std::make_unique<VolumeAutomationProcessor>();
-        row.automationProc = automationProcessor.get();
-        auto automationNode = context.graph.addNode(
-            std::move(automationProcessor),
+        auto meter = std::make_shared<OfflineStereoMeterState>();
+        auto postProcessor = std::make_unique<RowPostProcessor>(meter, nullptr);
+        row.automationProc = &postProcessor->automationProcessor();
+        row.gainProc = &postProcessor->gainProcessor();
+        row.panProc = &postProcessor->panProcessor();
+        row.postNode = context.graph.addNode(
+            std::move(postProcessor),
             std::nullopt,
             kBatchGraphUpdate);
 
-        auto gainProcessor = std::make_unique<SimpleGainProcessor>();
-        row.gainProc = gainProcessor.get();
-        auto gainNode = context.graph.addNode(
-            std::move(gainProcessor),
-            std::nullopt,
-            kBatchGraphUpdate);
-
-        auto panProcessor = std::make_unique<StereoPanProcessor>();
-        row.panProc = panProcessor.get();
-        auto panNode = context.graph.addNode(
-            std::move(panProcessor),
-            std::nullopt,
-            kBatchGraphUpdate);
-
-        if (row.inputNode == nullptr || automationNode == nullptr || gainNode == nullptr || panNode == nullptr)
+        if (row.inputNode == nullptr || row.postNode == nullptr)
         {
             error = "Offline export graph could not create row bus nodes.";
             return false;
@@ -7238,9 +7479,7 @@ bool buildOfflineExportContext(
             previousNodeId = node->nodeID;
         }
 
-        connectStereo(context.graph, previousNodeId, automationNode->nodeID, kBatchGraphUpdate);
-        connectStereo(context.graph, automationNode->nodeID, gainNode->nodeID, kBatchGraphUpdate);
-        connectStereo(context.graph, gainNode->nodeID, panNode->nodeID, kBatchGraphUpdate);
+        connectStereo(context.graph, previousNodeId, row.postNode->nodeID, kBatchGraphUpdate);
         auto groupIt = context.rowIdToGroupIndex.find(row.rowId);
         if (groupIt != context.rowIdToGroupIndex.end() &&
             groupIt->second >= 0 &&
@@ -7249,13 +7488,13 @@ bool buildOfflineExportContext(
         {
             connectStereo(
                 context.graph,
-                panNode->nodeID,
+                row.postNode->nodeID,
                 context.groups[(size_t)groupIt->second].inputNode->nodeID,
                 kBatchGraphUpdate);
         }
         else
         {
-            connectStereo(context.graph, panNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
+            connectStereo(context.graph, row.postNode->nodeID, context.master.inputNode->nodeID, kBatchGraphUpdate);
         }
 
         context.rowIdToIndex[row.rowId] = (int)context.rows.size();
@@ -9096,6 +9335,19 @@ juce::NamedValueSet JuceEngine::getEngineDiagnostics()
     out.set("pluginScanFailures", juce::var(pluginFailureValues));
     out.set("rowCount", (int)rows.size());
     out.set("clipCount", (int)clips.size());
+    const auto snapshotBuilds = routedSnapshotBuildCount.load(std::memory_order_relaxed);
+    const auto snapshotTotalMicros =
+        routedSnapshotBuildTotalMicros.load(std::memory_order_relaxed);
+    out.set("routedSnapshotBuildCount", juce::var((juce::int64)snapshotBuilds));
+    out.set("routedSnapshotBuildFailureCount", juce::var((juce::int64)
+        routedSnapshotBuildFailureCount.load(std::memory_order_relaxed)));
+    out.set("routedSnapshotBuildAverageMs",
+            snapshotBuilds > 0
+                ? (double)snapshotTotalMicros / (double)snapshotBuilds / 1000.0
+                : 0.0);
+    out.set("routedSnapshotBuildMaxMs",
+            (double)routedSnapshotBuildMaxMicros.load(std::memory_order_relaxed) /
+                1000.0);
     const auto configuredInputName = isV2PlaybackSession()
         ? deviceManager.getAudioDeviceSetup().inputDeviceName
         : getCurrentInputDeviceName();
@@ -9148,7 +9400,7 @@ juce::NamedValueSet JuceEngine::runTimelineRendererStressTest(int clipCount,
 {
     juce::NamedValueSet out;
 
-    clipCount = juce::jlimit(1, 1024, clipCount);
+    clipCount = juce::jlimit(1, 16384, clipCount);
     blockCount = juce::jlimit(1, 20000, blockCount);
     blockSize = juce::jlimit(64, kMixroomRealtimeScratchMaxSamples, blockSize);
     sampleRate = juce::jlimit(8000.0, 192000.0, sampleRate);
@@ -9185,7 +9437,7 @@ juce::NamedValueSet JuceEngine::runTimelineRendererStressTest(int clipCount,
     std::vector<int> rowAssignments;
     rowAssignments.reserve((size_t)clipCount);
 
-    const int rowCount = juce::jlimit(1, 32, juce::jmax(1, clipCount / 16));
+    const int rowCount = juce::jmax(1, clipCount / 8);
     const int pitchClipCount = clipCount >= 32 ? juce::jmax(1, clipCount / 32) : 0;
     const double clipLengthSec = renderSeconds + 0.75;
 
@@ -9590,17 +9842,17 @@ void JuceEngine::rewireTrackBusFxChain(
     compactRowFxChain(row);
 
     auto *inputNode = rows[(size_t)row].inputNode.get();
-    auto *automationNode = rows[(size_t)row].automationNode.get();
+    auto *postNode = rows[(size_t)row].postNode.get();
     auto &chain = rows[(size_t)row].fxChain;
 
-    if (!inputNode || !automationNode)
+    if (!inputNode || !postNode)
         return;
 
     const auto inputNodeId = inputNode->nodeID;
-    const auto automationNodeId = automationNode->nodeID;
+    const auto postNodeId = postNode->nodeID;
     juce::Array<AudioProcessorGraph::NodeID> localNodes;
     localNodes.add(inputNodeId);
-    localNodes.add(automationNodeId);
+    localNodes.add(postNodeId);
     for (auto nodeID : chain)
         localNodes.addIfNotAlreadyThere(nodeID);
     clearStereoConnectionsBetweenNodes(graph, localNodes, updateKind);
@@ -9617,7 +9869,7 @@ void JuceEngine::rewireTrackBusFxChain(
         }
     }
 
-    connectStereo(graph, prevNodeId, automationNodeId, updateKind);
+    connectStereo(graph, prevNodeId, postNodeId, updateKind);
 
     if (callerHoldsGraphLock)
         armOutputSafetyForCurrentRouteLocked();
@@ -9706,20 +9958,20 @@ void JuceEngine::reconnectAllRowOutputsToBuses(
 
     for (auto &row : rows)
     {
-        if (row.meterTapNode == nullptr)
+        if (row.postNode == nullptr)
             continue;
 
         for (auto destination : destinations)
-            disconnectStereo(graph, row.meterTapNode->nodeID, destination, updateKind);
+            disconnectStereo(graph, row.postNode->nodeID, destination, updateKind);
 
         if (auto *group = trackGroupForMemberRowId(row.rowId);
             group != nullptr && group->inputNode != nullptr)
         {
-            connectStereo(graph, row.meterTapNode->nodeID, group->inputNode->nodeID, updateKind);
+            connectStereo(graph, row.postNode->nodeID, group->inputNode->nodeID, updateKind);
         }
         else
         {
-            connectStereo(graph, row.meterTapNode->nodeID, masterInputNode->nodeID, updateKind);
+            connectStereo(graph, row.postNode->nodeID, masterInputNode->nodeID, updateKind);
         }
     }
 }
@@ -9828,24 +10080,6 @@ void JuceEngine::compactMasterFxChain()
         masterEffectIds.removeRange(masterEffectIds.size() - 1, 1);
 }
 
-bool JuceEngine::isGraphConnectionPresent(juce::AudioProcessorGraph::NodeID src,
-                                          juce::AudioProcessorGraph::NodeID dst,
-                                          int ch) const
-{
-    for (const auto &connection : graph.getConnections())
-    {
-        if (connection.source.nodeID == src &&
-            connection.destination.nodeID == dst &&
-            connection.source.channelIndex == ch &&
-            connection.destination.channelIndex == ch)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 void JuceEngine::ensureMasterOutputRouting()
 {
     if (!busGraphInitialised)
@@ -9870,13 +10104,43 @@ void JuceEngine::ensureMasterOutputRouting()
         return;
     }
 
+    // getConnections() returns a vector by value. Take one snapshot instead of
+    // copying and scanning the complete graph for every row and channel.
+    std::array<std::unordered_set<juce::uint64>, 2> stereoConnections;
+    const auto connections = graph.getConnections();
+    for (auto &channelConnections : stereoConnections)
+        channelConnections.reserve(connections.size());
+    for (const auto &connection : connections)
+    {
+        const int sourceChannel = connection.source.channelIndex;
+        if (sourceChannel == connection.destination.channelIndex &&
+            juce::isPositiveAndBelow(sourceChannel, (int)stereoConnections.size()))
+        {
+            const auto key = (static_cast<juce::uint64>(connection.source.nodeID.uid) << 32) |
+                             static_cast<juce::uint64>(connection.destination.nodeID.uid);
+            stereoConnections[(size_t)sourceChannel].insert(key);
+        }
+    }
+    const auto isStereoConnectionPresent = [&stereoConnections](
+                                                juce::AudioProcessorGraph::NodeID src,
+                                                juce::AudioProcessorGraph::NodeID dst,
+                                                int channel)
+    {
+        if (!juce::isPositiveAndBelow(channel, (int)stereoConnections.size()))
+            return false;
+        const auto key = (static_cast<juce::uint64>(src.uid) << 32) |
+                         static_cast<juce::uint64>(dst.uid);
+        return stereoConnections[(size_t)channel].find(key) !=
+               stereoConnections[(size_t)channel].end();
+    };
+
     bool needsRepair = false;
 
     for (int ch = 0; ch < 2; ++ch)
     {
-        if (!isGraphConnectionPresent(masterInputNode->nodeID, entryNode->nodeID, ch) ||
-            !isGraphConnectionPresent(masterGainNode->nodeID, masterPanNode->nodeID, ch) ||
-            !isGraphConnectionPresent(masterPanNode->nodeID, outputNode->nodeID, ch))
+        if (!isStereoConnectionPresent(masterInputNode->nodeID, entryNode->nodeID, ch) ||
+            !isStereoConnectionPresent(masterGainNode->nodeID, masterPanNode->nodeID, ch) ||
+            !isStereoConnectionPresent(masterPanNode->nodeID, outputNode->nodeID, ch))
         {
             needsRepair = true;
             break;
@@ -9887,7 +10151,7 @@ void JuceEngine::ensureMasterOutputRouting()
     {
         for (auto &row : rows)
         {
-            if (row.meterTapNode == nullptr)
+            if (row.postNode == nullptr)
                 continue;
 
             for (int ch = 0; ch < 2; ++ch)
@@ -9897,7 +10161,7 @@ void JuceEngine::ensureMasterOutputRouting()
                     (group != nullptr && group->inputNode != nullptr)
                         ? group->inputNode->nodeID
                         : masterInputNode->nodeID;
-                if (!isGraphConnectionPresent(row.meterTapNode->nodeID, destination, ch))
+                if (!isStereoConnectionPresent(row.postNode->nodeID, destination, ch))
                 {
                     needsRepair = true;
                     break;
@@ -11504,6 +11768,12 @@ void JuceEngine::applyAutomationParameterTarget(
 
 void JuceEngine::publishAutomationSnapshotLocked()
 {
+    if (projectClipLoadDepth > 0)
+    {
+        projectClipLoadAutomationSnapshotDirty = true;
+        return;
+    }
+
     auto next = std::make_shared<AutomationSnapshot>();
     next->rows.reserve(rows.size());
 
@@ -11525,15 +11795,17 @@ void JuceEngine::publishAutomationSnapshotLocked()
             rowState.gainProc->clearAutomationGainOverride();
         if (rowState.panProc != nullptr && rowState.panAutomationPoints.empty())
             rowState.panProc->clearAutomationPanOverride();
-        if (rowState.gainNode != nullptr && rowState.gainProc != nullptr && rowState.gainProc->gain != nullptr)
+        if (rowState.postNode != nullptr && rowState.gainProc != nullptr && rowState.gainProc->gain != nullptr)
         {
-            rowSnapshot.gainTarget.node = rowState.gainNode;
+            rowSnapshot.gainTarget.node = rowState.postNode;
+            rowSnapshot.gainTarget.embeddedProcessor = rowState.gainProc;
             rowSnapshot.gainTarget.parameter =
                 static_cast<juce::AudioProcessorParameter *>(rowState.gainProc->gain);
         }
-        if (rowState.panNode != nullptr && rowState.panProc != nullptr && rowState.panProc->pan != nullptr)
+        if (rowState.postNode != nullptr && rowState.panProc != nullptr && rowState.panProc->pan != nullptr)
         {
-            rowSnapshot.panTarget.node = rowState.panNode;
+            rowSnapshot.panTarget.node = rowState.postNode;
+            rowSnapshot.panTarget.embeddedProcessor = rowState.panProc;
             rowSnapshot.panTarget.parameter =
                 static_cast<juce::AudioProcessorParameter *>(rowState.panProc->pan);
         }
@@ -11713,8 +11985,11 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
                 const float gain = kGainUiMin + (kGainUiMax - kGainUiMin) * normalized;
                 if (rowAutomation.gainTarget.node != nullptr)
                 {
-                    if (auto *gainProc = dynamic_cast<SimpleGainProcessor *>(
-                            rowAutomation.gainTarget.node->getProcessor()))
+                    auto *targetProcessor =
+                        rowAutomation.gainTarget.embeddedProcessor != nullptr
+                            ? rowAutomation.gainTarget.embeddedProcessor
+                            : rowAutomation.gainTarget.node->getProcessor();
+                    if (auto *gainProc = dynamic_cast<SimpleGainProcessor *>(targetProcessor))
                     {
                         gainProc->setAutomationGainUiRealtime(gain);
                         gainProc->setMuted(rowAutomation.muted);
@@ -11743,8 +12018,11 @@ void JuceEngine::applyTrackEffectAutomationAtTimeSeconds(double timeSeconds)
             {
                 if (rowAutomation.panTarget.node != nullptr)
                 {
-                    if (auto *panProc = dynamic_cast<StereoPanProcessor *>(
-                            rowAutomation.panTarget.node->getProcessor()))
+                    auto *targetProcessor =
+                        rowAutomation.panTarget.embeddedProcessor != nullptr
+                            ? rowAutomation.panTarget.embeddedProcessor
+                            : rowAutomation.panTarget.node->getProcessor();
+                    if (auto *panProc = dynamic_cast<StereoPanProcessor *>(targetProcessor))
                     {
                         panProc->setAutomationPanNormalizedRealtime(pan);
                     }
@@ -11996,20 +12274,20 @@ void JuceEngine::beginRoutedClipScheduleMutationLocked() noexcept
     ++routedClipScheduleMutationDepth;
 }
 
-void JuceEngine::endRoutedClipScheduleMutationLocked()
+bool JuceEngine::endRoutedClipScheduleMutationLocked()
 {
     if (routedClipScheduleMutationDepth <= 0)
-        return;
+        return true;
 
     --routedClipScheduleMutationDepth;
     if (routedClipScheduleMutationDepth > 0)
-        return;
+        return true;
 
     if (!routedClipSchedulePublishPending || projectClipLoadDepth > 0)
-        return;
+        return true;
 
     routedClipSchedulePublishPending = false;
-    publishRoutedClipSchedulesLocked();
+    return publishRoutedClipSchedulesLocked();
 }
 
 void JuceEngine::requestRoutedClipSchedulePublishLocked()
@@ -12023,15 +12301,29 @@ void JuceEngine::requestRoutedClipSchedulePublishLocked()
     publishRoutedClipSchedulesLocked();
 }
 
-void JuceEngine::publishRoutedClipSchedulesLocked()
+bool JuceEngine::publishRoutedClipSchedulesLocked()
 {
-    if (rowRoutedClipScheduleSnapshot != nullptr)
+    const auto snapshotBuildStarted = juce::Time::getHighResolutionTicks();
+    const auto recordSnapshotBuild = [this, snapshotBuildStarted](bool failed) noexcept
     {
-        retiredRoutedClipScheduleSnapshots.push_back({
-            rowRoutedClipScheduleSnapshot,
-            routedAudioRenderGeneration.load(std::memory_order_acquire)});
-    }
+        const auto elapsedMicros = (std::int64_t)std::llround(
+            juce::Time::highResolutionTicksToSeconds(
+                juce::Time::getHighResolutionTicks() - snapshotBuildStarted) *
+            1000000.0);
+        routedSnapshotBuildCount.fetch_add(1, std::memory_order_relaxed);
+        routedSnapshotBuildTotalMicros.fetch_add(elapsedMicros, std::memory_order_relaxed);
+        auto priorMax = routedSnapshotBuildMaxMicros.load(std::memory_order_relaxed);
+        while (elapsedMicros > priorMax &&
+               !routedSnapshotBuildMaxMicros.compare_exchange_weak(
+                   priorMax, elapsedMicros, std::memory_order_relaxed))
+        {
+        }
+        if (failed)
+            routedSnapshotBuildFailureCount.fetch_add(1, std::memory_order_relaxed);
+    };
     const auto previousSnapshot = rowRoutedClipScheduleSnapshot;
+    try
+    {
     auto nextSnapshot = std::make_shared<RoutedClipSchedules>();
     nextSnapshot->reserve(rowRoutedClipSchedules.size());
     for (const auto &rowEntry : rowRoutedClipSchedules)
@@ -12073,13 +12365,17 @@ void JuceEngine::publishRoutedClipSchedulesLocked()
         for (const auto &clipEntry : rowEntry.second.clipItemsById)
         {
             const int clipId = clipEntry.first;
-            if (clipId < 0 || clipId >= kMaxClips)
+            if (clipId < 0)
                 continue;
-
-            const auto index = static_cast<size_t>(clipId);
-            publishedRow.clipItemsById[index] = clipEntry.second;
-            publishedRow.clipItemPresent.set(index);
+            publishedRow.clipItemsById.push_back(clipEntry.second);
         }
+        std::sort(
+            publishedRow.clipItemsById.begin(), publishedRow.clipItemsById.end(),
+            [](const RoutedClipRenderItem &a, const RoutedClipRenderItem &b) noexcept
+            {
+                return a.clipId < b.clipId;
+            });
+        publishedRow.prepareRenderWorkspace();
 
         nextSnapshot->emplace(
             rowEntry.first,
@@ -12090,35 +12386,76 @@ void JuceEngine::publishRoutedClipSchedulesLocked()
     for (const auto &clipEntry : routedClipItemsById)
     {
         const int clipId = clipEntry.first;
-        if (clipId < 0 || clipId >= kMaxClips)
+        if (clipId < 0)
             continue;
-
-        const auto index = static_cast<size_t>(clipId);
-        nextItemSnapshot->itemsById[index] = clipEntry.second;
-        nextItemSnapshot->itemPresent.set(index);
+        nextItemSnapshot->itemsById.push_back(clipEntry.second);
     }
+    std::sort(
+        nextItemSnapshot->itemsById.begin(), nextItemSnapshot->itemsById.end(),
+        [](const RoutedClipRenderItem &a, const RoutedClipRenderItem &b) noexcept
+        {
+            return a.clipId < b.clipId;
+        });
     std::shared_ptr<const RoutedClipItemsSnapshot> publishedItemSnapshot =
         std::move(nextItemSnapshot);
     const auto *nextItemSnapshotRaw = publishedItemSnapshot.get();
 
+    // Publication below must be allocation-free. If either retirement vector
+    // needs to grow, do it while the old snapshots are still authoritative so
+    // an allocation failure cannot leave a partially published snapshot pair.
+    auto previousItemSnapshot = std::atomic_load_explicit(
+        &routedClipItemSnapshot,
+        std::memory_order_acquire);
+    if (previousSnapshot != nullptr)
+        retiredRoutedClipScheduleSnapshots.reserve(
+            retiredRoutedClipScheduleSnapshots.size() + 1);
+    if (previousItemSnapshot != nullptr)
+        retiredRoutedClipItemSnapshots.reserve(
+            retiredRoutedClipItemSnapshots.size() + 1);
+
+    if (previousSnapshot != nullptr)
+    {
+        retiredRoutedClipScheduleSnapshots.push_back({
+            previousSnapshot,
+            routedAudioRenderGeneration.load(std::memory_order_acquire)});
+    }
     rowRoutedClipScheduleSnapshot =
         std::shared_ptr<const RoutedClipSchedules>(std::move(nextSnapshot));
     dirtyRoutedClipScheduleRows.clear();
-    auto previousItemSnapshot = std::atomic_exchange_explicit(
+    previousItemSnapshot = std::atomic_exchange_explicit(
         &routedClipItemSnapshot,
         std::move(publishedItemSnapshot),
         std::memory_order_acq_rel);
+    routedClipItemSnapshotRaw.store(
+        nextItemSnapshotRaw,
+        std::memory_order_release);
     if (previousItemSnapshot != nullptr)
     {
         retiredRoutedClipItemSnapshots.push_back({
             std::move(previousItemSnapshot),
             routedAudioRenderGeneration.load(std::memory_order_acquire)});
     }
-    routedClipItemSnapshotRaw.store(
-        nextItemSnapshotRaw,
-        std::memory_order_release);
     refreshRowRoutedSchedulePointersLocked();
     drainRetiredRoutedClipScheduleSnapshotsLocked();
+    recordSnapshotBuild(false);
+    return true;
+    }
+    catch (const std::bad_alloc &)
+    {
+        recordSnapshotBuild(true);
+        routedClipSchedulePublishPending = true;
+        juceLogToFlutter(
+            "Routed clip snapshot allocation failed; keeping previous playback state.");
+        return false;
+    }
+    catch (...)
+    {
+        recordSnapshotBuild(true);
+        routedClipSchedulePublishPending = true;
+        juceLogToFlutter(
+            "Routed clip snapshot publication failed; keeping previous playback state.");
+        return false;
+    }
 }
 
 void JuceEngine::refreshRowRoutedSchedulePointersLocked()
@@ -12432,38 +12769,50 @@ void JuceEngine::processRoutedClipsForRow(int rowId,
     const double blockStart = blockTransportStartSec.load(std::memory_order_relaxed);
     const double blockEnd = blockStart + ((double)numSamples / sr);
 
-    std::array<const RoutedClipRenderItem *, kMaxClips> activeClipItems{};
-    std::bitset<kMaxClips> activeClipPresent;
+    const auto *schedule =
+        static_cast<const RowRoutedClipSchedule *>(rowSchedule);
+    if (schedule == nullptr)
+        return;
+
+    auto &activeClipItems = schedule->activeClipScratch;
+    auto &activeClipVisitEpoch = schedule->activeClipVisitEpoch;
+    auto &renderEpoch = schedule->renderEpoch;
+    ++renderEpoch;
+    if (renderEpoch == 0)
+    {
+        std::fill(activeClipVisitEpoch.begin(), activeClipVisitEpoch.end(), 0);
+        renderEpoch = 1;
+    }
     int activeClipCount = 0;
     auto addActiveClipIfNeeded =
         [this,
+         schedule,
          blockStart,
          blockEnd,
          &activeClipItems,
-         &activeClipPresent,
+         &activeClipVisitEpoch,
+         renderEpoch,
          &activeClipCount](
             const RoutedClipRenderItem &item) noexcept
     {
         const int clipId = item.clipId;
-        if (clipId < 0 || clipId >= kMaxClips)
+        if (clipId < 0)
             return;
 
         if (!routedClipMayRenderBlock(item, blockStart, blockEnd))
             return;
 
-        const auto index = static_cast<size_t>(clipId);
-        if (activeClipPresent.test(index))
+        const int ordinal = schedule->clipOrdinal(clipId);
+        if (ordinal < 0)
             return;
-        activeClipPresent.set(index);
+        const auto index = static_cast<size_t>(ordinal);
+        if (activeClipVisitEpoch[index] == renderEpoch)
+            return;
+        activeClipVisitEpoch[index] = renderEpoch;
 
-        if (activeClipCount < kMaxClips)
+        if ((size_t)activeClipCount < activeClipItems.size())
             activeClipItems[(size_t)activeClipCount++] = &item;
     };
-
-    const auto *schedule =
-        static_cast<const RowRoutedClipSchedule *>(rowSchedule);
-    if (schedule == nullptr)
-        return;
 
     const long long firstBucket = routedClipBucketForTime(blockStart);
     const long long lastBucket =
@@ -15058,6 +15407,10 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     if (v2Recording)
     {
         const int requiredInputs = channelStart + channelCount;
+#if JUCE_IOS
+        if (channelStart != 0 || channelCount != 1)
+            return false;
+#endif
         if (!validateRecordingRouteV2() || channelStart < 0 ||
             (channelCount != 1 && channelCount != 2) ||
             requiredInputs != desiredInputOpenChannels.load(std::memory_order_relaxed))
@@ -15107,9 +15460,18 @@ bool JuceEngine::startRecordingToWav(const juce::File &file,
     if (numInputs <= 0)
         return false;
 
-    channelStart = juce::jlimit(0, numInputs - 1, channelStart);
-    const int maxCount = juce::jmax(1, numInputs - channelStart);
-    channelCount = juce::jlimit(1, juce::jmin(2, maxCount), channelCount);
+    if (v2Recording)
+    {
+        if (channelStart < 0 || channelCount <= 0 ||
+            channelStart + channelCount > numInputs)
+            return false;
+    }
+    else
+    {
+        channelStart = juce::jlimit(0, numInputs - 1, channelStart);
+        const int maxCount = juce::jmax(1, numInputs - channelStart);
+        channelCount = juce::jlimit(1, juce::jmin(2, maxCount), channelCount);
+    }
 
     const double acceptedSampleRate = getKnownDeviceSampleRate(
         deviceManager,
@@ -16056,13 +16418,71 @@ int JuceEngine::allocateRowId(int preferredRowId)
     return nextRowId.fetch_add(1);
 }
 
+bool JuceEngine::prepareRowStorageForInsertionLocked() noexcept
+{
+    if (rows.size() == rows.max_size())
+        return false;
+
+    try
+    {
+        // Ensure retargeting after a vector move cannot itself allocate.
+        for (auto &row : rows)
+            if (row.meter == nullptr)
+                row.meter = std::make_shared<StereoMeterState>();
+        for (auto &group : trackGroups)
+            if (group.meter == nullptr)
+                group.meter = std::make_shared<StereoMeterState>();
+
+        if (rows.size() == rows.capacity())
+        {
+            const auto required = rows.size() + 1;
+            const auto growth = std::max<std::size_t>(rows.capacity() / 2, 1);
+            const auto available = rows.max_size() - rows.capacity();
+            const auto target = available < growth
+                                    ? rows.max_size()
+                                    : rows.capacity() + growth;
+            rows.reserve(std::max<std::size_t>(
+                required,
+                std::max<std::size_t>(kInitialRowReserve, target)));
+            // RowState moves leave native processors pointing at the old
+            // vector addresses. Retarget immediately after any reallocation.
+            retargetRowMeterTapPointers();
+        }
+        rowIdToIndex.reserve(rows.size() + 1);
+        return true;
+    }
+    catch (...)
+    {
+        // Existing RowState objects may already have moved even though no new
+        // row was admitted. All meter objects were prepared before reserve.
+        retargetRowMeterTapPointers();
+        return false;
+    }
+}
+
+void JuceEngine::rebuildRowIdIndexCacheBestEffortLocked() noexcept
+{
+    rowIdToIndex.clear();
+    try
+    {
+        rowIdToIndex.reserve(rows.size());
+        for (int i = 0; i < (int)rows.size(); ++i)
+            rowIdToIndex.emplace(rows[(size_t)i].rowId, i);
+    }
+    catch (...)
+    {
+        // An empty cache is safe because getRowIndexById has a linear fallback.
+        // A partially rebuilt cache is not safe after insertion changed indices.
+        rowIdToIndex.clear();
+    }
+}
+
 int JuceEngine::addRow(const juce::String &name, int iconId, int preferredRowId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
-
-    if ((int)rows.size() >= kMaxRows)
-        return -1;
-
+    const auto priorRowCount = rows.size();
+    const auto previousAutomationSnapshot = automationSnapshot;
+    const auto previousMeterSnapshot = meterReadoutSnapshot;
     RowState r;
     const int newRowId = allocateRowId(preferredRowId);
     if (newRowId < 0)
@@ -16071,18 +16491,46 @@ int JuceEngine::addRow(const juce::String &name, int iconId, int preferredRowId)
     r.name = name.isNotEmpty() ? name : "Row";
     r.iconId = iconId;
 
-    rows.push_back(std::move(r));
-    rebuildRowIdIndexCache();
-    publishAutomationSnapshotLocked();
+    if (!prepareRowStorageForInsertionLocked())
+        return -1;
 
-    if (engineInitialized)
+    try
     {
-        ensureRowBusNodesAttached((int)rows.size() - 1, kBatchGraphUpdate, true);
-        retargetRowMeterTapPointers();
-        commitGraphMutationLocked();
-    }
+        rows.push_back(std::move(r));
+        rebuildRowIdIndexCache();
+        publishAutomationSnapshotLocked();
 
-    return newRowId;
+        if (engineInitialized)
+        {
+            ensureRowBusNodesAttached((int)rows.size() - 1, kBatchGraphUpdate, true);
+            retargetRowMeterTapPointers();
+            commitGraphMutationLocked();
+        }
+        return newRowId;
+    }
+    catch (...)
+    {
+        if (rows.size() > priorRowCount && rows.back().rowId == newRowId)
+        {
+            auto failed = std::move(rows.back());
+            for (auto id : failed.fxChain)
+                graph.removeNode(id, kBatchGraphUpdate);
+            if (failed.inputNode) graph.removeNode(failed.inputNode->nodeID, kBatchGraphUpdate);
+            if (failed.postNode) graph.removeNode(failed.postNode->nodeID, kBatchGraphUpdate);
+            rows.pop_back();
+        }
+        rebuildRowIdIndexCacheBestEffortLocked();
+        automationSnapshot = previousAutomationSnapshot;
+        automationSnapshotRaw.store(automationSnapshot.get(), std::memory_order_release);
+        std::atomic_store_explicit(
+            &meterReadoutSnapshot,
+            previousMeterSnapshot,
+            std::memory_order_release);
+        retargetRowMeterTapPointers();
+        if (engineInitialized)
+            commitGraphMutationLocked();
+        return -1;
+    }
 }
 
 bool JuceEngine::renameRow(int rowId, const juce::String &newName)
@@ -16101,9 +16549,8 @@ bool JuceEngine::renameRow(int rowId, const juce::String &newName)
 int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int iconId, int preferredRowId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
-
-    if ((int)rows.size() >= kMaxRows)
-        return -1;
+    const auto previousAutomationSnapshot = automationSnapshot;
+    const auto previousMeterSnapshot = meterReadoutSnapshot;
 
     const int refIdx = getRowIndexById(referenceRowId);
     const int insertIdx = juce::jlimit(0, (int)rows.size(), refIdx);
@@ -16116,26 +16563,55 @@ int JuceEngine::insertRowAbove(int referenceRowId, const juce::String &name, int
     r.name = name.isNotEmpty() ? name : "Row";
     r.iconId = iconId;
 
-    rows.insert(rows.begin() + insertIdx, std::move(r));
-    rebuildRowIdIndexCache();
-    publishAutomationSnapshotLocked();
+    if (!prepareRowStorageForInsertionLocked())
+        return -1;
 
-    if (engineInitialized)
+    try
     {
-        ensureRowBusNodesAttached(insertIdx, kBatchGraphUpdate, true);
-        retargetRowMeterTapPointers();
-        commitGraphMutationLocked();
-    }
+        rows.insert(rows.begin() + insertIdx, std::move(r));
+        rebuildRowIdIndexCache();
+        publishAutomationSnapshotLocked();
 
-    return newRowId;
+        if (engineInitialized)
+        {
+            ensureRowBusNodesAttached(insertIdx, kBatchGraphUpdate, true);
+            retargetRowMeterTapPointers();
+            commitGraphMutationLocked();
+        }
+        return newRowId;
+    }
+    catch (...)
+    {
+        const auto failedIt = std::find_if(rows.begin(), rows.end(),
+                                           [newRowId](const RowState &row)
+                                           { return row.rowId == newRowId; });
+        if (failedIt != rows.end())
+        {
+            auto failed = std::move(*failedIt);
+            for (auto id : failed.fxChain) graph.removeNode(id, kBatchGraphUpdate);
+            if (failed.inputNode) graph.removeNode(failed.inputNode->nodeID, kBatchGraphUpdate);
+            if (failed.postNode) graph.removeNode(failed.postNode->nodeID, kBatchGraphUpdate);
+            rows.erase(failedIt);
+        }
+        rebuildRowIdIndexCacheBestEffortLocked();
+        automationSnapshot = previousAutomationSnapshot;
+        automationSnapshotRaw.store(automationSnapshot.get(), std::memory_order_release);
+        std::atomic_store_explicit(
+            &meterReadoutSnapshot,
+            previousMeterSnapshot,
+            std::memory_order_release);
+        retargetRowMeterTapPointers();
+        if (engineInitialized)
+            commitGraphMutationLocked();
+        return -1;
+    }
 }
 
 int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int iconId, int preferredRowId)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
-
-    if ((int)rows.size() >= kMaxRows)
-        return -1;
+    const auto previousAutomationSnapshot = automationSnapshot;
+    const auto previousMeterSnapshot = meterReadoutSnapshot;
 
     const int refIdx = getRowIndexById(referenceRowId);
     const int insertIdx = juce::jlimit(0, (int)rows.size(), refIdx + 1);
@@ -16148,18 +16624,48 @@ int JuceEngine::insertRowBelow(int referenceRowId, const juce::String &name, int
     r.name = name.isNotEmpty() ? name : "Row";
     r.iconId = iconId;
 
-    rows.insert(rows.begin() + insertIdx, std::move(r));
-    rebuildRowIdIndexCache();
-    publishAutomationSnapshotLocked();
+    if (!prepareRowStorageForInsertionLocked())
+        return -1;
 
-    if (engineInitialized)
+    try
     {
-        ensureRowBusNodesAttached(insertIdx, kBatchGraphUpdate, true);
-        retargetRowMeterTapPointers();
-        commitGraphMutationLocked();
-    }
+        rows.insert(rows.begin() + insertIdx, std::move(r));
+        rebuildRowIdIndexCache();
+        publishAutomationSnapshotLocked();
 
-    return newRowId;
+        if (engineInitialized)
+        {
+            ensureRowBusNodesAttached(insertIdx, kBatchGraphUpdate, true);
+            retargetRowMeterTapPointers();
+            commitGraphMutationLocked();
+        }
+        return newRowId;
+    }
+    catch (...)
+    {
+        const auto failedIt = std::find_if(rows.begin(), rows.end(),
+                                           [newRowId](const RowState &row)
+                                           { return row.rowId == newRowId; });
+        if (failedIt != rows.end())
+        {
+            auto failed = std::move(*failedIt);
+            for (auto id : failed.fxChain) graph.removeNode(id, kBatchGraphUpdate);
+            if (failed.inputNode) graph.removeNode(failed.inputNode->nodeID, kBatchGraphUpdate);
+            if (failed.postNode) graph.removeNode(failed.postNode->nodeID, kBatchGraphUpdate);
+            rows.erase(failedIt);
+        }
+        rebuildRowIdIndexCacheBestEffortLocked();
+        automationSnapshot = previousAutomationSnapshot;
+        automationSnapshotRaw.store(automationSnapshot.get(), std::memory_order_release);
+        std::atomic_store_explicit(
+            &meterReadoutSnapshot,
+            previousMeterSnapshot,
+            std::memory_order_release);
+        retargetRowMeterTapPointers();
+        if (engineInitialized)
+            commitGraphMutationLocked();
+        return -1;
+    }
 }
 
 bool JuceEngine::moveRowOrder(int fromIndex, int toIndex)
@@ -16262,14 +16768,8 @@ bool JuceEngine::removeRow(int rowId)
             graph.removeNode(id, kBatchGraphUpdate);
         if (removed.inputNode)
             graph.removeNode(removed.inputNode->nodeID, kBatchGraphUpdate);
-        if (removed.automationNode)
-            graph.removeNode(removed.automationNode->nodeID, kBatchGraphUpdate);
-        if (removed.gainNode)
-            graph.removeNode(removed.gainNode->nodeID, kBatchGraphUpdate);
-        if (removed.panNode)
-            graph.removeNode(removed.panNode->nodeID, kBatchGraphUpdate);
-        if (removed.meterTapNode)
-            graph.removeNode(removed.meterTapNode->nodeID, kBatchGraphUpdate);
+        if (removed.postNode)
+            graph.removeNode(removed.postNode->nodeID, kBatchGraphUpdate);
 
         rows.erase(rows.begin() + idx);
         rebuildRowIdIndexCache();
@@ -16369,22 +16869,14 @@ void JuceEngine::rebuildBusesAndRewireClips()
     {
         if (r.inputNode)
             graph.removeNode(r.inputNode->nodeID, kBatchGraphUpdate);
-        if (r.automationNode)
-            graph.removeNode(r.automationNode->nodeID, kBatchGraphUpdate);
-        if (r.gainNode)
-            graph.removeNode(r.gainNode->nodeID, kBatchGraphUpdate);
-        if (r.panNode)
-            graph.removeNode(r.panNode->nodeID, kBatchGraphUpdate);
-        if (r.meterTapNode)
-            graph.removeNode(r.meterTapNode->nodeID, kBatchGraphUpdate);
+        if (r.postNode)
+            graph.removeNode(r.postNode->nodeID, kBatchGraphUpdate);
 
         r.inputNode = nullptr;
-        r.automationNode = nullptr;
-        r.gainNode = nullptr;
-        r.panNode = nullptr;
-        r.meterTapNode = nullptr;
+        r.postNode = nullptr;
 
         r.inputProc = nullptr;
+        r.postProc = nullptr;
         r.automationProc = nullptr;
         r.gainProc = nullptr;
         r.panProc = nullptr;

@@ -6,6 +6,15 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
+// The System Default Oboe input and Bluetooth communication capture are mono.
+// This is an app capture capability, not the advertised device channel count.
+internal object AndroidRecordingChannelPolicyV2 {
+  const val channelStart = 0
+  const val channelCount = 1
+  fun accepts(start: Int, count: Int): Boolean = start == channelStart && count == channelCount
+  fun toMap(): Map<String, Int> = mapOf("channelStart" to channelStart, "channelCount" to channelCount)
+}
+
 internal enum class EngineOwnership {
   NONE,
   LEGACY,

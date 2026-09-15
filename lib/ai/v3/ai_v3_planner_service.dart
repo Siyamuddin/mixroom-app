@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:http/http.dart' as http;
 
 import 'ai_v3_context.dart';
@@ -9,6 +10,9 @@ import 'ai_v3_resources.dart';
 
 const String aiV3ContextRequestContract = 'mixroom_v3_context_v2';
 const String aiV3ServerResponseVersion = 'v3_plan_response_server_v1';
+const int aiV3MaxSerializedRequestBytes = 4500000;
+const int _aiV3LegacyMaxSerializedRequestBytes = 180000;
+const int _aiV3LegacyMaxCoreContextBytes = 140000;
 
 const Set<String> _allowedResponseFields = <String>{
   'schema_version',
@@ -139,6 +143,23 @@ class AiV3PlannerService implements AiV3Planner {
     );
     final encodedBody = jsonEncode(body);
     final requestBodyBytes = utf8.encode(encodedBody).length;
+    final project = context.data['project'];
+    final usesDynamicCapacity =
+        project is Map &&
+        project['project_capacity_policy'] == aiV3ProjectCapacityPolicy;
+    final maximumRequestBytes = usesDynamicCapacity
+        ? aiV3MaxSerializedRequestBytes
+        : _aiV3LegacyMaxSerializedRequestBytes;
+    final maximumCoreContextBytes = usesDynamicCapacity
+        ? AiV3CoreContextBuilder.maxCanonicalBytes
+        : _aiV3LegacyMaxCoreContextBytes;
+    // Match contract-6 byte envelopes before authentication or network access.
+    // Existing notes are sent completely; never trim a project to fit.
+    if (requestBodyBytes > maximumRequestBytes ||
+        utf8.encode(jsonEncode(body['core_context'])).length >
+            maximumCoreContextBytes) {
+      throw const AiV3PlannerException('v3_context_request_limit');
+    }
     final stopwatch = Stopwatch()..start();
     var requestStage = 'auth';
     try {
@@ -151,6 +172,18 @@ class AiV3PlannerService implements AiV3Planner {
       try {
         result = _parseResponse(response);
       } on AiV3PlannerException catch (error) {
+        // Explicit local debugging only; never include response text or IDs.
+        if (kDebugMode &&
+            const bool.fromEnvironment('AI_V3_LOCAL_VALIDATION_DIAGNOSTICS')) {
+          final detail =
+              error.code == 'v3_planner_contract_invalid' &&
+                  RegExp(r'^v3_[a-zA-Z0-9_.]{1,140}$').hasMatch(error.detail)
+              ? error.detail
+              : null;
+          debugPrint(
+            '[AI.v3-validation] ${jsonEncode(<String, dynamic>{'code': error.code, if (detail != null) 'contract_error_code': detail, 'http_status': response.statusCode, 'elapsed_ms': stopwatch.elapsedMilliseconds, 'request_timeout_ms': requestTimeout.inMilliseconds})}',
+          );
+        }
         throw AiV3PlannerException(error.code, error.detail, <String, dynamic>{
           ...error.diagnostic,
           'stage': 'proxy_response',
@@ -205,7 +238,11 @@ class AiV3PlannerService implements AiV3Planner {
       final isTimeout =
           response.statusCode == 504 || safeCode == 'v3_upstream_timeout';
       throw AiV3PlannerException(
-        isTimeout ? 'v3_planner_timeout' : 'v3_planner_http_error',
+        isTimeout
+            ? 'v3_planner_timeout'
+            : safeCode == 'v3_context_request_limit'
+            ? 'v3_context_request_limit'
+            : 'v3_planner_http_error',
         'http_${response.statusCode}:$safeCode',
         <String, dynamic>{
           'http_status': response.statusCode,

@@ -66,6 +66,32 @@ double? _nullableDouble(Object? value) =>
 
 bool? _nullableBool(Object? value) => value is bool ? value : null;
 
+/// An inclusive nominal sample-rate range reported by the output driver.
+class AudioSampleRateRangeV2 {
+  const AudioSampleRateRangeV2(
+      {required this.minimumHz, required this.maximumHz});
+
+  final double minimumHz;
+  final double maximumHz;
+
+  bool get isValid =>
+      minimumHz.isFinite &&
+      maximumHz.isFinite &&
+      minimumHz > 1000 &&
+      maximumHz >= minimumHz;
+
+  bool contains(num rate) =>
+      isValid && rate.isFinite && rate >= minimumHz && rate <= maximumHz;
+
+  factory AudioSampleRateRangeV2.fromMap(Map map) => AudioSampleRateRangeV2(
+        minimumHz: _nullableDouble(map['minimumHz']) ?? double.nan,
+        maximumHz: _nullableDouble(map['maximumHz']) ?? double.nan,
+      );
+
+  Map<String, double> toRawMap() =>
+      {'minimumHz': minimumHz, 'maximumHz': maximumHz};
+}
+
 class AudioRouteEndpointV2 {
   const AudioRouteEndpointV2({
     required this.direction,
@@ -75,6 +101,8 @@ class AudioRouteEndpointV2 {
     required this.name,
     required this.channelCount,
     this.clockDomain,
+    this.sampleRateChangeable,
+    this.sampleRateRanges = const [],
   });
 
   final AudioRouteDirectionV2 direction;
@@ -84,6 +112,8 @@ class AudioRouteEndpointV2 {
   final String name;
   final int? channelCount;
   final int? clockDomain;
+  final bool? sampleRateChangeable;
+  final List<AudioSampleRateRangeV2> sampleRateRanges;
 
   factory AudioRouteEndpointV2.fromMap(Map<String, dynamic> map) {
     return AudioRouteEndpointV2(
@@ -102,6 +132,13 @@ class AudioRouteEndpointV2 {
       name: map['name']?.toString() ?? '',
       channelCount: _nullableInt(map['channelCount']),
       clockDomain: _nullableInt(map['clockDomain']),
+      sampleRateChangeable: _nullableBool(map['sampleRateChangeable']),
+      sampleRateRanges: map['sampleRateRanges'] is List
+          ? List.unmodifiable((map['sampleRateRanges'] as List)
+              .whereType<Map>()
+              .map(AudioSampleRateRangeV2.fromMap)
+              .where((range) => range.isValid))
+          : const [],
     );
   }
 
@@ -113,6 +150,11 @@ class AudioRouteEndpointV2 {
         'name': name,
         'channelCount': channelCount,
         'clockDomain': clockDomain,
+        if (sampleRateChangeable != null)
+          'sampleRateChangeable': sampleRateChangeable,
+        if (sampleRateRanges.isNotEmpty)
+          'sampleRateRanges':
+              sampleRateRanges.map((range) => range.toRawMap()).toList(),
       };
 }
 

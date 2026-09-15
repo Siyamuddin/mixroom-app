@@ -218,6 +218,7 @@ AiV3PreparedBundle _bundle({
   String? intentKind,
   String? direction,
   String? descriptor,
+  bool resetFx = false,
 }) {
   final plan = AiV3Plan(
     outcome: 'plan',
@@ -258,7 +259,7 @@ AiV3PreparedBundle _bundle({
           'execution_profile': 'producer_safe',
           'audibility': 'noticeable',
           'style_tags': const <String>[],
-          'reset_fx': false,
+          'reset_fx': resetFx,
           'reference': reference
               ? const <String, dynamic>{
                   'row_id': 20,
@@ -1326,6 +1327,117 @@ void main() {
       expect(result.actions.every((action) => action.data['row'] == 0), isTrue);
     },
   );
+
+  test(
+    'all-row FX reset respects the resolved row scope without touching master',
+    () async {
+      for (final allowedRows in <Set<int>>[
+        {10},
+        {10, 20},
+      ]) {
+        final result =
+            await AiV3MixGoalMaterializer(
+              mixModel: LocalMixingModel(),
+              magnitudePredictor: _Predictor((actions) => actions),
+            ).materializeSingleGoal(
+              data: _bundle(
+                target: {'scope': 'all_rows'},
+                intentKind: 'balance',
+                resetFx: true,
+              ).actions.single.data,
+              project: _project(),
+              roleOverrides: const {},
+              bypassLearnedMagnitudes: true,
+              allowedEffectIds: _allMixEffectIds,
+              allowedTargetRowIds: allowedRows,
+            );
+        final expectedIndexes = {
+          if (allowedRows.contains(10)) 0,
+          if (allowedRows.contains(20)) 1,
+        };
+        expect(
+          result.actions
+              .where((a) => a.type == 'hard_reset_row_fx')
+              .map((a) => a.data['row'])
+              .toSet(),
+          expectedIndexes,
+        );
+        expect(
+          result.actions.every((a) => expectedIndexes.contains(a.data['row'])),
+          isTrue,
+        );
+      }
+    },
+  );
+
+  test('FX reset preserves explicit row, group and master targets', () async {
+    for (final target in <Map<String, dynamic>>[
+      {'scope': 'row', 'row_id': 10, 'row_index': 0},
+      {'scope': 'group', 'group_id': 'vocals'},
+      {'scope': 'master'},
+    ]) {
+      final result =
+          await AiV3MixGoalMaterializer(
+            mixModel: LocalMixingModel(),
+            magnitudePredictor: _Predictor((actions) => actions),
+          ).materializeSingleGoal(
+            data: _bundle(
+              target: target,
+              intentKind: 'balance',
+              resetFx: true,
+            ).actions.single.data,
+            project: _project(grouped: true),
+            roleOverrides: const {},
+            bypassLearnedMagnitudes: true,
+            allowedEffectIds: _allMixEffectIds,
+          );
+      final resetRows = result.actions
+          .where((a) => a.type == 'hard_reset_row_fx')
+          .map((a) => a.data['row'])
+          .toSet();
+      expect(
+        resetRows,
+        target['scope'] == 'master'
+            ? <int>{}
+            : target['scope'] == 'row'
+            ? {0}
+            : {0, 1},
+      );
+      expect(
+        result.actions.any((a) => a.type == 'hard_reset_master_fx'),
+        target['scope'] == 'master',
+      );
+    }
+  });
+
+  test('legacy unscoped global FX reset still resets master and all rows', () {
+    final result = LocalMixingModel().run(
+      project: _project(),
+      goal: GoalVector.fromJson({
+        'type': 'mix_request',
+        'target': {'scope': 'auto', 'confidence': 1.0},
+        'intents': [
+          {'kind': 'balance', 'confidence': 1.0},
+        ],
+        'reset_fx': true,
+        'intensity': 0.6,
+      }),
+      strict: true,
+    );
+    expect(
+      result.actions
+          .where((a) => a.type == 'hard_reset_row_fx')
+          .map((a) => a.data['row'])
+          .toSet(),
+      {0, 1},
+    );
+    expect(
+      result.actions.where((a) => a.type == 'hard_reset_master_fx'),
+      hasLength(1),
+    );
+    expect(result.actions.any((a) => a.type == 'set_master_gain'), isTrue);
+    expect(result.actions.any((a) => a.type == 'set_master_pan'), isTrue);
+  });
 
   test(
     'row-set materialization rejects unrelated rows and master actions',

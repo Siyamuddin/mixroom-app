@@ -242,11 +242,10 @@ void main() {
     final editor = File(editorPath).readAsStringSync();
     final refresh = _between(
       editor,
-      'Future<void> _refreshSystemSelectedRouteInfoV2() async {',
-      'Future<void> _refreshAndroidOutputRouteLabel(',
+      'Future<void> _drainMacInputRefresh() async {',
+      'MacInputChannelOption get _macSelectedInputChannels',
     );
-    expect(refresh, contains('Platform.isMacOS'));
-    expect(refresh, contains('advertisedInput.clockDomain'));
+    expect(refresh, contains('input.clockDomain'));
     expect(refresh, contains('_v2MonitoringClockCompatible'));
     expect(
       editor,
@@ -258,11 +257,11 @@ void main() {
     final editor = File(editorPath).readAsStringSync();
     final refresh = _between(
       editor,
-      'Future<void> _refreshSystemSelectedRouteInfoV2() async {',
-      'Future<void> _refreshAndroidOutputRouteLabel(',
+      'Future<void> _drainMacInputRefresh() async {',
+      'MacInputChannelOption get _macSelectedInputChannels',
     );
-    expect(refresh, contains('JuceAudioEngine.getInputDeviceInfos()'));
-    expect(refresh, contains('advertisedInput?.channelCount'));
+    expect(refresh, contains('JuceAudioEngine.getInputDeviceInfos('));
+    expect(refresh, contains('input?.channelCount'));
     expect(refresh, isNot(contains('prepareRecordingInputs')));
     expect(refresh, isNot(contains('transitionIntent')));
 
@@ -381,7 +380,12 @@ void main() {
       'Future<void> _handleRecordPressed({required bool keepPlayingOnStop}) async {',
       'String _normalizeEffectText(',
     );
-    expect(handler, contains('!((Platform.isMacOS || Platform.isAndroid || Platform.isIOS) &&'));
+    expect(
+      handler,
+      contains(
+        '!((Platform.isMacOS || Platform.isAndroid || Platform.isIOS) &&',
+      ),
+    );
     expect(handler, contains('_v2LiveMonitoringActive)'));
     final plugin = File(
       'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
@@ -613,26 +617,50 @@ void main() {
     expect(facts, isNot(contains('syncLiveInputMonitorRoutingLocked')));
   });
   test('iOS captures retain ownership independently of recording intent', () {
-    final plugin = File('juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m').readAsStringSync();
-    final helper = File('juce_audio_engine/ios/Classes/MixroomIOSCaptureLifecycleV2.m').readAsStringSync();
-    final start = _between(plugin, '- (void)startIOSCaptureV2:', '- (void)stopIOSCaptureV2:');
+    final plugin = File(
+      'juce_audio_engine/ios/Classes/JuceAudioEnginePlugin.m',
+    ).readAsStringSync();
+    final helper = File(
+      'juce_audio_engine/ios/Classes/MixroomIOSCaptureLifecycleV2.m',
+    ).readAsStringSync();
+    final start = _between(
+      plugin,
+      '- (void)startIOSCaptureV2:',
+      '- (void)stopIOSCaptureV2:',
+    );
     expect(start, contains('MixroomIOSLifecycleQueue()'));
     expect(start, contains('canDeliverStartWithCurrent:current'));
     expect(start, contains('transition == self.iosLifecycleCompletionTokenV2'));
-    final reuse = _between(plugin, '} else if (reusesMonitoringRoute) {', '} else if ([intent isEqualToString:@"preparingRecording"]');
+    final reuse = _between(
+      plugin,
+      '} else if (reusesMonitoringRoute) {',
+      '} else if ([intent isEqualToString:@"preparingRecording"]',
+    );
     expect(reuse, isNot(contains('setLiveInputMonitorTargetV2ObjC')));
     expect(reuse, contains('monitorMatches'));
-    final owner = _between(plugin, '- (MixroomIOSCaptureLifecycleV2 *)newIOSCaptureV2 {', '- (BOOL)iosCaptureRouteReadyV2');
+    final owner = _between(
+      plugin,
+      '- (MixroomIOSCaptureLifecycleV2 *)newIOSCaptureV2 {',
+      '- (BOOL)iosCaptureRouteReadyV2',
+    );
     expect(owner, contains('preserveMonitoring:[self isIOSMonitorOwnedV2]'));
     expect(owner, isNot(contains('currentAudioRouteIntentV2')));
     expect(plugin, contains('if (cancelOnly && [self isIOSMonitorOwnedV2])'));
-    expect(helper, contains('[self.native finalizePreservingMonitor:self.preserve]'));
+    expect(
+      helper,
+      contains('[self.native finalizePreservingMonitor:self.preserve]'),
+    );
     expect(helper, contains('self.streamGeneration != 0'));
-    final engine = File('juce_audio_engine/ios/Classes/JuceEngine.cpp').readAsStringSync();
-    final facts = _between(engine, 'juce::NamedValueSet JuceEngine::getLiveInputMonitoringFactsV2()', 'void JuceEngine::disableLiveInputMonitoringV2()');
+    final engine = File(
+      'juce_audio_engine/ios/Classes/JuceEngine.cpp',
+    ).readAsStringSync();
+    final facts = _between(
+      engine,
+      'juce::NamedValueSet JuceEngine::getLiveInputMonitoringFactsV2()',
+      'void JuceEngine::disableLiveInputMonitoringV2()',
+    );
     expect(facts, contains('graph.isConnected(connection)'));
     expect(facts, contains('wavCapture.stop(true)'));
     expect(facts, isNot(contains('syncLiveInputMonitorRoutingLocked')));
   });
-
 }

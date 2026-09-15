@@ -72,8 +72,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     val mode: IntentOperationModeV2 = IntentOperationModeV2.STANDARD,
     val routeAdapter: AndroidRecordingRouteAdapterV2 =
       AndroidRecordingRouteAdapterV2.BUILT_IN,
-    val recordingChannelStart: Int = 0,
-    val recordingChannelCount: Int = 1,
+    val recordingChannelStart: Int = AndroidRecordingChannelPolicyV2.channelStart,
+    val recordingChannelCount: Int = AndroidRecordingChannelPolicyV2.channelCount,
     val purpose: InputLifecyclePurposeV2 = InputLifecyclePurposeV2.RECORDING,
     val monitoringTargetRow: Int = 0,
     val bluetoothSelectionMode: AndroidBluetoothRouteSelectionModeV2? = null,
@@ -131,6 +131,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   private val audioDeviceCallbackV2 =
     object : AudioDeviceCallback() {
       override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+        emitInputStatusChangedV2()
         handleAudioRouteSignalV2(
           AndroidRouteSignalKindV2.DEVICE_ADDED,
           emptySet(),
@@ -146,6 +147,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       }
 
       override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+        emitInputStatusChangedV2()
         val removedDeviceIds = removedDevices.mapTo(mutableSetOf()) { it.id }
         handleAudioRouteSignalV2(
           AndroidRouteSignalKindV2.DEVICE_REMOVED,
@@ -972,6 +974,20 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
   }
 
+  private fun emitInputStatusChangedV2() {
+    if (audioRouteMonitoringV2 && !lifecycleDisposedV2) {
+      eventsSink?.success(mapOf("event" to "androidV2InputStatusChanged"))
+    }
+  }
+
+  private fun recordingInputConfigurationV2(): Map<String, Any?> {
+    val manager = applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    val available: Boolean? = try {
+      manager.getDevices(AudioManager.GET_DEVICES_INPUTS).any { it.isSource }
+    } catch (_: SecurityException) { null } catch (_: IllegalStateException) { null }
+    return AndroidRecordingChannelPolicyV2.toMap() + mapOf("inputAvailable" to available)
+  }
+
   private fun inputDeviceInfosV2(): List<Map<String, Any>> {
     val audioManager =
       applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -1396,6 +1412,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             recordingOperationV2 = null
           }
         }
+      emitInputStatusChangedV2()
       result.success(
         routeTransitionResultV2(
           status = deliveredOutcome.status,
@@ -2759,11 +2776,10 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
     val requestedOperation = args.stringValue("intentOperation")
     val requestedChannelStart = args.intValue("recordingChannelStart")
-    val requestedChannelCount = args.intValue("recordingChannelCount", 1)
+    val requestedChannelCount = args.intValue("recordingChannelCount", AndroidRecordingChannelPolicyV2.channelCount)
     val requestedMonitoringTargetRow = args.intValue("monitoringTargetRow", -1)
-    val validRecordingSelection = requestedChannelStart >= 0 &&
-      requestedChannelCount in 1..2 &&
-      requestedChannelStart + requestedChannelCount in 1..32
+    val validRecordingSelection = AndroidRecordingChannelPolicyV2.accepts(
+      requestedChannelStart, requestedChannelCount)
     val operationMode = when (requestedOperation) {
       "systemSelectedRecording" -> IntentOperationModeV2.SYSTEM_SELECTED_RECORDING
       "systemSelectedMonitoring" -> IntentOperationModeV2.SYSTEM_SELECTED_MONITORING
@@ -2780,7 +2796,8 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     )
     if (requestedIntent == null ||
       ((requestedIntent == AudioRouteIntentV2.PREPARING_RECORDING ||
-          requestedIntent == AudioRouteIntentV2.MONITORING) &&
+          requestedIntent == AudioRouteIntentV2.MONITORING ||
+          requestedIntent == AudioRouteIntentV2.RECORDING) &&
         !validRecordingSelection)
     ) {
       result.success(
@@ -2901,6 +2918,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         ) {
           recordingOperationV2 = null
         }
+        emitInputStatusChangedV2()
         result.success(null)
       }
     }
@@ -2963,6 +2981,16 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
       audioRouteIntentV2 == AudioRouteIntentV2.PREPARING_RECORDING
     if (operation == null || (!monitoringCapture && !preparedCapture) ||
       !isCaptureOperationCurrentV2(operation) || lifecycleTransitionInProgressV2
+    ) {
+      result.success(false)
+      return
+    }
+    val requestedChannelStart = args.intValue("channelStart")
+    val requestedChannelCount = args.intValue("channelCount")
+    if (
+      !AndroidRecordingChannelPolicyV2.accepts(requestedChannelStart, requestedChannelCount) ||
+      requestedChannelStart != operation.recordingChannelStart ||
+      requestedChannelCount != operation.recordingChannelCount
     ) {
       result.success(false)
       return
@@ -3380,6 +3408,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
   }
 
   private fun validatePreparedRecordingV2(operation: RecordingOperationV2): String {
+    if (!AndroidRecordingChannelPolicyV2.accepts(operation.recordingChannelStart, operation.recordingChannelCount)) {
+      return "recording_route_unsupported"
+    }
     if (
       !isCaptureOperationCurrentV2(operation) ||
       operation.cancelled.get() ||
@@ -3533,7 +3564,7 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         "normalizedKind" to endpoint.kind.wireValue,
         "uid" to endpoint.id.toString(),
         "name" to endpoint.name,
-        "channelCount" to endpoint.channelCount,
+        "channelCount" to (oboeInput["channelCount"] as? Number)?.toInt(),
       )
     }
     val audioManager =
@@ -4249,6 +4280,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
           JuceBridge.endProjectClipLoadTransactionJNI()
           result.success(null)
         }
+        "endProjectClipLoadDetailed" -> {
+          result.success(JuceBridge.endProjectClipLoadTransactionDetailedJNI())
+        }
         "beginGraphMutationBatch" -> {
           JuceBridge.beginGraphMutationBatchJNI()
           result.success(null)
@@ -4323,6 +4357,24 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             )
             mainHandler.post { emitPluginLoaded(clip, path, ok) }
             ok
+          }
+        }
+        "loadClipDetailed" -> {
+          val clip = args.intValue("clip")
+          val rowId = resolveRowId(args, 0)
+          val path = args.stringValue("path")
+          val startSec = args.doubleValue("startSec")
+          val lengthSec = args.doubleValue("lengthSec")
+          val inFileOffsetSec = args.doubleValue("inFileOffsetSec")
+          runHeavyTask("loadClipDetailed", result) {
+            JuceBridge.loadClipDetailedJNI(
+              clip,
+              rowId,
+              path,
+              startSec,
+              lengthSec,
+              inFileOffsetSec,
+            )
           }
         }
         "unloadClip" -> {
@@ -4911,6 +4963,9 @@ class JuceAudioEnginePlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
         "getInputDevices" -> {
           result.success(JuceBridge.getInputDevicesJNI())
+        }
+        "getAndroidRecordingInputConfigurationV2" -> {
+          result.success(recordingInputConfigurationV2())
         }
         "getInputDeviceInfos" -> {
           result.success(inputDeviceInfosV2())
