@@ -54,11 +54,27 @@ void main() {
     expect(autosave, isNot(contains('_forkCompatibilityProjectForEdits')));
     expect(autosave, contains('if (!_usingCompatibilityAudio)'));
     expect(editor, contains('_scheduleListenOnlyEditAutosave('));
+    expect(editor, contains('_listenOnlyInMemoryDirty = true'));
     expect(
       editor,
       contains(
-        'if (_usingCompatibilityAudio) {\n      unawaited(_scheduleListenOnlyEditAutosave(',
+        'if (_usingCompatibilityAudio) {\n      _listenOnlyInMemoryDirty = true;\n      unawaited(_scheduleListenOnlyEditAutosave(',
       ),
+    );
+    expect(editor, contains('mutationGate'));
+    expect(editor, contains('_listenOnlyMutationGate'));
+    expect(editor, contains('_confirmFrozenMixCopyForEditsAndReplay()'));
+    expect(editor, contains('takePendingGatedActions()'));
+    expect(editor, contains('_listenOnlyBaselineUndoDepth'));
+    expect(editor, contains('undoSteps(extraSteps)'));
+
+    final execute = _methodBody(
+      editor,
+      'Future<void> execute(EditorUndoAction action) async',
+    );
+    expect(
+      execute.indexOf('_allowMutation('),
+      lessThan(execute.indexOf('await action.redo()')),
     );
 
     final prompt = _methodBody(

@@ -4703,6 +4703,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _sourceRequiresUnhostedPlugins = false;
   bool _pluginMixOpenBlocked = false;
   Future<bool>? _frozenMixPromptFuture;
+  int _listenOnlyBaselineUndoDepth = 0;
+  bool _listenOnlyInMemoryDirty = false;
   Map<String, dynamic> _compatibilityProjectionMetadata =
       const <String, dynamic>{};
   Map<int, List<String>> _frozenPluginNamesByRow = const <int, List<String>>{};
@@ -9530,6 +9532,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       },
     );
     unawaited(_loadCloudSyncMode());
+    _undoManager.mutationGate = _listenOnlyMutationGate;
     _undoManager.addListener(_handleUndoHistoryChanged);
 
     _classifier = InstrumentClassifier();
@@ -15202,6 +15205,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       await _restorePersistedUndoHistory(json);
+      _listenOnlyBaselineUndoDepth = _undoManager.undoDepth;
+      _listenOnlyInMemoryDirty = false;
       setState(() {});
       projectLoadedSuccessfully = true;
       _showProjectLoadRecoveryNoticeIfNeeded();
@@ -15740,6 +15745,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }) {
     if (!_loadedOnce || _isProjectLoading) return;
     if (_usingCompatibilityAudio) {
+      _listenOnlyInMemoryDirty = true;
       unawaited(_scheduleListenOnlyEditAutosave(debounce: debounce));
       return;
     }
@@ -15751,6 +15757,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _projectAutosaveCoordinator.schedule(debounce: debounce);
+  }
+
+  bool _listenOnlyMutationGate(EditorUndoAction action) {
+    if (!_usingCompatibilityAudio) return true;
+    unawaited(_confirmFrozenMixCopyForEditsAndReplay());
+    return false;
+  }
+
+  Future<void> _confirmFrozenMixCopyForEditsAndReplay() async {
+    final allowed = await _confirmFrozenMixCopyForEdits();
+    if (!allowed || !mounted) return;
+    final pending = _undoManager.takePendingGatedActions();
+    for (final action in pending) {
+      await _undoManager.execute(action);
+    }
   }
 
   Future<void> _scheduleListenOnlyEditAutosave({
@@ -15846,11 +15867,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _discardListenOnlyEdit() async {
-    if (_undoManager.canUndo) {
-      await _undoManager.undo();
-      if (mounted) setState(() {});
+    _undoManager.dropPendingGatedActions();
+    final extraSteps = _undoManager.undoDepth - _listenOnlyBaselineUndoDepth;
+    if (extraSteps > 0) {
+      await _undoManager.undoSteps(extraSteps);
     }
     _projectAutosaveCoordinator.clearDirty();
+    final shouldReload = _listenOnlyInMemoryDirty;
+    _listenOnlyInMemoryDirty = false;
+    if (shouldReload && mounted && !_isProjectLoading) {
+      _loadedOnce = false;
+      await _loadProjectIfAny();
+      return;
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadCloudSyncMode() async {
@@ -91772,15 +91802,18 @@ class EditorUndoManager extends ChangeNotifier {
   final List<_EditorUndoStackEntry> _undo = [];
   final List<_EditorUndoStackEntry> _redo = [];
   final Object _captureZoneKey = Object();
+  final List<EditorUndoAction> _pendingGatedActions = [];
   List<EditorUndoAction>? _capturedActions;
   Object? _captureOwnerToken;
   EditorUndoAction? _lastAction;
+  bool Function(EditorUndoAction action)? mutationGate;
 
   EditorUndoManager({this.maxHistory = 5});
 
   bool get canUndo => _capturedActions == null && _undo.isNotEmpty;
   bool get canRedo => _capturedActions == null && _redo.isNotEmpty;
   bool get isCapturingActions => _capturedActions != null;
+  int get undoDepth => _undo.length;
   EditorUndoAction? get lastAction => _lastAction;
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
       List.unmodifiable(_snapshotRecords(_undo));
@@ -91807,6 +91840,7 @@ class EditorUndoManager extends ChangeNotifier {
 
   Future<void> execute(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!_allowMutation(action, queueIfBlocked: true)) return;
     await action.redo();
     if (!action.didChange) return;
     if (_capturedActions != null) {
@@ -91829,6 +91863,7 @@ class EditorUndoManager extends ChangeNotifier {
   // but you need to execute in sequence before you add, because they depend on each other
   Future<void> executeWithoutAdd(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!_allowMutation(action, queueIfBlocked: true)) return;
     await action.redo();
     if (action.didChange && _capturedActions != null) {
       _captureAction(action);
@@ -91838,6 +91873,7 @@ class EditorUndoManager extends ChangeNotifier {
   // same comment here as above
   Future<void> addWithoutExecute(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!_allowMutation(action, queueIfBlocked: false)) return;
     if (!action.didChange) return;
     if (_capturedActions != null) {
       _captureAction(action);
@@ -91852,6 +91888,28 @@ class EditorUndoManager extends ChangeNotifier {
     _redo.clear();
     _lastAction = action;
     notifyListeners();
+  }
+
+  List<EditorUndoAction> takePendingGatedActions() {
+    final pending = List<EditorUndoAction>.from(_pendingGatedActions);
+    _pendingGatedActions.clear();
+    return pending;
+  }
+
+  void dropPendingGatedActions() {
+    _pendingGatedActions.clear();
+  }
+
+  bool _allowMutation(
+    EditorUndoAction action, {
+    required bool queueIfBlocked,
+  }) {
+    final gate = mutationGate;
+    if (gate == null || gate(action)) return true;
+    if (queueIfBlocked && !_pendingGatedActions.contains(action)) {
+      _pendingGatedActions.add(action);
+    }
+    return false;
   }
 
   /// Runs existing editor behavior without creating a history entry. Every
