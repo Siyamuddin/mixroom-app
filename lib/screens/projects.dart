@@ -830,8 +830,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
     json['cloudDocumentRevision'] = cloud.documentRevision;
     json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
-    json['cloudSourceFingerprint'] =
-        ProjectCompatibilityService.sourceFingerprint(json);
+    json['cloudChangeFingerprint'] =
+        ProjectCompatibilityService.cloudChangeFingerprint(json);
+    json.remove('cloudSourceFingerprint');
     await ProjectManager.writeProjectJson(projectDir, json);
     await ProjectCompatibilityService.rebaseForImportedProject(
       projectDir: projectDir,
@@ -3814,8 +3815,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       }
       json['cloudDocumentRevision'] = result.project.documentRevision;
       json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
-      json['cloudSourceFingerprint'] =
-          ProjectCompatibilityService.sourceFingerprint(json);
+      json['cloudChangeFingerprint'] =
+          ProjectCompatibilityService.cloudChangeFingerprint(json);
+      json.remove('cloudSourceFingerprint');
       await ProjectManager.writeProjectJson(meta.dir, json);
       await entitlement.refreshAccountSurface(force: true);
       await _refresh(includeCloud: true);

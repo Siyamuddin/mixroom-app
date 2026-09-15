@@ -296,11 +296,41 @@ class ProjectCompatibilityService {
       ..remove('cloudDocumentRevision')
       ..remove('cloudSyncedAt')
       ..remove('cloudSourceFingerprint')
+      ..remove('cloudChangeFingerprint')
       ..remove('lastOpenedAt')
       ..remove('familyId')
       ..remove('mixKind')
       ..remove('forkedFromProjectId');
     copy['compatibilityRenderSettings'] = _compatibilityRenderSettings(project);
+    return sha256
+        .convert(utf8.encode(jsonEncode(_canonicalize(copy))))
+        .toString();
+  }
+
+  static String cloudChangeFingerprint(Map<String, dynamic> project) {
+    final copy = _copyMap(project)
+      ..remove('compatibility')
+      ..remove('name')
+      ..remove('nameConfirmed')
+      ..remove('createdAt')
+      ..remove('projectId')
+      ..remove('project_id')
+      ..remove('ui')
+      ..remove('assistantChat')
+      ..remove('undoHistory')
+      ..remove('cloudProjectId')
+      ..remove('cloudWorkspaceId')
+      ..remove('cloudOrganizationId')
+      ..remove('cloudDocumentRevision')
+      ..remove('cloudSyncedAt')
+      ..remove('cloudSourceFingerprint')
+      ..remove('cloudChangeFingerprint')
+      ..remove('lastOpenedAt')
+      ..remove('familyId')
+      ..remove('mixKind')
+      ..remove('forkedFromProjectId');
+    copy['compatibilityRenderSettings'] = _compatibilityRenderSettings(project);
+    copy['cloudChangeUi'] = _cloudChangeUi(project);
     return sha256
         .convert(utf8.encode(jsonEncode(_canonicalize(copy))))
         .toString();
@@ -1108,6 +1138,18 @@ class ProjectCompatibilityService {
     return <String, Object?>{
       'sampleRate': ui['sampleRate'],
       'crossfadeMode': ui['crossfadeMode'],
+    };
+  }
+
+  static Map<String, Object?> _cloudChangeUi(Map<String, dynamic> project) {
+    final ui = project['ui'];
+    if (ui is! Map) return const <String, Object?>{};
+    return <String, Object?>{
+      'loopEnabled': ui['loopEnabled'],
+      'loopStartMs': ui['loopStartMs'],
+      'loopEndMs': ui['loopEndMs'],
+      'metronomeEnabled': ui['metronomeEnabled'],
+      'metronomeVolume': ui['metronomeVolume'],
     };
   }
 

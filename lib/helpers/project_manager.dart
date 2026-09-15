@@ -271,7 +271,7 @@ class ProjectManager {
             (json["cloudOrganizationId"] ?? json["cloud_organization_id"])
                 ?.toString()
                 .trim();
-        final cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+        final cloudChangeFingerprint = (json['cloudChangeFingerprint'] ?? '')
             .toString()
             .trim();
         final familyId = (json['familyId'] ?? '').toString().trim();
@@ -298,12 +298,11 @@ class ProjectManager {
                 : cloudOrganizationId,
             cloudDocumentRevision: (json["cloudDocumentRevision"] as num?)
                 ?.toInt(),
-            cloudSourceFingerprint: cloudSourceFingerprint.isEmpty
+            cloudSourceFingerprint: cloudChangeFingerprint.isEmpty
                 ? null
-                : cloudSourceFingerprint,
-            sourceFingerprint: ProjectCompatibilityService.sourceFingerprint(
-              json,
-            ),
+                : cloudChangeFingerprint,
+            sourceFingerprint:
+                ProjectCompatibilityService.cloudChangeFingerprint(json),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
               (json["createdAt"] ?? 0) as int,
             ),
@@ -612,6 +611,7 @@ class ProjectManager {
     json.remove('cloud_organization_id');
     json.remove('cloudDocumentRevision');
     json.remove('cloudSourceFingerprint');
+    json.remove('cloudChangeFingerprint');
     json.remove('cloud_document_revision');
     json.remove('cloudSyncedAt');
     json.remove('cloud_synced_at');

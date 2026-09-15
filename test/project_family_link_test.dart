@@ -91,6 +91,10 @@ void main() {
         ProjectCompatibilityService.sourceFingerprint(linked),
         ProjectCompatibilityService.sourceFingerprint(original),
       );
+      expect(
+        ProjectCompatibilityService.cloudChangeFingerprint(linked),
+        ProjectCompatibilityService.cloudChangeFingerprint(original),
+      );
     },
   );
 }

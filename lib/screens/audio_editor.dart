@@ -14418,7 +14418,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _cloudDocumentRevision = rawCloudDocumentRevision is num
           ? rawCloudDocumentRevision.toInt()
           : int.tryParse((rawCloudDocumentRevision ?? '').toString().trim());
-      _cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+      _cloudSourceFingerprint = (json['cloudChangeFingerprint'] ?? '')
           .toString()
           .trim();
       _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
@@ -16125,8 +16125,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
           localProject = await ProjectManager.readProjectJson(_projectDir);
           if (remoteProject != null &&
-              ProjectCompatibilityService.sourceFingerprint(remoteProject) ==
-                  ProjectCompatibilityService.sourceFingerprint(localProject)) {
+              ProjectCompatibilityService.cloudChangeFingerprint(
+                    remoteProject,
+                  ) ==
+                  ProjectCompatibilityService.cloudChangeFingerprint(
+                    localProject,
+                  )) {
             _cloudDocumentRevision = remote.documentRevision;
             _cloudAutoSyncConflict = false;
             debugPrint(
@@ -16217,7 +16221,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _projectDir,
       );
       final sourceFingerprintBeforePreparation =
-          ProjectCompatibilityService.sourceFingerprint(sourceBeforePublish);
+          ProjectCompatibilityService.cloudChangeFingerprint(
+            sourceBeforePublish,
+          );
       if (_cloudSourceFingerprint == sourceFingerprintBeforePreparation) {
         return;
       }
@@ -16233,7 +16239,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final sourceForPublish = await ProjectManager.readProjectJson(
         _projectDir,
       );
-      final sourceFingerprint = ProjectCompatibilityService.sourceFingerprint(
+      final sourceFingerprint = ProjectCompatibilityService.cloudChangeFingerprint(
         sourceForPublish,
       );
       final projectId = _projectId.trim().isNotEmpty
@@ -16319,7 +16325,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         json['cloudDocumentRevision'] = _cloudDocumentRevision;
         json['cloudSyncedAt'] = _cloudSyncedAt;
-        json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
+        json['cloudChangeFingerprint'] = _cloudSourceFingerprint;
+        json.remove('cloudSourceFingerprint');
         await ProjectManager.writeProjectJson(_projectDir, json);
         ProjectManager.notifyProjectLibraryChanged();
       } finally {
@@ -17634,7 +17641,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       json["cloudSyncedAt"] = _cloudSyncedAt;
     }
     if (_cloudSourceFingerprint.isNotEmpty) {
-      json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
+      json['cloudChangeFingerprint'] = _cloudSourceFingerprint;
     }
     if (assistantChat != null) {
       json["assistantChat"] = assistantChat;

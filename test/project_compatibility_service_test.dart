@@ -257,6 +257,45 @@ void main() {
     );
   });
 
+  test('loop and metronome change the cloud fingerprint only', () {
+    final original = <String, dynamic>{
+      'tempoBpm': 120,
+      'tracks': <Map<String, dynamic>>[],
+      'ui': <String, dynamic>{
+        'sampleRate': 48000,
+        'crossfadeMode': 'equal_power',
+        'loopEnabled': false,
+        'loopStartMs': 0,
+        'loopEndMs': 4000,
+        'metronomeEnabled': false,
+        'metronomeVolume': 0.5,
+      },
+    };
+    final looped =
+        jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
+    (looped['ui'] as Map)['loopEnabled'] = true;
+    final metronome =
+        jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
+    (metronome['ui'] as Map)['metronomeEnabled'] = true;
+
+    expect(
+      ProjectCompatibilityService.sourceFingerprint(looped),
+      ProjectCompatibilityService.sourceFingerprint(original),
+    );
+    expect(
+      ProjectCompatibilityService.sourceFingerprint(metronome),
+      ProjectCompatibilityService.sourceFingerprint(original),
+    );
+    expect(
+      ProjectCompatibilityService.cloudChangeFingerprint(looped),
+      isNot(ProjectCompatibilityService.cloudChangeFingerprint(original)),
+    );
+    expect(
+      ProjectCompatibilityService.cloudChangeFingerprint(metronome),
+      isNot(ProjectCompatibilityService.cloudChangeFingerprint(original)),
+    );
+  });
+
   test('maps frozen rows to their unavailable plugin names', () {
     final source = _sourceProject();
     final manifest = ProjectCompatibilityService.inspect(source);
