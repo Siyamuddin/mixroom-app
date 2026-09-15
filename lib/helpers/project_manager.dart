@@ -1102,9 +1102,12 @@ class ProjectBundle {
     final session = await FFmpegKit.execute(command);
     final code = await session.getReturnCode();
     final output = File(outputPath);
+    // A header-only file is still a valid conversion of a silent or empty
+    // clip, so only a failed return code, a missing file, or zero bytes count
+    // as a failure here.
     if (!ReturnCode.isSuccess(code) ||
         !output.existsSync() ||
-        output.lengthSync() <= 44) {
+        output.lengthSync() == 0) {
       throw ProcessException(
         'ffmpeg',
         <String>[],
