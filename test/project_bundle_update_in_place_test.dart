@@ -296,6 +296,72 @@ void main() {
     },
   );
 
+  test(
+    'midi instrument clips without a rendered file still update in place',
+    () async {
+      final sourceBytes = _buildTestWavBytes();
+      final sourceDir = await _createProjectWithTone(
+        name: 'Source Mix',
+        fileName: 'tone.wav',
+        label: 'Tone',
+        bytes: sourceBytes,
+      );
+      final sourceJson = await ProjectManager.readProjectJson(sourceDir);
+      // A hosted instrument row stores a placeholder render name. The file
+      // is produced on demand and never exists inside the bundle.
+      (sourceJson['tracks'] as List).add(<String, dynamic>{
+        'fileName': 'aumu,Vita,Tyte_1789489043098426.wav',
+        'label': 'Vital',
+        'clipType': 'midi',
+        'instrumentId': 'aumu,Vita,Tyte',
+        'instrumentName': 'Vital',
+        'rowIndex': 1,
+        'midiNotes': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'n1',
+            'pitch': 52,
+            'startBeat': 0.0,
+            'lengthBeats': 1.0,
+            'velocity': 0.8,
+          },
+        ],
+      });
+      await ProjectManager.writeProjectJson(sourceDir, sourceJson);
+
+      final destDir = await _createProjectWithTone(
+        name: 'Local Mix',
+        fileName: 'old.wav',
+        label: 'Old',
+        bytes: _buildTestWavBytes(frequencyHz: 220.0),
+      );
+
+      final bundlePath = await ProjectBundle.exportMixroomBundle(
+        projectDir: sourceDir,
+        audioMode: BundleAudioMode.flacLossless,
+      );
+
+      await ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: destDir,
+        bundleFile: File(bundlePath),
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+
+      final destJson = await ProjectManager.readProjectJson(destDir);
+      final tracks =
+          (destJson['tracks'] as List?)?.cast<Map>() ?? const <Map>[];
+      expect(tracks, hasLength(2));
+      expect(tracks[0]['fileName'], 'tone.wav');
+      expect(tracks[1]['clipType'], 'midi');
+      expect(tracks[1]['fileName'], 'aumu,Vita,Tyte_1789489043098426.wav');
+      expect(
+        await File(
+          p.join(ProjectManager.audioDir(destDir).path, 'tone.wav'),
+        ).exists(),
+        isTrue,
+      );
+    },
+  );
+
   test('failed ffmpeg conversion leaves the live project unchanged', () async {
     final sourceBytes = _buildTestWavBytes();
     final sourceDir = await _createProjectWithTone(

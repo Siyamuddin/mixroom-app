@@ -26,6 +26,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive_io.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
+import 'package:mixroom/models/models.dart';
 
 class ProjectMeta {
   final Directory dir;
@@ -1262,7 +1263,7 @@ class ProjectBundleImport {
       final stagedReadyRoot = Directory(
         p.join(stagingDir.path, _stagedAudioReadyDirectoryName),
       );
-      await _materializeImportedAudio(
+      final shippedFileNames = await _materializeImportedAudio(
         unpackDir: stagingDir,
         destProjectDir: stagedReadyRoot,
         jsonMap: jsonMap,
@@ -1272,6 +1273,7 @@ class ProjectBundleImport {
       await _verifyImportedTrackFiles(
         audioDir: stagedAudioDir,
         jsonMap: jsonMap,
+        shippedFileNames: shippedFileNames,
       );
 
       final localProjectId = (localJson['projectId'] ?? localJson['project_id'])
@@ -1368,7 +1370,9 @@ class ProjectBundleImport {
     return Map<String, dynamic>.from(decoded);
   }
 
-  static Future<void> _materializeImportedAudio({
+  /// Copies or converts the bundle's audio files into [destProjectDir] and
+  /// returns the file names that now exist there.
+  static Future<Set<String>> _materializeImportedAudio({
     required Directory unpackDir,
     required Directory destProjectDir,
     required Map<String, dynamic> jsonMap,
@@ -1404,7 +1408,8 @@ class ProjectBundleImport {
       }
     }
 
-    if (fileNameRemap.isEmpty) return;
+    final shipped = fileNameRemap.values.toSet();
+    if (fileNameRemap.isEmpty) return shipped;
     final tracks = (jsonMap["tracks"] as List?) ?? const [];
     for (final t in tracks) {
       final track = (t as Map).cast<String, dynamic>();
@@ -1415,17 +1420,29 @@ class ProjectBundleImport {
         track["fileName"] = remapped;
       }
     }
+    return shipped;
   }
 
+  /// Confirms every audio clip the bundle shipped landed in [audioDir].
+  ///
+  /// MIDI clips are skipped: their `fileName` is a placeholder for a render
+  /// that is produced on demand and never travels inside the bundle. Files
+  /// the bundle never contained are skipped too, so a clip that was already
+  /// missing on the source device keeps importing the same way it always has.
   static Future<void> _verifyImportedTrackFiles({
     required Directory audioDir,
     required Map<String, dynamic> jsonMap,
+    required Set<String> shippedFileNames,
   }) async {
     final tracks = (jsonMap['tracks'] as List?) ?? const [];
     for (final t in tracks) {
       if (t is! Map) continue;
+      if (ClipKindWire.fromWire(t['clipType']?.toString()) == ClipKind.midi) {
+        continue;
+      }
       final fileName = (t['fileName'] ?? '').toString().trim();
       if (fileName.isEmpty) continue;
+      if (!shippedFileNames.contains(p.basename(fileName))) continue;
       final file = File(p.join(audioDir.path, p.basename(fileName)));
       if (!await file.exists() || file.lengthSync() <= 0) {
         throw Exception('Bundle audio is missing $fileName');
