@@ -2018,6 +2018,8 @@ class L10n {
           'You can play this mix. Editing needs a Frozen mix copy.',
       'Original': 'Original',
       'Frozen mix': 'Frozen mix',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mixes stay on this device. Sync the original project instead.',
       'Original · Frozen mix': 'Original · Frozen mix',
       'This mix': 'This mix',
       'Whole song': 'Whole song',
@@ -4117,6 +4119,8 @@ class L10n {
           '이 믹스는 재생할 수 있습니다. 편집하려면 Frozen mix 사본이 필요합니다.',
       'Original': '원본',
       'Frozen mix': 'Frozen mix',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mix는 이 기기에만 남습니다. 원본 프로젝트를 동기화하세요.',
       'Original · Frozen mix': '원본 · Frozen mix',
       'This mix': '이 믹스만',
       'Whole song': '곡 전체',
@@ -4872,6 +4876,8 @@ class L10n {
           '可以播放此混音。编辑需要 Frozen mix 副本。',
       'Original': '原版',
       'Frozen mix': 'Frozen mix',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mix 会保留在此设备上。请同步原项目。',
       'Original · Frozen mix': '原版 · Frozen mix',
       'This mix': '仅此混音',
       'Whole song': '整首歌',
@@ -7142,6 +7148,8 @@ class L10n {
           'このミックスは再生できます。編集するには Frozen mix のコピーが必要です。',
       'Original': 'オリジナル',
       'Frozen mix': 'Frozen mix',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mix はこのデバイスに残ります。オリジナルを同期してください。',
       'Original · Frozen mix': 'オリジナル · Frozen mix',
       'This mix': 'このミックスだけ',
       'Whole song': '曲全体',

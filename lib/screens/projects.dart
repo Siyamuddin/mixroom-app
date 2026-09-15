@@ -3191,7 +3191,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 label: L10n.translate(context, 'Version History'),
                 onTap: () => Navigator.of(context).pop('version_history'),
               ),
-              if (_cloudProjectsFeatureEnabled) ...[
+              if (_cloudProjectsFeatureEnabled &&
+                  !projectIsFrozenMix(project)) ...[
                 const SizedBox(height: 4),
                 _ProjectToolAction(
                   icon: Icons.cloud_upload_rounded,
@@ -3598,6 +3599,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _syncProjectToCloud(ProjectMeta meta) async {
+    if (projectIsFrozenMix(meta)) {
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          'Frozen mixes stay on this device. Sync the original project instead.',
+        ),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
     final auth = context.read<AuthService>();
     final entitlement = context.read<EntitlementService>();
     if (!entitlement.areCloudProjectsEnabled) {

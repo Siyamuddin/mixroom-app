@@ -89,4 +89,24 @@ void main() {
     expect(projects, contains('frozenMix'));
     expect(projects, contains("'Frozen mix'"));
   });
+
+  test('frozen mixes cannot be synced to Cloud as a separate project', () {
+    final menu = _methodBody(
+      projects,
+      'Future<void> _showProjectItemMenu({',
+    );
+    expect(menu, contains('!projectIsFrozenMix(project)'));
+
+    final sync = _methodBody(
+      projects,
+      'Future<void> _syncProjectToCloud(ProjectMeta meta) async',
+    );
+    expect(sync, contains('projectIsFrozenMix(meta)'));
+    expect(
+      sync,
+      contains(
+        'Frozen mixes stay on this device. Sync the original project instead.',
+      ),
+    );
+  });
 }
