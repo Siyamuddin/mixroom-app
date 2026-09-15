@@ -46,6 +46,27 @@ void main() {
     );
   });
 
+  test('plugin notice tells desktop users to rescan, mobile users to prepare', () {
+    final notice = _methodBody(
+      editor,
+      'void _queuePluginMixUnavailableNotice()',
+    );
+    expect(notice, contains('_platformCapabilities.externalPluginHosting'));
+    expect(
+      notice,
+      contains(
+        'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.',
+      ),
+    );
+    expect(
+      notice,
+      contains(
+        'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
+      ),
+    );
+    expect(notice, contains('canHostPlugins\n'));
+  });
+
   test('autosave does not silently fork a listen-only mix', () {
     final autosave = _methodBody(
       editor,

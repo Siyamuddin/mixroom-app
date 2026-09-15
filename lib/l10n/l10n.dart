@@ -2019,6 +2019,8 @@ class L10n {
           'You can play this mix. Editing needs a Frozen mix copy.',
       'Original': 'Original',
       'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.',
       'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
           'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.',
       'Could not make a Frozen mix.': 'Could not make a Frozen mix.',
@@ -4129,6 +4131,8 @@ class L10n {
           '이 믹스는 재생할 수 있습니다. 편집하려면 Frozen mix 사본이 필요합니다.',
       'Original': '원본',
       'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          '이 프로젝트는 플러그인 목록에 없는 플러그인을 사용합니다. 설치되어 있다면 플러그인 설정에서 다시 검색을 선택한 뒤 프로젝트를 다시 열어 주세요.',
       'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
           '이 믹스는 이 기기에서 듣기 전용입니다. 어시스턴트가 변경할 수 있도록 Frozen mix를 만드세요. 변경된 내용은 없습니다.',
       'Could not make a Frozen mix.': 'Frozen mix를 만들 수 없습니다.',
@@ -4894,6 +4898,8 @@ class L10n {
           '可以播放此混音。编辑需要 Frozen mix 副本。',
       'Original': '原版',
       'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          '此项目使用的插件不在您的插件列表中。如果已安装，请打开插件设置，选择重新扫描，然后重新打开项目。',
       'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
           '此混音在此设备上仅可试听。请创建 Frozen mix 以便助手进行更改。未做任何更改。',
       'Could not make a Frozen mix.': '无法创建 Frozen mix。',
@@ -7175,6 +7181,8 @@ class L10n {
           'このミックスは再生できます。編集するには Frozen mix のコピーが必要です。',
       'Original': 'オリジナル',
       'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          'このプロジェクトはプラグインリストにないプラグインを使用しています。インストール済みの場合は、プラグイン設定で再スキャンを選び、プロジェクトをもう一度開いてください。',
       'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
           'このミックスはこのデバイスでは試聴のみです。アシスタントが変更できるように Frozen mix を作成してください。変更はありません。',
       'Could not make a Frozen mix.': 'Frozen mix を作成できませんでした。',

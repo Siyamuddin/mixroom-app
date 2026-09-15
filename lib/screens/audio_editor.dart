@@ -15256,6 +15256,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _queuePluginMixUnavailableNotice() {
+    // A desktop can host plugins, so the missing ones are most likely just
+    // not in the scanned list yet. Mobile can only wait for a Prepare.
+    final canHostPlugins = _platformCapabilities.externalPluginHosting;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       await showAppMessageDialog(
@@ -15263,7 +15266,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         title: L10n.translate(context, 'Mix not ready on this device'),
         message: L10n.translate(
           context,
-          'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
+          canHostPlugins
+              ? 'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.'
+              : 'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
         ),
         buttonLabel: L10n.translate(context, 'Back'),
         icon: Icons.graphic_eq_rounded,
