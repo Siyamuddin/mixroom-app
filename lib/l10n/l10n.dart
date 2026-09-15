@@ -2006,6 +2006,17 @@ class L10n {
       'Save this copy as a second project, then open the cloud version.':
           'Save this copy as a second project, then open the cloud version.',
       ' (this device)': ' (this device)',
+      'Make a frozen mix?': 'Make a frozen mix?',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.",
+      'Yes': 'Yes',
+      'No': 'No',
+      'Listen only': 'Listen only',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          'You can play this mix. Editing needs a Frozen mix copy.',
+      'Mix not ready on this device': 'Mix not ready on this device',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
       'Compliance controls': 'Compliance controls',
       'Create sampler': 'Create sampler',
       'Custom AI models': 'Custom AI models',
@@ -4084,6 +4095,17 @@ class L10n {
       'Save this copy as a second project, then open the cloud version.':
           '이 사본을 두 번째 프로젝트로 저장한 다음 클라우드 버전을 엽니다.',
       ' (this device)': ' (이 기기)',
+      'Make a frozen mix?': '프리즈 믹스를 만들까요?',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          '이 믹스는 이 기기에 없는 플러그인을 사용해서 해당 트랙을 여기서 바꿀 수 없습니다. 프리즈 믹스를 만들까요? 원본은 바뀌지 않습니다.',
+      'Yes': '예',
+      'No': '아니요',
+      'Listen only': '듣기 전용',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          '이 믹스는 재생할 수 있습니다. 편집하려면 Frozen mix 사본이 필요합니다.',
+      'Mix not ready on this device': '이 기기에서는 믹스를 열 수 없습니다',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          '이 프로젝트는 이 기기에 없는 플러그인을 사용합니다. 플러그인이 있는 Mac에서 한 번 연 다음, 프로젝트 설정에서 Prepare로 재생 가능한 믹스를 만들어 주세요.',
       'Compliance controls': '규정 준수 제어',
       'Create sampler': '샘플러 만들기',
       'Custom AI models': '사용자 지정 AI 모델',
@@ -4820,6 +4842,17 @@ class L10n {
       'Save this copy as a second project, then open the cloud version.':
           '将此副本另存为第二个项目，然后打开云端版本。',
       ' (this device)': ' (此设备)',
+      'Make a frozen mix?': '要制作 Frozen mix 吗？',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          '此混音使用了此设备上没有的插件，因此无法在这里修改那些轨道。要制作 Frozen mix 吗？这不会更改原项目。',
+      'Yes': '是',
+      'No': '否',
+      'Listen only': '仅试听',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          '可以播放此混音。编辑需要 Frozen mix 副本。',
+      'Mix not ready on this device': '此设备上还不能打开该混音',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          '此项目使用了此设备上没有的插件。请先在装有这些插件的 Mac 上打开一次，并在项目设置中选择 Prepare。',
       'Retry': '重试',
       'Save failed': '保存失败',
       'Usage': '用量',
@@ -7069,6 +7102,17 @@ class L10n {
       'Save this copy as a second project, then open the cloud version.':
           'このコピーを別プロジェクトとして保存し、クラウド版を開きます。',
       ' (this device)': ' (このデバイス)',
+      'Make a frozen mix?': 'Frozen mix を作りますか？',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          'このミックスは、このデバイスにないプラグインを使っているため、該当トラックはここでは変更できません。Frozen mix を作りますか？元のプロジェクトは変わりません。',
+      'Yes': 'はい',
+      'No': 'いいえ',
+      'Listen only': '試聴のみ',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          'このミックスは再生できます。編集するには Frozen mix のコピーが必要です。',
+      'Mix not ready on this device': 'このデバイスではミックスを開けません',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          'このプロジェクトは、このデバイスにないプラグインを使っています。プラグインがある Mac で一度開き、プロジェクト設定の Prepare で再生用ミックスを作成してください。',
       'Compliance controls': 'コンプライアンス管理',
       'Copy': 'コピー',
       'Copy range': '範囲をコピー',

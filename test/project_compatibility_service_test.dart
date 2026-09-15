@@ -367,6 +367,8 @@ void main() {
         // Cloud import can assign a local display name. That metadata must
         // not make a valid frozen sidecar fall back to the plugin source.
         source['name'] = 'Renamed cloud copy';
+        source['familyId'] = 'orig-123';
+        source['mixKind'] = 'original';
         await File(
           p.join(projectDir.path, 'project.json'),
         ).writeAsString(_json(source));
@@ -378,6 +380,7 @@ void main() {
           hasPlugin: (_) => false,
         );
         expect(opened.usingCompatibleAudio, isTrue);
+        expect(opened.playableOnThisDevice, isTrue);
         final tracks = (opened.projectState['tracks'] as List).cast<Map>();
         expect(tracks.single['clipType'], 'audio');
         expect(tracks.single['fileName'], referenceMixFileName);
@@ -397,6 +400,74 @@ void main() {
       }
     },
   );
+
+  test(
+    'missing sidecar on a plugin-less host is not a playable open',
+    () async {
+      final projectDir = await Directory.systemTemp.createTemp(
+        'mixroom_compat_nomix_',
+      );
+      try {
+        final source = _sourceProject();
+        await File(
+          p.join(projectDir.path, 'project.json'),
+        ).writeAsString(_json(source));
+        final opened = await ProjectCompatibilityService.resolveForOpen(
+          projectDir: projectDir,
+          sourceProject: source,
+          canHostExternalPlugins: false,
+          hasPlugin: (_) => false,
+        );
+        expect(opened.usingCompatibleAudio, isFalse);
+        expect(opened.playableOnThisDevice, isFalse);
+        expect(
+          identical(opened.projectState, source) ||
+              opened.projectState['tracks'] == source['tracks'],
+          isTrue,
+        );
+      } finally {
+        await projectDir.delete(recursive: true);
+      }
+    },
+  );
+
+  test('stale sidecar on a plugin-less host is not a playable open', () async {
+    final projectDir = await Directory.systemTemp.createTemp(
+      'mixroom_compat_stale_',
+    );
+    try {
+      final source = _sourceProject();
+      await File(
+        p.join(projectDir.path, 'project.json'),
+      ).writeAsString(_json(source));
+      await Directory(
+        p.join(projectDir.path, 'compatibility'),
+      ).create(recursive: true);
+      await File(
+        p.join(projectDir.path, 'compatibility', 'manifest.json'),
+      ).writeAsString(
+        _json(<String, dynamic>{
+          'version': ProjectCompatibilityManifest.version,
+          'sourceFingerprint': 'stale-fingerprint',
+          'dependencies': const <Map<String, dynamic>>[],
+          'artifacts': const <Map<String, dynamic>>[],
+        }),
+      );
+      await File(
+        p.join(projectDir.path, 'compatibility', 'project.json'),
+      ).writeAsString(_json(source));
+      final opened = await ProjectCompatibilityService.resolveForOpen(
+        projectDir: projectDir,
+        sourceProject: source,
+        canHostExternalPlugins: false,
+        hasPlugin: (_) => false,
+      );
+      expect(opened.usingCompatibleAudio, isFalse);
+      expect(opened.playableOnThisDevice, isFalse);
+    } finally {
+      await projectDir.delete(recursive: true);
+    }
+  });
 
   test(
     'keeps compatibility audio paths when a fallback project is saved',

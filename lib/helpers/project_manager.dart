@@ -40,6 +40,9 @@ class ProjectMeta {
   final DateTime createdAt;
   final DateTime lastOpenedAt;
   final String? bundledDemoAssetPath;
+  final String? familyId;
+  final String? mixKind;
+  final String? forkedFromProjectId;
 
   ProjectMeta({
     required this.dir,
@@ -54,6 +57,9 @@ class ProjectMeta {
     required this.createdAt,
     required this.lastOpenedAt,
     this.bundledDemoAssetPath,
+    this.familyId,
+    this.mixKind,
+    this.forkedFromProjectId,
   });
 }
 
@@ -264,6 +270,11 @@ class ProjectManager {
         final cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
             .toString()
             .trim();
+        final familyId = (json['familyId'] ?? '').toString().trim();
+        final mixKind = (json['mixKind'] ?? '').toString().trim();
+        final forkedFromProjectId = (json['forkedFromProjectId'] ?? '')
+            .toString()
+            .trim();
         metas.add(
           ProjectMeta(
             dir: d,
@@ -298,6 +309,11 @@ class ProjectManager {
             bundledDemoAssetPath: bundledDemoAssetPath?.isEmpty == true
                 ? null
                 : bundledDemoAssetPath,
+            familyId: familyId.isEmpty ? null : familyId,
+            mixKind: mixKind.isEmpty ? null : mixKind,
+            forkedFromProjectId: forkedFromProjectId.isEmpty
+                ? null
+                : forkedFromProjectId,
           ),
         );
       } catch (_) {}
@@ -434,6 +450,7 @@ class ProjectManager {
     final now = DateTime.now().millisecondsSinceEpoch;
     final duplicateJson = Map<String, dynamic>.from(sourceJson);
     stripCloudSyncMetadata(duplicateJson);
+    stripFamilyMetadata(duplicateJson);
     duplicateJson["name"] = p.basename(duplicateDir.path);
     duplicateJson["projectId"] = _nextProjectId();
     duplicateJson.remove("project_id");
@@ -590,6 +607,36 @@ class ProjectManager {
     json.remove('cloud_document_revision');
     json.remove('cloudSyncedAt');
     json.remove('cloud_synced_at');
+  }
+
+  static const String mixKindOriginal = 'original';
+  static const String mixKindFrozen = 'frozen';
+
+  static void stripFamilyMetadata(Map<String, dynamic> json) {
+    json.remove('familyId');
+    json.remove('mixKind');
+    json.remove('forkedFromProjectId');
+  }
+
+  static String frozenMixDisplayName(String originalName) {
+    final trimmed = originalName.trim();
+    if (trimmed.isEmpty) return 'Frozen mix';
+    if (trimmed.toLowerCase().endsWith('frozen mix')) return trimmed;
+    return '$trimmed Frozen mix';
+  }
+
+  static void applyFrozenMixFamily({
+    required Map<String, dynamic> originalJson,
+    required Map<String, dynamic> forkJson,
+  }) {
+    final originalProjectId = ensureProjectIdInJson(originalJson);
+    originalJson['familyId'] = originalProjectId;
+    if ((originalJson['mixKind'] ?? '').toString().trim().isEmpty) {
+      originalJson['mixKind'] = mixKindOriginal;
+    }
+    forkJson['familyId'] = originalProjectId;
+    forkJson['mixKind'] = mixKindFrozen;
+    forkJson['forkedFromProjectId'] = originalProjectId;
   }
 
   static Directory audioDir(Directory dir) => _audioDir(dir);

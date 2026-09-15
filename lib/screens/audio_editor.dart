@@ -4614,6 +4614,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _cloudAutoSyncTerminalFailureEnvironment = '';
   bool _requiresProjectNaming = false;
   bool _usingCompatibilityAudio = false;
+  String _familyId = '';
+  String _mixKind = '';
+  String _forkedFromProjectId = '';
+  bool _sourceRequiresUnhostedPlugins = false;
+  bool _pluginMixOpenBlocked = false;
+  Future<bool>? _frozenMixPromptFuture;
   Map<String, dynamic> _compatibilityProjectionMetadata =
       const <String, dynamic>{};
   Map<int, List<String>> _frozenPluginNamesByRow = const <int, List<String>>{};
@@ -5976,8 +5982,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   TimelineGridMode _timelineGridMode = TimelineGridMode.adaptive;
   int _timelineFixedQuantizeDivisionsPerBar = 4;
   final ValueNotifier<({String clipId, int divisionsPerBar})?>
-      _activePianoRollGridResolution =
-          ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
+  _activePianoRollGridResolution =
+      ValueNotifier<({String clipId, int divisionsPerBar})?>(null);
 
   bool _loopEnabled = false;
   int _loopStartMs = 0;
@@ -9606,17 +9612,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       var startupAttempt = 0;
       while (true) {
         startupAttempt++;
-        engineInitialised =
-            await JuceAudioEngine.initialiseForImplementation(
-              bluetoothSession.active,
-            );
+        engineInitialised = await JuceAudioEngine.initialiseForImplementation(
+          bluetoothSession.active,
+        );
         if (!mounted) return;
         if (engineInitialised) break;
         final startupResult = JuceAudioEngine.lastPlaybackStartupResultV2;
-        _logAudioStartupFailure(
-          attempt: startupAttempt,
-          result: startupResult,
-        );
+        _logAudioStartupFailure(attempt: startupAttempt, result: startupResult);
         final retry = decideStartupRetry(
           diagnosticCode: startupResult?.diagnosticCode,
           attempt: startupAttempt,
@@ -9703,6 +9705,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       await _loadProjectIfAny();
       if (!mounted) {
         await _shutdownAudioEngineV2Aware();
+        return;
+      }
+      if (_pluginMixOpenBlocked) {
+        setState(() => _isLoadingNextScreen = false);
         return;
       }
       if (_isBluetoothV2Session && Platform.isIOS) {
@@ -11023,107 +11029,110 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       L10n.translate(context, sectionTitle),
                                     ),
                                   Container(
-                                  margin: const EdgeInsets.only(bottom: 10),
-                                  padding: const EdgeInsets.fromLTRB(
-                                    14,
-                                    12,
-                                    14,
-                                    12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: active
-                                        ? Colors.white.withValues(alpha: 0.11)
-                                        : Colors.white.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: active
-                                          ? const Color(0xFF66B5FF)
-                                          : conflict != null
-                                          ? const Color(0xFFF57272)
-                                          : Colors.white.withValues(
-                                              alpha: 0.08,
-                                            ),
+                                    margin: const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.fromLTRB(
+                                      14,
+                                      12,
+                                      14,
+                                      12,
                                     ),
-                                  ),
-                                  child: Column(
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              L10n.translate(
-                                                context,
-                                                entry.value,
-                                              ),
-                                              style: const TextStyle(
-                                                color: Color(0xFFF4F4F4),
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w600,
-                                              ),
+                                    decoration: BoxDecoration(
+                                      color: active
+                                          ? Colors.white.withValues(alpha: 0.11)
+                                          : Colors.white.withValues(
+                                              alpha: 0.05,
                                             ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 12,
-                                              vertical: 8,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.white.withValues(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: active
+                                            ? const Color(0xFF66B5FF)
+                                            : conflict != null
+                                            ? const Color(0xFFF57272)
+                                            : Colors.white.withValues(
                                                 alpha: 0.08,
                                               ),
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Text(
-                                              active
-                                                  ? 'Press keys...'
-                                                  : _desktopShortcutLabel(
-                                                      binding,
-                                                    ),
-                                              style: TextStyle(
-                                                color: const Color(
-                                                  0xFFF4F4F4,
-                                                ).withValues(alpha: 0.86),
-                                                fontFamily: 'Pretendard',
-                                                fontSize: 12.5,
-                                                fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                L10n.translate(
+                                                  context,
+                                                  entry.value,
+                                                ),
+                                                style: const TextStyle(
+                                                  color: Color(0xFFF4F4F4),
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          TextButton(
-                                            onPressed: () {
-                                              setModalState(() {
-                                                capturingActionId = active
-                                                    ? null
-                                                    : entry.key;
-                                              });
-                                            },
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white.withValues(
+                                                  alpha: 0.08,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                active
+                                                    ? 'Press keys...'
+                                                    : _desktopShortcutLabel(
+                                                        binding,
+                                                      ),
+                                                style: TextStyle(
+                                                  color: const Color(
+                                                    0xFFF4F4F4,
+                                                  ).withValues(alpha: 0.86),
+                                                  fontFamily: 'Pretendard',
+                                                  fontSize: 12.5,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            TextButton(
+                                              onPressed: () {
+                                                setModalState(() {
+                                                  capturingActionId = active
+                                                      ? null
+                                                      : entry.key;
+                                                });
+                                              },
+                                              child: Text(
+                                                active ? 'Cancel' : 'Change',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        if (conflict != null) ...[
+                                          const SizedBox(height: 8),
+                                          Align(
+                                            alignment: Alignment.centerLeft,
                                             child: Text(
-                                              active ? 'Cancel' : 'Change',
+                                              conflict,
+                                              style: const TextStyle(
+                                                color: Color(0xFFF58A8A),
+                                                fontFamily: 'Pretendard',
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
                                           ),
                                         ],
-                                      ),
-                                      if (conflict != null) ...[
-                                        const SizedBox(height: 8),
-                                        Align(
-                                          alignment: Alignment.centerLeft,
-                                          child: Text(
-                                            conflict,
-                                            style: const TextStyle(
-                                              color: Color(0xFFF58A8A),
-                                              fontFamily: 'Pretendard',
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w500,
-                                            ),
-                                          ),
-                                        ),
                                       ],
-                                    ],
+                                    ),
                                   ),
-                                ),
                                 ];
                               }),
                               const SizedBox(height: 4),
@@ -14034,13 +14043,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
             hasPlugin: _isKnownDesktopPluginId,
           );
+      final sourceInspect = ProjectCompatibilityService.inspect(
+        loadResult.projectState,
+      );
+      _sourceRequiresUnhostedPlugins =
+          sourceInspect.needsPluginAudio &&
+          (!_platformCapabilities.externalPluginHosting ||
+              (_desktopPluginCatalogLoadAttempted &&
+                  sourceInspect.dependencies.any(
+                    (dependency) =>
+                        !_isKnownDesktopPluginId(dependency.pluginId),
+                  )));
+      final playableOnThisDevice =
+          ProjectCompatibilityService.isPlayableOnThisDevice(
+            sourceProject: loadResult.projectState,
+            usingCompatibleAudio: compatibilityOpen.usingCompatibleAudio,
+            canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
+            hasPlugin: _isKnownDesktopPluginId,
+            pluginCatalogReady:
+                !_platformCapabilities.externalPluginHosting ||
+                _desktopPluginCatalogLoadAttempted,
+          );
+      if (!playableOnThisDevice) {
+        _loadedOnce = false;
+        _usingCompatibilityAudio = false;
+        _pluginMixOpenBlocked = true;
+        _queuePluginMixUnavailableNotice();
+        return;
+      }
       final json = compatibilityOpen.projectState;
       _usingCompatibilityAudio = compatibilityOpen.usingCompatibleAudio;
       _compatibilityAudioRequired =
-          !_usingCompatibilityAudio &&
-          ProjectCompatibilityService.inspect(
-            loadResult.projectState,
-          ).needsPluginAudio;
+          !_usingCompatibilityAudio && sourceInspect.needsPluginAudio;
       _compatibilityAudioCurrent =
           _compatibilityAudioRequired &&
           await ProjectCompatibilityService.isCurrent(_projectDir);
@@ -14113,6 +14147,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           .toString()
           .trim();
       _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
+          .toString()
+          .trim();
+      _familyId = (json['familyId'] ?? '').toString().trim();
+      _mixKind = (json['mixKind'] ?? '').toString().trim();
+      _forkedFromProjectId = (json['forkedFromProjectId'] ?? '')
           .toString()
           .trim();
       _requiresProjectNaming = _projectRequiresNameConfirmation(json);
@@ -14855,14 +14894,33 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       unawaited(
         showAppMessageDialog(
           context: context,
-          title: 'Plugin audio included',
-          message:
-              'This project contains plugins not available on this device. '
-              'Any edits made will create a clone of this project.\n\n'
-              'Rows containing unavailable plugins have been stemmed out to audio files.',
+          title: L10n.translate(context, 'Listen only'),
+          message: L10n.translate(
+            context,
+            'You can play this mix. Editing needs a Frozen mix copy.',
+          ),
           icon: Icons.graphic_eq_rounded,
         ),
       );
+    });
+  }
+
+  void _queuePluginMixUnavailableNotice() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showAppMessageDialog(
+        context: context,
+        title: L10n.translate(context, 'Mix not ready on this device'),
+        message: L10n.translate(
+          context,
+          'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
+        ),
+        buttonLabel: L10n.translate(context, 'Back'),
+        icon: Icons.graphic_eq_rounded,
+      );
+      if (mounted) {
+        await _handleBackPressed();
+      }
     });
   }
 
@@ -14954,9 +15012,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final duplicated = await ProjectManager.duplicateProject(oldProjectDir);
       final forkDir = await ProjectManager.renameProject(
         duplicated,
-        _projectName,
+        ProjectManager.frozenMixDisplayName(_projectName),
       );
+      final originalJson = await ProjectManager.readProjectJson(oldProjectDir);
       final forkJson = await ProjectManager.readProjectJson(forkDir);
+      ProjectManager.applyFrozenMixFamily(
+        originalJson: originalJson,
+        forkJson: forkJson,
+      );
+      ProjectManager.stripCloudSyncMetadata(forkJson);
+      await ProjectManager.writeProjectJson(oldProjectDir, originalJson);
+      await ProjectManager.writeProjectJson(forkDir, forkJson);
       await _remapCompatibilityForkAudioPaths(
         oldProjectDir: oldProjectDir,
         newProjectDir: forkDir,
@@ -14969,6 +15035,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _projectCreatedAtMs =
           (forkJson['createdAt'] as num?)?.toInt() ??
           DateTime.now().millisecondsSinceEpoch;
+      final originalProjectId = ProjectManager.ensureProjectIdInJson(
+        originalJson,
+      );
+      _familyId = (forkJson['familyId'] ?? originalProjectId).toString().trim();
+      _mixKind = ProjectManager.mixKindFrozen;
+      _forkedFromProjectId = originalProjectId;
+      _sourceRequiresUnhostedPlugins = false;
       _cloudProjectId = '';
       _cloudWorkspaceId = '';
       _cloudOrganizationId = '';
@@ -14986,7 +15059,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Editing ${_projectName.isEmpty ? 'a new project' : _projectName}',
+              'Editing ${_projectName.isEmpty ? 'Frozen mix' : _projectName}',
             ),
           ),
         );
@@ -15321,6 +15394,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration debounce = const Duration(seconds: 1),
   }) {
     if (!_loadedOnce || _isProjectLoading) return;
+    if (_usingCompatibilityAudio) {
+      unawaited(_scheduleListenOnlyEditAutosave(debounce: debounce));
+      return;
+    }
     if (_isRecording ||
         _recordStartVisualPending ||
         _isMidiClipRecording ||
@@ -15329,6 +15406,59 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _projectAutosaveCoordinator.schedule(debounce: debounce);
+  }
+
+  Future<void> _scheduleListenOnlyEditAutosave({
+    required Duration debounce,
+  }) async {
+    final allowed = await _confirmFrozenMixCopyForEdits();
+    if (!allowed || !mounted || !_loadedOnce || _isProjectLoading) return;
+    if (_isRecording ||
+        _recordStartVisualPending ||
+        _isMidiClipRecording ||
+        _recordTransitionInFlight) {
+      _projectAutosaveCoordinator.markDirty();
+      return;
+    }
+    _projectAutosaveCoordinator.schedule(debounce: debounce);
+  }
+
+  Future<bool> _confirmFrozenMixCopyForEdits() async {
+    if (!_usingCompatibilityAudio) return true;
+    _frozenMixPromptFuture ??= _promptFrozenMixCopyForEdits();
+    try {
+      return await _frozenMixPromptFuture!;
+    } finally {
+      _frozenMixPromptFuture = null;
+    }
+  }
+
+  Future<bool> _promptFrozenMixCopyForEdits() async {
+    if (!_usingCompatibilityAudio) return true;
+    if (!mounted) return false;
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: 'Make a frozen mix?',
+      message:
+          "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.",
+      confirmLabel: 'Yes',
+      cancelLabel: 'No',
+    );
+    if (!mounted) return false;
+    if (!confirmed) {
+      await _discardListenOnlyEdit();
+      return false;
+    }
+    await _forkCompatibilityProjectForEdits();
+    return !_usingCompatibilityAudio;
+  }
+
+  Future<void> _discardListenOnlyEdit() async {
+    if (_undoManager.canUndo) {
+      await _undoManager.undo();
+      if (mounted) setState(() {});
+    }
+    _projectAutosaveCoordinator.clearDirty();
   }
 
   Future<void> _loadCloudSyncMode() async {
@@ -15375,6 +15505,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // desktop project. Opening or autosaving that view must never publish it
     // as a competing cloud revision and overwrite the source plugin state.
     if (_usingCompatibilityAudio) return false;
+    if (_mixKind == ProjectManager.mixKindFrozen) return false;
+    if (_sourceRequiresUnhostedPlugins) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
     // Compatibility renders take a live graph snapshot. Do not start that
     // work in the middle of transport playback. The autosave remains dirty
@@ -15402,6 +15534,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   /// conditions that can make packaging unsafe.
   bool _canContinueCloudAutoSync() {
     if (_usingCompatibilityAudio) return false;
+    if (_mixKind == ProjectManager.mixKindFrozen) return false;
+    if (_sourceRequiresUnhostedPlugins) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
     if (_isPlaying) return false;
     if (_isRecording ||
@@ -16909,6 +17043,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (assistantChat != null) {
       json["assistantChat"] = assistantChat;
     }
+    if (_familyId.isNotEmpty) {
+      json['familyId'] = _familyId;
+    }
+    if (_mixKind.isNotEmpty) {
+      json['mixKind'] = _mixKind;
+    }
+    if (_forkedFromProjectId.isNotEmpty) {
+      json['forkedFromProjectId'] = _forkedFromProjectId;
+    }
     if (_usingCompatibilityAudio) {
       json['compatibility'] = _compatibilityProjectionMetadata.isEmpty
           ? const <String, dynamic>{'variant': 'audio'}
@@ -16921,9 +17064,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!_loadedOnce) {
       debugPrint('Skipping autosave because the project never loaded.');
       return;
-    }
-    if (_usingCompatibilityAudio) {
-      await _forkCompatibilityProjectForEdits();
     }
     if (!_usingCompatibilityAudio) {
       await _promoteCompatibilityAudioIntoCurrentProject();
@@ -26442,8 +26582,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final attackOverrideMs = params['attackMs'];
     final attackOverrideSec =
         attackOverrideMs != null && attackOverrideMs.isFinite
-            ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
-            : null;
+        ? (attackOverrideMs / 1000.0).clamp(0.0, 1.0).toDouble()
+        : null;
     final decaySec = (((params['decayMs'] ?? 120.0) / 1000.0).clamp(
       0.0,
       2.0,
@@ -26454,8 +26594,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final releaseOverrideMs = params['releaseMs'];
     final releaseOverrideSec =
         releaseOverrideMs != null && releaseOverrideMs.isFinite
-            ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
-            : null;
+        ? (releaseOverrideMs / 1000.0).clamp(0.0, 2.4).toDouble()
+        : null;
     final sampleStartNorm = (params['sampleStartNorm'] ?? 0.0)
         .clamp(0.0, 0.98)
         .toDouble();
@@ -30606,25 +30746,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               '$normalizedPath|${stat.size}|${stat.modified.millisecondsSinceEpoch}',
           durationMs: durationMs,
         );
-        final sourceRange =
-            waveformDetailSourceRangeForTimelineIntersection(
-              clipStartMs: clipStartMs,
-              timelineDurationMs: timelineDurationMs,
-              trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
-              trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
-              sourceDurationMs: durationMs,
-              isReversed: clip.isReversed,
-              viewportStartMs: viewport.timelineStartMs,
-              viewportEndMs: viewport.timelineEndMs,
-            );
+        final sourceRange = waveformDetailSourceRangeForTimelineIntersection(
+          clipStartMs: clipStartMs,
+          timelineDurationMs: timelineDurationMs,
+          trimStartMs: clip.trimStart.inMicroseconds / 1000.0,
+          trimEndMs: clip.trimEnd.inMicroseconds / 1000.0,
+          sourceDurationMs: durationMs,
+          isReversed: clip.isReversed,
+          viewportStartMs: viewport.timelineStartMs,
+          viewportEndMs: viewport.timelineEndMs,
+        );
         if (sourceRange == null) {
           return const <WaveformDetailTileRequest>[];
         }
         return waveformDetailTileIndicesForRange(
-          sourceStartMs: sourceRange.startMs,
-          sourceEndMs: sourceRange.endMs,
-          sourceDurationMs: durationMs,
-        )
+              sourceStartMs: sourceRange.startMs,
+              sourceEndMs: sourceRange.endMs,
+              sourceDurationMs: durationMs,
+            )
             .map(
               (tileIndex) => WaveformDetailTileRequest(
                 source: source,
@@ -34169,9 +34308,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (!mounted) return false;
     if (epoch != _liveMidiRowArmEpoch) return false;
     final row = _rowIndexForId(rowId);
-    return row >= 0 &&
-        row < _rows.length &&
-        _rows[row].isInstrumentLane;
+    return row >= 0 && row < _rows.length && _rows[row].isInstrumentLane;
   }
 
   Future<void> _armLiveMidiInputForInstrumentRow(int row) async {
@@ -40619,8 +40756,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       builder: (context, _) {
         final controls = _timelineController.topControlsState;
         final pianoRollGrid = _activePianoRollGridResolution.value;
-        final pianoRollDivisions = _showPianoRoll &&
-                controls.gridMode == TimelineGridMode.adaptive
+        final pianoRollDivisions =
+            _showPianoRoll && controls.gridMode == TimelineGridMode.adaptive
             ? pianoRollGrid?.divisionsPerBar
             : null;
         final rawQuantizeLabel = pianoRollDivisions != null
@@ -43205,40 +43342,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                             : scannedCandidateCount;
                                         currentScannedPlugin =
                                             event['currentPlugin']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                currentScannedPlugin;
+                                                ?.toString()
+                                                .trim() ??
+                                            currentScannedPlugin;
                                         currentScannedPluginFormat =
                                             event['format']
-                                                    ?.toString()
-                                                    .trim() ??
-                                                currentScannedPluginFormat;
+                                                ?.toString()
+                                                .trim() ??
+                                            currentScannedPluginFormat;
                                         if (rawPlugin is Map) {
-                                          final plugin = JuceAudioEngine
-                                              .normalizeScannedPlugin(
-                                            rawPlugin,
-                                          );
+                                          final plugin =
+                                              JuceAudioEngine.normalizeScannedPlugin(
+                                                rawPlugin,
+                                              );
                                           if (plugin != null) {
                                             currentScannedPlugin =
                                                 plugin['name'] as String;
                                             final rawFormat =
                                                 (plugin['format'] as String?)
-                                                        ?.trim() ??
-                                                    '';
+                                                    ?.trim() ??
+                                                '';
                                             currentScannedPluginFormat =
                                                 rawFormat == 'AudioUnit'
-                                                    ? 'AU'
-                                                    : rawFormat;
+                                                ? 'AU'
+                                                : rawFormat;
                                             final id = plugin['id'] as String;
                                             currentPlugins =
-                                                _applyDesktopPluginPreferences(<
-                                              Map<String, dynamic>
-                                            >[
-                                              ...currentPlugins.where(
-                                                (entry) => entry['id'] != id,
-                                              ),
-                                              plugin,
-                                            ]);
+                                                _applyDesktopPluginPreferences(
+                                                  <Map<String, dynamic>>[
+                                                    ...currentPlugins.where(
+                                                      (entry) =>
+                                                          entry['id'] != id,
+                                                    ),
+                                                    plugin,
+                                                  ],
+                                                );
                                           }
                                         }
                                       });
@@ -47131,7 +47269,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 : monitoringAvailable &&
                       (_liveInputMonitoringEffective ??
                           _shouldEnableLiveInputMonitoring(_audioRouteInfo));
-            final monitoringSubtitle = !monitoringAvailable && !monitoringEnabled
+            final monitoringSubtitle =
+                !monitoringAvailable && !monitoringEnabled
                 ? L10n.translate(
                     context,
                     'Monitoring is unavailable for the current audio route.',
@@ -48543,11 +48682,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final rawCurrent = parameter['value'];
       final currentNormalized = switch (rawCurrent) {
         bool value => value ? 1.0 : 0.0,
-        _ => (_toActionDouble(parameter['valueNormalized']) ??
-                _toActionDouble(rawCurrent) ??
-                0.0)
-            .clamp(0.0, 1.0)
-            .toDouble(),
+        _ =>
+          (_toActionDouble(parameter['valueNormalized']) ??
+                  _toActionDouble(rawCurrent) ??
+                  0.0)
+              .clamp(0.0, 1.0)
+              .toDouble(),
       };
       double nextNormalized;
       if (mode == 'set') {
@@ -48613,8 +48753,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (mode == 'set') {
       final normalized = _toActionDouble(action['value_norm']);
       if (normalized != null && minimum != null && maximum != null) {
-        next = minimum +
-            (maximum - minimum) * normalized.clamp(0.0, 1.0);
+        next = minimum + (maximum - minimum) * normalized.clamp(0.0, 1.0);
       } else {
         final value = _toActionDouble(action['value']);
         if (value == null) {
@@ -67306,12 +67445,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
               final parameterApplied = adjustment.usesNormalizedVerification
                   ? normalizedValue != null &&
-                        (normalizedValue -
-                                    adjustment.expectedNormalizedValue!)
+                        (normalizedValue - adjustment.expectedNormalizedValue!)
                                 .abs() <=
                             normalizedTolerance
                   : appliedValue != null &&
-                        (appliedValue - (adjustment.newValue as double)).abs() <=
+                        (appliedValue - (adjustment.newValue as double))
+                                .abs() <=
                             math.max(
                               0.0001,
                               adjustment.rawInterval / 2.0 + 0.000001,
@@ -82925,7 +83064,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Future<void> _disarmLiveMidiInputForRow(int rowId) async {
     if (!_liveMidiEventPlaybackSupported) return;
     final targetId = _lastLiveMidiInputTargetClipId;
-    final targetOnRow = targetId >= 0 &&
+    final targetOnRow =
+        targetId >= 0 &&
         _audioTracks.any(
           (clip) => clip.rowId == rowId && clip.engineClipId == targetId,
         );
@@ -82951,50 +83091,50 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _waveformDetailProvider.beginMutation();
     try {
       await _disarmLiveMidiInputForRow(deletingRowId);
-    if (_rowCount == 1) {
-      await _clearRowContent(row);
-      final rowId = deletingRowId;
-      if (rowId >= 0) {
-        await JuceAudioEngine.renameRow(rowId, 'Track 1');
-        await JuceAudioEngine.setRowIcon(rowId, 0);
-        await _applyRowsToEditorState(
-          <TimelineRow>[
-            TimelineRow(
-              rowId: rowId,
-              name: 'Track 1',
-              iconId: 0,
-              kind: TimelineRowKind.audio,
-            ),
-          ],
-          refreshAutomationTargets: false,
-          syncClipRows: false,
-        );
-        await _recomputeAudibleState();
+      if (_rowCount == 1) {
+        await _clearRowContent(row);
+        final rowId = deletingRowId;
+        if (rowId >= 0) {
+          await JuceAudioEngine.renameRow(rowId, 'Track 1');
+          await JuceAudioEngine.setRowIcon(rowId, 0);
+          await _applyRowsToEditorState(
+            <TimelineRow>[
+              TimelineRow(
+                rowId: rowId,
+                name: 'Track 1',
+                iconId: 0,
+                kind: TimelineRowKind.audio,
+              ),
+            ],
+            refreshAutomationTargets: false,
+            syncClipRows: false,
+          );
+          await _recomputeAudibleState();
+        }
+        return true;
       }
+      final removedClips = _clipsForFadeResolution(
+        rowIds: <int>{deletingRowId},
+      ).toList(growable: false);
+
+      final ok = await JuceAudioEngine.removeRow(deletingRowId);
+      if (!ok) return false;
+
+      for (final clip in removedClips) {
+        clip.audioStartTimer?.cancel();
+        _clipFadeRowIdByEngineId.remove(clip.engineClipId);
+      }
+      _audioTracks.removeWhere((clip) => clip.rowId == deletingRowId);
+      _updateOverallDurationIfNeeded(removedClips: removedClips);
+
+      final nextRows = List<TimelineRow>.from(_rows)..removeAt(row);
+      await _applyRowsToEditorState(
+        nextRows,
+        refreshAutomationTargets: false,
+        syncClipRows: true,
+      );
+      await _recomputeAudibleState();
       return true;
-    }
-    final removedClips = _clipsForFadeResolution(
-      rowIds: <int>{deletingRowId},
-    ).toList(growable: false);
-
-    final ok = await JuceAudioEngine.removeRow(deletingRowId);
-    if (!ok) return false;
-
-    for (final clip in removedClips) {
-      clip.audioStartTimer?.cancel();
-      _clipFadeRowIdByEngineId.remove(clip.engineClipId);
-    }
-    _audioTracks.removeWhere((clip) => clip.rowId == deletingRowId);
-    _updateOverallDurationIfNeeded(removedClips: removedClips);
-
-    final nextRows = List<TimelineRow>.from(_rows)..removeAt(row);
-    await _applyRowsToEditorState(
-      nextRows,
-      refreshAutomationTargets: false,
-      syncClipRows: true,
-    );
-    await _recomputeAudibleState();
-    return true;
     } finally {
       _waveformDetailProvider.endMutation();
     }
@@ -83786,11 +83926,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _removeDuplicatedRows(List<int> rowIds) async {
-    final indices = rowIds
-        .map(_rowIndexForId)
-        .where((index) => index >= 0 && index < _rowCount)
-        .toList()
-      ..sort();
+    final indices =
+        rowIds
+            .map(_rowIndexForId)
+            .where((index) => index >= 0 && index < _rowCount)
+            .toList()
+          ..sort();
     if (indices.isEmpty) return;
     // Bottom-up so the indices we have not deleted yet stay valid.
     for (final index in indices.reversed) {
