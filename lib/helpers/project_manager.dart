@@ -1421,11 +1421,18 @@ class ProjectBundleImport {
       // failed update leaves them intact.
       await _clearStaleEditorStateAfterUpdate(projectDir);
 
-      if (await liveCompatibilityDir.exists()) {
-        await ProjectCompatibilityService.rebaseForImportedProject(
-          projectDir: projectDir,
-          sourceProject: jsonMap,
-        );
+      // Past the commit the project is already the new one, so a problem
+      // here must not be reported as a failed update. A stale manifest only
+      // makes the compatibility copy look unprepared until the next Prepare.
+      try {
+        if (await liveCompatibilityDir.exists()) {
+          await ProjectCompatibilityService.rebaseForImportedProject(
+            projectDir: projectDir,
+            sourceProject: jsonMap,
+          );
+        }
+      } catch (error) {
+        debugPrint('Compatibility rebase after cloud update failed: $error');
       }
     } catch (error) {
       if (!committed) {

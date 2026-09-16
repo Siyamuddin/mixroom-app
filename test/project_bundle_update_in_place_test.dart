@@ -454,6 +454,12 @@ void main() {
     expect(await oldAudio.readAsBytes(), originalAudioBytes);
     expect(await compatMarker.readAsString(), 'keep');
     expect(
+      await File(
+        p.join(destDir.path, ProjectBundleImport.incomingProjectJsonName),
+      ).exists(),
+      isFalse,
+    );
+    expect(
       await Directory(
         p.join(destDir.path, ProjectBundleImport.incomingUpdateDirectoryName),
       ).exists(),
