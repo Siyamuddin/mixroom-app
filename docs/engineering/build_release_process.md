@@ -2,7 +2,7 @@
 
 Owner: Release Engineering  
 Status: Draft  
-Last reviewed: 2026-06-05  
+Last reviewed: 2026-09-15
 Update trigger: Update this when build commands, release targets, signing,
 store requirements, compliance gates, SDK requirements, deployment steps, or
 release ownership changes.
@@ -13,6 +13,9 @@ This page gives engineers the technical release path. The compliance checklist
 still lives in `docs/RELEASE_COMPLIANCE_CHECKLIST.md`.
 
 ## Pre-Release Checks
+
+Build app releases with Flutter 3.47.4 and its bundled Dart 3.13.3. The exact
+Flutter version is enforced by `pubspec.yaml` and the Windows build workflow.
 
 Run docs freshness:
 

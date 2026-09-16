@@ -18,7 +18,6 @@ android/.idea/libraries
 android/.idea/modules.xml
 android/.idea/workspace.xml
 android/.idea/gradle.xml
-android/gradle/wrapper/gradle-wrapper.properties
 
 # iOS related
 ios/Pods/

@@ -2,7 +2,7 @@
 
 Owner: Engineering  
 Status: Draft  
-Last reviewed: 2026-08-29
+Last reviewed: 2026-09-15
 Update trigger: Update this when supported platforms, required SDK versions,
 native library selection, media dependencies, or backend local setup changes.
 
@@ -14,7 +14,8 @@ media dependencies, and optional backend services.
 
 ## Required Tools
 
-- Flutter and Dart, matching the version expected by `pubspec.yaml`
+- Flutter 3.47.4, which includes Dart 3.13.3. Do not install or upgrade Dart
+  separately from Flutter.
 - Xcode for iOS and macOS builds
 - Android Studio, Android SDK, and Android NDK for Android builds
 - CocoaPods for iOS plugin integration
