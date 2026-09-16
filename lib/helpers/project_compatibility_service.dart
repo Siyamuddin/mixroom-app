@@ -169,10 +169,15 @@ class ProjectCompatibilityOpenResult {
   const ProjectCompatibilityOpenResult({
     required this.projectState,
     required this.usingCompatibleAudio,
+    required this.playableOnThisDevice,
   });
 
   final Map<String, dynamic> projectState;
   final bool usingCompatibleAudio;
+
+  /// False when the source needs third-party plugins this device cannot host
+  /// and there is no current compatibility mix to play instead.
+  final bool playableOnThisDevice;
 }
 
 /// Owns the portable, plugin-free representation of a project.
@@ -291,8 +296,41 @@ class ProjectCompatibilityService {
       ..remove('cloudDocumentRevision')
       ..remove('cloudSyncedAt')
       ..remove('cloudSourceFingerprint')
-      ..remove('lastOpenedAt');
+      ..remove('cloudChangeFingerprint')
+      ..remove('lastOpenedAt')
+      ..remove('familyId')
+      ..remove('mixKind')
+      ..remove('forkedFromProjectId');
     copy['compatibilityRenderSettings'] = _compatibilityRenderSettings(project);
+    return sha256
+        .convert(utf8.encode(jsonEncode(_canonicalize(copy))))
+        .toString();
+  }
+
+  static String cloudChangeFingerprint(Map<String, dynamic> project) {
+    final copy = _copyMap(project)
+      ..remove('compatibility')
+      ..remove('name')
+      ..remove('nameConfirmed')
+      ..remove('createdAt')
+      ..remove('projectId')
+      ..remove('project_id')
+      ..remove('ui')
+      ..remove('assistantChat')
+      ..remove('undoHistory')
+      ..remove('cloudProjectId')
+      ..remove('cloudWorkspaceId')
+      ..remove('cloudOrganizationId')
+      ..remove('cloudDocumentRevision')
+      ..remove('cloudSyncedAt')
+      ..remove('cloudSourceFingerprint')
+      ..remove('cloudChangeFingerprint')
+      ..remove('lastOpenedAt')
+      ..remove('familyId')
+      ..remove('mixKind')
+      ..remove('forkedFromProjectId');
+    copy['compatibilityRenderSettings'] = _compatibilityRenderSettings(project);
+    copy['cloudChangeUi'] = _cloudChangeUi(project);
     return sha256
         .convert(utf8.encode(jsonEncode(_canonicalize(copy))))
         .toString();
@@ -992,44 +1030,76 @@ class ProjectCompatibilityService {
     return projection;
   }
 
+  /// A plugin-less host can play a mix only through a current compatibility
+  /// sidecar. The raw plugin source is not a playable fallback.
+  static bool isPlayableOnThisDevice({
+    required Map<String, dynamic> sourceProject,
+    required bool usingCompatibleAudio,
+    required bool canHostExternalPlugins,
+    required bool Function(String pluginId) hasPlugin,
+    bool pluginCatalogReady = true,
+  }) {
+    if (usingCompatibleAudio) return true;
+    final inspected = inspect(sourceProject);
+    if (!inspected.needsPluginAudio) return true;
+    if (!canHostExternalPlugins) return false;
+    if (!pluginCatalogReady) return false;
+    return inspected.dependencies.every(
+      (dependency) => hasPlugin(dependency.pluginId),
+    );
+  }
+
   static Future<ProjectCompatibilityOpenResult> resolveForOpen({
     required Directory projectDir,
     required Map<String, dynamic> sourceProject,
     required bool canHostExternalPlugins,
     required bool Function(String pluginId) hasPlugin,
+    bool pluginCatalogReady = true,
   }) async {
     final manifest = await readManifest(projectDir);
     final sourceFingerprintValue = sourceFingerprint(sourceProject);
     final allPluginsAvailable =
         canHostExternalPlugins &&
+        pluginCatalogReady &&
         (manifest?.dependencies.every(
               (dependency) => hasPlugin(dependency.pluginId),
             ) ??
             true);
+    ProjectCompatibilityOpenResult result({
+      required Map<String, dynamic> projectState,
+      required bool usingCompatibleAudio,
+    }) {
+      return ProjectCompatibilityOpenResult(
+        projectState: projectState,
+        usingCompatibleAudio: usingCompatibleAudio,
+        playableOnThisDevice: isPlayableOnThisDevice(
+          sourceProject: sourceProject,
+          usingCompatibleAudio: usingCompatibleAudio,
+          canHostExternalPlugins: canHostExternalPlugins,
+          hasPlugin: hasPlugin,
+          pluginCatalogReady: pluginCatalogReady,
+        ),
+      );
+    }
+
     if (allPluginsAvailable ||
         manifest == null ||
         manifest.sourceFingerprint != sourceFingerprintValue ||
         !await isCurrent(projectDir)) {
-      return ProjectCompatibilityOpenResult(
-        projectState: sourceProject,
-        usingCompatibleAudio: false,
-      );
+      return result(projectState: sourceProject, usingCompatibleAudio: false);
     }
     try {
       final decoded = jsonDecode(
         await projectionFileFor(projectDir).readAsString(),
       );
       if (decoded is Map) {
-        return ProjectCompatibilityOpenResult(
+        return result(
           projectState: Map<String, dynamic>.from(decoded),
           usingCompatibleAudio: true,
         );
       }
     } catch (_) {}
-    return ProjectCompatibilityOpenResult(
-      projectState: sourceProject,
-      usingCompatibleAudio: false,
-    );
+    return result(projectState: sourceProject, usingCompatibleAudio: false);
   }
 
   static String _pluginId(Map<String, dynamic> json) =>
@@ -1068,6 +1138,18 @@ class ProjectCompatibilityService {
     return <String, Object?>{
       'sampleRate': ui['sampleRate'],
       'crossfadeMode': ui['crossfadeMode'],
+    };
+  }
+
+  static Map<String, Object?> _cloudChangeUi(Map<String, dynamic> project) {
+    final ui = project['ui'];
+    if (ui is! Map) return const <String, Object?>{};
+    return <String, Object?>{
+      'loopEnabled': ui['loopEnabled'],
+      'loopStartMs': ui['loopStartMs'],
+      'loopEndMs': ui['loopEndMs'],
+      'metronomeEnabled': ui['metronomeEnabled'],
+      'metronomeVolume': ui['metronomeVolume'],
     };
   }
 

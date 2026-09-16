@@ -66,4 +66,23 @@ void main() {
       ProjectCloudFreshness.linkedUnknown,
     );
   });
+
+  test('empty fingerprint is never treated as synced', () {
+    expect(
+      resolveProjectCloudFreshness(
+        project: project(syncedFingerprint: ''),
+        cloudStatusAvailable: true,
+        latestCloudRevision: 4,
+      ),
+      ProjectCloudFreshness.linkedUnknown,
+    );
+    expect(
+      resolveProjectCloudFreshness(
+        project: project(syncedFingerprint: ''),
+        cloudStatusAvailable: true,
+        latestCloudRevision: 5,
+      ),
+      ProjectCloudFreshness.cloudAhead,
+    );
+  });
 }

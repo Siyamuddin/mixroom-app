@@ -4699,6 +4699,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _cloudAutoSyncTerminalFailureEnvironment = '';
   bool _requiresProjectNaming = false;
   bool _usingCompatibilityAudio = false;
+  String _familyId = '';
+  String _mixKind = '';
+  String _forkedFromProjectId = '';
+  bool _sourceRequiresUnhostedPlugins = false;
+  bool _pluginMixOpenBlocked = false;
+  Future<bool>? _frozenMixPromptFuture;
+  int _listenOnlyBaselineUndoDepth = 0;
+  bool _listenOnlyInMemoryDirty = false;
   Map<String, dynamic> _compatibilityProjectionMetadata =
       const <String, dynamic>{};
   Map<int, List<String>> _frozenPluginNamesByRow = const <int, List<String>>{};
@@ -9564,6 +9572,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       },
     );
     unawaited(_loadCloudSyncMode());
+    _undoManager.mutationGate = _listenOnlyMutationGate;
     _undoManager.addListener(_handleUndoHistoryChanged);
 
     _classifier = InstrumentClassifier();
@@ -9904,6 +9913,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       }
       if (!mounted) {
         await _shutdownAudioEngineV2Aware();
+        return;
+      }
+      if (_pluginMixOpenBlocked) {
+        setState(() => _isLoadingNextScreen = false);
         return;
       }
       if (_isBluetoothV2Session && Platform.isIOS) {
@@ -14365,24 +14378,55 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final loadResult = await _projectPersistence.loadProjectState(
         _projectDir,
       );
-      // Project opening is never allowed to scan every third-party plug-in
-      // installed on the machine. It uses the persisted catalog only; a full
-      // scan is an explicit Plug-in Settings action. This keeps an unrelated
-      // unhealthy VST from preventing a project from opening.
+      // Project opening never force-rescans every installed plug-in. A full
+      // rescan stays an explicit Plug-in Settings action. If this Mac has
+      // never loaded a catalog, a cached scan is used so missing plugins
+      // are not treated as available.
+      final sourceInspect = ProjectCompatibilityService.inspect(
+        loadResult.projectState,
+      );
+      var pluginCatalogReady =
+          !_platformCapabilities.externalPluginHosting ||
+          _desktopPluginCatalogLoadAttempted;
+      if (_platformCapabilities.externalPluginHosting &&
+          !pluginCatalogReady &&
+          sourceInspect.needsPluginAudio) {
+        await _scanDesktopPlugins();
+        pluginCatalogReady = _desktopPluginCatalogLoadAttempted;
+      }
       final compatibilityOpen =
           await ProjectCompatibilityService.resolveForOpen(
             projectDir: _projectDir,
             sourceProject: loadResult.projectState,
             canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
             hasPlugin: _isKnownDesktopPluginId,
+            pluginCatalogReady: pluginCatalogReady,
           );
+      _sourceRequiresUnhostedPlugins =
+          sourceInspect.needsPluginAudio &&
+          (!_platformCapabilities.externalPluginHosting ||
+              sourceInspect.dependencies.any(
+                (dependency) => !_isKnownDesktopPluginId(dependency.pluginId),
+              ));
+      final playableOnThisDevice =
+          ProjectCompatibilityService.isPlayableOnThisDevice(
+            sourceProject: loadResult.projectState,
+            usingCompatibleAudio: compatibilityOpen.usingCompatibleAudio,
+            canHostExternalPlugins: _platformCapabilities.externalPluginHosting,
+            hasPlugin: _isKnownDesktopPluginId,
+            pluginCatalogReady: pluginCatalogReady,
+          );
+      if (!playableOnThisDevice) {
+        _loadedOnce = false;
+        _usingCompatibilityAudio = false;
+        _pluginMixOpenBlocked = true;
+        _queuePluginMixUnavailableNotice();
+        return;
+      }
       final json = compatibilityOpen.projectState;
       _usingCompatibilityAudio = compatibilityOpen.usingCompatibleAudio;
       _compatibilityAudioRequired =
-          !_usingCompatibilityAudio &&
-          ProjectCompatibilityService.inspect(
-            loadResult.projectState,
-          ).needsPluginAudio;
+          !_usingCompatibilityAudio && sourceInspect.needsPluginAudio;
       _compatibilityAudioCurrent =
           _compatibilityAudioRequired &&
           await ProjectCompatibilityService.isCurrent(_projectDir);
@@ -14453,10 +14497,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _cloudDocumentRevision = rawCloudDocumentRevision is num
           ? rawCloudDocumentRevision.toInt()
           : int.tryParse((rawCloudDocumentRevision ?? '').toString().trim());
-      _cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+      _cloudSourceFingerprint = (json['cloudChangeFingerprint'] ?? '')
           .toString()
           .trim();
       _cloudSyncedAt = (json["cloudSyncedAt"] ?? json["cloud_synced_at"] ?? '')
+          .toString()
+          .trim();
+      _familyId = (json['familyId'] ?? '').toString().trim();
+      _mixKind = (json['mixKind'] ?? '').toString().trim();
+      _forkedFromProjectId = (json['forkedFromProjectId'] ?? '')
           .toString()
           .trim();
       _requiresProjectNaming = _projectRequiresNameConfirmation(json);
@@ -15235,6 +15284,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ),
       );
       await _restorePersistedUndoHistory(json);
+      _listenOnlyBaselineUndoDepth = _undoManager.undoDepth;
+      _listenOnlyInMemoryDirty = false;
       setState(() {});
       projectLoadedSuccessfully = true;
       _showProjectLoadRecoveryNoticeIfNeeded();
@@ -15272,14 +15323,38 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       unawaited(
         showAppMessageDialog(
           context: context,
-          title: 'Plugin audio included',
-          message:
-              'This project contains plugins not available on this device. '
-              'Any edits made will create a clone of this project.\n\n'
-              'Rows containing unavailable plugins have been stemmed out to audio files.',
+          title: L10n.translate(context, 'Listen only'),
+          message: L10n.translate(
+            context,
+            'You can play this mix. Editing needs a Frozen mix copy.',
+          ),
           icon: Icons.graphic_eq_rounded,
         ),
       );
+    });
+  }
+
+  void _queuePluginMixUnavailableNotice() {
+    // A desktop can host plugins, so the missing ones are most likely just
+    // not in the scanned list yet. Mobile can only wait for a Prepare.
+    final canHostPlugins = _platformCapabilities.externalPluginHosting;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showAppMessageDialog(
+        context: context,
+        title: L10n.translate(context, 'Mix not ready on this device'),
+        message: L10n.translate(
+          context,
+          canHostPlugins
+              ? 'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.'
+              : 'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
+        ),
+        buttonLabel: L10n.translate(context, 'Back'),
+        icon: Icons.graphic_eq_rounded,
+      );
+      if (mounted) {
+        await _handleBackPressed();
+      }
     });
   }
 
@@ -15363,22 +15438,43 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return true;
   }
 
-  Future<void> _forkCompatibilityProjectForEdits() async {
-    if (!_usingCompatibilityAudio || _compatibilityForkInFlight) return;
+  /// Makes a Frozen mix copy of the listen-only project and switches the
+  /// editor to it. Returns true only when the editor now points at the copy.
+  /// On failure the half-made copy is removed and the editor stays on the
+  /// listen-only original.
+  Future<bool> _forkCompatibilityProjectForEdits() async {
+    if (!_usingCompatibilityAudio || _compatibilityForkInFlight) return false;
     _compatibilityForkInFlight = true;
+    Directory? copyDir;
+    var switched = false;
     try {
       final oldProjectDir = _projectDir;
+      final frozenMixIndex = await _nextFrozenMixIndexForFamily(oldProjectDir);
       final duplicated = await ProjectManager.duplicateProject(oldProjectDir);
+      copyDir = duplicated;
       final forkDir = await ProjectManager.renameProject(
         duplicated,
-        _projectName,
+        ProjectManager.frozenMixDisplayName(
+          _projectName,
+          index: frozenMixIndex,
+        ),
       );
+      copyDir = forkDir;
+      final originalJson = await ProjectManager.readProjectJson(oldProjectDir);
       final forkJson = await ProjectManager.readProjectJson(forkDir);
+      ProjectManager.applyFrozenMixFamily(
+        originalJson: originalJson,
+        forkJson: forkJson,
+      );
+      ProjectManager.stripCloudSyncMetadata(forkJson);
+      await ProjectManager.writeProjectJson(oldProjectDir, originalJson);
+      await ProjectManager.writeProjectJson(forkDir, forkJson);
       await _remapCompatibilityForkAudioPaths(
         oldProjectDir: oldProjectDir,
         newProjectDir: forkDir,
       );
       _projectDir = forkDir;
+      switched = true;
       _projectName = (forkJson['name'] ?? p.basename(forkDir.path))
           .toString()
           .trim();
@@ -15386,6 +15482,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _projectCreatedAtMs =
           (forkJson['createdAt'] as num?)?.toInt() ??
           DateTime.now().millisecondsSinceEpoch;
+      final originalProjectId = ProjectManager.ensureProjectIdInJson(
+        originalJson,
+      );
+      _familyId = (forkJson['familyId'] ?? originalProjectId).toString().trim();
+      _mixKind = ProjectManager.mixKindFrozen;
+      _forkedFromProjectId = originalProjectId;
+      _sourceRequiresUnhostedPlugins = false;
       _cloudProjectId = '';
       _cloudWorkspaceId = '';
       _cloudOrganizationId = '';
@@ -15403,13 +15506,56 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Editing ${_projectName.isEmpty ? 'a new project' : _projectName}',
+              'Editing ${_projectName.isEmpty ? 'Frozen mix' : _projectName}',
             ),
           ),
         );
       }
+      return true;
+    } catch (e, stack) {
+      debugPrint('Frozen mix fork failed: $e\n$stack');
+      if (!switched && copyDir != null) {
+        try {
+          if (await copyDir.exists()) {
+            await copyDir.delete(recursive: true);
+          }
+          ProjectManager.notifyProjectLibraryChanged();
+        } catch (cleanupError) {
+          debugPrint('Frozen mix fork cleanup failed: $cleanupError');
+        }
+      }
+      return switched;
     } finally {
       _compatibilityForkInFlight = false;
+    }
+  }
+
+  /// Picks the number for the next Frozen mix of this project by looking at
+  /// the Frozen mixes already in its family, so a second copy becomes
+  /// "Song Frozen mix 2" instead of a folder-collision name like "#1".
+  Future<int> _nextFrozenMixIndexForFamily(Directory originalDir) async {
+    try {
+      final originalJson = await ProjectManager.readProjectJson(originalDir);
+      final familyId = (originalJson['familyId'] ?? '').toString().trim();
+      final originalProjectId = ProjectManager.ensureProjectIdInJson(
+        originalJson,
+      );
+      final lookupFamilyId = familyId.isEmpty ? originalProjectId : familyId;
+      final projects = await ProjectManager.listProjects();
+      final existingFrozenNames = <String>[
+        for (final meta in projects)
+          if ((meta.familyId ?? '').trim() == lookupFamilyId &&
+              (meta.mixKind ?? '').trim() == ProjectManager.mixKindFrozen)
+            meta.name,
+      ];
+      return ProjectManager.nextFrozenMixIndex(
+        originalName: _projectName,
+        existingFrozenNames: existingFrozenNames,
+        allProjectNames: <String>[for (final meta in projects) meta.name],
+      );
+    } catch (error) {
+      debugPrint('Frozen mix numbering fell back to 1: $error');
+      return 1;
     }
   }
 
@@ -15738,6 +15884,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Duration debounce = const Duration(seconds: 1),
   }) {
     if (!_loadedOnce || _isProjectLoading) return;
+    if (_usingCompatibilityAudio) {
+      _listenOnlyInMemoryDirty = true;
+      unawaited(_scheduleListenOnlyEditAutosave(debounce: debounce));
+      return;
+    }
     if (_isRecording ||
         _recordStartVisualPending ||
         _isMidiClipRecording ||
@@ -15746,6 +15897,158 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     _projectAutosaveCoordinator.schedule(debounce: debounce);
+  }
+
+  bool _listenOnlyMutationGate(EditorUndoAction action) {
+    if (!_usingCompatibilityAudio) return true;
+    unawaited(_confirmFrozenMixCopyForEditsAndReplay());
+    return false;
+  }
+
+  Future<void> _confirmFrozenMixCopyForEditsAndReplay() async {
+    // Called unawaited from the mutation gate: nothing may escape.
+    try {
+      final allowed = await _confirmFrozenMixCopyForEdits();
+      if (!allowed || !mounted) {
+        _undoManager.dropPendingGatedActions();
+        return;
+      }
+      final pending = _undoManager.takePendingGatedActions();
+      for (final action in pending) {
+        await _undoManager.execute(action);
+      }
+    } catch (e, stack) {
+      debugPrint('Listen-only edit replay failed: $e\n$stack');
+      _undoManager.dropPendingGatedActions();
+    }
+  }
+
+  Future<void> _scheduleListenOnlyEditAutosave({
+    required Duration debounce,
+  }) async {
+    // Called unawaited from _markProjectDirty: nothing may escape.
+    try {
+      final allowed = await _confirmFrozenMixCopyForEdits();
+      if (!allowed || !mounted || !_loadedOnce || _isProjectLoading) return;
+      if (_isRecording ||
+          _recordStartVisualPending ||
+          _isMidiClipRecording ||
+          _recordTransitionInFlight) {
+        _projectAutosaveCoordinator.markDirty();
+        return;
+      }
+      _projectAutosaveCoordinator.schedule(debounce: debounce);
+    } catch (e, stack) {
+      debugPrint('Listen-only edit prompt failed: $e\n$stack');
+      _undoManager.dropPendingGatedActions();
+    }
+  }
+
+  Future<bool> _confirmFrozenMixCopyForEdits() async {
+    if (!_usingCompatibilityAudio) return true;
+    _frozenMixPromptFuture ??= _promptFrozenMixCopyForEdits();
+    try {
+      return await _frozenMixPromptFuture!;
+    } finally {
+      _frozenMixPromptFuture = null;
+    }
+  }
+
+  Future<bool> _promptFrozenMixCopyForEdits() async {
+    if (!_usingCompatibilityAudio) return true;
+    if (!mounted) return false;
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: 'Make a frozen mix?',
+      message:
+          "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.",
+      confirmLabel: 'Yes',
+      cancelLabel: 'No',
+    );
+    if (!mounted) return false;
+    if (!confirmed) {
+      await _discardListenOnlyEdit();
+      return false;
+    }
+    if (!await _canCreateFrozenMixCopy()) {
+      await _showFrozenMixProjectLimitDialog();
+      await _discardListenOnlyEdit();
+      return false;
+    }
+    final forked = await _forkCompatibilityProjectForEdits();
+    if (forked && !_usingCompatibilityAudio) return true;
+    // The copy could not be made. Treat it like "No": drop the queued
+    // actions and put the editor back on the prepared projection.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            L10n.translate(context, 'Could not make a Frozen mix.'),
+          ),
+        ),
+      );
+    }
+    await _discardListenOnlyEdit();
+    return false;
+  }
+
+  int _localProjectLimit() {
+    try {
+      final entitlementService = context.read<EntitlementService>();
+      return SubscriptionLimits.localProjectLimitForService(
+        isEnforcementEnabled: entitlementService.isEnforcementEnabled,
+        entitlement: entitlementService.entitlement,
+      );
+    } catch (_) {
+      return SubscriptionLimits.paidLocalProjects;
+    }
+  }
+
+  Future<bool> _canCreateFrozenMixCopy() async {
+    return ProjectManager.canCreateNew(maxProjects: _localProjectLimit());
+  }
+
+  Future<void> _showFrozenMixProjectLimitDialog() async {
+    if (!mounted) return;
+    final limit = _localProjectLimit();
+    if (limit == SubscriptionLimits.freeLocalProjects) {
+      await showAppUpgradeDialog(
+        context: context,
+        title: 'Upgrade for more projects',
+        message:
+            'Free includes 10 local projects. Export or delete one, or upgrade for more.',
+        icon: Icons.folder_off_outlined,
+        onUpgrade: widget.onUpgradeRequested,
+      );
+      return;
+    }
+    await showAppMessageDialog(
+      context: context,
+      title: L10n.translate(context, 'Project limit reached'),
+      message: L10n.translate(
+        context,
+        'Delete a project to create or import a new one.',
+      ),
+      buttonLabel: L10n.translate(context, 'OK'),
+      icon: Icons.folder_off_outlined,
+    );
+  }
+
+  Future<void> _discardListenOnlyEdit() async {
+    _undoManager.dropPendingGatedActions();
+    final extraSteps = _undoManager.undoDepth - _listenOnlyBaselineUndoDepth;
+    if (extraSteps > 0) {
+      await _undoManager.undoSteps(extraSteps);
+    }
+    _projectAutosaveCoordinator.clearDirty();
+    final shouldReload = _listenOnlyInMemoryDirty;
+    _listenOnlyInMemoryDirty = false;
+    if (shouldReload && mounted && !_isProjectLoading) {
+      _loadedOnce = false;
+      await _loadProjectIfAny();
+      return;
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadCloudSyncMode() async {
@@ -15792,6 +16095,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     // desktop project. Opening or autosaving that view must never publish it
     // as a competing cloud revision and overwrite the source plugin state.
     if (_usingCompatibilityAudio) return false;
+    if (_mixKind == ProjectManager.mixKindFrozen) return false;
+    if (_sourceRequiresUnhostedPlugins) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
     // Compatibility renders take a live graph snapshot. Do not start that
     // work in the middle of transport playback. The autosave remains dirty
@@ -15819,6 +16124,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   /// conditions that can make packaging unsafe.
   bool _canContinueCloudAutoSync() {
     if (_usingCompatibilityAudio) return false;
+    if (_mixKind == ProjectManager.mixKindFrozen) return false;
+    if (_sourceRequiresUnhostedPlugins) return false;
     if (!_loadedOnce || _isProjectLoading) return false;
     if (_isPlaying) return false;
     if (_isRecording ||
@@ -15986,8 +16293,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               );
           localProject = await ProjectManager.readProjectJson(_projectDir);
           if (remoteProject != null &&
-              ProjectCompatibilityService.sourceFingerprint(remoteProject) ==
-                  ProjectCompatibilityService.sourceFingerprint(localProject)) {
+              ProjectCompatibilityService.cloudChangeFingerprint(
+                    remoteProject,
+                  ) ==
+                  ProjectCompatibilityService.cloudChangeFingerprint(
+                    localProject,
+                  )) {
             _cloudDocumentRevision = remote.documentRevision;
             _cloudAutoSyncConflict = false;
             debugPrint(
@@ -16078,7 +16389,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _projectDir,
       );
       final sourceFingerprintBeforePreparation =
-          ProjectCompatibilityService.sourceFingerprint(sourceBeforePublish);
+          ProjectCompatibilityService.cloudChangeFingerprint(
+            sourceBeforePublish,
+          );
       if (_cloudSourceFingerprint == sourceFingerprintBeforePreparation) {
         return;
       }
@@ -16094,9 +16407,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       final sourceForPublish = await ProjectManager.readProjectJson(
         _projectDir,
       );
-      final sourceFingerprint = ProjectCompatibilityService.sourceFingerprint(
-        sourceForPublish,
-      );
+      final sourceFingerprint =
+          ProjectCompatibilityService.cloudChangeFingerprint(sourceForPublish);
       final projectId = _projectId.trim().isNotEmpty
           ? _projectId.trim()
           : await ProjectManager.ensureProjectId(_projectDir);
@@ -16180,7 +16492,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         }
         json['cloudDocumentRevision'] = _cloudDocumentRevision;
         json['cloudSyncedAt'] = _cloudSyncedAt;
-        json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
+        json['cloudChangeFingerprint'] = _cloudSourceFingerprint;
+        json.remove('cloudSourceFingerprint');
         await ProjectManager.writeProjectJson(_projectDir, json);
         ProjectManager.notifyProjectLibraryChanged();
       } finally {
@@ -17495,10 +17808,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       json["cloudSyncedAt"] = _cloudSyncedAt;
     }
     if (_cloudSourceFingerprint.isNotEmpty) {
-      json['cloudSourceFingerprint'] = _cloudSourceFingerprint;
+      json['cloudChangeFingerprint'] = _cloudSourceFingerprint;
     }
     if (assistantChat != null) {
       json["assistantChat"] = assistantChat;
+    }
+    if (_familyId.isNotEmpty) {
+      json['familyId'] = _familyId;
+    }
+    if (_mixKind.isNotEmpty) {
+      json['mixKind'] = _mixKind;
+    }
+    if (_forkedFromProjectId.isNotEmpty) {
+      json['forkedFromProjectId'] = _forkedFromProjectId;
     }
     if (_usingCompatibilityAudio) {
       json['compatibility'] = _compatibilityProjectionMetadata.isEmpty
@@ -17513,31 +17835,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       debugPrint('Skipping autosave because the project never loaded.');
       return;
     }
-    if (_usingCompatibilityAudio) {
-      await _forkCompatibilityProjectForEdits();
-    }
-    if (!_usingCompatibilityAudio) {
-      await _promoteCompatibilityAudioIntoCurrentProject();
-    }
+    // A listen-only mix has nothing to save. Every edit goes through the
+    // Frozen mix prompt first; a background flush or an early Back must not
+    // slip in-memory changes into the prepared projection on disk.
+    if (_usingCompatibilityAudio) return;
+    await _promoteCompatibilityAudioIntoCurrentProject();
     _syncEffectSnapshotCacheToCurrentRows();
     await _refreshHostedInstrumentStatesForPersistence(captureAll: false);
     final json = await _buildProjectJsonSnapshot();
     _attachPersistedUndoHistoryToProjectJson(json);
-    if (_usingCompatibilityAudio) {
-      await ProjectCompatibilityService.writeCompatibleProjection(
-        projectDir: _projectDir,
-        project: json,
-      );
-    } else {
-      await _projectPersistence.saveProjectState(
-        projectDir: _projectDir,
-        projectState: json,
-        mode: AudioProjectSaveMode.autosave,
-      );
-    }
-    if (!_usingCompatibilityAudio) {
-      await _refreshCompatibilityAudioStatus(project: json);
-    }
+    await _projectPersistence.saveProjectState(
+      projectDir: _projectDir,
+      projectState: json,
+      mode: AudioProjectSaveMode.autosave,
+    );
+    await _refreshCompatibilityAudioStatus(project: json);
     if (_isPlaying) {
       // _scheduleCloudAutoSync intentionally does not run while playing.
       // Retain the intent and schedule it when transport stops.
@@ -17545,12 +17857,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     } else if (!_cloudAutoSyncInFlight) {
       _scheduleCloudAutoSync(reason: 'autosave');
     }
-    if (!_usingCompatibilityAudio) {
-      _requestLocalVersionSnapshot(
-        reason: ProjectVersionReason.autosave,
-        minInterval: ProjectVersionStore.defaultPeriodicInterval,
-      );
-    }
+    _requestLocalVersionSnapshot(
+      reason: ProjectVersionReason.autosave,
+      minInterval: ProjectVersionStore.defaultPeriodicInterval,
+    );
     await _persistUndoHistory();
   }
 
@@ -19427,36 +19737,48 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
     try {
-      await _projectAutosaveCoordinator.flush();
-      if (!_usingCompatibilityAudio) {
-        await _promoteCompatibilityAudioIntoCurrentProject();
-        await _normalizeProjectAudioAssetsForCheckpoint();
+      if (_usingCompatibilityAudio) {
+        // Listen-only: the prepared projection on disk is the source of
+        // truth. Unsaved in-memory edits can only be kept by making a
+        // Frozen mix.
+        if (_listenOnlyInMemoryDirty) {
+          final forked = await _confirmFrozenMixCopyForEdits();
+          if (!forked || !mounted) return;
+        } else {
+          if (mounted && showSnackBar) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  L10n.translate(
+                    context,
+                    'Listen only. Make a Frozen mix to save changes.',
+                  ),
+                ),
+              ),
+            );
+          }
+          return;
+        }
       }
+      await _projectAutosaveCoordinator.flush();
+      await _promoteCompatibilityAudioIntoCurrentProject();
+      await _normalizeProjectAudioAssetsForCheckpoint();
       await _refreshAllPersistedEffectSnapshots();
       await _refreshHostedInstrumentStatesForPersistence();
       final json = await _buildProjectJsonSnapshot();
       _attachPersistedUndoHistoryToProjectJson(json);
-      if (_usingCompatibilityAudio) {
-        await ProjectCompatibilityService.writeCompatibleProjection(
-          projectDir: _projectDir,
-          project: json,
-        );
-      } else {
-        await _projectPersistence.saveProjectState(
-          projectDir: _projectDir,
-          projectState: json,
-          mode: AudioProjectSaveMode.checkpoint,
-        );
-      }
+      await _projectPersistence.saveProjectState(
+        projectDir: _projectDir,
+        projectState: json,
+        mode: AudioProjectSaveMode.checkpoint,
+      );
       _projectAutosaveCoordinator.clearDirty();
       await _uploadProjectTelemetrySnapshot(json);
       _requestCloudAutoSyncNow('save');
-      if (!_usingCompatibilityAudio) {
-        _requestLocalVersionSnapshot(
-          reason: ProjectVersionReason.manualSave,
-          minInterval: ProjectVersionStore.defaultSaveInterval,
-        );
-      }
+      _requestLocalVersionSnapshot(
+        reason: ProjectVersionReason.manualSave,
+        minInterval: ProjectVersionStore.defaultSaveInterval,
+      );
       await _persistUndoHistory();
 
       if (mounted && showSnackBar) {
@@ -19616,7 +19938,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_producerDataMode) {
       await _setProducerDataMode(false, closeReason: 'project_exit');
     }
-    if (_loadedOnce) {
+    if (_usingCompatibilityAudio) {
+      // Listen-only: nothing is written on the way out. Any in-memory edit
+      // that was not turned into a Frozen mix is discarded with the editor.
+      _listenOnlyInMemoryDirty = false;
+      _projectAutosaveCoordinator.clearDirty();
+    } else if (_loadedOnce) {
       await _saveProject(showSnackBar: false);
     } else {
       debugPrint(
@@ -48388,9 +48715,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         !(Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       return;
     }
-    if (enabled &&
-        Platform.isMacOS &&
-        !await _validateMacRecordingChannels()) {
+    if (enabled && Platform.isMacOS && !await _validateMacRecordingChannels()) {
       return;
     }
     if (enabled &&
@@ -70791,6 +71116,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+    if (_usingCompatibilityAudio) {
+      // Listen-only mix: the assistant may only change a Frozen mix copy.
+      // Ask first, exactly like a manual edit would. The fork keeps rows,
+      // clips and groups identical, so the prepared plan still applies.
+      final forked = await _confirmFrozenMixCopyForEdits();
+      if (!mounted) return;
+      if (!forked) {
+        _insertAiFailureSystemText(
+          L10n.translate(
+            context,
+            'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.',
+          ),
+        );
+        return;
+      }
+    }
     _setV3ExecutionInProgress(true);
     try {
       await _executePreparedAiV3Bundle(
@@ -92515,15 +92856,18 @@ class EditorUndoManager extends ChangeNotifier {
   final List<_EditorUndoStackEntry> _undo = [];
   final List<_EditorUndoStackEntry> _redo = [];
   final Object _captureZoneKey = Object();
+  final List<EditorUndoAction> _pendingGatedActions = [];
   List<EditorUndoAction>? _capturedActions;
   Object? _captureOwnerToken;
   EditorUndoAction? _lastAction;
+  bool Function(EditorUndoAction action)? mutationGate;
 
   EditorUndoManager({this.maxHistory = 5});
 
   bool get canUndo => _capturedActions == null && _undo.isNotEmpty;
   bool get canRedo => _capturedActions == null && _redo.isNotEmpty;
   bool get isCapturingActions => _capturedActions != null;
+  int get undoDepth => _undo.length;
   EditorUndoAction? get lastAction => _lastAction;
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
       List.unmodifiable(_snapshotRecords(_undo));
@@ -92550,6 +92894,7 @@ class EditorUndoManager extends ChangeNotifier {
 
   Future<void> execute(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!_allowMutation(action, queueIfBlocked: true)) return;
     await action.redo();
     if (!action.didChange) return;
     if (_capturedActions != null) {
@@ -92572,6 +92917,7 @@ class EditorUndoManager extends ChangeNotifier {
   // but you need to execute in sequence before you add, because they depend on each other
   Future<void> executeWithoutAdd(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!_allowMutation(action, queueIfBlocked: true)) return;
     await action.redo();
     if (action.didChange && _capturedActions != null) {
       _captureAction(action);
@@ -92581,6 +92927,7 @@ class EditorUndoManager extends ChangeNotifier {
   // same comment here as above
   Future<void> addWithoutExecute(EditorUndoAction action) async {
     _requireActiveCaptureOwner();
+    if (!_allowMutation(action, queueIfBlocked: false)) return;
     if (!action.didChange) return;
     if (_capturedActions != null) {
       _captureAction(action);
@@ -92595,6 +92942,25 @@ class EditorUndoManager extends ChangeNotifier {
     _redo.clear();
     _lastAction = action;
     notifyListeners();
+  }
+
+  List<EditorUndoAction> takePendingGatedActions() {
+    final pending = List<EditorUndoAction>.from(_pendingGatedActions);
+    _pendingGatedActions.clear();
+    return pending;
+  }
+
+  void dropPendingGatedActions() {
+    _pendingGatedActions.clear();
+  }
+
+  bool _allowMutation(EditorUndoAction action, {required bool queueIfBlocked}) {
+    final gate = mutationGate;
+    if (gate == null || gate(action)) return true;
+    if (queueIfBlocked && !_pendingGatedActions.contains(action)) {
+      _pendingGatedActions.add(action);
+    }
+    return false;
   }
 
   /// Runs existing editor behavior without creating a history entry. Every

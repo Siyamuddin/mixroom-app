@@ -246,3 +246,91 @@ Future<void> showAppUpgradeDialog({
     onUpgrade?.call();
   }
 }
+
+Future<bool> showAppConfirmDialog({
+  required BuildContext context,
+  required String title,
+  required String message,
+  String confirmLabel = 'Yes',
+  String cancelLabel = 'No',
+  IconData icon = Icons.graphic_eq_rounded,
+}) async {
+  if (!context.mounted) return false;
+  final action = await showDialog<bool>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.58),
+    builder: (dialogContext) {
+      return MixroomShellDialog(
+        maxWidth: 390,
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.14),
+                    ),
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 19),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    L10n.translate(context, title),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      height: 1.18,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              L10n.translate(context, message),
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                color: Colors.white.withValues(alpha: 0.82),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w500,
+                height: 1.36,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: MixroomShellDialogButton(
+                    label: L10n.translate(context, cancelLabel),
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: MixroomShellDialogButton(
+                    label: L10n.translate(context, confirmLabel),
+                    accent: true,
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+  return action == true;
+}

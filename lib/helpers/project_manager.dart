@@ -25,7 +25,10 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:archive/archive_io.dart';
 import 'package:mixroom/ffmpeg/ffmpeg.dart';
+import 'package:mixroom/helpers/audio_project_persistence.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
+import 'package:mixroom/helpers/project_undo_history_store.dart';
+import 'package:mixroom/models/models.dart';
 
 class ProjectMeta {
   final Directory dir;
@@ -40,6 +43,9 @@ class ProjectMeta {
   final DateTime createdAt;
   final DateTime lastOpenedAt;
   final String? bundledDemoAssetPath;
+  final String? familyId;
+  final String? mixKind;
+  final String? forkedFromProjectId;
 
   ProjectMeta({
     required this.dir,
@@ -54,6 +60,9 @@ class ProjectMeta {
     required this.createdAt,
     required this.lastOpenedAt,
     this.bundledDemoAssetPath,
+    this.familyId,
+    this.mixKind,
+    this.forkedFromProjectId,
   });
 }
 
@@ -80,6 +89,10 @@ ProjectCloudFreshness resolveProjectCloudFreshness({
       latestCloudRevision != null &&
       (project.cloudDocumentRevision == null ||
           latestCloudRevision != project.cloudDocumentRevision);
+  if (syncedFingerprint.isEmpty) {
+    if (cloudAhead) return ProjectCloudFreshness.cloudAhead;
+    return ProjectCloudFreshness.linkedUnknown;
+  }
   if (cloudAhead && hasLocalChanges) return ProjectCloudFreshness.diverged;
   if (cloudAhead) return ProjectCloudFreshness.cloudAhead;
   if (hasLocalChanges) return ProjectCloudFreshness.localChanges;
@@ -261,7 +274,12 @@ class ProjectManager {
             (json["cloudOrganizationId"] ?? json["cloud_organization_id"])
                 ?.toString()
                 .trim();
-        final cloudSourceFingerprint = (json['cloudSourceFingerprint'] ?? '')
+        final cloudChangeFingerprint = (json['cloudChangeFingerprint'] ?? '')
+            .toString()
+            .trim();
+        final familyId = (json['familyId'] ?? '').toString().trim();
+        final mixKind = (json['mixKind'] ?? '').toString().trim();
+        final forkedFromProjectId = (json['forkedFromProjectId'] ?? '')
             .toString()
             .trim();
         metas.add(
@@ -283,12 +301,11 @@ class ProjectManager {
                 : cloudOrganizationId,
             cloudDocumentRevision: (json["cloudDocumentRevision"] as num?)
                 ?.toInt(),
-            cloudSourceFingerprint: cloudSourceFingerprint.isEmpty
+            cloudSourceFingerprint: cloudChangeFingerprint.isEmpty
                 ? null
-                : cloudSourceFingerprint,
-            sourceFingerprint: ProjectCompatibilityService.sourceFingerprint(
-              json,
-            ),
+                : cloudChangeFingerprint,
+            sourceFingerprint:
+                ProjectCompatibilityService.cloudChangeFingerprint(json),
             createdAt: DateTime.fromMillisecondsSinceEpoch(
               (json["createdAt"] ?? 0) as int,
             ),
@@ -298,6 +315,11 @@ class ProjectManager {
             bundledDemoAssetPath: bundledDemoAssetPath?.isEmpty == true
                 ? null
                 : bundledDemoAssetPath,
+            familyId: familyId.isEmpty ? null : familyId,
+            mixKind: mixKind.isEmpty ? null : mixKind,
+            forkedFromProjectId: forkedFromProjectId.isEmpty
+                ? null
+                : forkedFromProjectId,
           ),
         );
       } catch (_) {}
@@ -434,9 +456,9 @@ class ProjectManager {
     final now = DateTime.now().millisecondsSinceEpoch;
     final duplicateJson = Map<String, dynamic>.from(sourceJson);
     stripCloudSyncMetadata(duplicateJson);
+    stripFamilyMetadata(duplicateJson);
     duplicateJson["name"] = p.basename(duplicateDir.path);
-    duplicateJson["projectId"] = _nextProjectId();
-    duplicateJson.remove("project_id");
+    assignFreshProjectId(duplicateJson);
     duplicateJson["createdAt"] = now;
     duplicateJson["lastOpenedAt"] = now;
     await writeProjectJson(duplicateDir, duplicateJson);
@@ -490,14 +512,19 @@ class ProjectManager {
     return (jsonDecode(await f.readAsString()) as Map<String, dynamic>);
   }
 
+  static String assignFreshProjectId(Map<String, dynamic> json) {
+    final next = _nextProjectId();
+    json['projectId'] = next;
+    json.remove('project_id');
+    return next;
+  }
+
   static String ensureProjectIdInJson(Map<String, dynamic> json) {
     final existing = (json['projectId'] ?? json['project_id'] ?? '')
         .toString()
         .trim();
     if (existing.isNotEmpty) return existing;
-    final next = _nextProjectId();
-    json['projectId'] = next;
-    return next;
+    return assignFreshProjectId(json);
   }
 
   static Map<int, int> persistedRowOrderIndexById(
@@ -587,9 +614,139 @@ class ProjectManager {
     json.remove('cloud_organization_id');
     json.remove('cloudDocumentRevision');
     json.remove('cloudSourceFingerprint');
+    json.remove('cloudChangeFingerprint');
     json.remove('cloud_document_revision');
     json.remove('cloudSyncedAt');
     json.remove('cloud_synced_at');
+  }
+
+  static const String mixKindOriginal = 'original';
+  static const String mixKindFrozen = 'frozen';
+
+  static void stripFamilyMetadata(Map<String, dynamic> json) {
+    json.remove('familyId');
+    json.remove('mixKind');
+    json.remove('forkedFromProjectId');
+  }
+
+  static const String frozenMixSuffix = 'Frozen mix';
+
+  /// Default name for the [index]-th Frozen mix of [originalName].
+  ///
+  /// The first one is `Song Frozen mix`; later ones are `Song Frozen mix 2`,
+  /// `Song Frozen mix 3`, and so on, like Finder's "copy 2".
+  static String frozenMixDisplayName(String originalName, {int index = 1}) {
+    final trimmed = originalName.trim();
+    final base = trimmed.isEmpty
+        ? frozenMixSuffix
+        : trimmed.toLowerCase().endsWith(frozenMixSuffix.toLowerCase())
+        ? trimmed
+        : '$trimmed $frozenMixSuffix';
+    return index <= 1 ? base : '$base $index';
+  }
+
+  /// Returns the number of a Frozen mix that still follows the default name
+  /// for [originalName], or null when the user gave it a custom name.
+  ///
+  /// `Song Frozen mix` returns 1, `Song Frozen mix 3` returns 3.
+  static int? frozenMixIndexFromName({
+    required String originalName,
+    required String frozenName,
+  }) {
+    final base = frozenMixDisplayName(originalName).toLowerCase();
+    final candidate = frozenName.trim().toLowerCase();
+    if (candidate == base) return 1;
+    if (!candidate.startsWith('$base ')) return null;
+    final index = int.tryParse(candidate.substring(base.length + 1));
+    if (index == null || index < 2) return null;
+    return index;
+  }
+
+  /// Smallest number not used by the Frozen mixes already in the family, so
+  /// deleting "Frozen mix 2" and making another one gives "2" back.
+  ///
+  /// [allProjectNames] are the names of every local project. A number whose
+  /// default name is already taken by any of them is skipped too, so the copy
+  /// never collides with an unrelated project (or with an Original that
+  /// itself ends in "Frozen mix") and falls back to a "#1" folder name.
+  static int nextFrozenMixIndex({
+    required String originalName,
+    required Iterable<String> existingFrozenNames,
+    required Iterable<String> allProjectNames,
+  }) {
+    final used = <int>{};
+    for (final name in existingFrozenNames) {
+      final index = frozenMixIndexFromName(
+        originalName: originalName,
+        frozenName: name,
+      );
+      if (index != null) used.add(index);
+    }
+    final takenNames = <String>{
+      for (final name in allProjectNames) name.trim().toLowerCase(),
+    };
+    var next = 1;
+    while (used.contains(next) ||
+        takenNames.contains(
+          frozenMixDisplayName(originalName, index: next).toLowerCase(),
+        )) {
+      next++;
+    }
+    return next;
+  }
+
+  /// Short label for a Frozen mix row: `Frozen mix` or `Frozen mix N`.
+  /// Works from the project name alone so a renamed copy that still ends in
+  /// "Frozen mix 3" keeps its number.
+  static String frozenMixLabel(String frozenName) {
+    final match = RegExp(
+      r'frozen mix(?:\s+(\d+))?\s*$',
+      caseSensitive: false,
+    ).firstMatch(frozenName.trim());
+    final number = match?.group(1);
+    if (number == null || number == '1') return frozenMixSuffix;
+    return '$frozenMixSuffix $number';
+  }
+
+  static void applyFrozenMixFamily({
+    required Map<String, dynamic> originalJson,
+    required Map<String, dynamic> forkJson,
+  }) {
+    final originalProjectId = ensureProjectIdInJson(originalJson);
+    originalJson['familyId'] = originalProjectId;
+    if ((originalJson['mixKind'] ?? '').toString().trim().isEmpty) {
+      originalJson['mixKind'] = mixKindOriginal;
+    }
+    forkJson['familyId'] = originalProjectId;
+    forkJson['mixKind'] = mixKindFrozen;
+    forkJson['forkedFromProjectId'] = originalProjectId;
+  }
+
+  /// Points every local Frozen mix of [oldFamilyId] at [newProjectId].
+  ///
+  /// Used when the Original gets a fresh id (Keep both) so the copies made on
+  /// this device stay grouped with the local Original instead of the fresh
+  /// Cloud download. Returns how many Frozen mixes were rewritten.
+  static Future<int> relinkFrozenMixFamily({
+    required String oldFamilyId,
+    required String newProjectId,
+    required Iterable<ProjectMeta> projects,
+  }) async {
+    final from = oldFamilyId.trim();
+    final to = newProjectId.trim();
+    if (from.isEmpty || to.isEmpty || from == to) return 0;
+    var relinked = 0;
+    for (final meta in projects) {
+      if ((meta.familyId ?? '').trim() != from) continue;
+      if ((meta.mixKind ?? '').trim() != mixKindFrozen) continue;
+      final json = await readProjectJson(meta.dir);
+      json['familyId'] = to;
+      json['mixKind'] = mixKindFrozen;
+      json['forkedFromProjectId'] = to;
+      await writeProjectJson(meta.dir, json);
+      relinked++;
+    }
+    return relinked;
   }
 
   static Directory audioDir(Directory dir) => _audioDir(dir);
@@ -1037,7 +1194,28 @@ class ProjectBundle {
     // FLAC is lossless. This preserves audio quality; it just compresses storage.
     // You can add -ar 48000 if you WANT to standardize, but it’s not required.
     final cmd = '-y -i "$inPath" -c:a flac "$outPath"';
-    await FFmpegKit.execute(cmd);
+    await _runFfmpegOrThrow(command: cmd, outputPath: outPath);
+  }
+
+  static Future<void> _runFfmpegOrThrow({
+    required String command,
+    required String outputPath,
+  }) async {
+    final session = await FFmpegKit.execute(command);
+    final code = await session.getReturnCode();
+    final output = File(outputPath);
+    // A header-only file is still a valid conversion of a silent or empty
+    // clip, so only a failed return code, a missing file, or zero bytes count
+    // as a failure here.
+    if (!ReturnCode.isSuccess(code) ||
+        !output.existsSync() ||
+        output.lengthSync() == 0) {
+      throw ProcessException(
+        'ffmpeg',
+        <String>[],
+        'Failed to convert audio for the project bundle.',
+      );
+    }
   }
 
   static String _sanitizeFileName(String s) {
@@ -1077,6 +1255,11 @@ class ProjectBundleImport {
     'meta.json',
   };
 
+  static const String incomingUpdateDirectoryName = '.incoming_update';
+  static const String outgoingUpdateSuffix = '.outgoing_update';
+  static const String incomingProjectJsonName = 'project.json.incoming';
+  static const String _stagedAudioReadyDirectoryName = '_audio_ready';
+
   static Future<Directory> importMixroomBundle({
     required File bundleFile,
     required ImportAudioStrategy audioStrategy,
@@ -1096,35 +1279,11 @@ class ProjectBundleImport {
     var importCompleted = false;
 
     try {
-      final archive = _decodeValidatedArchive(bundleFile);
-      for (final item in archive) {
-        final outPath = _resolveExtractPath(unpackDir, item.name);
-        if (item.isDirectory) {
-          await Directory(outPath).create(recursive: true);
-          continue;
-        }
-
-        final outFile = File(outPath);
-        await outFile.parent.create(recursive: true);
-        final output = OutputFileStream(outFile.path);
-        try {
-          item.writeContent(output);
-        } finally {
-          await output.close();
-          item.clear();
-        }
-      }
-
-      final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
-      if (!incomingJsonFile.existsSync()) {
-        throw Exception("Bundle missing project.json");
-      }
-
-      final decoded = jsonDecode(incomingJsonFile.readAsStringSync());
-      if (decoded is! Map) {
-        throw Exception("Bundle project.json is invalid");
-      }
-      final jsonMap = Map<String, dynamic>.from(decoded);
+      await _extractValidatedArchive(
+        bundleFile: bundleFile,
+        unpackDir: unpackDir,
+      );
+      final jsonMap = await _readIncomingProjectJson(unpackDir);
       final incomingName = (jsonMap["name"] as String?) ?? "Imported Project";
 
       destProjectDir = await ProjectManager.createNewProjectDir(
@@ -1136,65 +1295,22 @@ class ProjectBundleImport {
       jsonMap["lastOpenedAt"] = DateTime.now().millisecondsSinceEpoch;
       ProjectManager.stripCloudSyncMetadata(jsonMap);
 
-      final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
-      final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
-      await dstAudioDir.create(recursive: true);
-      final fileNameRemap = <String, String>{};
-
-      if (await srcAudioDir.exists()) {
-        final files = srcAudioDir
-            .listSync(followLinks: false)
-            .whereType<File>();
-        for (final f in files) {
-          final ext = p.extension(f.path).toLowerCase();
-          final base = p.basenameWithoutExtension(f.path);
-
-          if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
-              ext == ".flac") {
-            final outName = "$base.wav";
-            final outWav = File(p.join(dstAudioDir.path, outName));
-            final cmd =
-                '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
-            await FFmpegKit.execute(cmd);
-            fileNameRemap[p.basename(f.path)] = outName;
-          } else {
-            final outName = p.basename(f.path);
-            await f.copy(p.join(dstAudioDir.path, outName));
-            fileNameRemap[p.basename(f.path)] = outName;
-          }
-        }
-      }
-
-      final tracks = (jsonMap["tracks"] as List?) ?? const [];
-      for (final t in tracks) {
-        final track = (t as Map).cast<String, dynamic>();
-        final original = track["fileName"] as String?;
-        if (original == null) continue;
-        final remapped = fileNameRemap[original];
-        if (remapped != null) {
-          track["fileName"] = remapped;
-        }
-      }
+      await _materializeImportedAudio(
+        unpackDir: unpackDir,
+        destProjectDir: destProjectDir,
+        jsonMap: jsonMap,
+        audioStrategy: audioStrategy,
+      );
 
       await File(
         p.join(destProjectDir.path, "project.json"),
       ).writeAsString(jsonEncode(jsonMap));
 
-      final sourceCompatibilityDir = Directory(
-        p.join(unpackDir.path, ProjectCompatibilityService.directoryName),
+      await _copyIncomingCompatibilityIfPresent(
+        unpackDir: unpackDir,
+        destProjectDir: destProjectDir,
+        sourceProject: jsonMap,
       );
-      if (await sourceCompatibilityDir.exists()) {
-        final destinationCompatibilityDir =
-            ProjectCompatibilityService.directoryFor(destProjectDir);
-        await ProjectBundle._copyDirectory(
-          sourceCompatibilityDir,
-          destinationCompatibilityDir,
-        );
-        await ProjectCompatibilityService.rebaseForImportedProject(
-          projectDir: destProjectDir,
-          sourceProject: jsonMap,
-        );
-      }
 
       importCompleted = true;
       return destProjectDir;
@@ -1208,6 +1324,415 @@ class ProjectBundleImport {
         } catch (_) {}
       }
     }
+  }
+
+  static Future<void> updateProjectFromMixroomBundle({
+    required Directory projectDir,
+    required File bundleFile,
+    required ImportAudioStrategy audioStrategy,
+  }) async {
+    if (!bundleFile.existsSync()) throw Exception("Bundle file missing");
+    if (!await projectDir.exists()) {
+      throw Exception("Project folder missing");
+    }
+    final existingJsonFile = File(p.join(projectDir.path, "project.json"));
+    if (!await existingJsonFile.exists()) {
+      throw Exception("project.json missing in ${projectDir.path}");
+    }
+
+    await recoverInterruptedUpdate(projectDir);
+
+    final localJson = await ProjectManager.readProjectJson(projectDir);
+    final liveAudioDir = ProjectManager.audioDir(projectDir);
+    final liveCompatibilityDir = ProjectCompatibilityService.directoryFor(
+      projectDir,
+    );
+    final stagingDir = Directory(
+      p.join(projectDir.path, incomingUpdateDirectoryName),
+    );
+    await stagingDir.create(recursive: true);
+    final incomingJsonFile = File(
+      p.join(projectDir.path, incomingProjectJsonName),
+    );
+
+    // Commit point: renaming project.json.incoming over project.json. Until
+    // then every step can be undone from the *.outgoing_update folders; after
+    // it the new project is the truth and only cleanup remains.
+    var committed = false;
+    try {
+      await _extractValidatedArchive(
+        bundleFile: bundleFile,
+        unpackDir: stagingDir,
+      );
+      final jsonMap = await _readIncomingProjectJson(stagingDir);
+
+      final stagedReadyRoot = Directory(
+        p.join(stagingDir.path, _stagedAudioReadyDirectoryName),
+      );
+      final shippedFileNames = await _materializeImportedAudio(
+        unpackDir: stagingDir,
+        destProjectDir: stagedReadyRoot,
+        jsonMap: jsonMap,
+        audioStrategy: audioStrategy,
+      );
+      final stagedAudioDir = Directory(p.join(stagedReadyRoot.path, 'audio'));
+      await _verifyImportedTrackFiles(
+        audioDir: stagedAudioDir,
+        jsonMap: jsonMap,
+        shippedFileNames: shippedFileNames,
+      );
+
+      final localProjectId = (localJson['projectId'] ?? localJson['project_id'])
+          ?.toString()
+          .trim();
+      if (localProjectId != null && localProjectId.isNotEmpty) {
+        jsonMap['projectId'] = localProjectId;
+        jsonMap.remove('project_id');
+      } else {
+        ProjectManager.ensureProjectIdInJson(jsonMap);
+      }
+      jsonMap['name'] = p.basename(projectDir.path);
+      if (localJson.containsKey('createdAt')) {
+        jsonMap['createdAt'] = localJson['createdAt'];
+      }
+      jsonMap['lastOpenedAt'] = DateTime.now().millisecondsSinceEpoch;
+      // Frozen mixes never sync, so the family link between this project and
+      // a Frozen mix made on this device only exists here. Keep it, otherwise
+      // the Cloud copy would split the pair back into two unrelated projects.
+      _preserveLocalFamilyMetadata(localJson: localJson, incoming: jsonMap);
+      ProjectManager.stripCloudSyncMetadata(jsonMap);
+
+      await incomingJsonFile.writeAsString(jsonEncode(jsonMap), flush: true);
+
+      await _swapDirectory(incoming: stagedAudioDir, dest: liveAudioDir);
+      await _swapDirectory(
+        incoming: Directory(
+          p.join(stagingDir.path, ProjectCompatibilityService.directoryName),
+        ),
+        dest: liveCompatibilityDir,
+      );
+
+      await _renameOver(incomingJsonFile, existingJsonFile);
+      committed = true;
+
+      // The update is committed. Undo history and recovery snapshots still
+      // describe the old project, so an undo or a recovery prompt could put
+      // it back over the new one. Only clear them after the commit so a
+      // failed update leaves them intact.
+      await _clearStaleEditorStateAfterUpdate(projectDir);
+
+      // Past the commit the project is already the new one, so a problem
+      // here must not be reported as a failed update. A stale manifest only
+      // makes the compatibility copy look unprepared until the next Prepare.
+      try {
+        if (await liveCompatibilityDir.exists()) {
+          await ProjectCompatibilityService.rebaseForImportedProject(
+            projectDir: projectDir,
+            sourceProject: jsonMap,
+          );
+        }
+      } catch (error) {
+        debugPrint('Compatibility rebase after cloud update failed: $error');
+      }
+    } catch (error) {
+      if (!committed) {
+        await _restoreOutgoingDirectory(liveCompatibilityDir);
+        await _restoreOutgoingDirectory(liveAudioDir);
+        try {
+          if (await incomingJsonFile.exists()) {
+            await incomingJsonFile.delete();
+          }
+        } catch (_) {}
+      }
+      rethrow;
+    } finally {
+      await _deleteOutgoingDirectory(liveAudioDir);
+      await _deleteOutgoingDirectory(liveCompatibilityDir);
+      try {
+        if (await stagingDir.exists()) {
+          await stagingDir.delete(recursive: true);
+        }
+      } catch (_) {}
+    }
+  }
+
+  static Future<void> _renameOver(File source, File target) async {
+    try {
+      await source.rename(target.path);
+    } on FileSystemException {
+      if (await target.exists()) {
+        await target.delete();
+      }
+      await source.rename(target.path);
+    }
+  }
+
+  static Future<void> _extractValidatedArchive({
+    required File bundleFile,
+    required Directory unpackDir,
+  }) async {
+    final archive = _decodeValidatedArchive(bundleFile);
+    for (final item in archive) {
+      final outPath = _resolveExtractPath(unpackDir, item.name);
+      if (item.isDirectory) {
+        await Directory(outPath).create(recursive: true);
+        continue;
+      }
+
+      final outFile = File(outPath);
+      await outFile.parent.create(recursive: true);
+      final output = OutputFileStream(outFile.path);
+      try {
+        item.writeContent(output);
+      } finally {
+        await output.close();
+        item.clear();
+      }
+    }
+  }
+
+  static void _preserveLocalFamilyMetadata({
+    required Map<String, dynamic> localJson,
+    required Map<String, dynamic> incoming,
+  }) {
+    final localFamilyId = (localJson['familyId'] ?? '').toString().trim();
+    if (localFamilyId.isEmpty) return;
+    incoming['familyId'] = localFamilyId;
+    final localMixKind = (localJson['mixKind'] ?? '').toString().trim();
+    if (localMixKind.isNotEmpty) {
+      incoming['mixKind'] = localMixKind;
+    } else {
+      incoming.remove('mixKind');
+    }
+    final localForkedFrom = (localJson['forkedFromProjectId'] ?? '')
+        .toString()
+        .trim();
+    if (localForkedFrom.isNotEmpty) {
+      incoming['forkedFromProjectId'] = localForkedFrom;
+    } else {
+      incoming.remove('forkedFromProjectId');
+    }
+  }
+
+  static Future<Map<String, dynamic>> _readIncomingProjectJson(
+    Directory unpackDir,
+  ) async {
+    final incomingJsonFile = File(p.join(unpackDir.path, "project.json"));
+    if (!incomingJsonFile.existsSync()) {
+      throw Exception("Bundle missing project.json");
+    }
+    final decoded = jsonDecode(incomingJsonFile.readAsStringSync());
+    if (decoded is! Map) {
+      throw Exception("Bundle project.json is invalid");
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  /// Copies or converts the bundle's audio files into [destProjectDir] and
+  /// returns the file names that now exist there.
+  static Future<Set<String>> _materializeImportedAudio({
+    required Directory unpackDir,
+    required Directory destProjectDir,
+    required Map<String, dynamic> jsonMap,
+    required ImportAudioStrategy audioStrategy,
+  }) async {
+    final srcAudioDir = Directory(p.join(unpackDir.path, "audio"));
+    final dstAudioDir = Directory(p.join(destProjectDir.path, "audio"));
+    await dstAudioDir.create(recursive: true);
+    final fileNameRemap = <String, String>{};
+
+    if (await srcAudioDir.exists()) {
+      final files = srcAudioDir.listSync(followLinks: false).whereType<File>();
+      for (final f in files) {
+        final ext = p.extension(f.path).toLowerCase();
+        final base = p.basenameWithoutExtension(f.path);
+
+        if (audioStrategy == ImportAudioStrategy.convertFlacToWav48k &&
+            ext == ".flac") {
+          final outName = "$base.wav";
+          final outWav = File(p.join(dstAudioDir.path, outName));
+          final cmd =
+              '-y -i "${f.path}" -c:a pcm_s16le -ar 48000 "${outWav.path}"';
+          await ProjectBundle._runFfmpegOrThrow(
+            command: cmd,
+            outputPath: outWav.path,
+          );
+          fileNameRemap[p.basename(f.path)] = outName;
+        } else {
+          final outName = p.basename(f.path);
+          await f.copy(p.join(dstAudioDir.path, outName));
+          fileNameRemap[p.basename(f.path)] = outName;
+        }
+      }
+    }
+
+    final shipped = fileNameRemap.values.toSet();
+    if (fileNameRemap.isEmpty) return shipped;
+    final tracks = (jsonMap["tracks"] as List?) ?? const [];
+    for (final t in tracks) {
+      final track = (t as Map).cast<String, dynamic>();
+      final original = track["fileName"] as String?;
+      if (original == null) continue;
+      final remapped = fileNameRemap[original];
+      if (remapped != null) {
+        track["fileName"] = remapped;
+      }
+    }
+    return shipped;
+  }
+
+  /// Confirms every audio clip the bundle shipped landed in [audioDir].
+  ///
+  /// MIDI clips are skipped: their `fileName` is a placeholder for a render
+  /// that is produced on demand and never travels inside the bundle. Files
+  /// the bundle never contained are skipped too, so a clip that was already
+  /// missing on the source device keeps importing the same way it always has.
+  static Future<void> _verifyImportedTrackFiles({
+    required Directory audioDir,
+    required Map<String, dynamic> jsonMap,
+    required Set<String> shippedFileNames,
+  }) async {
+    final tracks = (jsonMap['tracks'] as List?) ?? const [];
+    for (final t in tracks) {
+      if (t is! Map) continue;
+      if (ClipKindWire.fromWire(t['clipType']?.toString()) == ClipKind.midi) {
+        continue;
+      }
+      final fileName = (t['fileName'] ?? '').toString().trim();
+      if (fileName.isEmpty) continue;
+      if (!shippedFileNames.contains(p.basename(fileName))) continue;
+      final file = File(p.join(audioDir.path, p.basename(fileName)));
+      if (!await file.exists() || file.lengthSync() <= 0) {
+        throw Exception('Bundle audio is missing $fileName');
+      }
+    }
+  }
+
+  static Future<void> _clearStaleEditorStateAfterUpdate(
+    Directory projectDir,
+  ) async {
+    for (final dir in <Directory>[
+      ProjectUndoHistoryStore.directoryFor(projectDir),
+      JsonAudioProjectPersistence.recoveryDirectoryFor(projectDir),
+    ]) {
+      try {
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      } catch (error) {
+        debugPrint('Could not clear ${p.basename(dir.path)}: $error');
+      }
+    }
+  }
+
+  /// Repairs a project folder after a Cloud update was interrupted (crash,
+  /// kill, power loss). Safe to call on a healthy folder: it does nothing.
+  ///
+  /// - `project.json.incoming` still present -> the update never committed:
+  ///   put every `*.outgoing_update` folder back and drop the incoming file.
+  /// - no incoming file -> the update committed (or never started): drop any
+  ///   leftover `*.outgoing_update` folders.
+  /// - incoming present but `project.json` missing -> the commit rename was
+  ///   cut in half; the folders are already the new ones, so finish it.
+  static Future<void> recoverInterruptedUpdate(Directory projectDir) async {
+    if (!await projectDir.exists()) return;
+    final stagingDir = Directory(
+      p.join(projectDir.path, incomingUpdateDirectoryName),
+    );
+    try {
+      if (await stagingDir.exists()) {
+        await stagingDir.delete(recursive: true);
+      }
+    } catch (_) {}
+
+    final liveDirs = <Directory>[
+      ProjectManager.audioDir(projectDir),
+      ProjectCompatibilityService.directoryFor(projectDir),
+    ];
+    final incomingJsonFile = File(
+      p.join(projectDir.path, incomingProjectJsonName),
+    );
+    final projectJsonFile = File(p.join(projectDir.path, 'project.json'));
+
+    if (await incomingJsonFile.exists()) {
+      if (await projectJsonFile.exists()) {
+        for (final dir in liveDirs) {
+          await _restoreOutgoingDirectory(dir);
+        }
+        await incomingJsonFile.delete();
+      } else {
+        await incomingJsonFile.rename(projectJsonFile.path);
+      }
+    }
+    for (final dir in liveDirs) {
+      await _deleteOutgoingDirectory(dir);
+    }
+  }
+
+  static Future<void> _swapDirectory({
+    required Directory incoming,
+    required Directory dest,
+  }) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (await outgoing.exists()) {
+      await outgoing.delete(recursive: true);
+    }
+
+    if (!await incoming.exists()) {
+      if (await dest.exists()) {
+        await dest.rename(outgoing.path);
+      }
+      return;
+    }
+
+    if (await dest.exists()) {
+      await dest.rename(outgoing.path);
+    }
+    try {
+      await incoming.rename(dest.path);
+    } catch (_) {
+      if (await outgoing.exists() && !await dest.exists()) {
+        await outgoing.rename(dest.path);
+      }
+      rethrow;
+    }
+  }
+
+  static Future<void> _restoreOutgoingDirectory(Directory dest) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (!await outgoing.exists()) return;
+    if (await dest.exists()) {
+      await dest.delete(recursive: true);
+    }
+    await outgoing.rename(dest.path);
+  }
+
+  static Future<void> _deleteOutgoingDirectory(Directory dest) async {
+    final outgoing = Directory('${dest.path}$outgoingUpdateSuffix');
+    if (await outgoing.exists()) {
+      await outgoing.delete(recursive: true);
+    }
+  }
+
+  static Future<void> _copyIncomingCompatibilityIfPresent({
+    required Directory unpackDir,
+    required Directory destProjectDir,
+    required Map<String, dynamic> sourceProject,
+  }) async {
+    final sourceCompatibilityDir = Directory(
+      p.join(unpackDir.path, ProjectCompatibilityService.directoryName),
+    );
+    if (!await sourceCompatibilityDir.exists()) return;
+    final destinationCompatibilityDir =
+        ProjectCompatibilityService.directoryFor(destProjectDir);
+    await ProjectBundle._copyDirectory(
+      sourceCompatibilityDir,
+      destinationCompatibilityDir,
+    );
+    await ProjectCompatibilityService.rebaseForImportedProject(
+      projectDir: destProjectDir,
+      sourceProject: sourceProject,
+    );
   }
 
   static Archive _decodeValidatedArchive(File bundleFile) {

@@ -8,6 +8,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
+import 'package:mixroom/helpers/cloud_open_resolver.dart';
 import 'package:mixroom/helpers/cloud_project_service.dart';
 import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/export_save_dialog.dart';
@@ -19,6 +20,7 @@ import 'package:mixroom/models/entitlement_models.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:mixroom/helpers/app_popup.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
+import 'package:mixroom/helpers/project_family.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_version_store.dart';
 import 'package:mixroom/helpers/subscription_limits.dart';
@@ -75,6 +77,10 @@ enum _ProjectSortMode { recent, alphabetical }
 
 enum _ProjectLibraryTab { yourProjects, cloudProjects, demoProjects }
 
+enum _LocalCloudConflictChoice { keepDevice, takeCloud, keepBoth }
+
+enum _FamilyDeleteScope { mix, song }
+
 class _LocalCloudStatusPresentation {
   const _LocalCloudStatusPresentation({
     required this.label,
@@ -90,22 +96,22 @@ class _LocalCloudStatusPresentation {
 }
 
 class _ProjectListEntry {
-  const _ProjectListEntry.project(this.project)
+  _ProjectListEntry.family(this.family)
     : bundledDemo = null,
       cloudProject = null,
       isBundledDemo = false;
 
   const _ProjectListEntry.bundledDemo(this.bundledDemo)
-    : project = null,
+    : family = null,
       cloudProject = null,
       isBundledDemo = true;
 
   const _ProjectListEntry.cloud(this.cloudProject)
-    : project = null,
+    : family = null,
       bundledDemo = null,
       isBundledDemo = false;
 
-  final ProjectMeta? project;
+  final ProjectFamilyGroup? family;
   final BundledDemoProjectAsset? bundledDemo;
   final CloudProjectAccessItem? cloudProject;
   final bool isBundledDemo;
@@ -153,6 +159,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   static const Key _deleteDialogKey = ValueKey('projects_delete_dialog');
   static const Key _deleteCancelKey = ValueKey('projects_delete_cancel');
   static const Key _deleteConfirmKey = ValueKey('projects_delete_confirm');
+  static const Key _deleteThisMixKey = ValueKey('projects_delete_this_mix');
+  static const Key _deleteWholeSongKey = ValueKey('projects_delete_whole_song');
   static List<ProjectMeta>? _cachedProjects;
   static List<BundledDemoProjectAsset>? _cachedBundledDemoProjects;
   List<ProjectMeta> _projects = [];
@@ -188,6 +196,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   _ProjectLibraryTab _libraryTab = _ProjectLibraryTab.yourProjects;
   final Set<String> _selectedProjectPaths = <String>{};
   final Set<String> _selectedBundledDemoAssetPaths = <String>{};
+  final Set<String> _expandedFamilyIds = <String>{};
   final Set<String> _cloudProjectsInFlight = <String>{};
   final ProjectVersionStore _projectVersionStore = const ProjectVersionStore();
   bool _selectionModePinned = false;
@@ -568,8 +577,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (local == null) continue;
       final currentCloudProjectId = (local.cloudProjectId ?? '').trim();
       if (currentCloudProjectId == cloud.projectId &&
-          local.cloudDocumentRevision == cloud.documentRevision &&
-          (local.cloudSourceFingerprint ?? '').trim().isNotEmpty) {
+          local.cloudDocumentRevision == cloud.documentRevision) {
         continue;
       }
       try {
@@ -584,11 +592,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             ? rawJsonCloudRevision.toInt()
             : int.tryParse((rawJsonCloudRevision ?? '').toString().trim());
         if (jsonCloudProjectId == cloud.projectId &&
-            jsonCloudRevision == cloud.documentRevision &&
-            (json['cloudSourceFingerprint'] ?? '')
-                .toString()
-                .trim()
-                .isNotEmpty) {
+            jsonCloudRevision == cloud.documentRevision) {
           continue;
         }
         // A cloud-list refresh only discovers that a newer revision exists.
@@ -605,8 +609,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         json['cloudSyncedAt'] = (cloud.updatedAt ?? DateTime.now())
             .toUtc()
             .toIso8601String();
-        json['cloudSourceFingerprint'] =
-            ProjectCompatibilityService.sourceFingerprint(json);
         await ProjectManager.writeProjectJson(local.dir, json);
       } catch (error) {
         debugPrint('Failed to persist local cloud project link: $error');
@@ -617,8 +619,51 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   Future<void> _openProject(
     Directory dir, {
     AudioEditorInitialAction? initialAction,
+    bool checkCloud = true,
   }) async {
-    // 1. Show loading spinner immediately
+    // A Cloud update that was cut off (crash, kill) leaves repair markers in
+    // the folder. Fix them before the editor reads anything.
+    try {
+      await ProjectBundleImport.recoverInterruptedUpdate(dir);
+    } catch (error) {
+      debugPrint('Interrupted update recovery failed: $error');
+    }
+    if (!checkCloud || initialAction != null) {
+      await _pushEditor(dir, initialAction: initialAction);
+      return;
+    }
+
+    final meta = _projectMetaForDirectory(dir);
+    final linkedCloudProjectId = (meta?.cloudProjectId ?? '').trim();
+    var signedIn = false;
+    try {
+      signedIn = context.read<AuthService>().isSignedIn;
+    } catch (_) {}
+
+    if (meta == null ||
+        linkedCloudProjectId.isEmpty ||
+        !_cloudProjectsFeatureEnabled ||
+        !signedIn) {
+      await _pushEditor(dir);
+      return;
+    }
+
+    await _openLinkedLocalProject(meta);
+  }
+
+  ProjectMeta? _projectMetaForDirectory(Directory dir) {
+    final path = p.normalize(dir.path);
+    for (final project in _projects) {
+      if (p.normalize(project.dir.path) == path) return project;
+    }
+    return null;
+  }
+
+  Future<void> _pushEditor(
+    Directory dir, {
+    AudioEditorInitialAction? initialAction,
+    bool includeCloud = false,
+  }) async {
     showLoadingDialog(
       context,
       message: L10n.translate(
@@ -627,12 +672,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       ),
     );
 
-    // 2. Let UI render the dialog
     // TODO: also an arbitrary delay to hide the blocking UI lag involved in opening the project
     await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
-    // 3. Push editor
     await Navigator.push(
       context,
       _NoSwipeMaterialPageRoute(
@@ -646,13 +689,277 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
     if (!mounted) return;
 
-    // 4. Close spinner (safe even if already closed)
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
 
-    // 5. Refresh project list
+    await _refresh(includeCloud: includeCloud);
+  }
+
+  Future<void> _openLinkedLocalProject(ProjectMeta meta) async {
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Checking for updates…'),
+    );
+    CloudProjectAccessItem? cloud;
+    try {
+      final auth = context.read<AuthService>();
+      final snapshot = await _cloudProjectService
+          .listProjects(auth: auth)
+          .timeout(kCloudOpenCheckTimeout);
+      if (!mounted) return;
+      setState(() {
+        _cloudProjects = snapshot.cloudProjects;
+        _cloudStorage = snapshot.storage;
+        _cloudError = null;
+      });
+      cloud = _cloudProjectForLocal(meta);
+    } catch (error) {
+      debugPrint('Cloud update check failed: $error');
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          "Couldn't check for cloud updates. Opened the copy on this device.",
+        ),
+        tone: AppPopupTone.warning,
+      );
+      if (!isNetworkUnavailableError(error)) {
+        debugPrint('Cloud update check failed with non-network error: $error');
+      }
+      await _pushEditor(meta.dir);
+      return;
+    }
+    if (mounted && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    if (!mounted) return;
+    await _applyLocalOpenAction(meta: meta, cloud: cloud);
+  }
+
+  Future<void> _applyLocalOpenAction({
+    required ProjectMeta meta,
+    required CloudProjectAccessItem? cloud,
+  }) async {
+    switch (resolveLocalOpenAction(project: meta, cloud: cloud)) {
+      case LocalOpenAction.openLocal:
+        await _pushEditor(meta.dir);
+      case LocalOpenAction.updateInPlace:
+        await _updateLocalProjectFromCloud(local: meta, cloud: cloud!);
+      case LocalOpenAction.askUser:
+        final choice = await _showLocalCloudConflictDialog();
+        if (!mounted) return;
+        switch (choice) {
+          case _LocalCloudConflictChoice.keepDevice:
+            await _pushEditor(meta.dir);
+          case _LocalCloudConflictChoice.takeCloud:
+            await _updateLocalProjectFromCloud(local: meta, cloud: cloud!);
+          case _LocalCloudConflictChoice.keepBoth:
+            await _keepBothLocalAndCloud(local: meta, cloud: cloud!);
+          case null:
+            return;
+        }
+    }
+  }
+
+  Future<void> _updateLocalProjectFromCloud({
+    required ProjectMeta local,
+    required CloudProjectAccessItem cloud,
+  }) async {
+    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Downloading update…'),
+    );
+    try {
+      await _projectVersionStore.maybeCreateSnapshot(
+        projectDir: local.dir,
+        reason: ProjectVersionReason.cloudUpdate,
+        minInterval: Duration.zero,
+      );
+      if (!mounted) return;
+      final auth = context.read<AuthService>();
+      final downloaded = await _cloudProjectService.downloadBundle(
+        auth: auth,
+        project: cloud,
+      );
+      await ProjectBundleImport.updateProjectFromMixroomBundle(
+        projectDir: local.dir,
+        bundleFile: downloaded.file,
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+      await _writeCloudLinkMetadata(
+        projectDir: local.dir,
+        cloud: downloaded.project,
+      );
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await _pushEditor(local.dir, includeCloud: true);
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud download failed. Your project was left unchanged')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
+      } else {
+        _cloudProjectsInFlight.remove(cloud.projectId);
+      }
+    }
+  }
+
+  Future<void> _writeCloudLinkMetadata({
+    required Directory projectDir,
+    required CloudProjectAccessItem cloud,
+  }) async {
+    final json = await ProjectManager.readProjectJson(projectDir);
+    json['cloudProjectId'] = cloud.projectId;
+    if (cloud.workspaceId.trim().isNotEmpty) {
+      json['cloudWorkspaceId'] = cloud.workspaceId.trim();
+    } else {
+      json.remove('cloudWorkspaceId');
+    }
+    if (cloud.organizationId.trim().isNotEmpty) {
+      json['cloudOrganizationId'] = cloud.organizationId.trim();
+    } else {
+      json.remove('cloudOrganizationId');
+    }
+    json['cloudDocumentRevision'] = cloud.documentRevision;
+    json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+    json['cloudChangeFingerprint'] =
+        ProjectCompatibilityService.cloudChangeFingerprint(json);
+    json.remove('cloudSourceFingerprint');
+    await ProjectManager.writeProjectJson(projectDir, json);
+    await ProjectCompatibilityService.rebaseForImportedProject(
+      projectDir: projectDir,
+      sourceProject: json,
+    );
+  }
+
+  Future<void> _keepBothLocalAndCloud({
+    required ProjectMeta local,
+    required CloudProjectAccessItem cloud,
+  }) async {
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
+    if (!mounted) return;
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+    final suffix = L10n.translate(context, ' (this device)');
+    final renamedDir = await ProjectManager.renameProject(
+      local.dir,
+      '${local.name}$suffix',
+    );
+    final json = await ProjectManager.readProjectJson(renamedDir);
+    ProjectManager.stripCloudSyncMetadata(json);
+    final oldFamilyId = (json['familyId'] ?? '').toString().trim();
+    final newProjectId = ProjectManager.assignFreshProjectId(json);
+    if (oldFamilyId.isEmpty || projectIsFrozenMix(local)) {
+      ProjectManager.stripFamilyMetadata(json);
+    } else {
+      // The local Original keeps its Frozen mixes: move the family onto the
+      // fresh id so the copies do not attach to the Cloud download instead.
+      json['familyId'] = newProjectId;
+      json['mixKind'] = ProjectManager.mixKindOriginal;
+      json.remove('forkedFromProjectId');
+    }
+    await ProjectManager.writeProjectJson(renamedDir, json);
+    if (oldFamilyId.isNotEmpty && !projectIsFrozenMix(local)) {
+      await ProjectManager.relinkFrozenMixFamily(
+        oldFamilyId: oldFamilyId,
+        newProjectId: newProjectId,
+        projects: await ProjectManager.listProjects(),
+      );
+    }
     await _refresh();
+    if (!mounted) return;
+    await _downloadAndOpenNewCloudCopy(cloud);
+  }
+
+  Future<void> _downloadAndOpenNewCloudCopy(
+    CloudProjectAccessItem cloud,
+  ) async {
+    final canCreate = await ProjectManager.canCreateNew(
+      maxProjects: _localProjectLimit(),
+    );
+    if (!mounted) return;
+    if (!canCreate) {
+      _showProjectLimitDialog();
+      return;
+    }
+    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
+    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Downloading from cloud…'),
+    );
+    try {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
+      final auth = context.read<AuthService>();
+      final downloaded = await _cloudProjectService.downloadBundle(
+        auth: auth,
+        project: cloud,
+      );
+      final newDir = await ProjectBundleImport.importMixroomBundle(
+        bundleFile: downloaded.file,
+        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
+      );
+      final json = await ProjectManager.readProjectJson(newDir);
+      json['name'] = _downloadedCloudProjectDisplayName(
+        cloud: cloud,
+        resolvedName: (json['name'] ?? cloud.name).toString(),
+      );
+      await ProjectManager.writeProjectJson(newDir, json);
+      await _writeCloudLinkMetadata(
+        projectDir: newDir,
+        cloud: downloaded.project,
+      );
+      if (!mounted) return;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      await Navigator.push(
+        context,
+        _NoSwipeMaterialPageRoute(
+          builder: (_) => AudioEditorScreen(
+            mode: 'Pro',
+            projectDir: newDir,
+            onUpgradeRequested: widget.onUpgradeRequested,
+          ),
+        ),
+      );
+      if (!mounted) return;
+      await _refresh(includeCloud: true);
+    } catch (e) {
+      if (mounted && Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
+        tone: AppPopupTone.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
+      } else {
+        _cloudProjectsInFlight.remove(cloud.projectId);
+      }
+    }
   }
 
   Future<FilePickerResult?> _pickFilesSafely({
@@ -913,6 +1220,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           meta.dir,
           newName,
         );
+        if (!projectIsFrozenMix(meta)) {
+          await _renameLinkedFrozenMixIfFollowing(
+            original: meta,
+            oldName: meta.name,
+            newName: newName,
+          );
+        }
         await _restoreCloudScopedDisplayNameIfAllowed(
           original: meta,
           renamedDir: renamedDir,
@@ -955,23 +1269,69 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   bool get _selectionMode => _selectionModePinned || _selectedEntryCount > 0;
 
-  List<ProjectMeta> _visibleProjects() {
-    final query = _searchController.text.trim().toLowerCase();
-    final filtered = _projects.where((project) {
-      if (query.isEmpty) return true;
-      return project.name.toLowerCase().contains(query);
-    }).toList();
+  List<ProjectFamilyGroup> _visibleProjectGroups() {
+    final query = _searchController.text.trim();
+    final filtered = groupProjectsByFamily(
+      _projects,
+    ).where((group) => group.matchesQuery(query)).toList();
     switch (_sortMode) {
       case _ProjectSortMode.alphabetical:
         filtered.sort(
-          (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          (a, b) => a.displayProject.name.toLowerCase().compareTo(
+            b.displayProject.name.toLowerCase(),
+          ),
         );
         break;
       case _ProjectSortMode.recent:
-        filtered.sort((a, b) => b.lastOpenedAt.compareTo(a.lastOpenedAt));
+        filtered.sort((a, b) => b.sortOpenedAt.compareTo(a.sortOpenedAt));
         break;
     }
     return filtered;
+  }
+
+  ProjectFamilyGroup _familyGroupContaining(ProjectMeta meta) {
+    for (final group in groupProjectsByFamily(_projects)) {
+      if (group.members.any((member) => member.dir.path == meta.dir.path)) {
+        return group;
+      }
+    }
+    return ProjectFamilyGroup(members: <ProjectMeta>[meta]);
+  }
+
+  void _toggleFamilyExpansion(ProjectFamilyGroup group) {
+    final familyId = group.familyId;
+    if (familyId == null || !group.canExpand) return;
+    setState(() {
+      if (_expandedFamilyIds.contains(familyId)) {
+        _expandedFamilyIds.remove(familyId);
+      } else {
+        _expandedFamilyIds.add(familyId);
+      }
+    });
+  }
+
+  bool _isFamilyExpanded(ProjectFamilyGroup group) {
+    final familyId = group.familyId;
+    if (familyId == null) return false;
+    return _expandedFamilyIds.contains(familyId);
+  }
+
+  bool _isFamilySelected(ProjectFamilyGroup group) {
+    return group.members.every(_isSelected);
+  }
+
+  void _toggleFamilySelection(ProjectFamilyGroup group) {
+    setState(() {
+      final selected = _isFamilySelected(group);
+      for (final member in group.members) {
+        final key = _projectSelectionKey(member);
+        if (selected) {
+          _selectedProjectPaths.remove(key);
+        } else {
+          _selectedProjectPaths.add(key);
+        }
+      }
+    });
   }
 
   List<BundledDemoProjectAsset> _visibleBundledDemoProjects() {
@@ -991,6 +1351,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if ((project.cloudProjectId ?? '').trim() == cloud.projectId) {
         return project;
       }
+    }
+    for (final project in _projects) {
       if (project.projectId.trim().isNotEmpty &&
           project.projectId == cloud.localProjectId) {
         return project;
@@ -1005,11 +1367,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   CloudProjectAccessItem? _cloudProjectForLocal(ProjectMeta meta) {
     final cloudProjectId = (meta.cloudProjectId ?? '').trim();
+    if (cloudProjectId.isNotEmpty) {
+      for (final project in _cloudProjects) {
+        if (!project.isBundleStorage) continue;
+        if (project.projectId == cloudProjectId) {
+          return project;
+        }
+      }
+    }
     for (final project in _cloudProjects) {
       if (!project.isBundleStorage) continue;
-      if (cloudProjectId.isNotEmpty && project.projectId == cloudProjectId) {
-        return project;
-      }
       if (meta.projectId.trim().isNotEmpty &&
           project.localProjectId == meta.projectId) {
         return project;
@@ -1494,7 +1861,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         icon = Icons.cloud_outlined;
         color = const Color(0xFFC7B8FF);
       case ProjectCloudFreshness.linkedUnknown:
-        baseLabel = L10n.translate(context, 'Not synced');
+        baseLabel = L10n.translate(context, 'Sync status unknown');
         icon = Icons.cloud_outlined;
         color = const Color(0xFFC7B8FF);
       case ProjectCloudFreshness.synced:
@@ -1661,7 +2028,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         return false;
       }
       if (query.isEmpty) return true;
-      return project.name.toLowerCase().contains(query);
+      if (project.name.toLowerCase().contains(query)) return true;
+      final frozen = localFrozenMixSibling(
+        projects: _projects,
+        localProject: _localProjectForCloud(project),
+      );
+      return frozen != null && frozen.name.toLowerCase().contains(query);
     }).toList();
     int compareLocation(CloudProjectAccessItem a, CloudProjectAccessItem b) {
       final aLabel = _destinationForCloudProject(a, entitlement).label;
@@ -1697,7 +2069,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   List<_ProjectListEntry> _visibleEntriesForTab(_ProjectLibraryTab tab) {
     switch (tab) {
       case _ProjectLibraryTab.yourProjects:
-        return _visibleProjects().map(_ProjectListEntry.project).toList();
+        return _visibleProjectGroups().map(_ProjectListEntry.family).toList();
       case _ProjectLibraryTab.cloudProjects:
         if (!_cloudProjectsFeatureEnabled) return const <_ProjectListEntry>[];
         return _visibleCloudProjects().map(_ProjectListEntry.cloud).toList();
@@ -1801,8 +2173,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         } else if (entry.isCloudProject) {
           continue;
         } else {
-          final project = entry.project!;
-          _selectedProjectPaths.add(_projectSelectionKey(project));
+          for (final project
+              in entry.family?.members ?? const <ProjectMeta>[]) {
+            _selectedProjectPaths.add(_projectSelectionKey(project));
+          }
         }
       }
     });
@@ -2051,6 +2425,194 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return result == true;
   }
 
+  Future<_FamilyDeleteScope?> _showDeleteMixOrSongDialog({
+    required String songName,
+    required int frozenMixCount,
+  }) async {
+    final several = frozenMixCount > 1;
+    final question = several
+        ? L10n.translate(
+            context,
+            'Delete only this mix, or the original and {count} Frozen mixes?',
+          ).replaceAll('{count}', '$frozenMixCount')
+        : L10n.translate(
+            context,
+            'Delete only this mix, or the original and Frozen mix?',
+          );
+    final wholeSongLabel = several
+        ? L10n.translate(
+            context,
+            'Whole song ({count} projects)',
+          ).replaceAll('{count}', '${frozenMixCount + 1}')
+        : L10n.translate(context, 'Whole song');
+    return showDialog<_FamilyDeleteScope>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        return Dialog(
+          key: _deleteDialogKey,
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(255, 119, 119, 0.16),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Color(0xFFFF8D8D),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              L10n.translate(dialogContext, 'Delete song?'),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              L10n.translate(
+                                dialogContext,
+                                'This action cannot be undone.',
+                              ),
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.68),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '“$songName”. $question',
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.84),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      key: _deleteCancelKey,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFF4F4F4),
+                        backgroundColor: const Color.fromRGBO(
+                          244,
+                          244,
+                          244,
+                          0.08,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.10),
+                          ),
+                        ),
+                      ),
+                      child: Text(L10n.translate(dialogContext, 'Cancel')),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      key: _deleteThisMixKey,
+                      onPressed: () => Navigator.of(
+                        dialogContext,
+                      ).pop(_FamilyDeleteScope.mix),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color.fromRGBO(
+                          244,
+                          244,
+                          244,
+                          0.18,
+                        ),
+                        foregroundColor: const Color(0xFFF4F4F4),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(L10n.translate(dialogContext, 'This mix')),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      key: _deleteWholeSongKey,
+                      onPressed: () => Navigator.of(
+                        dialogContext,
+                      ).pop(_FamilyDeleteScope.song),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color.fromRGBO(
+                          196,
+                          74,
+                          74,
+                          0.92,
+                        ),
+                        foregroundColor: const Color(0xFFFDF4F4),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(wholeSongLabel),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<bool> _showReplaceCloudVersionDialog() async {
     final result = await showDialog<bool>(
       context: context,
@@ -2176,6 +2738,167 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       },
     );
     return result == true;
+  }
+
+  Future<_LocalCloudConflictChoice?> _showLocalCloudConflictDialog() {
+    return showDialog<_LocalCloudConflictChoice>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) {
+        Widget option({
+          required _LocalCloudConflictChoice choice,
+          required IconData icon,
+          required String title,
+          required String subtitle,
+        }) {
+          return Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => Navigator.of(dialogContext).pop(choice),
+              borderRadius: BorderRadius.circular(18),
+              splashColor: Colors.white.withValues(alpha: 0.12),
+              highlightColor: Colors.white.withValues(alpha: 0.08),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 13,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color.fromRGBO(244, 244, 244, 0.08),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.10),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: const Color.fromRGBO(112, 139, 166, 0.28),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Icon(
+                        icon,
+                        color: const Color(0xFFF4F4F4),
+                        size: 19,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            L10n.translate(dialogContext, title),
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            L10n.translate(dialogContext, subtitle),
+                            style: TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Colors.white.withValues(alpha: 0.66),
+                              fontSize: 12,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 430),
+            child: MixroomShellSurface(
+              radius: 30,
+              strong: true,
+              color: const Color.fromRGBO(244, 244, 244, 0.14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    L10n.translate(dialogContext, 'Project versions differ'),
+                    style: const TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Color(0xFFF4F4F4),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    L10n.translate(
+                      dialogContext,
+                      'This project changed on this device and in the cloud.',
+                    ),
+                    style: TextStyle(
+                      fontFamily: 'Pretendard',
+                      color: Colors.white.withValues(alpha: 0.70),
+                      fontSize: 13,
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  option(
+                    choice: _LocalCloudConflictChoice.keepDevice,
+                    icon: Icons.phone_iphone_rounded,
+                    title: 'Keep this device',
+                    subtitle: 'Open the copy on this device.',
+                  ),
+                  const SizedBox(height: 10),
+                  option(
+                    choice: _LocalCloudConflictChoice.takeCloud,
+                    icon: Icons.cloud_download_rounded,
+                    title: 'Take the cloud version',
+                    subtitle: 'Replace this copy with the cloud version.',
+                  ),
+                  const SizedBox(height: 10),
+                  option(
+                    choice: _LocalCloudConflictChoice.keepBoth,
+                    icon: Icons.copy_all_rounded,
+                    title: 'Keep both',
+                    subtitle:
+                        'Save this copy as a second project, then open the cloud version.',
+                  ),
+                  const SizedBox(height: 14),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: Text(L10n.translate(dialogContext, 'Cancel')),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   bool _isCloudRevisionConflict(Object error) {
@@ -2381,7 +3104,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
             );
           }
           if (entry.isCloudProject) return true;
-          return _selectedProjectPaths.contains(entry.project!.dir.path);
+          final members = entry.family?.members ?? const <ProjectMeta>[];
+          if (members.isEmpty) return true;
+          return members.every(
+            (project) => _selectedProjectPaths.contains(project.dir.path),
+          );
         });
     final selected = await _showAnchoredShellMenu<String>(
       anchorKey: _projectToolsButtonKey,
@@ -2499,7 +3226,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 label: L10n.translate(context, 'Version History'),
                 onTap: () => Navigator.of(context).pop('version_history'),
               ),
-              if (_cloudProjectsFeatureEnabled) ...[
+              if (_cloudProjectsFeatureEnabled &&
+                  !projectIsFrozenMix(project)) ...[
                 const SizedBox(height: 4),
                 _ProjectToolAction(
                   icon: Icons.cloud_upload_rounded,
@@ -2746,18 +3474,60 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
-  Future<void> _deleteProject(ProjectMeta meta) async {
-    final cloudBacked = _hasCloudReference(meta);
-    final ok = await _showDeleteProjectsDialog(
-      message: cloudBacked
-          ? '“${meta.name}” ${L10n.translate(context, 'will be deleted from this device. The cloud copy will remain available.')}'
-          : '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
-      dialogKey: _deleteDialogKey,
-      cancelKey: _deleteCancelKey,
-      confirmKey: _deleteConfirmKey,
+  Future<void> _renameLinkedFrozenMixIfFollowing({
+    required ProjectMeta original,
+    required String oldName,
+    required String newName,
+  }) async {
+    // Every Frozen mix that still uses its default name follows the original.
+    // Each keeps its own number so "Song Frozen mix 3" becomes
+    // "New name Frozen mix 3". Custom-named copies are left alone.
+    final frozenMixes = localFrozenMixesOf(
+      projects: _projects,
+      original: original,
     );
+    for (final frozen in frozenMixes) {
+      final index = ProjectManager.frozenMixIndexFromName(
+        originalName: oldName,
+        frozenName: frozen.name,
+      );
+      if (index == null) continue;
+      await ProjectManager.renameProject(
+        frozen.dir,
+        ProjectManager.frozenMixDisplayName(newName, index: index),
+      );
+    }
+  }
 
-    if (!ok) return;
+  Future<void> _deleteProject(ProjectMeta meta) async {
+    final group = _familyGroupContaining(meta);
+    // Any member of a song group (the Original or one of its Frozen mixes)
+    // gets the same choice: just this mix, or the whole song.
+    if (group.canExpand) {
+      final scope = await _showDeleteMixOrSongDialog(
+        songName: meta.name,
+        frozenMixCount: group.members.where(projectIsFrozenMix).length,
+      );
+      if (scope == null) return;
+      if (scope == _FamilyDeleteScope.song) {
+        for (final member in group.members) {
+          await ProjectManager.deleteProject(member.dir);
+        }
+        await _refresh();
+        return;
+      }
+    } else {
+      final cloudBacked = _hasCloudReference(meta);
+      final ok = await _showDeleteProjectsDialog(
+        message: cloudBacked
+            ? '“${meta.name}” ${L10n.translate(context, 'will be deleted from this device. The cloud copy will remain available.')}'
+            : '“${meta.name}” ${L10n.translate(context, 'will be permanently deleted.')}',
+        dialogKey: _deleteDialogKey,
+        cancelKey: _deleteCancelKey,
+        confirmKey: _deleteConfirmKey,
+      );
+      if (!ok) return;
+    }
     await ProjectManager.deleteProject(meta.dir);
     await _refresh();
   }
@@ -2863,6 +3633,17 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   Future<void> _syncProjectToCloud(ProjectMeta meta) async {
+    if (projectIsFrozenMix(meta)) {
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          'Frozen mixes stay on this device. Sync the original project instead.',
+        ),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
     final auth = context.read<AuthService>();
     final entitlement = context.read<EntitlementService>();
     if (!entitlement.areCloudProjectsEnabled) {
@@ -3074,8 +3855,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       }
       json['cloudDocumentRevision'] = result.project.documentRevision;
       json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
-      json['cloudSourceFingerprint'] =
-          ProjectCompatibilityService.sourceFingerprint(json);
+      json['cloudChangeFingerprint'] =
+          ProjectCompatibilityService.cloudChangeFingerprint(json);
+      json.remove('cloudSourceFingerprint');
       await ProjectManager.writeProjectJson(meta.dir, json);
       await entitlement.refreshAccountSurface(force: true);
       await _refresh(includeCloud: true);
@@ -3114,121 +3896,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       return;
     }
     final local = _localProjectForCloud(cloud);
-    if (local != null &&
-        local.cloudDocumentRevision == cloud.documentRevision) {
-      await _openProject(local.dir);
-      return;
-    }
-    final canCreate = await ProjectManager.canCreateNew(
-      maxProjects: _localProjectLimit(),
-    );
-    if (!mounted) return;
-    if (!canCreate) {
-      _showProjectLimitDialog();
-      return;
-    }
-
-    // Preserve an out-of-date local copy as an unlinked local project rather
-    // than silently overwriting user work. The freshly downloaded revision
-    // becomes the cloud-linked copy opened below.
     if (local != null) {
-      try {
-        final staleJson = await ProjectManager.readProjectJson(local.dir);
-        staleJson.remove('cloudProjectId');
-        staleJson.remove('cloud_project_id');
-        staleJson.remove('cloudWorkspaceId');
-        staleJson.remove('cloudOrganizationId');
-        staleJson.remove('cloudDocumentRevision');
-        staleJson.remove('cloud_document_revision');
-        staleJson.remove('cloudSyncedAt');
-        await ProjectManager.writeProjectJson(local.dir, staleJson);
-      } catch (error) {
-        debugPrint('Failed to detach stale local cloud project: $error');
-      }
+      await _applyLocalOpenAction(meta: local, cloud: cloud);
+      return;
     }
-    final auth = context.read<AuthService>();
-    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
-    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
-    showLoadingDialog(
-      context,
-      message: L10n.translate(context, 'Downloading from cloud…'),
-    );
-    try {
-      await Future.delayed(const Duration(milliseconds: 200));
-      final downloaded = await _cloudProjectService.downloadBundle(
-        auth: auth,
-        project: cloud,
-      );
-      final newDir = await ProjectBundleImport.importMixroomBundle(
-        bundleFile: downloaded.file,
-        audioStrategy: ImportAudioStrategy.convertFlacToWav48k,
-      );
-      final json = await ProjectManager.readProjectJson(newDir);
-      json['name'] = _downloadedCloudProjectDisplayName(
-        cloud: cloud,
-        resolvedName: (json['name'] ?? cloud.name).toString(),
-      );
-      json['cloudProjectId'] = cloud.projectId;
-      if (cloud.workspaceId.trim().isNotEmpty) {
-        json['cloudWorkspaceId'] = cloud.workspaceId.trim();
-      } else {
-        json.remove('cloudWorkspaceId');
-      }
-      if (cloud.organizationId.trim().isNotEmpty) {
-        json['cloudOrganizationId'] = cloud.organizationId.trim();
-      } else {
-        json.remove('cloudOrganizationId');
-      }
-      json['cloudDocumentRevision'] = cloud.documentRevision;
-      json['cloudSyncedAt'] = DateTime.now().toUtc().toIso8601String();
-      json['cloudSourceFingerprint'] =
-          ProjectCompatibilityService.sourceFingerprint(json);
-      await ProjectManager.writeProjectJson(newDir, json);
-      // The cloud library assigns a local display name after bundle import.
-      // Keep the copied compatibility manifest and projection anchored to the
-      // final canonical project JSON before the editor chooses its variant.
-      await ProjectCompatibilityService.rebaseForImportedProject(
-        projectDir: newDir,
-        sourceProject: json,
-      );
-      if (!mounted) return;
-      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-      await Navigator.push(
-        context,
-        _NoSwipeMaterialPageRoute(
-          builder: (_) => AudioEditorScreen(
-            mode: 'Pro',
-            projectDir: newDir,
-            onUpgradeRequested: widget.onUpgradeRequested,
-          ),
-        ),
-      );
-      if (!mounted) return;
-      await _refresh(includeCloud: true);
-    } catch (e) {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-      if (!mounted) return;
-      showAppSnackBar(
-        context,
-        '${L10n.translate(context, 'Cloud download failed')}: ${_cleanCloudError(e)}',
-        tone: AppPopupTone.error,
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
-      } else {
-        _cloudProjectsInFlight.remove(cloud.projectId);
-      }
-    }
+    await _downloadAndOpenNewCloudCopy(cloud);
   }
 
   Future<void> _startProjectExport(
     ProjectMeta meta,
     AudioEditorInitialAction action,
   ) async {
-    await _openProject(meta.dir, initialAction: action);
+    await _openProject(meta.dir, initialAction: action, checkCloud: false);
   }
 
   Future<void> _importProjectFromIncomingFile(File bundleFile) async {
@@ -3717,6 +4396,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       ProjectVersionReason.autosave => 'Autosave',
       ProjectVersionReason.manualSave => 'Manual save',
       ProjectVersionReason.background => 'Background save',
+      ProjectVersionReason.cloudUpdate => 'Cloud update',
     });
   }
 
@@ -3920,6 +4600,343 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  Color? _projectTileOverlayColor(Set<WidgetState> states) {
+    if (states.contains(WidgetState.pressed)) {
+      return Colors.white.withValues(alpha: 0.14);
+    }
+    if (states.contains(WidgetState.hovered)) {
+      return Colors.white.withValues(alpha: 0.08);
+    }
+    if (states.contains(WidgetState.focused)) {
+      return Colors.white.withValues(alpha: 0.10);
+    }
+    return Colors.transparent;
+  }
+
+  String _familyMemberLabel(ProjectMeta member) {
+    if (projectIsFrozenMix(member)) {
+      final label = ProjectManager.frozenMixLabel(member.name);
+      final translated = L10n.translate(context, 'Frozen mix');
+      // Keep the number when the copy is "Frozen mix 2", "Frozen mix 3", ...
+      return label.replaceFirst(ProjectManager.frozenMixSuffix, translated);
+    }
+    return L10n.translate(context, 'Original');
+  }
+
+  Widget _buildOnDeviceFamilyTile({
+    required ProjectFamilyGroup group,
+    required bool compact,
+  }) {
+    final project = group.displayProject;
+    final expandable = group.canExpand;
+    final expanded = expandable && _isFamilyExpanded(group);
+    final selected = _isFamilySelected(group);
+    final cloud = _cloudProjectForLocal(project);
+    final cloudLinked =
+        cloud != null || (project.cloudProjectId ?? '').trim().isNotEmpty;
+    final cloudInFlight = _localCloudSyncInFlight(project, cloud);
+    final cloudStatus = cloudLinked
+        ? _localCloudStatus(project, cloud, syncInProgress: cloudInFlight)
+        : null;
+    final localSubtitle = expandable
+        ? L10n.translate(context, 'Original · Frozen mix')
+        : '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
+    final openedSubtitle =
+        '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(group.sortOpenedAt)}';
+    final keyToken = _projectActionKeyToken(
+      '${project.name}_${project.projectId}',
+    );
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final expandDuration = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 200);
+
+    void handleTileTap() {
+      if (_selectionMode) {
+        _toggleFamilySelection(group);
+        return;
+      }
+      if (expandable) {
+        _toggleFamilyExpansion(group);
+        return;
+      }
+      _openProject(project.dir);
+    }
+
+    return Semantics(
+      button: true,
+      enabled: true,
+      label:
+          'Open project ${project.name}, $localSubtitle${cloudLinked ? ', ${cloudStatus!.label}' : ''}',
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(24),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onLongPress: () => _toggleFamilySelection(group),
+            onTap: handleTileTap,
+            splashFactory: InkRipple.splashFactory,
+            splashColor: Colors.white.withValues(alpha: 0.12),
+            highlightColor: Colors.white.withValues(alpha: 0.04),
+            overlayColor: WidgetStateProperty.resolveWith<Color?>(
+              _projectTileOverlayColor,
+            ),
+            child: MixroomShellSurface(
+              padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
+              color: selected
+                  ? const Color.fromRGBO(193, 221, 249, 0.34)
+                  : const Color.fromRGBO(244, 244, 244, 0.30),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    project.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontFamily: 'Pretendard',
+                                      color: Color(0xFFF4F4F4),
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w600,
+                                      height: 22 / 15,
+                                    ),
+                                  ),
+                                ),
+                                if (cloudLinked) ...[
+                                  const SizedBox(width: 8),
+                                  _buildLocalCloudStatusIcon(cloudStatus!),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              height: 1,
+                              color: Colors.white.withValues(alpha: 0.22),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              localSubtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.80),
+                                fontSize: 12,
+                                height: 22 / 12,
+                              ),
+                            ),
+                            if (expandable) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                openedSubtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11,
+                                  height: 17 / 11,
+                                ),
+                              ),
+                            ],
+                            if (cloudLinked) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                cloudStatus!.label,
+                                softWrap: true,
+                                style: TextStyle(
+                                  fontFamily: 'Pretendard',
+                                  color: Colors.white.withValues(alpha: 0.62),
+                                  fontSize: 11,
+                                  height: 17 / 11,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_selectionMode)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: selected
+                              ? SvgPicture.asset(
+                                  kMixroomShellCheckboxCheckedAsset,
+                                  width: 22,
+                                  height: 22,
+                                )
+                              : Container(
+                                  width: 22,
+                                  height: 22,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                        )
+                      else if (cloudInFlight)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 10),
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      else
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (expandable)
+                              MixroomShellRoundButton(
+                                size: 40,
+                                iconExtent: 18,
+                                icon: AnimatedRotation(
+                                  turns: expanded ? 0.5 : 0,
+                                  duration: expandDuration,
+                                  child: const Icon(
+                                    Icons.expand_more_rounded,
+                                    color: Colors.white,
+                                    size: 22,
+                                  ),
+                                ),
+                                onTap: () => _toggleFamilyExpansion(group),
+                              ),
+                            if (!expanded) ...[
+                              if (expandable) const SizedBox(width: 6),
+                              _buildProjectTrailingActions(
+                                context: context,
+                                project: project,
+                                keyToken: keyToken,
+                                compact: compact,
+                              ),
+                            ],
+                          ],
+                        ),
+                    ],
+                  ),
+                  AnimatedSize(
+                    duration: expandDuration,
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: expanded
+                        ? Column(
+                            children: [
+                              for (final member in group.members)
+                                _buildFamilyMemberRow(
+                                  member: member,
+                                  compact: compact,
+                                ),
+                            ],
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFamilyMemberRow({
+    required ProjectMeta member,
+    required bool compact,
+  }) {
+    // A Frozen mix is a snapshot, so the time it was made tells copies apart.
+    // The original keeps showing when it was last opened.
+    final subtitle = projectIsFrozenMix(member)
+        ? '${L10n.translate(context, 'Created')} : ${_formatLastOpened(member.createdAt)}'
+        : '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(member.lastOpenedAt)}';
+    final keyToken = _projectActionKeyToken(
+      '${member.name}_${member.projectId}_member',
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            if (_selectionMode) {
+              _toggleSelection(member);
+              return;
+            }
+            _openProject(member.dir);
+          },
+          splashFactory: InkRipple.splashFactory,
+          splashColor: Colors.white.withValues(alpha: 0.12),
+          highlightColor: Colors.white.withValues(alpha: 0.04),
+          overlayColor: WidgetStateProperty.resolveWith<Color?>(
+            _projectTileOverlayColor,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 0, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _familyMemberLabel(member),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 20 / 14,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Colors.white.withValues(alpha: 0.62),
+                          fontSize: 11,
+                          height: 17 / 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (!_selectionMode)
+                  _buildProjectTrailingActions(
+                    context: context,
+                    project: member,
+                    keyToken: keyToken,
+                    compact: compact,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildProjectTrailingActions({
     required BuildContext context,
     required ProjectMeta project,
@@ -3981,11 +4998,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   int _localProjectLimit() {
     final entitlementService = context.read<EntitlementService>();
-    if (!entitlementService.isEnforcementEnabled) {
-      return SubscriptionLimits.paidLocalProjects;
-    }
-    return SubscriptionLimits.localProjectLimitFor(
-      entitlementService.entitlement,
+    return SubscriptionLimits.localProjectLimitForService(
+      isEnforcementEnabled: entitlementService.isEnforcementEnabled,
+      entitlement: entitlementService.entitlement,
     );
   }
 
@@ -4898,6 +5913,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final local = _localProjectForCloud(
                                             cloud,
                                           );
+                                          final frozenMix =
+                                              localFrozenMixSibling(
+                                                projects: _projects,
+                                                localProject: local,
+                                              );
                                           final inFlight = local == null
                                               ? _cloudProjectsInFlight.contains(
                                                       cloud.projectId,
@@ -5142,6 +6162,73 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                                           11,
                                                                     ),
                                                                   ),
+                                                                  if (frozenMix !=
+                                                                      null) ...[
+                                                                    const SizedBox(
+                                                                      height: 8,
+                                                                    ),
+                                                                    Material(
+                                                                      color: Colors
+                                                                          .transparent,
+                                                                      borderRadius:
+                                                                          BorderRadius.circular(
+                                                                            14,
+                                                                          ),
+                                                                      clipBehavior:
+                                                                          Clip.antiAlias,
+                                                                      child: InkWell(
+                                                                        onTap: () => _openProject(
+                                                                          frozenMix
+                                                                              .dir,
+                                                                        ),
+                                                                        splashFactory:
+                                                                            InkRipple.splashFactory,
+                                                                        splashColor: Colors
+                                                                            .white
+                                                                            .withValues(
+                                                                              alpha: 0.12,
+                                                                            ),
+                                                                        child: Padding(
+                                                                          padding: const EdgeInsets.symmetric(
+                                                                            vertical:
+                                                                                6,
+                                                                          ),
+                                                                          child: Row(
+                                                                            children: [
+                                                                              Expanded(
+                                                                                child: Text(
+                                                                                  L10n.translate(
+                                                                                    context,
+                                                                                    'Frozen mix',
+                                                                                  ),
+                                                                                  maxLines: 1,
+                                                                                  overflow: TextOverflow.ellipsis,
+                                                                                  style: TextStyle(
+                                                                                    fontFamily: 'Pretendard',
+                                                                                    color: Colors.white.withValues(
+                                                                                      alpha: 0.86,
+                                                                                    ),
+                                                                                    fontSize: 12,
+                                                                                    fontWeight: FontWeight.w600,
+                                                                                    height:
+                                                                                        18 /
+                                                                                        12,
+                                                                                  ),
+                                                                                ),
+                                                                              ),
+                                                                              Icon(
+                                                                                Icons.chevron_right_rounded,
+                                                                                size: 18,
+                                                                                color: Colors.white.withValues(
+                                                                                  alpha: 0.64,
+                                                                                ),
+                                                                              ),
+                                                                            ],
+                                                                          ),
+                                                                        ),
+                                                                      ),
+                                                                    ),
+                                                                  ],
                                                                 ],
                                                               ),
                                                             ],
@@ -5195,279 +6282,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           );
                                         }
 
-                                        final project = entry.project!;
-                                        final cloud = _cloudProjectForLocal(
-                                          project,
-                                        );
-                                        final cloudLinked =
-                                            cloud != null ||
-                                            (project.cloudProjectId ?? '')
-                                                .trim()
-                                                .isNotEmpty;
-                                        final cloudInFlight =
-                                            _localCloudSyncInFlight(
-                                              project,
-                                              cloud,
-                                            );
-                                        final cloudStatus = cloudLinked
-                                            ? _localCloudStatus(
-                                                project,
-                                                cloud,
-                                                syncInProgress: cloudInFlight,
-                                              )
-                                            : null;
-                                        final localSubtitle =
-                                            '${L10n.translate(context, 'Last opened')} : ${_formatLastOpened(project.lastOpenedAt)}';
-                                        final keyToken = _projectActionKeyToken(
-                                          project.name,
-                                        );
-                                        final selected = _isSelected(project);
-                                        return Semantics(
-                                          button: true,
-                                          enabled: true,
-                                          label:
-                                              'Open project ${project.name}, $localSubtitle${cloudLinked ? ', ${cloudStatus!.label}' : ''}',
-                                          child: ExcludeSemantics(
-                                            child: Material(
-                                              color: Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(24),
-                                              clipBehavior: Clip.antiAlias,
-                                              child: InkWell(
-                                                onLongPress: () =>
-                                                    _toggleSelection(project),
-                                                onTap: () {
-                                                  if (_selectionMode) {
-                                                    _toggleSelection(project);
-                                                    return;
-                                                  }
-                                                  _openProject(project.dir);
-                                                },
-                                                splashFactory:
-                                                    InkRipple.splashFactory,
-                                                splashColor: Colors.white
-                                                    .withValues(alpha: 0.12),
-                                                highlightColor: Colors.white
-                                                    .withValues(alpha: 0.04),
-                                                overlayColor:
-                                                    WidgetStateProperty.resolveWith<
-                                                      Color?
-                                                    >((states) {
-                                                      if (states.contains(
-                                                        WidgetState.pressed,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                              alpha: 0.14,
-                                                            );
-                                                      }
-                                                      if (states.contains(
-                                                        WidgetState.hovered,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                              alpha: 0.08,
-                                                            );
-                                                      }
-                                                      if (states.contains(
-                                                        WidgetState.focused,
-                                                      )) {
-                                                        return Colors.white
-                                                            .withValues(
-                                                              alpha: 0.10,
-                                                            );
-                                                      }
-                                                      return Colors.transparent;
-                                                    }),
-                                                child: MixroomShellSurface(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                        18,
-                                                        16,
-                                                        12,
-                                                        16,
-                                                      ),
-                                                  color: selected
-                                                      ? const Color.fromRGBO(
-                                                          193,
-                                                          221,
-                                                          249,
-                                                          0.34,
-                                                        )
-                                                      : const Color.fromRGBO(
-                                                          244,
-                                                          244,
-                                                          244,
-                                                          0.30,
-                                                        ),
-                                                  child: Row(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      Expanded(
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Row(
-                                                              children: [
-                                                                Expanded(
-                                                                  child: Text(
-                                                                    project
-                                                                        .name,
-                                                                    maxLines: 1,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis,
-                                                                    style: const TextStyle(
-                                                                      fontFamily:
-                                                                          'Pretendard',
-                                                                      color: Color(
-                                                                        0xFFF4F4F4,
-                                                                      ),
-                                                                      fontSize:
-                                                                          15,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                      height:
-                                                                          22 /
-                                                                          15,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                                if (cloudLinked) ...[
-                                                                  const SizedBox(
-                                                                    width: 8,
-                                                                  ),
-                                                                  _buildLocalCloudStatusIcon(
-                                                                    cloudStatus!,
-                                                                  ),
-                                                                ],
-                                                              ],
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 8,
-                                                            ),
-                                                            Container(
-                                                              height: 1,
-                                                              color: Colors
-                                                                  .white
-                                                                  .withValues(
-                                                                    alpha: 0.22,
-                                                                  ),
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 8,
-                                                            ),
-                                                            Text(
-                                                              localSubtitle,
-                                                              maxLines: 1,
-                                                              overflow:
-                                                                  TextOverflow
-                                                                      .ellipsis,
-                                                              style: TextStyle(
-                                                                fontFamily:
-                                                                    'Pretendard',
-                                                                color: Colors
-                                                                    .white
-                                                                    .withValues(
-                                                                      alpha:
-                                                                          0.80,
-                                                                    ),
-                                                                fontSize: 12,
-                                                                height: 22 / 12,
-                                                              ),
-                                                            ),
-                                                            if (cloudLinked) ...[
-                                                              const SizedBox(
-                                                                height: 2,
-                                                              ),
-                                                              Text(
-                                                                cloudStatus!
-                                                                    .label,
-                                                                softWrap: true,
-                                                                style: TextStyle(
-                                                                  fontFamily:
-                                                                      'Pretendard',
-                                                                  color: Colors
-                                                                      .white
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.62,
-                                                                      ),
-                                                                  fontSize: 11,
-                                                                  height:
-                                                                      17 / 11,
-                                                                ),
-                                                              ),
-                                                            ],
-                                                          ],
-                                                        ),
-                                                      ),
-                                                      const SizedBox(width: 8),
-                                                      if (_selectionMode)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets.only(
-                                                                top: 12,
-                                                              ),
-                                                          child: selected
-                                                              ? SvgPicture.asset(
-                                                                  kMixroomShellCheckboxCheckedAsset,
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                )
-                                                              : Container(
-                                                                  width: 22,
-                                                                  height: 22,
-                                                                  decoration: BoxDecoration(
-                                                                    shape: BoxShape
-                                                                        .circle,
-                                                                    border: Border.all(
-                                                                      color: Colors
-                                                                          .white
-                                                                          .withValues(
-                                                                            alpha:
-                                                                                0.6,
-                                                                          ),
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                        )
-                                                      else if (cloudInFlight)
-                                                        const Padding(
-                                                          padding:
-                                                              EdgeInsets.only(
-                                                                top: 10,
-                                                              ),
-                                                          child: SizedBox(
-                                                            width: 22,
-                                                            height: 22,
-                                                            child:
-                                                                CircularProgressIndicator(
-                                                                  strokeWidth:
-                                                                      2,
-                                                                ),
-                                                          ),
-                                                        )
-                                                      else
-                                                        _buildProjectTrailingActions(
-                                                          context: context,
-                                                          project: project,
-                                                          keyToken: keyToken,
-                                                          compact:
-                                                              useCompactProjectMenus,
-                                                        ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        );
+                                        final family = entry.family;
+                                        if (family != null) {
+                                          return _buildOnDeviceFamilyTile(
+                                            group: family,
+                                            compact: useCompactProjectMenus,
+                                          );
+                                        }
+                                        return const SizedBox.shrink();
                                       },
                                     ),
                                   );

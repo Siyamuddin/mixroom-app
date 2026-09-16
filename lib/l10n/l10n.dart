@@ -441,6 +441,7 @@ class L10n {
       'Autosave': 'Autosave',
       'Manual save': 'Manual save',
       'Background save': 'Background save',
+      'Cloud update': 'Cloud update',
       'Restore Copy': 'Restore Copy',
       'Restoring version…': 'Restoring version…',
       'Restored project copy created.': 'Restored project copy created.',
@@ -2060,6 +2061,8 @@ class L10n {
       'Clip source set to': 'Clip source set to',
       'Cloud delete failed': 'Cloud delete failed',
       'Cloud download failed': 'Cloud download failed',
+      'Cloud download failed. Your project was left unchanged':
+          'Cloud download failed. Your project was left unchanged',
       'Cloud file browser': 'Cloud file browser',
       'Cloud project deleted': 'Cloud project deleted',
       'Cloud projects': 'Cloud projects',
@@ -2067,7 +2070,54 @@ class L10n {
       'Cloud sync failed': 'Cloud sync failed',
       'Cloud synced': 'Cloud synced',
       'Not synced': 'Not synced',
+      'Sync status unknown': 'Sync status unknown',
       'Cloud update available': 'Cloud update available',
+      'Downloading update…': 'Downloading update…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          "Couldn't check for cloud updates. Opened the copy on this device.",
+      'Project versions differ': 'Project versions differ',
+      'This project changed on this device and in the cloud.':
+          'This project changed on this device and in the cloud.',
+      'Keep this device': 'Keep this device',
+      'Open the copy on this device.': 'Open the copy on this device.',
+      'Take the cloud version': 'Take the cloud version',
+      'Replace this copy with the cloud version.':
+          'Replace this copy with the cloud version.',
+      'Keep both': 'Keep both',
+      'Save this copy as a second project, then open the cloud version.':
+          'Save this copy as a second project, then open the cloud version.',
+      ' (this device)': ' (this device)',
+      'Make a frozen mix?': 'Make a frozen mix?',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.",
+      'Yes': 'Yes',
+      'No': 'No',
+      'Listen only': 'Listen only',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          'You can play this mix. Editing needs a Frozen mix copy.',
+      'Original': 'Original',
+      'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.',
+      'Could not make a Frozen mix.': 'Could not make a Frozen mix.',
+      'Listen only. Make a Frozen mix to save changes.':
+          'Listen only. Make a Frozen mix to save changes.',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mixes stay on this device. Sync the original project instead.',
+      'Original · Frozen mix': 'Original · Frozen mix',
+      'This mix': 'This mix',
+      'Whole song': 'Whole song',
+      'Delete song?': 'Delete song?',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          'Delete only this mix, or the original and {count} Frozen mixes?',
+      'Whole song ({count} projects)': 'Whole song ({count} projects)',
+      'Delete only this mix, or the original and Frozen mix?':
+          'Delete only this mix, or the original and Frozen mix?',
+      'Mix not ready on this device': 'Mix not ready on this device',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.',
       'Compliance controls': 'Compliance controls',
       'Create sampler': 'Create sampler',
       'Custom AI models': 'Custom AI models',
@@ -2675,6 +2725,7 @@ class L10n {
       'Autosave': '자동 저장',
       'Manual save': '수동 저장',
       'Background save': '백그라운드 저장',
+      'Cloud update': '클라우드 업데이트',
       'Restore Copy': '복사본 복원',
       'Restoring version…': '버전을 복원하는 중…',
       'Restored project copy created.': '복원된 프로젝트 복사본을 만들었습니다.',
@@ -2969,7 +3020,8 @@ class L10n {
           '{email} 초대를 만들었지만 이메일을 보낼 수 없습니다. 학생 목록에서 초대 링크를 복사하세요.',
       'Could not create invite. Check available student seats and try again.':
           '초대를 만들 수 없습니다. 사용 가능한 학생 좌석을 확인한 뒤 다시 시도하세요.',
-      'Paste a valid education invite link or code.': '올바른 교육 초대 링크 또는 코드를 붙여넣으세요.',
+      'Paste a valid education invite link or code.':
+          '올바른 교육 초대 링크 또는 코드를 붙여넣으세요.',
       'Education student seat activated.': '교육 학생 좌석이 활성화되었습니다.',
       'Education access activated.': '교육 이용 권한이 활성화되었습니다.',
       'Could not accept this invite. It may have expired or already been used.':
@@ -4198,6 +4250,8 @@ class L10n {
       'Clip source set to': '클립 소스 설정:',
       'Cloud delete failed': '클라우드 삭제 실패',
       'Cloud download failed': '클라우드 다운로드 실패',
+      'Cloud download failed. Your project was left unchanged':
+          '클라우드 다운로드에 실패했습니다. 이 기기의 프로젝트는 그대로입니다',
       'Cloud file browser': '클라우드 파일 브라우저',
       'Cloud project deleted': '클라우드 프로젝트가 삭제되었습니다',
       'Cloud projects': '클라우드 프로젝트',
@@ -4205,7 +4259,53 @@ class L10n {
       'Cloud sync failed': '클라우드 동기화 실패',
       'Cloud synced': '클라우드 동기화 완료',
       'Not synced': '동기화되지 않음',
+      'Sync status unknown': '동기화 상태 알 수 없음',
       'Cloud update available': '클라우드 업데이트 있음',
+      'Downloading update…': '업데이트 다운로드 중…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          '클라우드 업데이트를 확인할 수 없습니다. 이 기기의 사본을 열었습니다.',
+      'Project versions differ': '프로젝트 버전이 다릅니다',
+      'This project changed on this device and in the cloud.':
+          '이 기기와 클라우드에서 프로젝트가 서로 다르게 변경되었습니다.',
+      'Keep this device': '이 기기 버전 유지',
+      'Open the copy on this device.': '이 기기의 사본을 엽니다.',
+      'Take the cloud version': '클라우드 버전 사용',
+      'Replace this copy with the cloud version.': '이 사본을 클라우드 버전으로 바꿉니다.',
+      'Keep both': '둘 다 유지',
+      'Save this copy as a second project, then open the cloud version.':
+          '이 사본을 두 번째 프로젝트로 저장한 다음 클라우드 버전을 엽니다.',
+      ' (this device)': ' (이 기기)',
+      'Make a frozen mix?': '프리즈 믹스를 만들까요?',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          '이 믹스는 이 기기에 없는 플러그인을 사용해서 해당 트랙을 여기서 바꿀 수 없습니다. 프리즈 믹스를 만들까요? 원본은 바뀌지 않습니다.',
+      'Yes': '예',
+      'No': '아니요',
+      'Listen only': '듣기 전용',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          '이 믹스는 재생할 수 있습니다. 편집하려면 Frozen mix 사본이 필요합니다.',
+      'Original': '원본',
+      'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          '이 프로젝트는 플러그인 목록에 없는 플러그인을 사용합니다. 설치되어 있다면 플러그인 설정에서 다시 검색을 선택한 뒤 프로젝트를 다시 열어 주세요.',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          '이 믹스는 이 기기에서 듣기 전용입니다. 어시스턴트가 변경할 수 있도록 Frozen mix를 만드세요. 변경된 내용은 없습니다.',
+      'Could not make a Frozen mix.': 'Frozen mix를 만들 수 없습니다.',
+      'Listen only. Make a Frozen mix to save changes.':
+          '듣기 전용입니다. 변경 사항을 저장하려면 Frozen mix를 만드세요.',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mix는 이 기기에만 남습니다. 원본 프로젝트를 동기화하세요.',
+      'Original · Frozen mix': '원본 · Frozen mix',
+      'This mix': '이 믹스만',
+      'Whole song': '곡 전체',
+      'Delete song?': '이 곡을 삭제할까요?',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          '이 믹스만 삭제할까요, 아니면 원본과 Frozen mix {count}개를 함께 삭제할까요?',
+      'Whole song ({count} projects)': '곡 전체 (프로젝트 {count}개)',
+      'Delete only this mix, or the original and Frozen mix?':
+          '이 믹스만 삭제할까요, 아니면 원본과 Frozen mix를 함께 삭제할까요?',
+      'Mix not ready on this device': '이 기기에서는 믹스를 열 수 없습니다',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          '이 프로젝트는 이 기기에 없는 플러그인을 사용합니다. 플러그인이 있는 Mac에서 한 번 연 다음, 프로젝트 설정에서 Prepare로 재생 가능한 믹스를 만들어 주세요.',
       'Compliance controls': '규정 준수 제어',
       'Create sampler': '샘플러 만들기',
       'Custom AI models': '사용자 지정 AI 모델',
@@ -4569,6 +4669,7 @@ class L10n {
       'Autosave': '自动保存',
       'Manual save': '手动保存',
       'Background save': '后台保存',
+      'Cloud update': '云端更新',
       'Restore Copy': '恢复副本',
       'Restoring version…': '正在恢复版本…',
       'Restored project copy created.': '已创建恢复的项目副本。',
@@ -4929,6 +5030,51 @@ class L10n {
       'Gain:': '增益:',
       'Project saved': '项目已保存',
       "Audio couldn't start.": '无法启动音频。',
+      'Downloading update…': '正在下载更新…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          '无法检查云端更新。已打开此设备上的副本。',
+      'Project versions differ': '项目版本不一致',
+      'This project changed on this device and in the cloud.':
+          '此设备和云端上的项目都有不同的更改。',
+      'Keep this device': '保留此设备版本',
+      'Open the copy on this device.': '打开此设备上的副本。',
+      'Take the cloud version': '使用云端版本',
+      'Replace this copy with the cloud version.': '将此副本替换为云端版本。',
+      'Keep both': '两个都保留',
+      'Save this copy as a second project, then open the cloud version.':
+          '将此副本另存为第二个项目，然后打开云端版本。',
+      ' (this device)': ' (此设备)',
+      'Make a frozen mix?': '要制作 Frozen mix 吗？',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          '此混音使用了此设备上没有的插件，因此无法在这里修改那些轨道。要制作 Frozen mix 吗？这不会更改原项目。',
+      'Yes': '是',
+      'No': '否',
+      'Listen only': '仅试听',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          '可以播放此混音。编辑需要 Frozen mix 副本。',
+      'Original': '原版',
+      'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          '此项目使用的插件不在您的插件列表中。如果已安装，请打开插件设置，选择重新扫描，然后重新打开项目。',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          '此混音在此设备上仅可试听。请创建 Frozen mix 以便助手进行更改。未做任何更改。',
+      'Could not make a Frozen mix.': '无法创建 Frozen mix。',
+      'Listen only. Make a Frozen mix to save changes.':
+          '仅试听。要保存更改，请创建 Frozen mix。',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mix 会保留在此设备上。请同步原项目。',
+      'Original · Frozen mix': '原版 · Frozen mix',
+      'This mix': '仅此混音',
+      'Whole song': '整首歌',
+      'Delete song?': '要删除这首歌吗？',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          '只删除此混音，还是同时删除原版和 {count} 个 Frozen mix？',
+      'Whole song ({count} projects)': '整首歌（{count} 个项目）',
+      'Delete only this mix, or the original and Frozen mix?':
+          '只删除此混音，还是同时删除原版和 Frozen mix？',
+      'Mix not ready on this device': '此设备上还不能打开该混音',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          '此项目使用了此设备上没有的插件。请先在装有这些插件的 Mac 上打开一次，并在项目设置中选择 Prepare。',
       'Retry': '重试',
       'Save failed': '保存失败',
       'Usage': '用量',
@@ -5713,6 +5859,7 @@ class L10n {
       'Autosave': '自動保存',
       'Manual save': '手動保存',
       'Background save': 'バックグラウンド保存',
+      'Cloud update': 'クラウド更新',
       'Restore Copy': 'コピーを復元',
       'Restoring version…': 'バージョンを復元中…',
       'Restored project copy created.': '復元したプロジェクトのコピーを作成しました。',
@@ -6003,7 +6150,8 @@ class L10n {
           '{email}への招待を作成しましたが、メールを送信できませんでした。学生一覧から招待リンクをコピーしてください。',
       'Could not create invite. Check available student seats and try again.':
           '招待を作成できませんでした。利用可能な学生席を確認してもう一度お試しください。',
-      'Paste a valid education invite link or code.': '有効な教育招待リンクまたはコードを貼り付けてください。',
+      'Paste a valid education invite link or code.':
+          '有効な教育招待リンクまたはコードを貼り付けてください。',
       'Education student seat activated.': '教育学生席が有効になりました。',
       'Education access activated.': '教育アクセスが有効になりました。',
       'Could not accept this invite. It may have expired or already been used.':
@@ -7228,6 +7376,8 @@ class L10n {
       'Clone': '複製',
       'Cloud delete failed': 'クラウド削除に失敗しました',
       'Cloud download failed': 'クラウドダウンロードに失敗しました',
+      'Cloud download failed. Your project was left unchanged':
+          'クラウドのダウンロードに失敗しました。このデバイスのプロジェクトはそのままです',
       'Cloud file browser': 'クラウドファイルブラウザー',
       'Cloud project deleted': 'クラウドプロジェクトを削除しました',
       'Cloud projects': 'クラウドプロジェクト',
@@ -7235,7 +7385,53 @@ class L10n {
       'Cloud sync failed': 'クラウド同期に失敗しました',
       'Cloud synced': 'クラウド同期済み',
       'Not synced': '未同期',
+      'Sync status unknown': '同期状態不明',
       'Cloud update available': 'クラウド更新あり',
+      'Downloading update…': '更新をダウンロード中…',
+      "Couldn't check for cloud updates. Opened the copy on this device.":
+          'クラウドの更新を確認できませんでした。このデバイスのコピーを開きました。',
+      'Project versions differ': 'プロジェクトのバージョンが異なります',
+      'This project changed on this device and in the cloud.':
+          'このデバイスとクラウドの両方でプロジェクトが変更されています。',
+      'Keep this device': 'このデバイスの版を残す',
+      'Open the copy on this device.': 'このデバイスのコピーを開きます。',
+      'Take the cloud version': 'クラウド版を使う',
+      'Replace this copy with the cloud version.': 'このコピーをクラウド版で置き換えます。',
+      'Keep both': '両方残す',
+      'Save this copy as a second project, then open the cloud version.':
+          'このコピーを別プロジェクトとして保存し、クラウド版を開きます。',
+      ' (this device)': ' (このデバイス)',
+      'Make a frozen mix?': 'Frozen mix を作りますか？',
+      "This mix uses plugins that are not available here, so this device can't change those tracks. Make a frozen mix? This won't change the original.":
+          'このミックスは、このデバイスにないプラグインを使っているため、該当トラックはここでは変更できません。Frozen mix を作りますか？元のプロジェクトは変わりません。',
+      'Yes': 'はい',
+      'No': 'いいえ',
+      'Listen only': '試聴のみ',
+      'You can play this mix. Editing needs a Frozen mix copy.':
+          'このミックスは再生できます。編集するには Frozen mix のコピーが必要です。',
+      'Original': 'オリジナル',
+      'Frozen mix': 'Frozen mix',
+      'This project uses plugins that are not in your plug-in list. If they are installed, open Plug-in Settings, choose Rescan, then open the project again.':
+          'このプロジェクトはプラグインリストにないプラグインを使用しています。インストール済みの場合は、プラグイン設定で再スキャンを選び、プロジェクトをもう一度開いてください。',
+      'This mix is listen-only on this device. Make a Frozen mix to let the assistant change it. Nothing was changed.':
+          'このミックスはこのデバイスでは試聴のみです。アシスタントが変更できるように Frozen mix を作成してください。変更はありません。',
+      'Could not make a Frozen mix.': 'Frozen mix を作成できませんでした。',
+      'Listen only. Make a Frozen mix to save changes.':
+          '試聴のみです。変更を保存するには Frozen mix を作成してください。',
+      'Frozen mixes stay on this device. Sync the original project instead.':
+          'Frozen mix はこのデバイスに残ります。オリジナルを同期してください。',
+      'Original · Frozen mix': 'オリジナル · Frozen mix',
+      'This mix': 'このミックスだけ',
+      'Whole song': '曲全体',
+      'Delete song?': 'この曲を削除しますか？',
+      'Delete only this mix, or the original and {count} Frozen mixes?':
+          'このミックスだけ削除しますか？それともオリジナルと {count} 個の Frozen mix をまとめて削除しますか？',
+      'Whole song ({count} projects)': '曲全体（{count} 個のプロジェクト）',
+      'Delete only this mix, or the original and Frozen mix?':
+          'このミックスだけ削除しますか？それともオリジナルと Frozen mix をまとめて削除しますか？',
+      'Mix not ready on this device': 'このデバイスではミックスを開けません',
+      'This project uses plugins that are not on this device. Open it once on the Mac that has those plugins and choose Prepare under Project Settings.':
+          'このプロジェクトは、このデバイスにないプラグインを使っています。プラグインがある Mac で一度開き、プロジェクト設定の Prepare で再生用ミックスを作成してください。',
       'Compliance controls': 'コンプライアンス管理',
       'Copy': 'コピー',
       'Copy range': '範囲をコピー',
