@@ -8,6 +8,7 @@ import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 import '../models/project_state.dart';
 import 'instrument_classifier.dart';
+import 'producer_plugin_identity.dart';
 
 const int _kProjectAnalysisMaxMono16kSamples = 16000 * 30;
 const int _kPromptStatsWindowOutputSamples = 12000;
@@ -250,6 +251,9 @@ class ProjectStateBuilder {
       if (effectIds.length != names.length) {
         effectIds = List<String>.from(names);
       }
+      final modelIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+        row, forceIndividualRow: true, modelIdentity: true,
+      );
       for (int i = 0; i < names.length; i++) {
         final params = exposedEffectParameters(
           names[i],
@@ -265,6 +269,7 @@ class ProjectStateBuilder {
             effectIndex: i,
             instanceId: instanceIds[i],
             effectId: effectIds[i],
+            modelPluginId: modelIds.length == names.length ? producerModelPluginId(modelIds[i]) : '',
             name: names[i],
             isBypassed: await JuceAudioEngine.getRowEffectBypassState(
               row,
@@ -618,6 +623,9 @@ class ProjectStateBuilder {
 
     final masterEffects = <EffectState>[];
     final masterNames = await JuceAudioEngine.getMasterEffects();
+    final masterIds = await JuceAudioEngine.getMasterEffectIds();
+    final masterModelIds = await JuceAudioEngine.getMasterEffectIds(modelIdentity: true);
+    final masterInstanceIds = await JuceAudioEngine.getMasterEffectInstanceIds();
     for (int i = 0; i < masterNames.length; i++) {
       final params = exposedEffectParameters(
         masterNames[i],
@@ -627,6 +635,9 @@ class ProjectStateBuilder {
         EffectState(
           effectIndex: i,
           name: masterNames[i],
+          effectId: masterIds.length == masterNames.length ? masterIds[i] : '',
+          modelPluginId: masterModelIds.length == masterNames.length ? producerModelPluginId(masterModelIds[i]) : '',
+          instanceId: masterInstanceIds.length == masterNames.length ? masterInstanceIds[i] : '',
           isBypassed: await JuceAudioEngine.getMasterEffectBypassState(i),
           parameters: params
               .map((p) =>
@@ -634,6 +645,36 @@ class ProjectStateBuilder {
               .toList(),
         ),
       );
+    }
+
+    final groupBuses = <Map<String, dynamic>>[];
+    for (final group in trackGroups) {
+      final members = rows.where((row) => group.rowIds.contains(row.rowId)).toList();
+      if (members.isEmpty) continue;
+      final lead = members.first.rowIndex;
+      final names = await JuceAudioEngine.getTrackEffectsForRow(lead);
+      final ids = await JuceAudioEngine.getTrackEffectIdsForRow(lead);
+      final modelIds = await JuceAudioEngine.getTrackEffectIdsForRow(lead, modelIdentity: true);
+      final instances = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(lead);
+      final effects = <Map<String, dynamic>>[];
+      for (var index = 0; index < names.length; index++) {
+        final params = exposedEffectParameters(names[index],
+            await JuceAudioEngine.getTrackPluginParameters(lead, index));
+        effects.add(EffectState(
+          effectIndex: index,
+          instanceId: instances.length == names.length ? instances[index] : '',
+          effectId: ids.length == names.length ? ids[index] : '',
+          modelPluginId: modelIds.length == names.length ? producerModelPluginId(modelIds[index]) : '',
+          name: names[index],
+          isBypassed: await JuceAudioEngine.getRowEffectBypassState(lead, index),
+          parameters: params.map((p) => EffectParameterState.fromMap(p)).toList(),
+        ).toJson());
+      }
+      groupBuses.add({
+        'group_id': group.id, 'row_indices': members.map((row) => row.rowIndex).toList(),
+        'gain': group.gain, 'pan': group.pan, 'muted': group.muted,
+        'soloed': group.soloed, 'effects': effects,
+      });
     }
 
     final bpm = bpmFallback;
@@ -652,6 +693,7 @@ class ProjectStateBuilder {
         maxRows: effectiveMaxRows,
         rows: rows,
         trackGroups: trackGroups,
+        groupBuses: groupBuses,
         masterEffects: masterEffects,
         overlapMatrix: overlap,
         overlapRatioMatrix: overlapRatio);

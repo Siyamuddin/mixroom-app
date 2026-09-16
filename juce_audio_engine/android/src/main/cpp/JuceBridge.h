@@ -97,7 +97,7 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_removeTrackEffectJNI(JNIEnv *, jclass, jint, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_reorderTrackEffectsJNI(JNIEnv *, jclass, jint, jint, jint, jboolean);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectsForRowJNI(JNIEnv *, jclass, jint, jboolean);
-    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectIdsForRowJNI(JNIEnv *, jclass, jint, jboolean);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectIdsForRowJNI(JNIEnv *, jclass, jint, jboolean, jboolean);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackEffectInstanceIdsForRowJNI(JNIEnv *, jclass, jint, jboolean);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getTrackPluginParametersJNI(JNIEnv *, jclass, jint, jint, jboolean);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setTrackEffectJNI(JNIEnv *, jclass, jint, jint, jstring, jobject, jboolean);
@@ -121,7 +121,8 @@ extern "C"
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_removeMasterEffectJNI(JNIEnv *, jclass, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_reorderMasterEffectsJNI(JNIEnv *, jclass, jint, jint);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectsJNI(JNIEnv *, jclass);
-    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectIdsJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectInstanceIdsJNI(JNIEnv *, jclass);
+    JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterEffectIdsJNI(JNIEnv *, jclass, jboolean);
     JNIEXPORT jobject JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_getMasterPluginParametersJNI(JNIEnv *, jclass, jint);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_setMasterEffectJNI(JNIEnv *, jclass, jint, jstring, jobject);
     JNIEXPORT void JNICALL Java_com_mixroom_juce_1audio_1engine_JuceBridge_bypassMasterEffectJNI(JNIEnv *, jclass, jint, jboolean);

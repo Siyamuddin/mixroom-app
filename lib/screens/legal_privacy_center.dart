@@ -3,6 +3,7 @@ import 'package:mixroom/config/legal_config.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
 import 'package:mixroom/core/privacy/privacy_preferences.dart';
+import 'package:mixroom/core/privacy/producer_training_consent.dart';
 import 'package:mixroom/helpers/app_user_service.dart';
 import 'package:mixroom/helpers/auth_service.dart';
 import 'package:mixroom/l10n/l10n.dart';
@@ -18,17 +19,13 @@ class LegalPrivacyCenterScreen extends StatefulWidget {
   const LegalPrivacyCenterScreen({super.key});
 
   @override
-  State<LegalPrivacyCenterScreen> createState() =>
-      _LegalPrivacyCenterScreenState();
+  State<LegalPrivacyCenterScreen> createState() => _LegalPrivacyCenterScreenState();
 }
 
 class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
-  static const String _analyticsPrefKey =
-      PrivacyPreferences.analyticsAndCrashDiagnosticsKey;
-  static const String _recommendationsPrefKey =
-      'mixroom.privacy.personalized_recommendations.v1';
-  static const String _productEmailsPrefKey =
-      'mixroom.privacy.product_emails.v1';
+  static const String _analyticsPrefKey = PrivacyPreferences.analyticsAndCrashDiagnosticsKey;
+  static const String _recommendationsPrefKey = 'mixroom.privacy.personalized_recommendations.v1';
+  static const String _productEmailsPrefKey = 'mixroom.privacy.product_emails.v1';
 
   static const String _privacyEmail = 'privacy@mixroom.ai';
   static const String _supportEmail = 'support@mixroom.ai';
@@ -37,6 +34,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   bool _analyticsEnabled = false;
   bool _recommendationsEnabled = false;
   bool _productEmailsEnabled = false;
+  bool _producerTrainingEnabled = false;
   bool _savingProductEmails = false;
 
   @override
@@ -59,15 +57,30 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
       }
     }
     final prefs = await SharedPreferences.getInstance();
+    final producerTrainingEnabled = await ProducerTrainingConsent.isAccepted();
     if (!mounted) return;
     setState(() {
-      _analyticsEnabled = appUser.current?.telemetryEnabled ??
-          (prefs.getBool(_analyticsPrefKey) ?? true);
+      _analyticsEnabled = appUser.current?.telemetryEnabled ?? (prefs.getBool(_analyticsPrefKey) ?? true);
       _recommendationsEnabled = prefs.getBool(_recommendationsPrefKey) ?? false;
-      _productEmailsEnabled = appUser.current?.newsletterOptIn ??
-          (prefs.getBool(_productEmailsPrefKey) ?? false);
+      _productEmailsEnabled = appUser.current?.newsletterOptIn ?? (prefs.getBool(_productEmailsPrefKey) ?? false);
+      _producerTrainingEnabled = producerTrainingEnabled;
       _loadingPreferences = false;
     });
+  }
+
+  Future<void> _saveProducerTrainingToggle(bool value) async {
+    setState(() => _producerTrainingEnabled = value);
+    try {
+      if (value) {
+        await ProducerTrainingConsent.accept();
+      } else {
+        await ProducerTrainingConsent.revoke();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _producerTrainingEnabled = !value);
+      _showMessage(L10n.translate(context, 'Could not save preference. Please retry.'));
+    }
   }
 
   Future<void> _saveToggle({
@@ -86,9 +99,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => applyLocalValue(!value));
-      _showMessage(
-        L10n.translate(context, 'Could not save preference. Please retry.'),
-      );
+      _showMessage(L10n.translate(context, 'Could not save preference. Please retry.'));
     }
   }
 
@@ -105,9 +116,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
 
     try {
       if (auth.isSignedIn && appUser.supportsRemoteProfileEdits) {
-        await appUser.updateTelemetryPreference(
-          telemetryEnabled: value,
-        );
+        await appUser.updateTelemetryPreference(telemetryEnabled: value);
       } else {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_analyticsPrefKey, value);
@@ -119,12 +128,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
       setState(() {
         _analyticsEnabled = previousValue;
       });
-      _showMessage(
-        L10n.translate(
-          context,
-          'Could not update telemetry preference. Please retry.',
-        ),
-      );
+      _showMessage(L10n.translate(context, 'Could not update telemetry preference. Please retry.'));
     }
   }
 
@@ -156,12 +160,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
       setState(() {
         _productEmailsEnabled = previousValue;
       });
-      _showMessage(
-        L10n.translate(
-          context,
-          'Could not update marketing email preference. Please retry.',
-        ),
-      );
+      _showMessage(L10n.translate(context, 'Could not update marketing email preference. Please retry.'));
     } finally {
       if (mounted) {
         setState(() {
@@ -171,34 +170,15 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
     }
   }
 
-  Future<void> _launchUri(
-    Uri uri, {
-    LaunchMode mode = LaunchMode.externalApplication,
-  }) async {
+  Future<void> _launchUri(Uri uri, {LaunchMode mode = LaunchMode.externalApplication}) async {
     final launched = await launchUrl(uri, mode: mode);
     if (!launched && mounted) {
-      _showMessage(
-        L10n.translate(
-          context,
-          'Could not open this link on your device right now.',
-        ),
-      );
+      _showMessage(L10n.translate(context, 'Could not open this link on your device right now.'));
     }
   }
 
-  Future<void> _openEmail({
-    required String to,
-    required String subject,
-    required String body,
-  }) {
-    final uri = Uri(
-      scheme: 'mailto',
-      path: to,
-      queryParameters: <String, String>{
-        'subject': subject,
-        'body': body,
-      },
-    );
+  Future<void> _openEmail({required String to, required String subject, required String body}) {
+    final uri = Uri(scheme: 'mailto', path: to, queryParameters: <String, String>{'subject': subject, 'body': body});
     return _launchUri(uri, mode: LaunchMode.platformDefault);
   }
 
@@ -233,10 +213,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   }
 
   Future<void> _confirmDeleteAccount() async {
-    final ok = await showDeleteAccountSheet(
-      context,
-      auth: context.read<AuthService>(),
-    );
+    final ok = await showDeleteAccountSheet(context, auth: context.read<AuthService>());
 
     if (ok != true || !mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
@@ -251,18 +228,15 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthService>();
     final appUser = context.watch<AppUserService>();
-    final effectiveProductEmailsEnabled = !_savingProductEmails &&
-            auth.isSignedIn &&
-            appUser.supportsRemoteProfileEdits &&
-            appUser.current != null
+    final effectiveProductEmailsEnabled =
+        !_savingProductEmails && auth.isSignedIn && appUser.supportsRemoteProfileEdits && appUser.current != null
         ? appUser.current!.newsletterOptIn
         : _productEmailsEnabled;
     final isBusy = auth.isBusy || appUser.isLoading || _savingProductEmails;
     final media = MediaQuery.of(context);
-    final bottomInset =
-        media.viewPadding.bottom > media.systemGestureInsets.bottom
-            ? media.viewPadding.bottom
-            : media.systemGestureInsets.bottom;
+    final bottomInset = media.viewPadding.bottom > media.systemGestureInsets.bottom
+        ? media.viewPadding.bottom
+        : media.systemGestureInsets.bottom;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -279,10 +253,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                 children: [
                   _ShellPageTopBar(
                     title: L10n.translate(context, 'Legal & Privacy'),
-                    subtitle: L10n.translate(
-                      context,
-                      'Controls, documents, and requests',
-                    ),
+                    subtitle: L10n.translate(context, 'Controls, documents, and requests'),
                   ),
                   const SizedBox(height: 12),
                   Container(
@@ -331,22 +302,14 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                       _ActionItem(
                         icon: Icons.privacy_tip_outlined,
                         title: L10n.translate(context, 'Privacy Policy'),
-                        subtitle: L10n.translate(
-                          context,
-                          'How Mixroom collects, uses, and shares information.',
-                        ),
-                        onTap: () =>
-                            _launchUri(Uri.parse(LegalConfig.privacyUrl)),
+                        subtitle: L10n.translate(context, 'How Mixroom collects, uses, and shares information.'),
+                        onTap: () => _launchUri(Uri.parse(LegalConfig.privacyUrl)),
                       ),
                       _ActionItem(
                         icon: Icons.description_outlined,
                         title: L10n.translate(context, 'Terms of Service'),
-                        subtitle: L10n.translate(
-                          context,
-                          'Rules for using Mixroom and user content.',
-                        ),
-                        onTap: () =>
-                            _launchUri(Uri.parse(LegalConfig.termsUrl)),
+                        subtitle: L10n.translate(context, 'Rules for using Mixroom and user content.'),
+                        onTap: () => _launchUri(Uri.parse(LegalConfig.termsUrl)),
                       ),
                       _ActionItem(
                         icon: Icons.groups_outlined,
@@ -356,29 +319,17 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                           'See third-party service providers that process data on Mixroom\'s behalf.',
                         ),
                         onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  const SubprocessorsDocumentScreen(),
-                            ),
-                          );
+                          Navigator.of(
+                            context,
+                          ).push(MaterialPageRoute(builder: (_) => const SubprocessorsDocumentScreen()));
                         },
                       ),
                       _ActionItem(
                         icon: Icons.integration_instructions_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Open-source licenses',
-                        ),
-                        subtitle: L10n.translate(
-                          context,
-                          'View software licenses used by this app.',
-                        ),
+                        title: L10n.translate(context, 'Open-source licenses'),
+                        subtitle: L10n.translate(context, 'View software licenses used by this app.'),
                         onTap: () {
-                          showLicensePage(
-                            context: context,
-                            applicationName: 'Mixroom',
-                          );
+                          showLicensePage(context: context, applicationName: 'Mixroom');
                         },
                       ),
                     ],
@@ -387,17 +338,11 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                   _SectionCard(
                     title: L10n.translate(context, 'Privacy Controls'),
                     strong: true,
-                    subtitle: L10n.translate(
-                      context,
-                      'You can change these preferences at any time from this screen.',
-                    ),
+                    subtitle: L10n.translate(context, 'You can change these preferences at any time from this screen.'),
                     children: [
                       _ToggleItem(
                         icon: Icons.analytics_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Optional analytics and diagnostics',
-                        ),
+                        title: L10n.translate(context, 'Optional analytics and diagnostics'),
                         subtitle: L10n.translate(
                           context,
                           'Share app interaction events and diagnostics to help improve Mixroom quality and product decisions.',
@@ -408,33 +353,28 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                       ),
                       _ToggleItem(
                         icon: Icons.auto_awesome_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Personalized recommendations',
-                        ),
-                        subtitle: L10n.translate(
-                          context,
-                          'Uses activity signals to tailor tips and suggestions.',
-                        ),
+                        title: L10n.translate(context, 'Personalized recommendations'),
+                        subtitle: L10n.translate(context, 'Uses activity signals to tailor tips and suggestions.'),
                         value: _recommendationsEnabled,
                         enabled: !_loadingPreferences && !isBusy,
                         onChanged: (next) => _saveToggle(
                           key: _recommendationsPrefKey,
                           value: next,
-                          applyLocalValue: (value) =>
-                              _recommendationsEnabled = value,
+                          applyLocalValue: (value) => _recommendationsEnabled = value,
                         ),
                       ),
                       _ToggleItem(
+                        icon: Icons.science_outlined,
+                        title: L10n.translate(context, 'producer_training_consent_setting'),
+                        subtitle: L10n.translate(context, 'producer_training_consent_setting_body'),
+                        value: _producerTrainingEnabled,
+                        enabled: !_loadingPreferences && !isBusy,
+                        onChanged: _saveProducerTrainingToggle,
+                      ),
+                      _ToggleItem(
                         icon: Icons.mark_email_read_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Product updates and marketing email',
-                        ),
-                        subtitle: L10n.translate(
-                          context,
-                          'Receive release notes, offers, and feature announcements.',
-                        ),
+                        title: L10n.translate(context, 'Product updates and marketing email'),
+                        subtitle: L10n.translate(context, 'Receive release notes, offers, and feature announcements.'),
                         value: effectiveProductEmailsEnabled,
                         enabled: !_loadingPreferences && !isBusy,
                         onChanged: _saveProductEmailsToggle,
@@ -447,24 +387,14 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                     children: [
                       _ActionItem(
                         icon: Icons.inventory_2_outlined,
-                        title:
-                            L10n.translate(context, 'Request my data export'),
-                        subtitle: L10n.translate(
-                          context,
-                          'Email request for a copy of your data.',
-                        ),
+                        title: L10n.translate(context, 'Request my data export'),
+                        subtitle: L10n.translate(context, 'Email request for a copy of your data.'),
                         onTap: _requestDataExport,
                       ),
                       _ActionItem(
                         icon: Icons.edit_note_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Request data correction or deletion',
-                        ),
-                        subtitle: L10n.translate(
-                          context,
-                          'Email request for correction or erasure.',
-                        ),
+                        title: L10n.translate(context, 'Request data correction or deletion'),
+                        subtitle: L10n.translate(context, 'Email request for correction or erasure.'),
                         onTap: _requestDataCorrectionOrDeletion,
                       ),
                     ],
@@ -480,10 +410,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                         onTap: () => _openEmail(
                           to: _privacyEmail,
                           subject: L10n.translate(context, 'Privacy inquiry'),
-                          body: L10n.translate(
-                            context,
-                            'Hello Mixroom Privacy Team,\n\n',
-                          ),
+                          body: L10n.translate(context, 'Hello Mixroom Privacy Team,\n\n'),
                         ),
                       ),
                       _ActionItem(
@@ -493,10 +420,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                         onTap: () => _openEmail(
                           to: _supportEmail,
                           subject: L10n.translate(context, 'Support request'),
-                          body: L10n.translate(
-                            context,
-                            'Hello Mixroom Support,\n\n',
-                          ),
+                          body: L10n.translate(context, 'Hello Mixroom Support,\n\n'),
                         ),
                       ),
                     ],
@@ -508,14 +432,8 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
                     children: [
                       _ActionItem(
                         icon: Icons.delete_forever_outlined,
-                        title: L10n.translate(
-                          context,
-                          'Delete account permanently',
-                        ),
-                        subtitle: L10n.translate(
-                          context,
-                          'Removes your account and signs you out.',
-                        ),
+                        title: L10n.translate(context, 'Delete account permanently'),
+                        subtitle: L10n.translate(context, 'Removes your account and signs you out.'),
                         iconColor: const Color(0xFFFFA4A4),
                         titleColor: const Color(0xFFFFD4D4),
                         onTap: isBusy ? null : _confirmDeleteAccount,
@@ -533,10 +451,7 @@ class _LegalPrivacyCenterScreenState extends State<LegalPrivacyCenterScreen> {
 }
 
 class _ShellPageTopBar extends StatelessWidget {
-  const _ShellPageTopBar({
-    required this.title,
-    required this.subtitle,
-  });
+  const _ShellPageTopBar({required this.title, required this.subtitle});
 
   final String title;
   final String subtitle;
@@ -551,40 +466,36 @@ class _ShellPageTopBar extends StatelessWidget {
           Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontFamily: 'Pretendard',
-                    color: Color(0xFFF4F4F4),
-                    fontSize: 19,
-                    fontWeight: FontWeight.w800,
-                  ),
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Color(0xFFF4F4F4),
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontFamily: 'Pretendard',
-                    color: Colors.white.withValues(alpha: 0.62),
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w500,
-                  ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  color: Colors.white.withValues(alpha: 0.62),
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
                 ),
-              ],
+              ),
+            ],
           ),
           Align(
             alignment: Alignment.topRight,
             child: MixroomShellRoundButton(
               size: 48,
-              icon: const Icon(
-                Icons.close_rounded,
-                size: 28,
-                color: Colors.white,
-              ),
+              icon: const Icon(Icons.close_rounded, size: 28, color: Colors.white),
               onTap: () => Navigator.of(context).maybePop(),
             ),
           ),
@@ -613,11 +524,7 @@ class _SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-      decoration: accountGlassDecoration(
-        radius: 24,
-        strong: strong,
-        danger: danger,
-      ),
+      decoration: accountGlassDecoration(radius: 24, strong: strong, danger: danger),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -659,10 +566,7 @@ class _SectionCard extends StatelessWidget {
         output.add(
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Container(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.34),
-            ),
+            child: Container(height: 1, color: Colors.white.withValues(alpha: 0.34)),
           ),
         );
       }
@@ -704,11 +608,7 @@ class _ActionItem extends StatelessWidget {
                 width: 38,
                 height: 38,
                 alignment: Alignment.center,
-                child: Icon(
-                  icon,
-                  size: 22,
-                  color: disabled ? Colors.white38 : iconColor,
-                ),
+                child: Icon(icon, size: 22, color: disabled ? Colors.white38 : iconColor),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -730,9 +630,7 @@ class _ActionItem extends StatelessWidget {
                         subtitle!,
                         style: TextStyle(
                           fontFamily: 'Pretendard',
-                          color: disabled
-                              ? Colors.white30
-                              : Colors.white.withValues(alpha: 0.66),
+                          color: disabled ? Colors.white30 : Colors.white.withValues(alpha: 0.66),
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                           height: 1.35,
@@ -746,9 +644,7 @@ class _ActionItem extends StatelessWidget {
               Icon(
                 Icons.chevron_right_rounded,
                 size: 22,
-                color: disabled
-                    ? Colors.white.withValues(alpha: 0.34)
-                    : Colors.white.withValues(alpha: 0.68),
+                color: disabled ? Colors.white.withValues(alpha: 0.34) : Colors.white.withValues(alpha: 0.68),
               ),
             ],
           ),
@@ -785,11 +681,7 @@ class _ToggleItem extends StatelessWidget {
             width: 38,
             height: 38,
             alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 22,
-              color: enabled ? kAccountGlassText : Colors.white30,
-            ),
+            child: Icon(icon, size: 22, color: enabled ? kAccountGlassText : Colors.white30),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -810,9 +702,7 @@ class _ToggleItem extends StatelessWidget {
                   subtitle,
                   style: TextStyle(
                     fontFamily: 'Pretendard',
-                    color: enabled
-                        ? Colors.white.withValues(alpha: 0.66)
-                        : Colors.white30,
+                    color: enabled ? Colors.white.withValues(alpha: 0.66) : Colors.white30,
                     fontSize: 12,
                     fontWeight: FontWeight.w500,
                     height: 1.35,
@@ -827,9 +717,7 @@ class _ToggleItem extends StatelessWidget {
               switchTheme: SwitchThemeData(
                 thumbColor: WidgetStateProperty.resolveWith((states) {
                   if (!enabled) return Colors.white38;
-                  return states.contains(WidgetState.selected)
-                      ? const Color(0xFFF4F4F4)
-                      : const Color(0xFFCCD7E5);
+                  return states.contains(WidgetState.selected) ? const Color(0xFFF4F4F4) : const Color(0xFFCCD7E5);
                 }),
                 trackColor: WidgetStateProperty.resolveWith((states) {
                   if (!enabled) return Colors.white12;
@@ -840,10 +728,7 @@ class _ToggleItem extends StatelessWidget {
                 trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
               ),
             ),
-            child: Switch.adaptive(
-              value: value,
-              onChanged: enabled ? onChanged : null,
-            ),
+            child: Switch.adaptive(value: value, onChanged: enabled ? onChanged : null),
           ),
         ],
       ),
@@ -893,8 +778,7 @@ class PrivacyPolicyDocumentScreen extends StatelessWidget {
         ),
         _LegalSection(
           heading: '7. Contact',
-          body:
-              'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.',
+          body: 'For privacy requests, contact privacy@mixroom.ai. For support, contact support@mixroom.ai.',
         ),
       ],
     );
@@ -913,8 +797,7 @@ class TermsOfServiceDocumentScreen extends StatelessWidget {
       sections: const [
         _LegalSection(
           heading: '1. Acceptance',
-          body:
-              'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.',
+          body: 'By creating an account or using Mixroom, you agree to these Terms and any policies referenced here.',
         ),
         _LegalSection(
           heading: '2. Accounts',
@@ -943,8 +826,7 @@ class TermsOfServiceDocumentScreen extends StatelessWidget {
         ),
         _LegalSection(
           heading: '7. Contact',
-          body:
-              'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.',
+          body: 'Legal questions can be sent to privacy@mixroom.ai or support@mixroom.ai.',
         ),
       ],
     );
@@ -1057,12 +939,7 @@ class _LegalDocumentScreen extends StatelessWidget {
         ),
       );
       if (i != sections.length - 1) {
-        output.add(
-          Container(
-            height: 1,
-            color: Colors.white.withValues(alpha: 0.34),
-          ),
-        );
+        output.add(Container(height: 1, color: Colors.white.withValues(alpha: 0.34)));
       }
     }
     return output;
@@ -1071,10 +948,9 @@ class _LegalDocumentScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final bottomInset =
-        media.viewPadding.bottom > media.systemGestureInsets.bottom
-            ? media.viewPadding.bottom
-            : media.systemGestureInsets.bottom;
+    final bottomInset = media.viewPadding.bottom > media.systemGestureInsets.bottom
+        ? media.viewPadding.bottom
+        : media.systemGestureInsets.bottom;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -1091,18 +967,12 @@ class _LegalDocumentScreen extends StatelessWidget {
                 children: [
                   _ShellPageTopBar(
                     title: title,
-                    subtitle: L10n.translate(
-                      context,
-                      'Legal details and supporting information',
-                    ),
+                    subtitle: L10n.translate(context, 'Legal details and supporting information'),
                   ),
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-                    decoration: accountGlassDecoration(
-                      radius: 24,
-                      strong: true,
-                    ),
+                    decoration: accountGlassDecoration(radius: 24, strong: true),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1117,8 +987,7 @@ class _LegalDocumentScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          L10n.translate(context, 'Last updated: {date}')
-                              .replaceAll('{date}', updatedAt),
+                          L10n.translate(context, 'Last updated: {date}').replaceAll('{date}', updatedAt),
                           style: TextStyle(
                             fontFamily: 'Pretendard',
                             color: Colors.white.withValues(alpha: 0.64),
@@ -1160,10 +1029,7 @@ class _LegalDocumentScreen extends StatelessWidget {
 }
 
 class _LegalSection {
-  const _LegalSection({
-    required this.heading,
-    required this.body,
-  });
+  const _LegalSection({required this.heading, required this.body});
 
   final String heading;
   final String body;

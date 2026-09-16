@@ -356,9 +356,10 @@ class AiV3MixGoalMaterializer {
       generationScope: generationScope,
     );
     heuristicStopwatch.stop();
-    var resolved = heuristic.actions
-        .where((candidate) => candidate.type != 'noop')
-        .toList(growable: false);
+    // Inference and capture must see the same row-vs-bus target as execution.
+    var resolved = normalizeAiV3MixActionsForExecution(
+      heuristic.actions.where((candidate) => candidate.type != 'noop'),
+    );
     validateAiV3MixEffectCapabilities(
       resolved,
       allowedEffectIds: allowedEffectIds,

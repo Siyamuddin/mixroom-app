@@ -20,6 +20,7 @@ import 'package:intl/intl.dart' as intl;
 import 'package:mixroom/core/analytics/analytics_events.dart';
 import 'package:mixroom/core/analytics/analytics_service.dart';
 import 'package:mixroom/core/crash_reporting/crash_reporting_service.dart';
+import 'package:mixroom/core/privacy/producer_training_consent.dart';
 import 'package:mixroom/helpers/midi_clip_arming.dart';
 import 'package:mixroom/helpers/midi_pitch_ranges.dart';
 import 'package:mixroom/helpers/midi_preview_note_coordinator.dart';
@@ -58,6 +59,7 @@ import 'package:mixroom/helpers/feedback_service.dart';
 import 'package:mixroom/helpers/midi_recording_generation.dart';
 import 'package:mixroom/helpers/mutable_midi_notes.dart';
 import 'package:mixroom/helpers/project_telemetry_service.dart';
+import 'package:mixroom/helpers/producer_training_upload_service.dart';
 import 'package:mixroom/helpers/project_compatibility_service.dart';
 import 'package:mixroom/helpers/project_chat_history.dart';
 import 'package:mixroom/helpers/tablet_daw_panel_layout.dart';
@@ -121,6 +123,7 @@ import 'package:mixroom/helpers/cloud_project_service.dart';
 import 'package:mixroom/helpers/cloud_sync_preferences.dart';
 import 'package:mixroom/helpers/desktop_file_ingress_service.dart';
 import 'package:mixroom/helpers/effect_parameter_exposure.dart';
+import 'package:mixroom/ai/effect_parameter_refinement.dart';
 import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/project_manager.dart';
 import 'package:mixroom/helpers/project_undo_history_store.dart';
@@ -4435,7 +4438,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   static const double _kAndroidOverlayPanelLift = 4.0;
   static const double _kAddActionsPanelWidth = 288.0;
   static const double _kOverlayPanelHorizontalInset = 8.0;
-  static const double _kProducerBannerHeightEstimate = 62.0;
   static const double _kTopPopupHorizontalMargin = 11.0;
   static const double _kTopPopupVerticalGap = 10.0;
   static const Set<String> _kSampleAudioExtensions = <String>{
@@ -6271,6 +6273,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   late final MixingMagnitudePredictor _magnitudePredictor;
   Future<void>? _aiModelsWarmupFuture;
   late final ProducerDataCollector _producerCollector;
+  late final ProducerTrainingUploadService _producerTrainingUploadService;
+  final Object _producerAiMutationZone = Object();
+  late final AuthService _producerCaptureAuth;
+  String? _producerUploadStage;
+  final _producerUploadProgress = ValueNotifier<double?>(null);
   final http.Client _producerCaptureAccessHttpClient = http.Client();
   bool _producerDataMode = false;
   bool _showProducerCaptureUi = false;
@@ -6284,7 +6291,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _producerPromptShuffle = true;
   bool _producerPromptSubmitting = false;
   bool _producerGuidedPromptAwaitingFinal = false;
-  bool _producerCapturePanelMinimized = true;
   bool _producerGuidedPromptMinimized = false;
   late final ChatController _chatController;
   String _assistantConversationSessionId = '';
@@ -7647,8 +7653,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     await WidgetsBinding.instance.endOfFrame;
 
     try {
-      final boundaryContext = _feedbackScreenshotBoundaryKey.currentContext;
-      final boundaryRenderObject = boundaryContext?.findRenderObject();
+      final boundaryRenderObject = _activeRenderObject(
+        _feedbackScreenshotBoundaryKey.currentContext,
+      );
       if (boundaryRenderObject is! RenderRepaintBoundary) {
         throw StateError('Could not capture the editor screenshot.');
       }
@@ -7936,10 +7943,24 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return (event.position - down).distance <= 10.0;
   }
 
-  bool _isGlobalPointInsideKeyRect(GlobalKey key, Offset globalPosition) {
-    final context = key.currentContext;
-    if (context == null) return false;
+  RenderObject? _activeRenderObject(BuildContext? context) {
+    if (context == null || !context.mounted) return null;
+
+    var isActive = true;
+    assert(() {
+      if (context is Element) {
+        isActive = context.debugIsActive;
+      }
+      return true;
+    }());
+    if (!isActive) return null;
+
     final renderObject = context.findRenderObject();
+    return renderObject?.attached == true ? renderObject : null;
+  }
+
+  bool _isGlobalPointInsideKeyRect(GlobalKey key, Offset globalPosition) {
+    final renderObject = _activeRenderObject(key.currentContext);
     if (renderObject is! RenderBox || !renderObject.hasSize) return false;
     final origin = renderObject.localToGlobal(Offset.zero);
     final rect = origin & renderObject.size;
@@ -7949,10 +7970,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   Rect? _topPopupAnchorRect(GlobalKey key) {
     final BuildContext? anchorContext = key.currentContext;
     final BuildContext? stackContext = _editorContentStackKey.currentContext;
-    if (anchorContext == null || stackContext == null) return null;
-
-    final RenderObject? anchorObject = anchorContext.findRenderObject();
-    final RenderObject? stackObject = stackContext.findRenderObject();
+    final RenderObject? anchorObject = _activeRenderObject(anchorContext);
+    final RenderObject? stackObject = _activeRenderObject(stackContext);
     if (anchorObject is! RenderBox ||
         stackObject is! RenderBox ||
         !anchorObject.hasSize ||
@@ -7997,9 +8016,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Rect? _globalAnchorRect(GlobalKey key) {
-    final BuildContext? anchorContext = key.currentContext;
-    if (anchorContext == null) return null;
-    final RenderObject? anchorObject = anchorContext.findRenderObject();
+    final RenderObject? anchorObject = _activeRenderObject(key.currentContext);
     if (anchorObject is! RenderBox || !anchorObject.hasSize) return null;
     final Offset topLeft = anchorObject.localToGlobal(Offset.zero);
     return topLeft & anchorObject.size;
@@ -8013,8 +8030,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool matchToolbarWidth = false,
     bool alignLeftToAnchor = false,
   }) {
-    final BuildContext? stackContext = _editorContentStackKey.currentContext;
-    final RenderObject? stackObject = stackContext?.findRenderObject();
+    final RenderObject? stackObject = _activeRenderObject(
+      _editorContentStackKey.currentContext,
+    );
     if (stackObject is! RenderBox || !stackObject.hasSize) {
       final fallbackWidth = desiredWidth;
       return _TopPopupLayout(
@@ -8807,6 +8825,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.undo();
+    if (action != null && _producerDataMode) {
+      unawaited(
+        _producerCollector
+            .recordUndoRedo(
+              isUndo: true,
+              description: action.description,
+              undoTransactionId: identityHashCode(action).toString(),
+            )
+            .catchError((Object _) {}),
+      );
+    }
     if (action != null) {
       _updateOverallDurationIfNeeded(forceRebuild: true);
     }
@@ -8834,6 +8863,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     if (_v3ExecutionInProgress) return;
     await _commitPendingProjectTempoUndo();
     final action = await _undoManager.redo();
+    if (action != null && _producerDataMode) {
+      unawaited(
+        _producerCollector
+            .recordUndoRedo(
+              isUndo: false,
+              description: action.description,
+              undoTransactionId: identityHashCode(action).toString(),
+            )
+            .catchError((Object _) {}),
+      );
+    }
     if (action != null) {
       _updateOverallDurationIfNeeded(forceRebuild: true);
     }
@@ -9549,15 +9589,39 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     //   );
     // };
     // Defer AI model loads until AI features are actually used.
-    _producerCollector = ProducerDataCollector();
-    _producerCollector.setEnabled(_producerDataMode);
     final authService = context.read<AuthService>();
-    _magnitudePredictor = !kUseLearnedMagnitudePredictor
+    _producerCaptureAuth = authService;
+    _producerTrainingUploadService = ProducerTrainingUploadService(onProgress: (stage, progress) {
+      if (!mounted) return;
+      _producerUploadProgress.value = progress;
+      if (_producerUploadStage != stage) {
+        setState(() => _producerUploadStage = stage);
+      }
+      if (stage == 'uploaded') {
+        _showSmallNotice(L10n.translate(context, 'producer_capture_status_uploaded'));
+      }
+    });
+    _producerCollector = ProducerDataCollector(
+      snapshotProvider: _buildProducerSnapshot,
+      ownerIdProvider: () => authService.signedInUser?.userId,
+    );
+    _producerCollector.configureProject(
+      projectId: _projectId,
+      projectDir: _projectDir,
+    );
+    _producerCollector.setEnabled(_producerDataMode);
+    unawaited(
+      _producerTrainingUploadService.drainPending(
+        auth: _producerCaptureAuth,
+        collector: _producerCollector,
+      ).catchError((Object _) {}),
+    );
+    final baseMagnitudePredictor = !kUseLearnedMagnitudePredictor
         ? const NoopMixingMagnitudePredictor()
         : kUseRemoteLearnedMagnitudePredictor
         ? RemoteMixingMagnitudePredictor(
             enabled: true,
-            proxyApiBaseUrl: LlmConfig.effectiveProxyApiBaseUrl,
+            proxyApiBaseUrl: LlmConfig.effectiveMixResolveBaseUrl,
             proxyPath: LlmConfig.mixResolvePath,
             authTokenProvider: authService.getIdTokenOrNull,
             refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
@@ -9568,6 +9632,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             applyModelAsset: kMixApplyClassifierAsset,
             magnitudeModelAsset: kMixMagnitudeRegressorAsset,
           );
+    _magnitudePredictor = CapturingMagnitudePredictor(
+      baseMagnitudePredictor,
+      captureEnabled: () => _producerDataMode && _producerCollector.isEnabled,
+      onTrace: _producerCollector.recordInferenceTrace,
+      captureToken: () => _producerCollector.inferenceCaptureToken,
+    );
     unawaited(_magnitudePredictor.startBackgroundRefresh());
 
     _mixModel = LocalMixingModel();
@@ -13180,7 +13250,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
     unawaited(_releaseAllDesktopMidiNotes());
     unawaited(_setIOSSystemGestureDeferral(false));
-    unawaited(_producerCollector.closeSession(reason: 'screen_dispose'));
+    unawaited(
+      _closeAndUploadProducerSession(
+        'screen_dispose',
+        awaitUpload: true,
+      ).whenComplete(_producerTrainingUploadService.close),
+    );
     WidgetsBinding.instance.removeObserver(this);
     _undoManager.removeListener(_handleUndoHistoryChanged);
     _amplitudeSub?.cancel();
@@ -13213,6 +13288,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _cloudAutoSyncTimer = null;
     _projectAutosaveCoordinator.dispose();
     _producerCaptureAccessHttpClient.close();
+    _producerUploadProgress.dispose();
     _copiedChatMessageTimer?.cancel();
     _copiedChatMessageTimer = null;
     _containedExportEllipsisTimer?.cancel();
@@ -14125,7 +14201,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _producerDataMode = false;
         _producerUiBusy = false;
         _producerGuidedPromptAwaitingFinal = false;
-        _producerCapturePanelMinimized = true;
         _producerPromptSubmitting = false;
         _producerPromptQueueIds = <String>[];
         _producerPromptQueueIndex = 0;
@@ -14134,6 +14209,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     _scheduleProjectAutosave();
     if (!allowlisted) {
       unawaited(_producerCollector.setEnabled(false));
+    } else {
+      unawaited(_producerCollector.discoverLegacyPendingUploads().then((_) =>
+        _producerTrainingUploadService.drainPending(auth: _producerCaptureAuth, collector: _producerCollector)
+      ).catchError((Object _) {}));
     }
   }
 
@@ -19856,6 +19935,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
+    if (_producerDataMode) {
+      await _setProducerDataMode(false, closeReason: 'project_exit');
+    }
     if (_usingCompatibilityAudio) {
       // Listen-only: nothing is written on the way out. Any in-memory edit
       // that was not turned into a Frozen mix is discarded with the editor.
@@ -20130,6 +20212,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final targetPlaying = !_isPlaying;
     if (targetPlaying && _rejectTransportStartWhileProjectLoading()) {
       return;
+    }
+    if (_producerDataMode) {
+      unawaited(
+        _producerCollector
+            .recordPlaybackContext({
+              'event': targetPlaying ? 'play' : 'stop',
+              'playhead_ms': _globalAudioClock.inMilliseconds,
+              'loop_enabled': _loopEnabled,
+              if (_loopEnabled) ...{
+                'loop_start_ms': _loopStartMs,
+                'loop_end_ms': _loopEndMs,
+              },
+              'selected_track': _selectedRow,
+            })
+            .catchError((Object _) {}),
+      );
     }
     _transportDesiredPlaying = targetPlaying;
     _transportCommandSerial++;
@@ -39884,8 +39982,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     final chatOverlayInsets = _desktopChatOverlayInsets(overlayContext);
     final mediaHeight = MediaQuery.sizeOf(overlayContext).height;
     final alignToChatBar = tabletDaw || PlatformCapabilities.current.isDesktop;
-    final stackRenderObject = _editorContentStackKey.currentContext
-        ?.findRenderObject();
+    final stackRenderObject = _activeRenderObject(
+      _editorContentStackKey.currentContext,
+    );
     final stackSize =
         stackRenderObject is RenderBox && stackRenderObject.hasSize
         ? stackRenderObject.size
@@ -40738,35 +40837,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
   }
 
-  double _desktopBottomPanelInset({
-    required bool chatTypingActive,
-    required double chatLift,
-  }) {
+  double _desktopBottomPanelInset({required double chatLift}) {
     if (_usesTabletDesktopDawShell(context)) {
       return chatLift +
           _kChatBarStackHeight +
           _androidTabletDawBottomInset(context) +
-          (_isProducerCaptureUiVisible && !chatTypingActive
-              ? _kProducerBannerHeightEstimate
-              : 0.0) +
           _kSamplePanelBottomGap;
     }
     if (!PlatformCapabilities.current.isDesktop) {
       return chatLift +
           _kChatBarStackHeight +
           _kTransportBarHeight +
-          (_isProducerCaptureUiVisible && !chatTypingActive
-              ? _kProducerBannerHeightEstimate
-              : 0.0) +
           (Platform.isAndroid ? 10.0 : 0.0) +
           (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
           _kSamplePanelBottomGap;
     }
-    return chatLift +
-        _kChatBarStackHeight +
-        (_isProducerCaptureUiVisible && !chatTypingActive
-            ? _kProducerBannerHeightEstimate
-            : 0.0);
+    return chatLift + _kChatBarStackHeight;
   }
 
   Widget _buildTopCircleButtonShell({
@@ -42689,10 +42775,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _kOverlayPanelHorizontalInset,
       desktopEdgeInset,
     );
-    final samplePanelBottom = _desktopBottomPanelInset(
-      chatTypingActive: _isChatTypingActive,
-      chatLift: keyboardLift,
-    );
+    final samplePanelBottom = _desktopBottomPanelInset(chatLift: keyboardLift);
     final collapsedTop = math.max(
       _kSamplePanelExpandedTop + 24.0,
       mediaSize.height * _kSamplePanelCollapsedTopFactor,
@@ -42822,10 +42905,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   return const SizedBox.shrink();
                 }
 
-                final midiPanelBottom = _desktopBottomPanelInset(
-                  chatTypingActive: _isChatTypingActive,
-                  chatLift: 0.0,
-                );
+                final midiPanelBottom = _desktopBottomPanelInset(chatLift: 0.0);
                 const midiExpandedTop = _kSamplePanelExpandedTop;
                 final midiCollapsedTop = math.max(
                   midiExpandedTop + 24.0,
@@ -43941,7 +44021,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             key: _projectSettingsProducerCaptureSwitchKey,
             value: _showProducerCaptureUi,
             activeTrackColor: const Color(0xFF1F89E3),
-            onChanged: (v) {
+            onChanged: (v) async {
+              if (!v && _producerDataMode) {
+                await _setProducerDataMode(
+                  false,
+                  closeReason: 'project_setting_disabled',
+                );
+              }
+              if (!mounted) return;
               _setStateAndRefreshProjectSettings(
                 () => _showProducerCaptureUi = v,
               );
@@ -50286,6 +50373,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       maximum: maximum,
       interval: rawInterval,
     );
+    next = applyDeferredParameterRefinement(
+      current: current,
+      proposal: next,
+      parameter: parameter,
+      action: action,
+    );
     return _EffectParameterAdjustment(
       oldValue: current,
       newValue: next,
@@ -52745,7 +52838,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     data: data,
                     project: project,
                     roleOverrides: aiV3CurrentRoleOverrides(project),
-                    bypassLearnedMagnitudes: _producerDataMode,
+                    bypassLearnedMagnitudes: false,
                     allowedEffectIds: _allowedBuiltInEffectIdsForCurrentPlan(),
                     effectConstraints: orderedEffectConstraints,
                     projectId: _projectId,
@@ -68032,6 +68125,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     bool emitActionSummaries = true,
     bool stageEffectEnsures = false,
     bool batchUndoGraphMutations = false,
+  }) => runZoned(
+    () => _applyMixingResultWithCaptureOrigin(
+      mix,
+      emitActionSummaries: emitActionSummaries,
+      stageEffectEnsures: stageEffectEnsures,
+      batchUndoGraphMutations: batchUndoGraphMutations,
+    ),
+    zoneValues: {_producerAiMutationZone: true},
+  );
+
+  Future<MixApplyReport> _applyMixingResultWithCaptureOrigin(
+    MixingResult mix, {
+    bool emitActionSummaries = true,
+    bool stageEffectEnsures = false,
+    bool batchUndoGraphMutations = false,
   }) async {
     if (mix.isNoOp || mix.actions.isEmpty) {
       return const MixApplyReport(attempted: 0, applied: 0);
@@ -69014,6 +69122,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               if (!parameterApplied || normalizedValue == null) {
                 throw StateError('mix_effect_parameter_apply_failed');
               }
+              if (_producerDataMode) {
+                _producerCollector.recordParameterExecution({
+                  'action': {'type': a.type, 'data': a.data},
+                  'effect': {
+                    'name': resolved.effectName,
+                    'effectId': resolved.effectId,
+                    'instanceId': resolved.effectInstanceId,
+                    'parameters': [EffectParameterState.fromMap(picked).toJson()],
+                  },
+                });
+              }
               appliedMutations.add(<String, dynamic>{
                 'kind': 'effect_parameter_value',
                 'row': row,
@@ -69140,6 +69259,17 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                           );
             if (!parameterApplied || normalizedValue == null) {
               throw StateError('mix_master_parameter_apply_failed');
+            }
+            if (_producerDataMode) {
+              _producerCollector.recordParameterExecution({
+                'action': {'type': a.type, 'data': a.data},
+                'effect': {
+                  'name': resolved.effectName,
+                  'effectId': resolved.effectId,
+                  'instanceId': resolved.effectInstanceId ?? '',
+                  'parameters': [EffectParameterState.fromMap(picked).toJson()],
+                },
+              });
             }
             appliedMutations.add(<String, dynamic>{
               'kind': 'effect_parameter_value',
@@ -70115,9 +70245,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final values = await Future.wait<dynamic>(<Future<dynamic>>[
           JuceAudioEngine.getMasterEffects(),
           JuceAudioEngine.getMasterEffectIds(),
+          if (_producerDataMode) JuceAudioEngine.getMasterEffectInstanceIds(),
         ]).timeout(_kAiMixEffectProbeTimeout);
         final effects = (values[0] as List).cast<String>();
         final effectIds = (values[1] as List).cast<String>();
+        final instances = values.length > 2
+            ? (values[2] as List).cast<String>()
+            : const <String>[];
         final effectIndex = effects.indexWhere(
           (name) => name.toLowerCase().contains(effectNameContains),
         );
@@ -70141,6 +70275,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               effectIndex: effectIndex,
               effectId: effectIds[effectIndex],
               effectName: effects[effectIndex],
+              effectInstanceId: instances.length == effects.length
+                  ? instances[effectIndex]
+                  : null,
               parameter: parameter,
             );
           }
@@ -70222,15 +70359,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _recordProducerManualEdit(String kind, Map<String, dynamic> payload) {
-    if (!_producerDataMode) return;
+    if (!_producerDataMode ||
+        _v3ExecutionInProgress ||
+        Zone.current[_producerAiMutationZone] == true)
+      return;
     unawaited(
-      _producerCollector.recordManualEdit(
-        kind: kind,
-        payload: {...payload, 'at': DateTime.now().toUtc().toIso8601String()},
-        projectId: _projectId,
-        projectName: _projectName,
-        projectDir: _projectDir,
-      ),
+      _producerCollector
+          .recordManualEdit(
+            kind: kind,
+            payload: {
+              ...payload,
+              if (_undoManager.lastAction != null)
+                'undo_transaction_id': identityHashCode(
+                  _undoManager.lastAction,
+                ).toString(),
+              'at': DateTime.now().toUtc().toIso8601String(),
+            },
+            projectId: _projectId,
+            projectName: _projectName,
+            projectDir: _projectDir,
+          )
+          .catchError((Object _) {}),
     );
   }
 
@@ -71049,6 +71198,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       return;
     }
+    final producerBefore = _producerDataMode
+        ? await _safeProducerSnapshot()
+        : null;
     final expectations = await _captureAiV3Expectations(actions);
     final workflowRuntime = AiV3WorkflowRuntime();
     final executionSummariesByCommandId = <String, List<String>>{};
@@ -71113,6 +71265,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   );
                 },
               );
+      if (_producerDataMode && producerBefore != null) {
+        final after = await _safeProducerSnapshot();
+        if (after != null) {
+          await _producerCollector
+              .recordAiStep(
+                prompt: _producerCollector.lastPrompt,
+                preSnapshot: producerBefore,
+                postSnapshot: after,
+                resolvedActions: actions
+                    .map(
+                      (a) => <String, dynamic>{'type': a.type, 'data': a.data},
+                    )
+                    .toList(),
+                undoTransactionId: _undoManager.lastAction == null
+                    ? null
+                    : identityHashCode(_undoManager.lastAction).toString(),
+                projectId: _projectId,
+                projectDir: _projectDir,
+              )
+              .catchError((Object _) {});
+        }
+      }
       releaseTransactionNoticeCapture();
       executionStopwatch.stop();
       final verifiedActionNotices = deferredActionNotices.isNotEmpty
@@ -77356,6 +77530,766 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         .join('\n');
   }
 
+  Future<bool> _ensureProducerTrainingConsent() async {
+    if (await ProducerTrainingConsent.isAccepted()) return true;
+    if (!mounted) return false;
+
+    Widget buildConsentDetail({
+      required IconData icon,
+      required String title,
+      required String body,
+    }) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1F89E3).withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 17, color: const Color(0xFF8FD3FF)),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Color(0xFFF4F4F4),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  body,
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.70),
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    height: 1.38,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.58),
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        clipBehavior: Clip.antiAlias,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 18),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: MixroomShellSurface(
+            radius: 24,
+            strong: true,
+            color: const Color.fromRGBO(244, 244, 244, 0.14),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1F89E3).withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.graphic_eq_rounded,
+                        color: Color(0xFF8FD3FF),
+                        size: 21,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        L10n.translate(
+                          dialogContext,
+                          'producer_capture_consent_title',
+                        ),
+                        style: const TextStyle(
+                          fontFamily: 'Pretendard',
+                          color: Color(0xFFF4F4F4),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  L10n.translate(
+                    dialogContext,
+                    'producer_capture_consent_intro',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.84),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w500,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                buildConsentDetail(
+                  icon: Icons.tune_rounded,
+                  title: L10n.translate(
+                    dialogContext,
+                    'producer_capture_collected_title',
+                  ),
+                  body: L10n.translate(
+                    dialogContext,
+                    'producer_capture_collected_body',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                buildConsentDetail(
+                  icon: Icons.lock_outline_rounded,
+                  title: L10n.translate(
+                    dialogContext,
+                    'producer_capture_privacy_title',
+                  ),
+                  body: L10n.translate(
+                    dialogContext,
+                    'producer_capture_privacy_body',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  L10n.translate(
+                    dialogContext,
+                    'producer_capture_turn_off_anytime',
+                  ),
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    color: Colors.white.withValues(alpha: 0.58),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          foregroundColor: const Color(0xFFF4F4F4),
+                          backgroundColor: Colors.white.withValues(alpha: 0.10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: 0.12),
+                            ),
+                          ),
+                        ),
+                        child: Text(
+                          L10n.translate(
+                            dialogContext,
+                            'producer_capture_not_now',
+                          ),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 44),
+                          foregroundColor: const Color(0xFFF4F4F4),
+                          backgroundColor: _kOneButtonMixAccentColor,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: Text(
+                          L10n.translate(
+                            dialogContext,
+                            'producer_capture_turn_on',
+                          ),
+                          style: const TextStyle(
+                            fontFamily: 'Pretendard',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (accepted != true) return false;
+    await ProducerTrainingConsent.accept();
+    return true;
+  }
+
+  Future<Map<String, dynamic>?> _safeProducerSnapshot() async {
+    try {
+      return await _buildProducerSnapshot();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _closeAndUploadProducerSession(
+    String reason, {
+    bool awaitUpload = false,
+  }) async {
+    try {
+      await _producerCollector.closeSession(reason: reason);
+      final upload = _producerTrainingUploadService
+          .drainPending(
+            auth: _producerCaptureAuth,
+            collector: _producerCollector,
+          )
+          .catchError((Object _) {});
+      if (awaitUpload) {
+        await upload;
+      } else {
+        unawaited(upload);
+      }
+    } catch (_) {
+      // Training capture is observation-only.
+    }
+  }
+
+  String _producerEpisodeSummary(Map<String, dynamic> episode) {
+    final time = DateTime.tryParse(
+      episode['started_at']?.toString() ?? '',
+    )?.toLocal();
+    final changes = (episode['control_changes'] as List?) ?? const [];
+    final labels = <String>{};
+    for (final change in changes.whereType<Map>()) {
+      final kind = change['kind']?.toString() ?? '';
+      final key = switch (kind) {
+        'gain' => 'producer_capture_summary_levels',
+        'pan' => 'producer_capture_label_stereo_placement',
+        'plugin_insert' => 'producer_capture_summary_added',
+        'plugin_remove' => 'producer_capture_summary_removed',
+        _ when kind.startsWith('plugin_') => 'producer_capture_summary_effects',
+        _ => 'producer_capture_summary_other',
+      };
+      labels.add(L10n.translate(context, key));
+    }
+    final request = episode['request_or_context'] as Map?;
+    final prompt = request?['prompt']?.toString().trim() ?? '';
+    return [
+      if (time != null)
+        L10n.translateWithParams(context, 'producer_capture_summary_time', {
+          'time': MaterialLocalizations.of(context).formatTimeOfDay(
+            TimeOfDay.fromDateTime(time),
+            alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+          ),
+        }),
+      if (labels.isNotEmpty) labels.join(' · '),
+      if (prompt.isNotEmpty)
+        L10n.translateWithParams(context, 'producer_capture_summary_prompt', {
+          'prompt': prompt,
+        }),
+    ].join('\n');
+  }
+
+  Future<void> _reviewSampledProducerEpisodes() async {
+    if (!mounted) return;
+    const diagnosisLabels = <String, String>{
+      'tone': 'producer_capture_label_tone',
+      'masking': 'producer_capture_label_masking',
+      'level_balance': 'producer_capture_label_level_balance',
+      'dynamics': 'producer_capture_label_dynamics',
+      'space_depth': 'producer_capture_label_space_depth',
+      'stereo_image': 'producer_capture_label_stereo_image',
+      'distortion_noise': 'producer_capture_label_distortion_noise',
+      'arrangement_timing': 'producer_capture_label_arrangement_timing',
+      'other': 'producer_capture_label_other',
+    };
+    const strategyLabels = <String, String>{
+      'target_level_change': 'producer_capture_label_target_level',
+      'competing_track_level_change':
+          'producer_capture_label_other_track_levels',
+      'source_tone_change': 'producer_capture_label_source_tone',
+      'competing_track_spectral_carve': 'producer_capture_label_eq_space',
+      'dynamics_control': 'producer_capture_label_control_dynamics',
+      'spatial_separation': 'producer_capture_label_stereo_placement',
+      'ambience_change': 'producer_capture_label_reverb_delay',
+      'bus_processing': 'producer_capture_label_bus_processing',
+      'other': 'producer_capture_label_other',
+    };
+
+    Widget buildCaptureChoice({
+      required String label,
+      required bool selected,
+      required ValueChanged<bool> onSelected,
+    }) {
+      return FilterChip(
+        label: Text(label),
+        selected: selected,
+        showCheckmark: true,
+        checkmarkColor: const Color(0xFFF4F4F4),
+        color: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return const Color(0xFF1F89E3).withValues(alpha: 0.28);
+          }
+          return Colors.white.withValues(alpha: 0.07);
+        }),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        pressElevation: 0,
+        onSelected: onSelected,
+        side: BorderSide(
+          color: selected
+              ? const Color(0xFF8FD3FF).withValues(alpha: 0.62)
+              : Colors.white.withValues(alpha: 0.10),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+        labelStyle: TextStyle(
+          fontFamily: 'Pretendard',
+          color: selected
+              ? const Color(0xFFF4F4F4)
+              : Colors.white.withValues(alpha: 0.72),
+          fontSize: 12.5,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        ),
+      );
+    }
+
+    final candidates = _producerCollector.reviewCandidates();
+    for (var index = 0; index < candidates.length; index++) {
+      if (!mounted) return;
+      final episode = candidates[index];
+      final selectedDiagnoses = <String>{
+        ...((episode['diagnoses'] as List?) ?? const []).map((v) => '$v'),
+      };
+      if (selectedDiagnoses.isEmpty) {
+        selectedDiagnoses.add((episode['diagnosis'] ?? 'other').toString());
+      }
+      final strategies = <String>{
+        ...((episode['strategies'] as List?) ?? const []).map((v) => '$v'),
+      };
+      var producerOutcome = 'not_evaluated';
+      var producerNotes = '';
+      final actionCount =
+          ((episode['actions_raw'] as List?) ?? const []).length;
+      final save = await showDialog<bool>(
+        context: context,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withValues(alpha: 0.58),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => Dialog(
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
+            shadowColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+            ),
+            clipBehavior: Clip.antiAlias,
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 24,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: 480,
+                maxHeight: MediaQuery.sizeOf(context).height * 0.86,
+              ),
+              child: MixroomShellSurface(
+                radius: 24,
+                strong: true,
+                color: const Color.fromRGBO(244, 244, 244, 0.14),
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFF1F89E3,
+                            ).withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          alignment: Alignment.center,
+                          child: const Icon(
+                            Icons.tune_rounded,
+                            color: Color(0xFF8FD3FF),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            L10n.translate(
+                              context,
+                              'producer_capture_review_title',
+                            ),
+                            style: const TextStyle(
+                              fontFamily: 'Pretendard',
+                              color: Color(0xFFF4F4F4),
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              height: 1.15,
+                            ),
+                          ),
+                        ),
+                        if (candidates.length > 1)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              L10n.translateWithParams(
+                                context,
+                                'producer_capture_review_progress',
+                                {
+                                  'current': '${index + 1}',
+                                  'total': '${candidates.length}',
+                                },
+                              ),
+                              style: TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white.withValues(alpha: 0.66),
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 13),
+                    Text(
+                      actionCount == 1
+                          ? L10n.translate(
+                              context,
+                              'producer_capture_review_single',
+                            )
+                          : L10n.translateWithParams(
+                              context,
+                              'producer_capture_review_multiple',
+                              {'count': '$actionCount'},
+                            ),
+                      style: TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Colors.white.withValues(alpha: 0.78),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (_producerEpisodeSummary(
+                              episode,
+                            ).isNotEmpty) ...[
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _producerEpisodeSummary(episode),
+                                  maxLines: 4,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontFamily: 'Pretendard',
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_review_hint',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Colors.white70,
+                                fontSize: 12,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_review_fixing',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Wrap(
+                              spacing: 7,
+                              runSpacing: 7,
+                              children: diagnosisLabels.entries
+                                  .map(
+                                    (entry) => buildCaptureChoice(
+                                      label: L10n.translate(
+                                        context,
+                                        entry.value,
+                                      ),
+                                      selected: selectedDiagnoses.contains(
+                                        entry.key,
+                                      ),
+                                      onSelected: (selected) => setDialogState(
+                                        () {
+                                          if (selected) {
+                                            selectedDiagnoses.add(entry.key);
+                                          } else {
+                                            selectedDiagnoses.remove(entry.key);
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_review_changed',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                color: Color(0xFFF4F4F4),
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Wrap(
+                              spacing: 7,
+                              runSpacing: 7,
+                              children: strategyLabels.entries
+                                  .map(
+                                    (entry) => buildCaptureChoice(
+                                      label: L10n.translate(
+                                        context,
+                                        entry.value,
+                                      ),
+                                      selected: strategies.contains(entry.key),
+                                      onSelected: (selected) =>
+                                          setDialogState(() {
+                                            if (selected) {
+                                              strategies.add(entry.key);
+                                            } else {
+                                              strategies.remove(entry.key);
+                                            }
+                                          }),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_outcome',
+                              ),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 9),
+                            Wrap(
+                              spacing: 7,
+                              runSpacing: 7,
+                              children: [
+                                for (final value in [
+                                  'accepted',
+                                  'rejected',
+                                  'partial',
+                                  'experimenting',
+                                  'not_evaluated',
+                                ])
+                                  buildCaptureChoice(
+                                    label: L10n.translate(
+                                      context,
+                                      'producer_capture_outcome_$value',
+                                    ),
+                                    selected: producerOutcome == value,
+                                    onSelected: (_) => setDialogState(
+                                      () => producerOutcome = value,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            TextField(
+                              maxLength: 2000,
+                              minLines: 2,
+                              maxLines: 4,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: InputDecoration(
+                                hintText: L10n.translate(
+                                  context,
+                                  'producer_capture_notes',
+                                ),
+                                hintStyle: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 13,
+                                ),
+                                filled: true,
+                                fillColor: Colors.white.withValues(alpha: 0.05),
+                                contentPadding: const EdgeInsets.all(12),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Colors.white.withValues(alpha: 0.12),
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xFF8FD3FF),
+                                  ),
+                                ),
+                              ),
+                              onChanged: (value) => producerNotes = value,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () =>
+                                Navigator.of(dialogContext).pop(false),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(0, 44),
+                              foregroundColor: const Color(0xFFF4F4F4),
+                              backgroundColor: Colors.white.withValues(
+                                alpha: 0.10,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                ),
+                              ),
+                            ),
+                            child: Text(
+                              L10n.translate(context, 'producer_capture_skip'),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () =>
+                                Navigator.of(dialogContext).pop(true),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(0, 44),
+                              foregroundColor: const Color(0xFFF4F4F4),
+                              backgroundColor: _kOneButtonMixAccentColor,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: Text(
+                              L10n.translate(
+                                context,
+                                'producer_capture_save_response',
+                              ),
+                              style: const TextStyle(
+                                fontFamily: 'Pretendard',
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      if (save == true) {
+        await _producerCollector.applyProducerLabel(
+          episodeId: episode['episode_id'].toString(),
+          diagnoses: selectedDiagnoses.toList(),
+          strategies: strategies.toList(),
+          outcome: producerOutcome,
+          notes: producerNotes,
+        );
+      }
+    }
+  }
+
   Future<void> _setProducerDataMode(
     bool enabled, {
     String closeReason = 'ui_toggle',
@@ -77365,35 +78299,40 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     setState(() => _producerUiBusy = true);
     try {
       if (enabled) {
+        if (!await _ensureProducerTrainingConsent()) return;
         _producerDataMode = true;
-        _producerCapturePanelMinimized = true;
+        if (_producerUploadStage == 'uploaded') {
+          _producerUploadStage = null;
+          _producerUploadProgress.value = null;
+        }
         _setDawPanelVisible('producer_capture', false);
         await _producerCollector.setEnabled(true);
-        await _refreshProducerPromptQueue(reshuffle: true);
-        _insertAssistantChatText(
-          'Producer data mode enabled. Use the guided prompt queue to run, skip, or reshuffle prompts. Each accepted prompt captures before, AI-after, and final producer-after snapshots.',
+        await _producerCollector.beginSession(
+          initialSnapshot: await _buildProducerSnapshot(),
+          projectId: _projectId,
+          projectDir: _projectDir,
         );
-        _showSmallNotice('Producer capture enabled. Guided prompts loaded.');
+        _insertAssistantChatText(
+          L10n.translate(context, 'producer_capture_on_chat'),
+        );
+        _showSmallNotice(L10n.translate(context, 'producer_capture_enabled'));
       } else {
-        if (_producerCollector.hasPendingPromptCycle) {
-          await _finalizeProducerPromptCycle(
-            disposition: 'mode_disabled',
-            insertMessage: false,
-          );
-        }
-        if (_producerCollector.hasActiveSession) {
-          await _producerCollector.closeSession(reason: closeReason);
-        }
+        await _producerCollector.finalizeActiveEpisode(
+          disposition: 'mode_disabled',
+        );
+        await _reviewSampledProducerEpisodes();
+        await _closeAndUploadProducerSession(closeReason);
         _producerDataMode = false;
         _producerGuidedPromptAwaitingFinal = false;
-        _producerCapturePanelMinimized = true;
         _setDawPanelVisible('producer_capture', false);
         _producerPromptSubmitting = false;
         _producerPromptQueueIds = <String>[];
         _producerPromptQueueIndex = 0;
         await _producerCollector.setEnabled(false);
-        _insertAssistantChatText('Producer data mode disabled.');
-        _showSmallNotice('Producer capture disabled.');
+        _insertAssistantChatText(
+          L10n.translate(context, 'producer_capture_off_chat'),
+        );
+        _showSmallNotice(L10n.translate(context, 'producer_capture_disabled'));
       }
     } finally {
       if (mounted) {
@@ -77417,17 +78356,20 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return;
     }
 
-    final snapshot = finalSnapshot ?? await _buildProducerSnapshot();
+    final snapshot = finalSnapshot ?? await _safeProducerSnapshot();
+    if (snapshot == null) return;
     final shouldAdvanceQueue =
         disposition == 'manual_mark' && _producerGuidedPromptAwaitingFinal;
     _producerGuidedPromptAwaitingFinal = false;
-    await _producerCollector.recordPromptCycleStop(
-      finalSnapshot: snapshot,
-      disposition: disposition,
-      projectId: _projectId,
-      projectName: _projectName,
-      projectDir: _projectDir,
-    );
+    await _producerCollector
+        .recordPromptCycleStop(
+          finalSnapshot: snapshot,
+          disposition: disposition,
+          projectId: _projectId,
+          projectName: _projectName,
+          projectDir: _projectDir,
+        )
+        .catchError((Object _) {});
     if (mounted) {
       setState(() {});
     }
@@ -77566,27 +78508,41 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     }
   }
 
-  String _producerCaptureStatusLabel() {
-    if (!_producerDataMode) return 'Producer Capture: OFF';
-    if (!_producerCollector.hasActiveSession) {
-      return 'Producer Capture: ON (waiting for first AI step)';
-    }
-    if (_producerCollector.hasPendingPromptCycle) {
-      return 'Producer Capture: ON (capture final after-state when done)';
-    }
-    return 'Producer Capture: ON';
+  String? _producerUploadLabel() {
+    final key = switch (_producerUploadStage) {
+      'preparing' => 'producer_capture_preparing',
+      'uploading' => 'producer_capture_compact_uploading',
+      'verifying' => 'producer_capture_verifying',
+      'uploaded' => 'producer_capture_status_uploaded',
+      'retry_needed' => 'producer_capture_status_retry',
+      'failed' => 'producer_capture_upload_failed',
+      _ => null,
+    };
+    if (key == null) return null;
+    final label = L10n.translate(context, key);
+    return _producerUploadStage == 'uploading' &&
+            _producerUploadProgress.value != null
+        ? '$label · ${(_producerUploadProgress.value! * 100).floor()}%'
+        : label;
   }
 
-  String _producerCaptureCompactStatusLabel() {
-    if (!_producerDataMode) return 'Capture Off';
-    if (!_producerCollector.hasActiveSession) {
-      return 'Capture On';
-    }
-    if (_producerCollector.hasPendingPromptCycle) {
-      return 'Need Final';
-    }
-    return 'Capture On';
-  }
+  String _producerCaptureStatusLabel() =>
+      _producerUploadLabel() ??
+      L10n.translate(
+        context,
+        _producerDataMode
+            ? 'producer_capture_status_recording'
+            : 'producer_capture_status_off',
+      );
+
+  String _producerCaptureCompactStatusLabel() =>
+      _producerUploadLabel() ??
+      L10n.translate(
+        context,
+        _producerDataMode
+            ? 'producer_capture_compact_recording'
+            : 'producer_capture_compact_off',
+      );
 
   _ProducerPromptTemplate? _producerPromptTemplateById(String id) {
     for (final template in _kProducerPromptTemplates) {
@@ -78160,7 +79116,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
       Map<String, dynamic>? producerPreSnapshot;
       if (_producerDataMode) {
-        producerPreSnapshot = await _buildProducerSnapshot();
+        producerPreSnapshot = await _safeProducerSnapshot();
+        await _producerCollector
+            .recordAiRequest(prompt: trimmed)
+            .catchError((Object _) {});
         _throwIfChatFlowStopped(chatFlowId);
         _producerGuidedPromptAwaitingFinal = false;
         if (_producerCollector.hasPendingPromptCycle) {
@@ -78212,7 +79171,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           aiFeature: aiFeature,
           conversationSessionId: _ensureAssistantConversationSessionId(),
           clientStateDigest: _freshAiV3StateFingerprint(),
-          bypassLearnedMagnitudes: _producerDataMode,
         );
         _throwIfChatFlowStopped(chatFlowId);
       } catch (error, stackTrace) {
@@ -78320,18 +79278,28 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           );
 
           if (_producerDataMode && producerPreSnapshot != null) {
-            final producerPostSnapshot = await _buildProducerSnapshot();
+            final producerPostSnapshot = await _safeProducerSnapshot();
             _throwIfChatFlowStopped(chatFlowId);
-            await _producerCollector.recordAiStep(
-              prompt: trimmed,
-              preSnapshot: producerPreSnapshot,
-              postSnapshot: producerPostSnapshot,
-              resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
-              llmPayload: reply.meta,
-              projectId: _projectId,
-              projectName: _projectName,
-              projectDir: _projectDir,
-            );
+            await _producerCollector
+                .recordAiStep(
+                  prompt: trimmed,
+                  preSnapshot: producerPreSnapshot,
+                  postSnapshot:
+                      producerPostSnapshot ??
+                      {'capture_warning': 'snapshot_unavailable'},
+                  resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
+                  llmPayload: reply.meta,
+                  captureWarning: applyReport.applied < applyReport.attempted
+                      ? 'partial_ai_application'
+                      : null,
+                  undoTransactionId: _undoManager.lastAction == null
+                      ? null
+                      : identityHashCode(_undoManager.lastAction).toString(),
+                  projectId: _projectId,
+                  projectName: _projectName,
+                  projectDir: _projectDir,
+                )
+                .catchError((Object _) {});
             _throwIfChatFlowStopped(chatFlowId);
           }
         }
@@ -78839,7 +79807,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
     Map<String, dynamic>? producerPreSnapshot;
     if (_producerDataMode) {
-      producerPreSnapshot = await _buildProducerSnapshot();
+      producerPreSnapshot = await _safeProducerSnapshot();
+      await _producerCollector
+          .recordAiRequest(prompt: prompt)
+          .catchError((Object _) {});
       _producerGuidedPromptAwaitingFinal = false;
       if (_producerCollector.hasPendingPromptCycle) {
         await _finalizeProducerPromptCycle(
@@ -78886,7 +79857,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         conversationSessionId: _ensureAssistantConversationSessionId(),
         clientStateDigest: _freshAiV3StateFingerprint(),
         autoApplyProposals: true, // <-- key
-        bypassLearnedMagnitudes: _producerDataMode,
         oneButtonMixProfileId: selectedProfile.id,
       );
     } catch (error, stackTrace) {
@@ -78980,17 +79950,27 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         );
 
         if (_producerDataMode && producerPreSnapshot != null) {
-          final producerPostSnapshot = await _buildProducerSnapshot();
-          await _producerCollector.recordAiStep(
-            prompt: prompt,
-            preSnapshot: producerPreSnapshot,
-            postSnapshot: producerPostSnapshot,
-            resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
-            llmPayload: reply.meta,
-            projectId: _projectId,
-            projectName: _projectName,
-            projectDir: _projectDir,
-          );
+          final producerPostSnapshot = await _safeProducerSnapshot();
+          await _producerCollector
+              .recordAiStep(
+                prompt: prompt,
+                preSnapshot: producerPreSnapshot,
+                postSnapshot:
+                    producerPostSnapshot ??
+                    {'capture_warning': 'snapshot_unavailable'},
+                resolvedActions: mix.actions.map((a) => a.toJson()).toList(),
+                llmPayload: reply.meta,
+                captureWarning: applyReport.applied < applyReport.attempted
+                    ? 'partial_ai_application'
+                    : null,
+                undoTransactionId: _undoManager.lastAction == null
+                    ? null
+                    : identityHashCode(_undoManager.lastAction).toString(),
+                projectId: _projectId,
+                projectName: _projectName,
+                projectDir: _projectDir,
+              )
+              .catchError((Object _) {});
         }
       }
 
@@ -79119,9 +80099,151 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return (navInset + 8.0).clamp(0.0, 88.0).toDouble();
   }
 
+  Widget _buildProducerCaptureOverlay() => ValueListenableBuilder<double?>(
+    valueListenable: _producerUploadProgress,
+    builder: (_, __, ___) => _buildProducerCaptureOverlayContent(),
+  );
+
+  Widget _buildProducerCaptureOverlayContent() {
+    return Tooltip(
+      message: L10n.translate(context, 'producer_capture_toggle_tooltip'),
+      preferBelow: false,
+      waitDuration: const Duration(milliseconds: 400),
+      showDuration: const Duration(seconds: 12),
+      triggerMode: TooltipTriggerMode.longPress,
+      constraints: const BoxConstraints(maxWidth: 300),
+      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E242A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      ),
+      textStyle: const TextStyle(
+        fontFamily: 'Pretendard',
+        color: Color(0xFFF4F4F4),
+        fontSize: 12,
+        height: 1.5,
+      ),
+      child: Semantics(
+        label: _producerCaptureStatusLabel(),
+        container: true,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 300),
+          padding: const EdgeInsets.fromLTRB(10, 4, 5, 4),
+          decoration: BoxDecoration(
+            color: const Color.fromRGBO(30, 36, 42, 0.94),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: _producerDataMode
+                  ? const Color.fromRGBO(79, 149, 255, 0.52)
+                  : Colors.white.withValues(alpha: 0.12),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (const {
+                'preparing',
+                'uploading',
+                'verifying',
+              }.contains(_producerUploadStage))
+                SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: _producerUploadStage == 'uploading'
+                        ? _producerUploadProgress.value
+                        : null,
+                  ),
+                )
+              else if (_producerUploadStage == 'uploaded')
+                const Icon(
+                  Icons.check_circle_outline,
+                  size: 15,
+                  color: Color(0xFF77C99C),
+                )
+              else
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _producerDataMode
+                        ? const Color(0xFF4F95FF)
+                        : Colors.white.withValues(alpha: 0.42),
+                  ),
+                ),
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  _producerCaptureCompactStatusLabel(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    fontFamily: 'Pretendard',
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.05,
+                  ),
+                ),
+              ),
+              if (_producerUploadStage == 'failed' ||
+                  _producerUploadStage == 'retry_needed')
+                IconButton(
+                  tooltip: L10n.translate(
+                    context,
+                    'producer_capture_retry_upload',
+                  ),
+                  icon: const Icon(Icons.refresh, size: 17),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => unawaited(
+                    _producerTrainingUploadService
+                        .drainPending(
+                          auth: _producerCaptureAuth,
+                          collector: _producerCollector,
+                          retryFailed: true,
+                        )
+                        .catchError((Object _) {}),
+                  ),
+                ),
+              const SizedBox(width: 3),
+              Transform.scale(
+                scale: 0.76,
+                child: Switch.adaptive(
+                  value: _producerDataMode,
+                  onChanged: _producerUiBusy
+                      ? null
+                      : (value) async {
+                          _trackUiClick(
+                            controlId: 'producer_mode_toggle',
+                            surface: 'producer_capture',
+                            controlType: 'toggle',
+                            value: value,
+                          );
+                          await _setProducerDataMode(value);
+                          if (mounted) setState(() {});
+                        },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildBottomChatAndTransport({
     bool includeChatBar = true,
-    bool includeProducerCapture = true,
     bool includeTransport = true,
     double chatBarKeyboardOffset = 0.0,
   }) {
@@ -79138,187 +80260,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (includeProducerCapture)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
-                child: Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: _producerCapturePanelMinimized ? 10 : 12,
-                    vertical: _producerCapturePanelMinimized ? 8 : 10,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        Color.fromRGBO(94, 104, 114, 0.90),
-                        Color.fromRGBO(58, 66, 75, 0.94),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.12),
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.24),
-                        blurRadius: 18,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(
-                            Icons.science_outlined,
-                            color: Colors.white,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              _producerCapturePanelMinimized
-                                  ? _producerCaptureCompactStatusLabel()
-                                  : _producerCaptureStatusLabel(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          IconButton(
-                            constraints: const BoxConstraints(
-                              minWidth: 32,
-                              minHeight: 32,
-                            ),
-                            padding: EdgeInsets.zero,
-                            tooltip:
-                                'Capture current producer final after-state',
-                            onPressed:
-                                _producerDataMode &&
-                                    _producerCollector.hasPendingPromptCycle
-                                ? () async {
-                                    _trackUiClick(
-                                      controlId: 'producer_capture_final',
-                                      surface: 'producer_capture',
-                                    );
-                                    await _finalizeProducerPromptCycle(
-                                      disposition: 'manual_mark',
-                                    );
-                                    if (mounted) setState(() {});
-                                  }
-                                : null,
-                            icon: Icon(
-                              Icons.check_circle_outline,
-                              size: 17,
-                              color:
-                                  _producerDataMode &&
-                                      _producerCollector.hasPendingPromptCycle
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.35),
-                            ),
-                          ),
-                          IconButton(
-                            constraints: const BoxConstraints(
-                              minWidth: 32,
-                              minHeight: 32,
-                            ),
-                            padding: EdgeInsets.zero,
-                            tooltip: L10n.translate(
-                              context,
-                              'Export producer session',
-                            ),
-                            onPressed: _producerDataMode
-                                ? () async {
-                                    _trackUiClick(
-                                      controlId: 'producer_export_session',
-                                      surface: 'producer_capture',
-                                    );
-                                    await _exportProducerSession();
-                                    if (mounted) setState(() {});
-                                  }
-                                : null,
-                            icon: Icon(
-                              Icons.ios_share_rounded,
-                              size: 17,
-                              color: _producerDataMode
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.35),
-                            ),
-                          ),
-                          IconButton(
-                            constraints: const BoxConstraints(
-                              minWidth: 32,
-                              minHeight: 32,
-                            ),
-                            padding: EdgeInsets.zero,
-                            tooltip: _producerCapturePanelMinimized
-                                ? 'Expand producer capture'
-                                : 'Minimize producer capture',
-                            onPressed: _producerDataMode
-                                ? () {
-                                    final nextExpanded =
-                                        _producerCapturePanelMinimized;
-                                    _trackUiClick(
-                                      controlId: 'producer_panel_toggle',
-                                      surface: 'producer_capture',
-                                      controlType: 'toggle',
-                                      value: nextExpanded,
-                                    );
-                                    setState(() {
-                                      _producerCapturePanelMinimized =
-                                          !_producerCapturePanelMinimized;
-                                    });
-                                    _setDawPanelVisible(
-                                      'producer_capture',
-                                      !_producerCapturePanelMinimized,
-                                    );
-                                  }
-                                : null,
-                            icon: Icon(
-                              _producerCapturePanelMinimized
-                                  ? Icons.unfold_more_rounded
-                                  : Icons.unfold_less_rounded,
-                              size: 17,
-                              color: _producerDataMode
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.35),
-                            ),
-                          ),
-                          Switch.adaptive(
-                            value: _producerDataMode,
-                            onChanged: _producerUiBusy
-                                ? null
-                                : (v) async {
-                                    _trackUiClick(
-                                      controlId: 'producer_mode_toggle',
-                                      surface: 'producer_capture',
-                                      controlType: 'toggle',
-                                      value: v,
-                                    );
-                                    await _setProducerDataMode(v);
-                                    if (mounted) setState(() {});
-                                  },
-                          ),
-                        ],
-                      ),
-                      if (_producerDataMode && !_producerCapturePanelMinimized)
-                        _buildProducerGuidedPromptPanel(),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
         if (usesTabletDesktopBottomRow && includeChatBar)
           Padding(
             padding: EdgeInsets.fromLTRB(16, 10, 16, 10),
@@ -85881,22 +86822,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final keyboardLift = usesTabletDawLayout
             ? rawKeyboardLift
             : math.max(0.0, rawKeyboardLift - fixedTransportFootprint);
+        final chatTypingActive = _isChatTypingActive;
+        final showProducerCapture =
+            (_isProducerCaptureUiVisible || _producerUploadStage != null) &&
+            !chatTypingActive &&
+            !_chatExpanded &&
+            !_showAddActionsPanel &&
+            !_sampleBrowserVisible;
         // Reserve the complete bottom control dock. This positions every
         // ScaffoldMessenger snack bar just above the chat bar on phone and
         // above the combined control row on tablet/desktop.
         final snackBottomInset = usesBottomControlRow
             ? _kChatBarStackHeight +
                   tabletDawBottomInset +
-                  (_isProducerCaptureUiVisible
-                      ? _kProducerBannerHeightEstimate
-                      : 0.0) +
                   keyboardLift +
                   _kSnackBarDockGap
             : _kChatBarStackHeight +
                   _kTransportBarHeight +
-                  (_isProducerCaptureUiVisible
-                      ? _kProducerBannerHeightEstimate
-                      : 0.0) +
                   _androidTransportBottomInset(context) +
                   (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0) +
                   _kSnackBarDockGap;
@@ -85914,9 +86856,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         final tabletBottomDockRightInset = usesTabletDawLayout
             ? tabletRightPanelReservedWidth
             : 0.0;
-        final chatTypingActive = _isChatTypingActive;
-        final showProducerCapture =
-            _isProducerCaptureUiVisible && !chatTypingActive;
+        final producerCaptureBottomInset =
+            tabletDawBottomInset +
+            (usesBottomControlRow
+                ? _kChatBarStackHeight
+                : _kChatBarStackHeight +
+                      _kTransportBarHeight +
+                      _androidTransportBottomInset(context) +
+                      (Platform.isAndroid ? _kAndroidOverlayPanelLift : 0.0)) +
+            6.0;
         final chatTapAwayBottomInset =
             _kChatHistoryHeight +
             _kChatBarStackHeight +
@@ -87291,10 +88239,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           bottomDockInset:
                                               _kChatBarStackHeight +
                                               _kTransportBarHeight +
-                                              tabletDawBottomInset +
-                                              (_isProducerCaptureUiVisible
-                                                  ? _kProducerBannerHeightEstimate
-                                                  : 0.0),
+                                              tabletDawBottomInset,
 
                                           mode: _resolvedMode,
                                         ),
@@ -87313,7 +88258,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   final keyboardInset = MediaQuery.viewInsetsOf(
                                     overlayContext,
                                   ).bottom;
-                                  final chatTypingActive = _isChatTypingActive;
                                   final chatKeyboardActive =
                                       _chatShouldTrackKeyboardInset(
                                         overlayContext,
@@ -87359,7 +88303,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       );
                                   final samplePanelBottom =
                                       _desktopBottomPanelInset(
-                                        chatTypingActive: chatTypingActive,
                                         chatLift: chatLift,
                                       );
                                   final collapsedTop = math.max(
@@ -87396,14 +88339,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       6.0;
                                   var addActionsRight = 10.0;
                                   if (_showAddActionsPanel) {
-                                    final addButtonAnchorContext =
-                                        _addButtonAnchorKey.currentContext;
                                     final addButtonAnchorObject =
-                                        addButtonAnchorContext
-                                            ?.findRenderObject();
-                                    if (addButtonAnchorContext != null &&
-                                        addButtonAnchorContext.mounted &&
-                                        addButtonAnchorObject is RenderBox &&
+                                        _activeRenderObject(
+                                          _addButtonAnchorKey.currentContext,
+                                        );
+                                    if (addButtonAnchorObject is RenderBox &&
                                         addButtonAnchorObject.attached &&
                                         addButtonAnchorObject.hasSize) {
                                       final addButtonTopLeft =
@@ -88050,8 +88990,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           );
                                       final midiPanelBottom =
                                           _desktopBottomPanelInset(
-                                            chatTypingActive:
-                                                _isChatTypingActive,
                                             chatLift: 0.0,
                                           );
                                       final desktopAvailableRect =
@@ -88251,8 +89189,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                       final screenH = media.size.height;
                                       final panelBottom =
                                           _desktopBottomPanelInset(
-                                            chatTypingActive:
-                                                _isChatTypingActive,
                                             chatLift: 0.0,
                                           );
                                       final desktopAvailableRect =
@@ -88463,10 +89399,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   right: 0,
                                   bottom:
                                       _kChatBarStackHeight +
-                                      _kTransportBarHeight +
-                                      (_isProducerCaptureUiVisible
-                                          ? _kProducerBannerHeightEstimate
-                                          : 0.0),
+                                      _kTransportBarHeight,
                                   child: Listener(
                                     behavior: HitTestBehavior.translucent,
                                     onPointerDown:
@@ -88499,10 +89432,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   right: 0,
                                   bottom:
                                       _kChatBarStackHeight +
-                                      _kTransportBarHeight +
-                                      (_isProducerCaptureUiVisible
-                                          ? _kProducerBannerHeightEstimate
-                                          : 0.0),
+                                      _kTransportBarHeight,
                                   child: Listener(
                                     behavior: HitTestBehavior.translucent,
                                     onPointerDown:
@@ -88537,10 +89467,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   right: 0,
                                   bottom:
                                       _kChatBarStackHeight +
-                                      _kTransportBarHeight +
-                                      (_isProducerCaptureUiVisible
-                                          ? _kProducerBannerHeightEstimate
-                                          : 0.0),
+                                      _kTransportBarHeight,
                                   child: Listener(
                                     behavior: HitTestBehavior.translucent,
                                     onPointerDown:
@@ -88617,13 +89544,23 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                     child: RepaintBoundary(
                       child: _buildBottomChatAndTransport(
                         includeChatBar: true,
-                        includeProducerCapture: showProducerCapture,
                         includeTransport: true,
                         chatBarKeyboardOffset: keyboardLift,
                       ),
                     ),
                   ),
                 ),
+                if (showProducerCapture)
+                  Positioned(
+                    right: tabletBottomDockRightInset + 16.0,
+                    bottom: producerCaptureBottomInset,
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: RepaintBoundary(
+                        child: _buildProducerCaptureOverlay(),
+                      ),
+                    ),
+                  ),
                 _buildFloatingTabletDesktopChatBarOverlay(),
                 _buildHoistedFloatingEditorWindows(
                   overlayContext: context,

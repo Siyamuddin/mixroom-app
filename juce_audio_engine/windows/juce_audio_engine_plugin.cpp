@@ -1833,7 +1833,7 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       const int row = FindInt(args, "row", 0);
       const bool force_individual_row = FindBool(args, "forceIndividualRow", false);
       const auto values = CallOnMessageThreadSync(
-          [row, force_individual_row] { return JuceEngine::get().getTrackEffectIdsForRow(row, force_individual_row); });
+          [row, force_individual_row, model_identity = FindBool(args, "modelIdentity", false)] { return JuceEngine::get().getTrackEffectIdsForRow(row, force_individual_row, model_identity); });
       result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
       return;
     }
@@ -2010,9 +2010,16 @@ void JuceAudioEnginePlugin::HandleMethodCall(
       return;
     }
 
+    if (method_call.method_name() == "getMasterEffectInstanceIds") {
+      const auto values =
+          CallOnMessageThreadSync([] { return JuceEngine::get().getMasterEffectInstanceIds(); });
+      result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
+      return;
+    }
+
     if (method_call.method_name() == "getMasterEffectIds") {
       const auto values =
-          CallOnMessageThreadSync([] { return JuceEngine::get().getMasterEffectIds(); });
+          CallOnMessageThreadSync([model_identity = FindBool(args, "modelIdentity", false)] { return JuceEngine::get().getMasterEffectIds(model_identity); });
       result->Success(flutter::EncodableValue(StringArrayToEncodableList(values)));
       return;
     }

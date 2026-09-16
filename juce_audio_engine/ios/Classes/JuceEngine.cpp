@@ -1,4 +1,5 @@
 #include "JuceEngine.h"
+#include "ProducerPluginIdentity.h"
 #if JUCE_IOS
 #include "MixroomIOSAudioSessionPolicy.h"
 #endif
@@ -10647,7 +10648,7 @@ juce::StringArray JuceEngine::getTrackEffectsForRow(int trackRow, bool forceIndi
     return names;
 }
 
-juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow)
+juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIndividualRow, bool modelIdentity)
 {
     const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
     juce::StringArray ids;
@@ -10661,6 +10662,15 @@ juce::StringArray JuceEngine::getTrackEffectIdsForRow(int trackRow, bool forceIn
         return ids;
     auto &chain = *chainPtr;
     auto &fxIds = *idsPtr;
+    if (modelIdentity)
+    {
+        for (auto nodeId : chain)
+        {
+            auto node = graph.getNodeForId(nodeId);
+            ids.add(cachedProducerPluginIdentity(node));
+        }
+        return ids;
+    }
     if (fxIds.size() == chain.size())
         return fxIds;
 
@@ -13288,8 +13298,30 @@ juce::StringArray JuceEngine::getMasterEffects()
     return out;
 }
 
-juce::StringArray JuceEngine::getMasterEffectIds()
+juce::StringArray JuceEngine::getMasterEffectInstanceIds()
 {
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    juce::StringArray ids;
+    if (masterEffectChain != nullptr)
+        for (auto &nodeID : *masterEffectChain)
+            ids.add(juce::String((juce::int64)nodeID.uid));
+    return ids;
+}
+
+juce::StringArray JuceEngine::getMasterEffectIds(bool modelIdentity)
+{
+    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    if (modelIdentity)
+    {
+        juce::StringArray ids;
+        if (masterEffectChain != nullptr)
+            for (auto nodeId : *masterEffectChain)
+            {
+                auto node = graph.getNodeForId(nodeId);
+                ids.add(cachedProducerPluginIdentity(node));
+            }
+        return ids;
+    }
     if (masterEffectIds.size() == 0 && masterEffectChain != nullptr && masterEffectChain->size() > 0)
     {
         juce::StringArray ids;

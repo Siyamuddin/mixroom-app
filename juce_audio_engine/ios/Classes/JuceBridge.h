@@ -269,7 +269,7 @@
                         toIndex:(NSInteger)toIdx
              forceIndividualRow:(BOOL)forceIndividualRow;
 + (NSArray<NSString *> *)getTrackEffectsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow;
-+ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow;
++ (NSArray<NSString *> *)getTrackEffectIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow modelIdentity:(BOOL)modelIdentity;
 + (NSArray<NSString *> *)getTrackEffectInstanceIdsForRowObjC:(NSInteger)trackRow forceIndividualRow:(BOOL)forceIndividualRow;
 + (NSString *)getTrackEffectStateObjC:(NSInteger)trackRow
                           effectIndex:(NSInteger)effectIndex
@@ -317,7 +317,8 @@
 + (void)reorderMasterEffectsObjC:(NSInteger)fromIndex
                          toIndex:(NSInteger)toIndex;
 + (NSArray<NSString *> *)getMasterEffectsObjC;
-+ (NSArray<NSString *> *)getMasterEffectIdsObjC;
++ (NSArray<NSString *> *)getMasterEffectInstanceIdsObjC;
++ (NSArray<NSString *> *)getMasterEffectIdsObjC:(BOOL)modelIdentity;
 + (NSString *)getMasterEffectStateObjC:(NSInteger)effectIndex;
 + (BOOL)setMasterEffectStateObjC:(NSInteger)effectIndex
                      stateBase64:(NSString *)stateBase64;

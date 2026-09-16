@@ -18,6 +18,10 @@ It still contains the in-house subscription core that normalizes Apple IAP, Goog
 - Client APIs:
 - `GET /v1/entitlements/me`
 - `GET /v1/feature-flags`
+- `POST /v1/producer-training/sessions/uploads`
+- `POST /v1/producer-training/sessions/{session_id}/complete`
+- `GET /v1/producer-training/sessions/{session_id}` (verification status)
+- `DELETE /v1/producer-training/sessions/{session_id}`
 - `GET /v1/billing/catalog`
 - `GET /v1/users/me`
 - `PATCH /v1/users/me`
@@ -75,6 +79,13 @@ If you prefer the AWS website over a local terminal, use:
 - [FIRST_DEPLOY_FROM_AWS_CONSOLE.md](FIRST_DEPLOY_FROM_AWS_CONSOLE.md)
 
 ## Helper scripts
+
+- Run a reversible live smoke test of reservation, signed upload, verification,
+  ingestion tracking, and deletion:
+
+```bash
+python3 scripts/producer_training_live_smoke.py
+```
 
 - Print or apply the minimal product mapping rows:
 
@@ -134,6 +145,8 @@ Environment variables (set by template and per-stage overrides):
 - `RECONCILIATION_JOBS_TABLE`
 - `PROJECTION_QUEUE_URL`
 - `CLOUD_PROJECT_DOCUMENTS_BUCKET`
+- `PRODUCER_TRAINING_BUCKET`
+- `PRODUCER_TRAINING_SESSIONS_TABLE`
 - `AWS_REGION`
 
 Provider secrets should be stored as SSM Parameter Store `SecureString`

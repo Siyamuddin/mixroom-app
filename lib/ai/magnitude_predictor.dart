@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../models/goal_vector.dart';
 import '../models/mixing_result.dart';
 import '../models/project_state.dart';
@@ -128,5 +130,83 @@ class NoopMixingMagnitudePredictor implements MixingMagnitudePredictor {
       fallbackUsed: true,
       fallbackReason: 'disabled',
     );
+  }
+}
+
+/// Observes inference only while explicitly enabled by producer capture.
+/// Never adds capture fields to network requests or analytics.
+class CapturingMagnitudePredictor implements MixingMagnitudePredictor {
+  CapturingMagnitudePredictor(
+    this.delegate, {
+    required this.captureEnabled,
+    required this.onTrace,
+    required this.captureToken,
+  });
+  final MixingMagnitudePredictor delegate;
+  final bool Function() captureEnabled;
+  final String Function() captureToken;
+  final void Function(Map<String, dynamic>) onTrace;
+  @override
+  bool get isEnabled => delegate.isEnabled;
+  @override
+  bool get isReady => delegate.isReady;
+  @override
+  Map<String, dynamic> get observabilityContext =>
+      delegate.observabilityContext;
+  @override
+  Future<void> load() => delegate.load();
+  @override
+  Future<void> dispose() => delegate.dispose();
+  @override
+  Future<void> startBackgroundRefresh() => delegate.startBackgroundRefresh();
+  @override
+  Future<MagnitudeRefineResult> refine({
+    required ProjectState project,
+    required GoalVector goal,
+    required List<MixAction> actions,
+    required bool strict,
+    String? projectId,
+  }) async {
+    final token = captureToken();
+    Map<String, dynamic>? trace;
+    if (captureEnabled()) {
+      try {
+        trace =
+            jsonDecode(
+                  jsonEncode({
+                    'mix_feature_contract_version': 'mix_refine_v1',
+                    'project_state': project.toMagnitudeResolverJson(),
+                    'row_identities': {
+                      for (final row in project.rows)
+                        row.rowIndex.toString(): row.rowId,
+                    },
+                    'goal': goal.toJson(),
+                    'actions': actions.map((a) => a.toJson()).toList(),
+                    'strict': strict,
+                  }),
+                )
+                as Map<String, dynamic>;
+      } catch (_) {} // Capture must never interfere with inference.
+    }
+    final result = await delegate.refine(
+      project: project,
+      goal: goal,
+      actions: actions,
+      strict: strict,
+      projectId: projectId,
+    );
+    if (trace != null && captureEnabled() && token == captureToken()) {
+      try {
+        onTrace({
+          ...trace,
+          'resolved_actions': result.actions.map((a) => a.toJson()).toList(),
+          'debug_entries': result.debugEntries.map((a) => a.toJson()).toList(),
+          'fallback_used': result.fallbackUsed,
+          'fallback_reason': result.fallbackReason,
+          'model_context': result.observability,
+        });
+      } catch (_) {}
+    }
+    return result;
   }
 }
