@@ -58,15 +58,19 @@ void main() {
     );
   });
 
-  test('deleting an original with a frozen sibling asks mix vs song', () {
+  test('deleting any member of a song group asks mix vs song', () {
     final delete = _methodBody(
       projects,
       'Future<void> _deleteProject(ProjectMeta meta) async',
     );
     expect(delete, contains('_showDeleteMixOrSongDialog('));
     expect(delete, contains('_FamilyDeleteScope.song'));
-    expect(delete, contains('projectIsFrozenMix(meta)'));
     expect(projects, contains('_FamilyDeleteScope.mix'));
+    // The choice is offered for the Original and for a Frozen mix alike:
+    // the only condition is that the project sits in a group.
+    expect(delete, contains('if (group.canExpand) {'));
+    expect(delete, isNot(contains('!projectIsFrozenMix(meta)')));
+    expect(delete, contains('songName: meta.name'));
 
     expect(projects, contains("ValueKey('projects_delete_this_mix')"));
     expect(projects, contains("ValueKey('projects_delete_whole_song')"));

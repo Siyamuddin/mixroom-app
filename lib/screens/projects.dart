@@ -3501,11 +3501,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _deleteProject(ProjectMeta meta) async {
     final group = _familyGroupContaining(meta);
-    final deletingOriginalWithSibling =
-        group.canExpand && !projectIsFrozenMix(meta);
-    if (deletingOriginalWithSibling) {
+    // Any member of a song group (the Original or one of its Frozen mixes)
+    // gets the same choice: just this mix, or the whole song.
+    if (group.canExpand) {
       final scope = await _showDeleteMixOrSongDialog(
-        songName: group.displayProject.name,
+        songName: meta.name,
         frozenMixCount: group.members.where(projectIsFrozenMix).length,
       );
       if (scope == null) return;
