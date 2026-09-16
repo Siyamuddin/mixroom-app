@@ -77,11 +77,15 @@ extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
                                                       double scale);
 extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView);
 extern "C" void mixroomScheduleOttPluginEditorAutotest(void);
-extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
-                                                          int row,
-                                                          int effectIndex,
-                                                          int clipId,
-                                                          void *ownerHandle);
+extern "C" bool mixroomBeginHostedPluginWindowCapture(int scopeKind,
+                                                       int row,
+                                                       int effectIndex,
+                                                       int clipId,
+                                                       void *ownerHandle);
+extern "C" bool mixroomEndHostedPluginWindowCapture(void *ownerHandle);
+extern "C" void mixroomReleaseHostedPluginWindowCapture(void *ownerHandle);
+extern "C" void mixroomPrepareHostedPluginPrimaryPeerReplacement(
+    void *ownerHandle);
 
 static NSRect mixroomScreenContentRectForWindow(NSWindow *window) {
     if (window == nil) {
@@ -729,6 +733,12 @@ extern "C" void mixroomScheduleOttPluginEditorAutotest(void) {
 - (void)requestAutomation:(id)sender;
 @end
 
+static BOOL mixroomCancelPendingHostedPluginWindowCapture(
+    void *ownerHandle);
+static void mixroomEndMatchingHostedPluginModalForWindow(
+    NSWindow *window,
+    void *ownerHandle);
+
 static MixroomHostedPluginWindowHelper *mixroomHostedPluginHelperForWindow(
     NSWindow *window) {
     if (window == nil) {
@@ -831,20 +841,27 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
                     if (strongSelf == nil) {
                         return;
                     }
+                    [strongSelf retain];
+                    const BOOL wasAlreadyClosing = strongSelf.closing;
                     strongSelf.closing = YES;
                     NSWindow *closingWindow =
                         [note.object isKindOfClass:NSWindow.class]
                             ? (NSWindow *)note.object
                             : strongSelf.window;
+                    const uintptr_t ownerValue =
+                        (uintptr_t)[strongSelf.metadata[@"ownerPtr"] unsignedLongLongValue];
+                    if (!wasAlreadyClosing && ownerValue != 0) {
+                        mixroomEndMatchingHostedPluginModalForWindow(
+                            closingWindow,
+                            (void *)ownerValue);
+                    }
                     [strongSelf removeEventMonitorIfNeeded];
                     [strongSelf releaseHeldDesktopMidiNotes];
                     if (closingWindow.parentWindow != nil) {
                         [closingWindow.parentWindow removeChildWindow:closingWindow];
                     }
                     [strongSelf removeAutomationAccessoryFromWindow:closingWindow];
-                    NSMutableDictionary<NSString *, id> *payload =
-                        [NSMutableDictionary dictionaryWithDictionary:strongSelf.metadata ?: @{}];
-                    payload[@"event"] = @"pluginEditorClosed";
+                    strongSelf.metadata = nil;
                     if (strongSelf.closeObserver != nil) {
                         [[NSNotificationCenter defaultCenter] removeObserver:strongSelf.closeObserver];
                         strongSelf.closeObserver = nil;
@@ -857,14 +874,7 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
                             OBJC_ASSOCIATION_ASSIGN);
                     }
                     strongSelf.window = nil;
-                    dispatch_after(
-                        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
-                        dispatch_get_main_queue(), ^{
-                          [[NSNotificationCenter defaultCenter]
-                              postNotificationName:MixroomHostedPluginEditorSpacebarNotification
-                                            object:nil
-                                          userInfo:payload];
-                        });
+                    [strongSelf release];
                 }];
     _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
         (NSEventMaskKeyDown |
@@ -953,6 +963,10 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
                     (uintptr_t)[strongSelf.metadata[@"ownerPtr"] unsignedLongLongValue];
                 if (ownerValue != 0) {
                     [strongSelf releaseHeldDesktopMidiNotes];
+                    if (mixroomCancelPendingHostedPluginWindowCapture(
+                            (void *)ownerValue)) {
+                        return nil;
+                    }
                     dispatch_async(dispatch_get_main_queue(), ^{
                         mixroomRequestHostedPluginEditorClose((void *)ownerValue);
                     });
@@ -1025,7 +1039,14 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
 
 - (void)applyWindowMode {
     NSWindow *pluginWindow = self.window;
-    if (pluginWindow == nil) {
+    if (pluginWindow == nil || self.closing) {
+        return;
+    }
+
+    // A plugin owns the presentation contract for sheets and AppKit modal
+    // windows. Keep tracking them for owner teardown, but do not reparent or
+    // restyle them as ordinary plugin editor windows.
+    if (pluginWindow.sheetParent != nil || NSApp.modalWindow == pluginWindow) {
         return;
     }
 
@@ -1255,6 +1276,13 @@ static void mixroomRetainObjectThroughPendingAppKitLayerFlush(id object) {
         [[NSNotificationCenter defaultCenter] removeObserver:_closeObserver];
     }
     [self removeAutomationAccessoryFromWindow:self.window];
+    self.closeObserver = nil;
+    self.automationAccessory = nil;
+    self.automationButton = nil;
+    self.heldDesktopMidiKeyCodes = nil;
+    self.metadata = nil;
+    self.window = nil;
+    [super dealloc];
 }
 
 @end
@@ -1288,15 +1316,101 @@ static NSMutableDictionary<NSString *, id> *mixroomHostedPluginMetadata(
     return metadata;
 }
 
-static BOOL mixroomShouldAdoptPluginAuxiliaryWindow(NSWindow *window,
-                                                     NSWindow *hostWindow) {
+extern "C" void mixroomNotifyHostedPluginEditorDestroyed(int scopeKind,
+                                                           int row,
+                                                           int effectIndex,
+                                                           int clipId,
+                                                           void *ownerHandle) {
+    void (^notifyDestroyed)(void) = ^{
+        NSMutableDictionary<NSString *, id> *payload =
+            mixroomHostedPluginMetadata(
+                scopeKind, row, effectIndex, clipId, ownerHandle);
+        payload[@"primaryWindow"] = @YES;
+        payload[@"event"] = @"pluginEditorClosed";
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:MixroomHostedPluginEditorSpacebarNotification
+                          object:nil
+                        userInfo:payload];
+    };
+    if ([NSThread isMainThread]) {
+        notifyDestroyed();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), notifyDestroyed);
+    }
+}
+
+@interface MixroomHostedPluginWindowCapture : NSObject
+@property(nonatomic, assign) void *ownerHandle;
+@property(nonatomic, copy) NSDictionary<NSString *, id> *metadata;
+@property(nonatomic, retain) NSSet<NSWindow *> *baselineWindows;
+@property(nonatomic, assign) BOOL creationActive;
+@property(nonatomic, assign) BOOL cancelled;
+@end
+
+@implementation MixroomHostedPluginWindowCapture
+- (void)dealloc {
+    [_metadata release];
+    [_baselineWindows release];
+    [super dealloc];
+}
+@end
+
+static NSMutableDictionary<NSValue *, MixroomHostedPluginWindowCapture *> *
+    gMixroomHostedPluginWindowCaptures = nil;
+static id gMixroomHostedPluginWindowDidBecomeKeyObserver = nil;
+static id gMixroomHostedPluginWindowDidBecomeMainObserver = nil;
+static id gMixroomHostedPluginWindowDidResignKeyObserver = nil;
+static id gMixroomHostedPluginWindowDidUpdateObserver = nil;
+static id gMixroomHostedPluginWindowWillBeginSheetObserver = nil;
+static void *gMixroomActiveHostedPluginWindowCaptureOwner = nullptr;
+static void *gMixroomLastKeyHostedPluginWindowOwner = nullptr;
+
+static NSValue *mixroomHostedPluginWindowCaptureKey(void *ownerHandle) {
+    return [NSValue valueWithPointer:ownerHandle];
+}
+
+static MixroomHostedPluginWindowCapture *
+mixroomHostedPluginWindowCaptureForOwner(void *ownerHandle) {
+    if (ownerHandle == nullptr || gMixroomHostedPluginWindowCaptures == nil) {
+        return nil;
+    }
+    return gMixroomHostedPluginWindowCaptures[
+        mixroomHostedPluginWindowCaptureKey(ownerHandle)];
+}
+
+static void mixroomEndMatchingHostedPluginModalForWindow(
+    NSWindow *window,
+    void *ownerHandle) {
+    if (window == nil || ownerHandle == nullptr || NSApp.modalWindow != window) {
+        return;
+    }
+
+    MixroomHostedPluginWindowCapture *capture =
+        mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
+    if (capture != nil && capture.creationActive) {
+        capture.cancelled = YES;
+        capture.creationActive = NO;
+        if (gMixroomActiveHostedPluginWindowCaptureOwner == ownerHandle) {
+            gMixroomActiveHostedPluginWindowCaptureOwner = nullptr;
+        }
+    }
+    [NSApp abortModal];
+}
+
+static void *mixroomHostedPluginOwnerForWindow(NSWindow *window) {
+    MixroomHostedPluginWindowHelper *helper =
+        mixroomHostedPluginHelperForWindow(window);
+    const uintptr_t ownerValue =
+        (uintptr_t)[helper.metadata[@"ownerPtr"] unsignedLongLongValue];
+    return ownerValue != 0 ? (void *)ownerValue : nullptr;
+}
+
+static BOOL mixroomShouldTrackAttributedPluginWindow(NSWindow *window,
+                                                      NSWindow *hostWindow) {
     if (window == nil || window == hostWindow) {
         return NO;
     }
     if (mixroomHostedPluginHelperForWindow(window) != nil) {
-        return NO;
-    }
-    if (window.parentWindow == hostWindow) {
         return NO;
     }
     if ([window.contentViewController isKindOfClass:NSClassFromString(@"FlutterViewController")]) {
@@ -1307,59 +1421,427 @@ static BOOL mixroomShouldAdoptPluginAuxiliaryWindow(NSWindow *window,
     if ([className isEqualToString:@"TUINSWindow"]) {
         return NO;
     }
-    if ([className hasPrefix:@"JUCEWindow_"]) {
-        return NO;
-    }
-
-    if (window.frame.size.width < 120.0 || window.frame.size.height < 120.0) {
-        return NO;
-    }
     return YES;
 }
 
-extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
-                                                          int row,
-                                                          int effectIndex,
-                                                          int clipId,
-                                                          void *ownerHandle) {
-    void (^adoptAttempt)(void) = ^{
-        NSWindow *hostWindow = mixroomFindFlutterHostWindow();
-        if (hostWindow == nil) {
+static BOOL mixroomTrackAttributedPluginWindow(
+    NSWindow *window,
+    MixroomHostedPluginWindowCapture *capture) {
+    NSWindow *hostWindow = mixroomFindFlutterHostWindow();
+    if (capture == nil ||
+        !mixroomShouldTrackAttributedPluginWindow(window, hostWindow)) {
+        return NO;
+    }
+
+    NSMutableDictionary<NSString *, id> *metadata =
+        [NSMutableDictionary dictionaryWithDictionary:capture.metadata ?: @{}];
+    metadata[@"primaryWindow"] = @NO;
+    MixroomHostedPluginWindowHelper *helper =
+        [[MixroomHostedPluginWindowHelper alloc] initWithWindow:window
+                                                       metadata:metadata];
+    objc_setAssociatedObject(
+        window,
+        kMixroomHostedPluginWindowHelperKey,
+        helper,
+        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // A window created immediately before runModalForWindow: is not yet
+    // reported as modal. Defer presentation changes until editor creation
+    // returns so native modal windows and sheets retain their AppKit style.
+    if (!capture.creationActive) {
+        [helper applyWindowMode];
+    }
+    [helper release];
+    NSLog(@"[Mixroom Plugin Host] tracked attributed auxiliary window class=%@ frame=%@ owner=%p",
+          NSStringFromClass(window.class),
+          NSStringFromRect(window.frame),
+          capture.ownerHandle);
+    return YES;
+}
+
+static MixroomHostedPluginWindowCapture *
+mixroomCaptureForRelatedPluginWindow(NSWindow *window) {
+    void *ownerHandle = mixroomHostedPluginOwnerForWindow(window.sheetParent);
+    if (ownerHandle == nullptr) {
+        ownerHandle = mixroomHostedPluginOwnerForWindow(window.parentWindow);
+    }
+    if (ownerHandle != nullptr) {
+        return mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
+    }
+    return nil;
+}
+
+static MixroomHostedPluginWindowCapture *
+mixroomCaptureForWindowEvent(NSWindow *window, BOOL includeActiveCapture) {
+    MixroomHostedPluginWindowCapture *capture = nil;
+    if (includeActiveCapture &&
+        gMixroomActiveHostedPluginWindowCaptureOwner != nullptr) {
+        capture = mixroomHostedPluginWindowCaptureForOwner(
+            gMixroomActiveHostedPluginWindowCaptureOwner);
+        if (capture != nil &&
+            [capture.baselineWindows containsObject:window]) {
+            capture = nil;
+        }
+    }
+    if (capture == nil) {
+        capture = mixroomCaptureForRelatedPluginWindow(window);
+    }
+    return capture;
+}
+
+static void mixroomReconcileHostedPluginWindowCapture(
+    MixroomHostedPluginWindowCapture *capture) {
+    if (capture == nil) {
+        return;
+    }
+    NSArray<NSWindow *> *windows = [NSApp.windows copy];
+    for (NSWindow *window in windows) {
+        if (mixroomHostedPluginOwnerForWindow(window) != nullptr) {
+            continue;
+        }
+        const BOOL createdDuringCapture =
+            capture.creationActive &&
+            ![capture.baselineWindows containsObject:window];
+        const BOOL relatedToOwner =
+            mixroomCaptureForRelatedPluginWindow(window) == capture;
+        if (createdDuringCapture || relatedToOwner) {
+            mixroomTrackAttributedPluginWindow(window, capture);
+        }
+    }
+    [windows release];
+}
+
+static void mixroomApplyHostedPluginWindowModesForCapture(
+    MixroomHostedPluginWindowCapture *capture) {
+    if (capture == nil) {
+        return;
+    }
+    NSArray<NSWindow *> *windows = [NSApp.windows copy];
+    for (NSWindow *window in windows) {
+        if (mixroomHostedPluginOwnerForWindow(window) != capture.ownerHandle) {
+            continue;
+        }
+        MixroomHostedPluginWindowHelper *helper =
+            mixroomHostedPluginHelperForWindow(window);
+        if (![helper.metadata[@"primaryWindow"] boolValue]) {
+            [helper applyWindowMode];
+        }
+    }
+    [windows release];
+}
+
+static void mixroomInstallHostedPluginWindowCaptureObservers(void) {
+    if (gMixroomHostedPluginWindowDidBecomeKeyObserver != nil) {
+        return;
+    }
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    gMixroomHostedPluginWindowDidResignKeyObserver =
+        [center addObserverForName:NSWindowDidResignKeyNotification
+                           object:nil
+                            queue:nil
+                       usingBlock:^(NSNotification *note) {
+                           NSWindow *window = [note.object isKindOfClass:NSWindow.class]
+                                                  ? (NSWindow *)note.object
+                                                  : nil;
+                           gMixroomLastKeyHostedPluginWindowOwner =
+                               mixroomHostedPluginOwnerForWindow(window);
+                       }];
+    gMixroomHostedPluginWindowDidBecomeKeyObserver =
+        [center addObserverForName:NSWindowDidBecomeKeyNotification
+                           object:nil
+                            queue:nil
+                       usingBlock:^(NSNotification *note) {
+                           NSWindow *window = [note.object isKindOfClass:NSWindow.class]
+                                                  ? (NSWindow *)note.object
+                                                  : nil;
+                           void *existingOwner =
+                               mixroomHostedPluginOwnerForWindow(window);
+                           if (existingOwner != nullptr) {
+                               gMixroomLastKeyHostedPluginWindowOwner = existingOwner;
+                               return;
+                           }
+
+                           MixroomHostedPluginWindowCapture *capture =
+                               mixroomCaptureForWindowEvent(window, YES);
+                           if (capture == nil && NSApp.modalWindow == window &&
+                               gMixroomLastKeyHostedPluginWindowOwner != nullptr) {
+                               capture = mixroomHostedPluginWindowCaptureForOwner(
+                                   gMixroomLastKeyHostedPluginWindowOwner);
+                           }
+                           if (mixroomTrackAttributedPluginWindow(window, capture)) {
+                               gMixroomLastKeyHostedPluginWindowOwner =
+                                   capture.ownerHandle;
+                           } else {
+#if MIXROOM_ENABLE_TEST_HOOKS
+                               NSLog(@"[Mixroom Plugin Host] left ambiguous key window untracked class=%@ title='%@'",
+                                     NSStringFromClass(window.class),
+                                     window.title ?: @"");
+#endif
+                               gMixroomLastKeyHostedPluginWindowOwner = nullptr;
+                           }
+                       }];
+    gMixroomHostedPluginWindowDidBecomeMainObserver =
+        [center addObserverForName:NSWindowDidBecomeMainNotification
+                           object:nil
+                            queue:nil
+                       usingBlock:^(NSNotification *note) {
+                           NSWindow *window = [note.object isKindOfClass:NSWindow.class]
+                                                  ? (NSWindow *)note.object
+                                                  : nil;
+                           if (mixroomHostedPluginOwnerForWindow(window) != nullptr) {
+                               return;
+                           }
+                           MixroomHostedPluginWindowCapture *capture =
+                               mixroomCaptureForWindowEvent(window, YES);
+                           if (capture != nil) {
+                               mixroomTrackAttributedPluginWindow(window, capture);
+                           }
+                       }];
+    gMixroomHostedPluginWindowDidUpdateObserver =
+        [center addObserverForName:NSWindowDidUpdateNotification
+                           object:nil
+                            queue:nil
+                       usingBlock:^(NSNotification *note) {
+                           NSWindow *window = [note.object isKindOfClass:NSWindow.class]
+                                                  ? (NSWindow *)note.object
+                                                  : nil;
+                           if (mixroomHostedPluginOwnerForWindow(window) != nullptr) {
+                               return;
+                           }
+                           MixroomHostedPluginWindowCapture *capture =
+                               mixroomCaptureForWindowEvent(window, YES);
+                           if (capture != nil) {
+                               mixroomTrackAttributedPluginWindow(window, capture);
+                           }
+                       }];
+    gMixroomHostedPluginWindowWillBeginSheetObserver =
+        [center addObserverForName:NSWindowWillBeginSheetNotification
+                           object:nil
+                            queue:nil
+                       usingBlock:^(NSNotification *note) {
+                           NSWindow *parent = [note.object isKindOfClass:NSWindow.class]
+                                                  ? (NSWindow *)note.object
+                                                  : nil;
+                           NSWindow *sheet = parent.attachedSheet;
+                           void *ownerHandle =
+                               mixroomHostedPluginOwnerForWindow(parent);
+                           MixroomHostedPluginWindowCapture *capture =
+                               mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
+                           mixroomTrackAttributedPluginWindow(sheet, capture);
+                       }];
+}
+
+static void mixroomRemoveHostedPluginWindowCaptureObserversIfUnused(void) {
+    if (gMixroomHostedPluginWindowCaptures.count != 0) {
+        return;
+    }
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    if (gMixroomHostedPluginWindowDidBecomeKeyObserver != nil) {
+        [center removeObserver:gMixroomHostedPluginWindowDidBecomeKeyObserver];
+        gMixroomHostedPluginWindowDidBecomeKeyObserver = nil;
+    }
+    if (gMixroomHostedPluginWindowDidResignKeyObserver != nil) {
+        [center removeObserver:gMixroomHostedPluginWindowDidResignKeyObserver];
+        gMixroomHostedPluginWindowDidResignKeyObserver = nil;
+    }
+    if (gMixroomHostedPluginWindowDidBecomeMainObserver != nil) {
+        [center removeObserver:gMixroomHostedPluginWindowDidBecomeMainObserver];
+        gMixroomHostedPluginWindowDidBecomeMainObserver = nil;
+    }
+    if (gMixroomHostedPluginWindowDidUpdateObserver != nil) {
+        [center removeObserver:gMixroomHostedPluginWindowDidUpdateObserver];
+        gMixroomHostedPluginWindowDidUpdateObserver = nil;
+    }
+    if (gMixroomHostedPluginWindowWillBeginSheetObserver != nil) {
+        [center removeObserver:gMixroomHostedPluginWindowWillBeginSheetObserver];
+        gMixroomHostedPluginWindowWillBeginSheetObserver = nil;
+    }
+    [gMixroomHostedPluginWindowCaptures release];
+    gMixroomHostedPluginWindowCaptures = nil;
+    gMixroomActiveHostedPluginWindowCaptureOwner = nullptr;
+    gMixroomLastKeyHostedPluginWindowOwner = nullptr;
+}
+
+extern "C" bool mixroomBeginHostedPluginWindowCapture(int scopeKind,
+                                                       int row,
+                                                       int effectIndex,
+                                                       int clipId,
+                                                       void *ownerHandle) {
+    if (ownerHandle == nullptr) {
+        return false;
+    }
+    __block BOOL began = NO;
+    void (^beginCapture)(void) = ^{
+        if ((gMixroomActiveHostedPluginWindowCaptureOwner != nullptr &&
+             gMixroomActiveHostedPluginWindowCaptureOwner != ownerHandle) ||
+            mixroomHostedPluginWindowCaptureForOwner(ownerHandle) != nil) {
+#if MIXROOM_ENABLE_TEST_HOOKS
+            NSLog(@"[Mixroom Plugin Host] rejected nested or duplicate editor capture owner=%p active=%p",
+                  ownerHandle,
+                  gMixroomActiveHostedPluginWindowCaptureOwner);
+#endif
             return;
         }
-
+        if (gMixroomHostedPluginWindowCaptures == nil) {
+            gMixroomHostedPluginWindowCaptures =
+                [[NSMutableDictionary alloc] init];
+        }
+        MixroomHostedPluginWindowCapture *capture =
+            [[MixroomHostedPluginWindowCapture alloc] init];
+        capture.ownerHandle = ownerHandle;
         NSMutableDictionary<NSString *, id> *metadata =
-            mixroomHostedPluginMetadata(scopeKind,
-                                        row,
-                                        effectIndex,
-                                        clipId,
-                                        ownerHandle);
+            mixroomHostedPluginMetadata(
+                scopeKind, row, effectIndex, clipId, ownerHandle);
         metadata[@"primaryWindow"] = @NO;
-        for (NSWindow *window in NSApp.windows) {
-            if (!mixroomShouldAdoptPluginAuxiliaryWindow(window, hostWindow)) {
+        capture.metadata = metadata;
+        NSArray<NSWindow *> *baselineWindows = [NSApp.windows copy];
+        capture.baselineWindows = [NSSet setWithArray:baselineWindows];
+        [baselineWindows release];
+        capture.creationActive = YES;
+        capture.cancelled = NO;
+        gMixroomHostedPluginWindowCaptures[
+            mixroomHostedPluginWindowCaptureKey(ownerHandle)] = capture;
+        [capture release];
+        gMixroomActiveHostedPluginWindowCaptureOwner = ownerHandle;
+        mixroomInstallHostedPluginWindowCaptureObservers();
+        began = YES;
+    };
+    if ([NSThread isMainThread]) {
+        beginCapture();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), beginCapture);
+    }
+    return began == YES;
+}
+
+extern "C" bool mixroomEndHostedPluginWindowCapture(void *ownerHandle) {
+    __block BOOL cancelled = NO;
+    void (^endCapture)(void) = ^{
+        MixroomHostedPluginWindowCapture *capture =
+            mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
+        if (capture == nil) {
+            return;
+        }
+        mixroomReconcileHostedPluginWindowCapture(capture);
+        capture.baselineWindows = nil;
+        capture.creationActive = NO;
+        cancelled = capture.cancelled;
+        if (!cancelled) {
+            mixroomApplyHostedPluginWindowModesForCapture(capture);
+        }
+        if (gMixroomActiveHostedPluginWindowCaptureOwner == ownerHandle) {
+            gMixroomActiveHostedPluginWindowCaptureOwner = nullptr;
+        }
+    };
+    if ([NSThread isMainThread]) {
+        endCapture();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), endCapture);
+    }
+    return cancelled == YES;
+}
+
+extern "C" bool mixroomHostedPluginWindowCaptureWasCancelled(
+    void *ownerHandle) {
+    __block BOOL cancelled = NO;
+    void (^readCancellation)(void) = ^{
+        cancelled =
+            mixroomHostedPluginWindowCaptureForOwner(ownerHandle).cancelled;
+    };
+    if ([NSThread isMainThread]) {
+        readCancellation();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), readCancellation);
+    }
+    return cancelled == YES;
+}
+
+static BOOL mixroomCancelPendingHostedPluginWindowCapture(
+    void *ownerHandle) {
+    MixroomHostedPluginWindowCapture *capture =
+        mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
+    if (capture == nil || !capture.creationActive) {
+        return NO;
+    }
+    capture.cancelled = YES;
+    mixroomReconcileHostedPluginWindowCapture(capture);
+    capture.creationActive = NO;
+    if (gMixroomActiveHostedPluginWindowCaptureOwner == ownerHandle) {
+        gMixroomActiveHostedPluginWindowCaptureOwner = nullptr;
+    }
+    mixroomCloseHostedPluginNativeWindowsForOwner(ownerHandle);
+    return YES;
+}
+
+extern "C" void mixroomReleaseHostedPluginWindowCapture(
+    void *ownerHandle) {
+    if (ownerHandle == nullptr) {
+        return;
+    }
+    void (^releaseCapture)(void) = ^{
+        NSValue *key = mixroomHostedPluginWindowCaptureKey(ownerHandle);
+        MixroomHostedPluginWindowCapture *capture =
+            gMixroomHostedPluginWindowCaptures[key];
+        [gMixroomHostedPluginWindowCaptures removeObjectForKey:key];
+        if (gMixroomActiveHostedPluginWindowCaptureOwner == ownerHandle) {
+            gMixroomActiveHostedPluginWindowCaptureOwner = nullptr;
+        }
+        if (gMixroomLastKeyHostedPluginWindowOwner == ownerHandle) {
+            gMixroomLastKeyHostedPluginWindowOwner = nullptr;
+        }
+        mixroomRemoveHostedPluginWindowCaptureObserversIfUnused();
+    };
+    if ([NSThread isMainThread]) {
+        releaseCapture();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), releaseCapture);
+    }
+}
+
+extern "C" void mixroomPrepareHostedPluginPrimaryPeerReplacement(
+    void *ownerHandle) {
+    if (ownerHandle == nullptr) {
+        return;
+    }
+    void (^prepareReplacement)(void) = ^{
+        MixroomHostedPluginWindowCapture *capture =
+            mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
+        NSArray<NSWindow *> *windows = [NSApp.windows copy];
+        for (NSWindow *window in windows) {
+            MixroomHostedPluginWindowHelper *helper =
+                mixroomHostedPluginHelperForWindow(window);
+            const uintptr_t ownerValue =
+                (uintptr_t)[helper.metadata[@"ownerPtr"] unsignedLongLongValue];
+            if (helper == nil || ownerValue != (uintptr_t)ownerHandle ||
+                ![helper.metadata[@"primaryWindow"] boolValue]) {
                 continue;
             }
-            MixroomHostedPluginWindowHelper *helper =
-                [[MixroomHostedPluginWindowHelper alloc] initWithWindow:window
-                                                               metadata:metadata];
-            [helper applyWindowMode];
+            [helper retain];
+            helper.closing = YES;
+            [helper removeEventMonitorIfNeeded];
+            [helper releaseHeldDesktopMidiNotes];
+            [helper removeAutomationAccessoryFromWindow:window];
+            if (helper.closeObserver != nil) {
+                [[NSNotificationCenter defaultCenter]
+                    removeObserver:helper.closeObserver];
+                helper.closeObserver = nil;
+            }
             objc_setAssociatedObject(
                 window,
                 kMixroomHostedPluginWindowHelperKey,
-                helper,
-                OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            NSLog(@"[Mixroom Plugin Host] adopted auxiliary plugin window class=%@ frame=%@",
-                  NSStringFromClass(window.class),
-                  NSStringFromRect(window.frame));
+                nil,
+                OBJC_ASSOCIATION_ASSIGN);
+            helper.metadata = nil;
+            helper.window = nil;
+            [helper release];
+            break;
         }
+        [windows release];
     };
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.20 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),
-                   adoptAttempt);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.00 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(),
-                   adoptAttempt);
+    if ([NSThread isMainThread]) {
+        prepareReplacement();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), prepareReplacement);
+    }
 }
 
 extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle) {
@@ -1368,6 +1850,8 @@ extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle)
     }
 
     void (^closeWindows)(void) = ^{
+        mixroomReconcileHostedPluginWindowCapture(
+            mixroomHostedPluginWindowCaptureForOwner(ownerHandle));
         NSArray<NSWindow *> *windows = [NSApp.windows copy];
         for (NSWindow *window in windows) {
             MixroomHostedPluginWindowHelper *helper =
@@ -1385,20 +1869,41 @@ extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle)
                 continue;
             }
 
+            [helper retain];
             helper.closing = YES;
             [helper removeEventMonitorIfNeeded];
             [helper releaseHeldDesktopMidiNotes];
             [helper removeAutomationAccessoryFromWindow:window];
+
+            NSWindow *sheetParent = window.sheetParent;
+            if (sheetParent != nil) {
+                [sheetParent endSheet:window returnCode:NSModalResponseCancel];
+            }
+            if (NSApp.modalWindow == window) {
+                [NSApp abortModal];
+            }
             if (window.parentWindow != nil) {
                 [window.parentWindow removeChildWindow:window];
             }
-            objc_setAssociatedObject(
-                window,
-                kMixroomHostedPluginWindowHelperKey,
-                nil,
-                OBJC_ASSOCIATION_ASSIGN);
+            [window orderOut:nil];
             [window close];
+            if (mixroomHostedPluginHelperForWindow(window) == helper) {
+                objc_setAssociatedObject(
+                    window,
+                    kMixroomHostedPluginWindowHelperKey,
+                    nil,
+                    OBJC_ASSOCIATION_ASSIGN);
+            }
+            if (helper.closeObserver != nil) {
+                [[NSNotificationCenter defaultCenter]
+                    removeObserver:helper.closeObserver];
+                helper.closeObserver = nil;
+            }
+            helper.metadata = nil;
+            helper.window = nil;
+            [helper release];
         }
+        [windows release];
     };
 
     if ([NSThread isMainThread]) {
@@ -1407,6 +1912,380 @@ extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle)
         dispatch_async(dispatch_get_main_queue(), closeWindows);
     }
 }
+
+#if MIXROOM_ENABLE_TEST_HOOKS
+extern "C" unsigned int mixroomRunHostedPluginWindowCleanupRegressionProbe(void) {
+    __block unsigned int result = 0;
+    void (^runProbe)(void) = ^{
+        static int primaryOwnerToken = 0;
+        static int unrelatedOwnerToken = 0;
+        static int modalOwnerToken = 0;
+        void *primaryOwner = &primaryOwnerToken;
+        void *unrelatedOwner = &unrelatedOwnerToken;
+        void *modalOwner = &modalOwnerToken;
+
+        NSWindow *flutterHostWindow = mixroomFindFlutterHostWindow();
+        const BOOL flutterHostWasVisible = flutterHostWindow.isVisible;
+        const BOOL flutterHostWasMiniaturized = flutterHostWindow.isMiniaturized;
+
+        NSWindow *(^makeWindow)(NSString *) = ^NSWindow *(NSString *title) {
+            NSWindow *window = [[NSWindow alloc]
+                initWithContentRect:NSMakeRect(100.0, 100.0, 360.0, 240.0)
+                          styleMask:(NSWindowStyleMaskTitled |
+                                     NSWindowStyleMaskClosable)
+                            backing:NSBackingStoreBuffered
+                              defer:NO];
+            window.title = title;
+            window.releasedWhenClosed = NO;
+            [window orderFront:nil];
+            return window;
+        };
+        MixroomHostedPluginWindowHelper *(^trackWindow)(
+            NSWindow *, void *, BOOL) =
+            ^MixroomHostedPluginWindowHelper *(NSWindow *window,
+                                                void *owner,
+                                                BOOL primary) {
+                NSMutableDictionary<NSString *, id> *metadata =
+                    mixroomHostedPluginMetadata(1, 0, 0, -1, owner);
+                metadata[@"primaryWindow"] = @(primary);
+                MixroomHostedPluginWindowHelper *helper =
+                    [[MixroomHostedPluginWindowHelper alloc]
+                        initWithWindow:window
+                              metadata:metadata];
+                objc_setAssociatedObject(
+                    window,
+                    kMixroomHostedPluginWindowHelperKey,
+                    helper,
+                    OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                return helper;
+            };
+
+        NSWindow *primaryWindow = makeWindow(@"PRO-76 primary");
+        MixroomHostedPluginWindowHelper *primaryHelper =
+            trackWindow(primaryWindow, primaryOwner, YES);
+        NSWindow *ordinaryWindow = makeWindow(@"PRO-76 ordinary auxiliary");
+        MixroomHostedPluginWindowHelper *ordinaryHelper =
+            trackWindow(ordinaryWindow, primaryOwner, NO);
+        NSWindow *sheetWindow = makeWindow(@"PRO-76 sheet auxiliary");
+        MixroomHostedPluginWindowHelper *sheetHelper =
+            trackWindow(sheetWindow, primaryOwner, NO);
+        [primaryWindow beginSheet:sheetWindow completionHandler:nil];
+        NSWindow *unrelatedWindow = makeWindow(@"PRO-76 unrelated owner");
+        MixroomHostedPluginWindowHelper *unrelatedHelper =
+            trackWindow(unrelatedWindow, unrelatedOwner, NO);
+
+        mixroomCloseHostedPluginNativeWindowsForOwner(primaryOwner);
+        const BOOL ordinaryCleaned =
+            !ordinaryWindow.isVisible &&
+            mixroomHostedPluginHelperForWindow(ordinaryWindow) == nil &&
+            ordinaryHelper.eventMonitor == nil &&
+            ordinaryHelper.metadata == nil &&
+            ordinaryHelper.window == nil;
+        if (ordinaryCleaned) {
+            result |= 1u << 0;
+        }
+        const BOOL sheetCleaned =
+            sheetWindow.sheetParent == nil &&
+            !sheetWindow.isVisible &&
+            mixroomHostedPluginHelperForWindow(sheetWindow) == nil &&
+            sheetHelper.eventMonitor == nil &&
+            sheetHelper.metadata == nil &&
+            sheetHelper.window == nil;
+        if (sheetCleaned) {
+            result |= 1u << 1;
+        }
+        if (primaryWindow.isVisible &&
+            mixroomHostedPluginHelperForWindow(primaryWindow) == primaryHelper) {
+            result |= 1u << 2;
+        }
+        if (unrelatedWindow.isVisible &&
+            mixroomHostedPluginHelperForWindow(unrelatedWindow) == unrelatedHelper) {
+            result |= 1u << 3;
+        }
+
+        mixroomCloseHostedPluginNativeWindowsForOwner(primaryOwner);
+        if (ordinaryCleaned && sheetCleaned && primaryWindow.isVisible &&
+            unrelatedWindow.isVisible) {
+            result |= 1u << 4;
+        }
+
+        NSWindow *modalWindow = makeWindow(@"PRO-76 modal auxiliary");
+        MixroomHostedPluginWindowHelper *modalHelper =
+            trackWindow(modalWindow, modalOwner, NO);
+        __block BOOL modalCleanupRan = NO;
+        __block BOOL modalFallbackRan = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            mixroomCloseHostedPluginNativeWindowsForOwner(modalOwner);
+            modalCleanupRan = YES;
+        });
+        dispatch_after(
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+            dispatch_get_main_queue(), ^{
+                if (NSApp.modalWindow == modalWindow) {
+                    modalFallbackRan = YES;
+                    [NSApp abortModal];
+                    [modalWindow orderOut:nil];
+                    [modalWindow close];
+                }
+            });
+        const NSModalResponse modalResponse = [NSApp runModalForWindow:modalWindow];
+        if (modalCleanupRan && !modalFallbackRan &&
+            modalResponse == NSModalResponseAbort &&
+            NSApp.modalWindow != modalWindow &&
+            !modalWindow.isVisible &&
+            mixroomHostedPluginHelperForWindow(modalWindow) == nil &&
+            modalHelper.eventMonitor == nil &&
+            modalHelper.metadata == nil &&
+            modalHelper.window == nil) {
+            result |= 1u << 5;
+        }
+
+        if (flutterHostWindow == nil ||
+            (flutterHostWindow.isVisible == flutterHostWasVisible &&
+             flutterHostWindow.isMiniaturized == flutterHostWasMiniaturized)) {
+            result |= 1u << 6;
+        }
+
+        mixroomCloseHostedPluginNativeWindowsForOwner(unrelatedOwner);
+        primaryHelper.closing = YES;
+        [primaryHelper removeEventMonitorIfNeeded];
+        if (primaryHelper.closeObserver != nil) {
+            [[NSNotificationCenter defaultCenter]
+                removeObserver:primaryHelper.closeObserver];
+            primaryHelper.closeObserver = nil;
+        }
+        primaryHelper.metadata = nil;
+        primaryHelper.window = nil;
+        objc_setAssociatedObject(
+            primaryWindow,
+            kMixroomHostedPluginWindowHelperKey,
+            nil,
+            OBJC_ASSOCIATION_ASSIGN);
+        [primaryWindow orderOut:nil];
+        [primaryWindow close];
+
+        [primaryHelper release];
+        [ordinaryHelper release];
+        [sheetHelper release];
+        [unrelatedHelper release];
+        [modalHelper release];
+        [primaryWindow release];
+        [ordinaryWindow release];
+        [sheetWindow release];
+        [unrelatedWindow release];
+        [modalWindow release];
+    };
+
+    if ([NSThread isMainThread]) {
+        runProbe();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), runProbe);
+    }
+    return result;
+}
+
+extern "C" unsigned int mixroomRunHostedPluginWindowCaptureRegressionProbe(void) {
+    __block unsigned int result = 0;
+    void (^runProbe)(void) = ^{
+        static int creationOwnerToken = 0;
+        static int liveOwnerToken = 0;
+        static int juceOwnerToken = 0;
+        static int nestedOwnerToken = 0;
+        static int closeModalOwnerToken = 0;
+        void *creationOwner = &creationOwnerToken;
+        void *liveOwner = &liveOwnerToken;
+        void *juceOwner = &juceOwnerToken;
+        void *nestedOwner = &nestedOwnerToken;
+        void *closeModalOwner = &closeModalOwnerToken;
+        NSWindow *flutterHostWindow = mixroomFindFlutterHostWindow();
+        const BOOL flutterHostWasVisible = flutterHostWindow.isVisible;
+
+        NSWindow *(^makeWindow)(NSString *, BOOL) =
+            ^NSWindow *(NSString *title, BOOL orderFront) {
+                NSWindow *window = [[NSWindow alloc]
+                    initWithContentRect:NSMakeRect(120.0, 120.0, 320.0, 210.0)
+                              styleMask:(NSWindowStyleMaskTitled |
+                                         NSWindowStyleMaskClosable)
+                                backing:NSBackingStoreBuffered
+                                  defer:NO];
+                window.title = title;
+                window.releasedWhenClosed = NO;
+                if (orderFront) {
+                    [window makeKeyAndOrderFront:nil];
+                }
+                return window;
+            };
+
+        mixroomBeginHostedPluginWindowCapture(1, 0, 0, -1, creationOwner);
+        NSWindow *creationModal = makeWindow(@"PRO-76 creation modal", NO);
+        __block BOOL modalCleanupRan = NO;
+        __block BOOL modalFallbackRan = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            modalCleanupRan =
+                mixroomCancelPendingHostedPluginWindowCapture(creationOwner);
+        });
+        dispatch_after(
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+            dispatch_get_main_queue(), ^{
+                if (NSApp.modalWindow == creationModal) {
+                    modalFallbackRan = YES;
+                    [NSApp abortModal];
+                    [creationModal orderOut:nil];
+                    [creationModal close];
+                }
+            });
+        const NSModalResponse modalResponse =
+            [NSApp runModalForWindow:creationModal];
+        const BOOL creationCancelled =
+            mixroomEndHostedPluginWindowCapture(creationOwner);
+        if (creationCancelled && modalCleanupRan && !modalFallbackRan &&
+            modalResponse != NSModalResponseContinue &&
+            mixroomHostedPluginHelperForWindow(creationModal) == nil &&
+            !creationModal.isVisible) {
+            result |= 1u << 0;
+        }
+        mixroomReleaseHostedPluginWindowCapture(creationOwner);
+
+        mixroomBeginHostedPluginWindowCapture(1, 0, 0, -1, liveOwner);
+        mixroomEndHostedPluginWindowCapture(liveOwner);
+        NSWindow *primaryWindow = makeWindow(@"PRO-76 captured primary", YES);
+        mixroomConfigureHostedPluginWindow(
+            (__bridge void *)primaryWindow.contentView,
+            1,
+            0,
+            0,
+            -1,
+            liveOwner,
+            false,
+            false);
+
+        NSWindow *sheetWindow = makeWindow(@"PRO-76 captured sheet", NO);
+        [primaryWindow beginSheet:sheetWindow completionHandler:nil];
+        if (mixroomHostedPluginOwnerForWindow(sheetWindow) == liveOwner &&
+            sheetWindow.sheetParent == primaryWindow) {
+            result |= 1u << 1;
+        }
+
+        NSWindow *childWindow = makeWindow(@"PRO-76 captured child", NO);
+        [primaryWindow addChildWindow:childWindow ordered:NSWindowAbove];
+        [childWindow makeKeyAndOrderFront:nil];
+        if (mixroomHostedPluginOwnerForWindow(childWindow) == liveOwner) {
+            result |= 1u << 2;
+        }
+
+        NSWindow *unrelatedWindow = makeWindow(@"PRO-76 ambiguous unrelated", YES);
+        if (mixroomHostedPluginHelperForWindow(unrelatedWindow) == nil) {
+            result |= 1u << 3;
+        }
+
+        mixroomCloseHostedPluginNativeWindowsForOwner(liveOwner);
+        mixroomCloseHostedPluginNativeWindowsForOwner(liveOwner);
+        if (!sheetWindow.isVisible && !childWindow.isVisible &&
+            primaryWindow.isVisible && unrelatedWindow.isVisible) {
+            result |= 1u << 4;
+        }
+        if (flutterHostWindow == nil ||
+            flutterHostWindow.isVisible == flutterHostWasVisible) {
+            result |= 1u << 5;
+        }
+
+        const BOOL beganJuceCapture =
+            mixroomBeginHostedPluginWindowCapture(1, 0, 0, -1, juceOwner);
+        auto juceAuxiliary = std::make_unique<juce::DocumentWindow>(
+            "PRO-76 JUCE auxiliary",
+            juce::Colours::black,
+            juce::DocumentWindow::closeButton,
+            true);
+        juceAuxiliary->setVisible(true);
+        mixroomEndHostedPluginWindowCapture(juceOwner);
+        NSWindow *juceNativeWindow = nil;
+        if (auto *peer = juceAuxiliary->getPeer()) {
+            NSView *nativeView = (__bridge NSView *)peer->getNativeHandle();
+            juceNativeWindow = nativeView.window;
+        }
+        const BOOL isJuceWindow =
+            [NSStringFromClass(juceNativeWindow.class) hasPrefix:@"JUCEWindow_"];
+        const BOOL trackedJuceWindow =
+            mixroomHostedPluginOwnerForWindow(juceNativeWindow) == juceOwner;
+        mixroomCloseHostedPluginNativeWindowsForOwner(juceOwner);
+        const BOOL cleanedJuceWindow =
+            !juceNativeWindow.isVisible &&
+            mixroomHostedPluginHelperForWindow(juceNativeWindow) == nil;
+        mixroomReleaseHostedPluginWindowCapture(juceOwner);
+        juceAuxiliary.reset();
+        if (beganJuceCapture && isJuceWindow && trackedJuceWindow &&
+            cleanedJuceWindow) {
+            result |= 1u << 6;
+        }
+
+        const BOOL beganOuterCapture =
+            mixroomBeginHostedPluginWindowCapture(1, 0, 0, -1, juceOwner);
+        const BOOL rejectedNestedCapture =
+            !mixroomBeginHostedPluginWindowCapture(
+                1, 0, 1, -1, nestedOwner);
+        mixroomEndHostedPluginWindowCapture(juceOwner);
+        mixroomReleaseHostedPluginWindowCapture(juceOwner);
+        const BOOL beganAfterRelease =
+            mixroomBeginHostedPluginWindowCapture(
+                1, 0, 1, -1, nestedOwner);
+        mixroomEndHostedPluginWindowCapture(nestedOwner);
+        mixroomReleaseHostedPluginWindowCapture(nestedOwner);
+        if (beganOuterCapture && rejectedNestedCapture && beganAfterRelease) {
+            result |= 1u << 7;
+        }
+
+        const BOOL beganCloseModalCapture =
+            mixroomBeginHostedPluginWindowCapture(
+                1, 0, 0, -1, closeModalOwner);
+        NSWindow *closeModal = makeWindow(@"PRO-76 close-driven modal", NO);
+        __block BOOL closeModalFallbackRan = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [closeModal close];
+        });
+        dispatch_after(
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+            dispatch_get_main_queue(), ^{
+                if (NSApp.modalWindow == closeModal) {
+                    closeModalFallbackRan = YES;
+                    [NSApp abortModal];
+                }
+            });
+        const NSModalResponse closeModalResponse =
+            [NSApp runModalForWindow:closeModal];
+        const BOOL closeModalCaptureCancelled =
+            mixroomEndHostedPluginWindowCapture(closeModalOwner);
+        const BOOL closeModalHelperRemoved =
+            mixroomHostedPluginHelperForWindow(closeModal) == nil;
+        mixroomReleaseHostedPluginWindowCapture(closeModalOwner);
+        if (beganCloseModalCapture && closeModalCaptureCancelled &&
+            !closeModalFallbackRan &&
+            closeModalResponse == NSModalResponseAbort &&
+            !closeModal.isVisible && closeModalHelperRemoved) {
+            result |= 1u << 8;
+        }
+
+        mixroomPrepareHostedPluginPrimaryPeerReplacement(liveOwner);
+        mixroomReleaseHostedPluginWindowCapture(liveOwner);
+        [primaryWindow orderOut:nil];
+        [primaryWindow close];
+        [unrelatedWindow orderOut:nil];
+        [unrelatedWindow close];
+        [creationModal release];
+        [primaryWindow release];
+        [sheetWindow release];
+        [childWindow release];
+        [unrelatedWindow release];
+        [closeModal release];
+    };
+
+    if ([NSThread isMainThread]) {
+        runProbe();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), runProbe);
+    }
+    return result;
+}
+#endif
 
 extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                                                     int scopeKind,
@@ -1463,8 +2342,11 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
 
         pluginWindow.releasedWhenClosed = NO;
 
+        MixroomHostedPluginWindowCapture *capture =
+            mixroomHostedPluginWindowCaptureForOwner(ownerHandle);
         MixroomHostedPluginWindowHelper *helper =
             mixroomHostedPluginHelperForWindow(pluginWindow);
+        BOOL createdHelper = NO;
         if (helper == nil) {
             helper = [[MixroomHostedPluginWindowHelper alloc] initWithWindow:pluginWindow
                                                                    metadata:metadata];
@@ -1473,11 +2355,15 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
                 kMixroomHostedPluginWindowHelperKey,
                 helper,
                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            createdHelper = YES;
         } else {
             helper.window = pluginWindow;
             helper.metadata = metadata;
         }
         [helper applyWindowMode];
+        if (createdHelper) {
+            [helper release];
+        }
         configureAttempt = nil;
     };
     if ([NSThread isMainThread]) {
@@ -1611,12 +2497,33 @@ extern "C" void mixroomConfigureHostedPluginWindow(void *nativeHandle,
         editorResizable);
 }
 
-extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
-                                                          int row,
-                                                          int effectIndex,
-                                                          int clipId,
-                                                          void *ownerHandle) {
+extern "C" bool mixroomBeginHostedPluginWindowCapture(int scopeKind,
+                                                       int row,
+                                                       int effectIndex,
+                                                       int clipId,
+                                                       void *ownerHandle) {
     juce::ignoreUnused(scopeKind, row, effectIndex, clipId, ownerHandle);
+    return false;
+}
+
+extern "C" bool mixroomEndHostedPluginWindowCapture(void *ownerHandle) {
+    juce::ignoreUnused(ownerHandle);
+    return false;
+}
+
+extern "C" bool mixroomHostedPluginWindowCaptureWasCancelled(
+    void *ownerHandle) {
+    juce::ignoreUnused(ownerHandle);
+    return false;
+}
+
+extern "C" void mixroomReleaseHostedPluginWindowCapture(void *ownerHandle) {
+    juce::ignoreUnused(ownerHandle);
+}
+
+extern "C" void mixroomPrepareHostedPluginPrimaryPeerReplacement(
+    void *ownerHandle) {
+    juce::ignoreUnused(ownerHandle);
 }
 
 extern "C" void mixroomSetHostedPluginWindowsDetached(BOOL detached) {

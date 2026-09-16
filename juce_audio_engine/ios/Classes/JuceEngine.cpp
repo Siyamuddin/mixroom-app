@@ -5211,6 +5211,7 @@ bool JuceEngine::openMidiClipPluginEditor(int clipId)
     metadata.clipId = clipId;
     setLiveMidiInputTargetClip(clipId);
 
+    HostedPluginEditorTarget target;
     {
         const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
@@ -5218,24 +5219,24 @@ bool JuceEngine::openMidiClipPluginEditor(int clipId)
             return false;
 
         auto &clip = clips[(size_t)clipId];
-        auto *processor = liveProcessorForClip(clip);
-        if (!clip.alive || !clip.isMidi || processor == nullptr)
+        target.sharedProcessor = liveProcessorSharedForClip(clip);
+        if (!clip.alive || !clip.isMidi || target.sharedProcessor == nullptr)
             return false;
         if (auto *hostedProc = dynamic_cast<ExternalMidiPluginClipProcessor *>(
-                processor))
+                target.sharedProcessor.get()))
         {
             if (!hostedProc->isEditorReady())
                 return false;
         }
-
-        return openPluginEditorWindowForProcessor(
-            pluginEditorWindowKeyForClip(clipId),
-            *processor,
-            "Instrument",
-            metadata);
     }
 
-    return false;
+    // The shared processor keeps the plugin alive beyond the lock.
+    // Third-party UI entrypoints run after graphRenderMutex is released.
+    return openPluginEditorWindowForTarget(
+        pluginEditorWindowKeyForClip(clipId),
+        std::move(target),
+        "Instrument",
+        metadata);
 }
 
 void JuceEngine::setMidiClipPluginParameter(
@@ -10836,42 +10837,106 @@ bool JuceEngine::setTrackEffectStateBase64(int trackRow,
     return true;
 }
 
+namespace
+{
+#if JUCE_MAC
+class ScopedHostedPluginWindowCapture final
+{
+public:
+    ScopedHostedPluginWindowCapture(HostedPluginEditorMetadata metadata,
+                                    void *ownerHandleIn)
+        : ownerHandle(ownerHandleIn),
+          active(mixroomBeginHostedPluginWindowCapture(
+              static_cast<int>(metadata.scope),
+              metadata.row,
+              metadata.effectIndex,
+              metadata.clipId,
+              ownerHandle))
+    {
+    }
+
+    ~ScopedHostedPluginWindowCapture()
+    {
+        if (!active || transferred)
+            return;
+        if (!creationEnded)
+            mixroomEndHostedPluginWindowCapture(ownerHandle);
+        mixroomCloseHostedPluginNativeWindowsForOwner(ownerHandle);
+        mixroomReleaseHostedPluginWindowCapture(ownerHandle);
+    }
+
+    bool wasAcquired() const noexcept
+    {
+        return active;
+    }
+
+    bool wasCancelled() const
+    {
+        return active &&
+               mixroomHostedPluginWindowCaptureWasCancelled(ownerHandle);
+    }
+
+    bool endCreation()
+    {
+        if (!active || creationEnded)
+            return false;
+        creationEnded = true;
+        return !mixroomEndHostedPluginWindowCapture(ownerHandle);
+    }
+
+    void transferToEditorWindow() noexcept
+    {
+        jassert(active && creationEnded);
+        transferred = active && creationEnded;
+    }
+
+private:
+    void *ownerHandle = nullptr;
+    bool active = false;
+    bool creationEnded = false;
+    bool transferred = false;
+};
+#endif
+} // namespace
+
 bool JuceEngine::openPluginEditorWindowForNode(
-    juce::AudioProcessorGraph::NodeID nodeID,
+    juce::AudioProcessorGraph::Node::Ptr node,
     const juce::String &titlePrefix,
     HostedPluginEditorMetadata metadata,
     bool showInitially)
 {
 #if JUCE_MAC
-    const std::string key = juce::String((juce::int64)nodeID.uid).toStdString();
-    auto node = graph.getNodeForId(nodeID);
     if (node == nullptr)
         return false;
 
-    auto *processor = node->getProcessor();
-    if (processor == nullptr)
+    if (node->getProcessor() == nullptr)
         return false;
 
-    return openPluginEditorWindowForProcessor(
+    const std::string key =
+        juce::String((juce::int64)node->nodeID.uid).toStdString();
+    HostedPluginEditorTarget target;
+    target.node = std::move(node);
+    return openPluginEditorWindowForTarget(
         key,
-        *processor,
+        std::move(target),
         titlePrefix,
         metadata,
         showInitially);
 #else
-    juce::ignoreUnused(nodeID, titlePrefix, metadata, showInitially);
+    juce::ignoreUnused(node, titlePrefix, metadata, showInitially);
     return false;
 #endif
 }
 
-bool JuceEngine::openPluginEditorWindowForProcessor(
+bool JuceEngine::openPluginEditorWindowForTarget(
     const std::string &key,
-    juce::AudioProcessor &processor,
+    HostedPluginEditorTarget target,
     const juce::String &titlePrefix,
     HostedPluginEditorMetadata metadata,
     bool showInitially)
 {
 #if JUCE_MAC
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
     if (auto found = hostedPluginEditorWindows.find(key);
         found != hostedPluginEditorWindows.end() && found->second != nullptr)
     {
@@ -10880,22 +10945,34 @@ bool JuceEngine::openPluginEditorWindowForProcessor(
         return true;
     }
 
-    auto *editorProcessor = &processor;
-    auto *editorOwnerProcessor = &processor;
+    auto *processor = target.getProcessor();
+    if (processor == nullptr)
+        return false;
+    target.session = std::make_shared<HostedPluginEditorSession>();
+    void *ownerHandle = target.getOwnerHandle();
+    ScopedHostedPluginWindowCapture capture(metadata, ownerHandle);
+    if (!capture.wasAcquired())
+        return false;
+
+    auto *editorProcessor = processor;
+    auto *editorOwnerProcessor = processor;
     if (auto *hostedMidi =
-            dynamic_cast<ExternalMidiPluginClipProcessor *>(&processor))
+            dynamic_cast<ExternalMidiPluginClipProcessor *>(processor))
     {
         if (auto *inner = hostedMidi->getHostedInstrumentProcessor())
             editorProcessor = inner;
-        editorOwnerProcessor = &processor;
+        editorOwnerProcessor = processor;
     }
-    if (editorProcessor == nullptr ||
-        editorOwnerProcessor == nullptr ||
-        !editorOwnerProcessor->hasEditor())
+    const bool editorAvailable =
+        editorProcessor != nullptr &&
+        editorOwnerProcessor != nullptr &&
+        editorOwnerProcessor->hasEditor();
+    if (!editorAvailable || capture.wasCancelled())
         return false;
 
-    auto *editor = editorOwnerProcessor->createEditor();
-    if (editor == nullptr)
+    std::unique_ptr<juce::AudioProcessorEditor> editor(
+        editorOwnerProcessor->createEditor());
+    if (editor == nullptr || !capture.endCreation())
         return false;
 
     const juce::String title =
@@ -10904,8 +10981,9 @@ bool JuceEngine::openPluginEditorWindowForProcessor(
             : editorProcessor->getName();
     hostedPluginEditorWindows[key] = std::make_unique<HostedPluginEditorWindow>(
         title,
-        editor,
+        editor.release(),
         editorProcessor,
+        std::move(target),
         metadata,
         showInitially,
         [this, key]()
@@ -10914,9 +10992,10 @@ bool JuceEngine::openPluginEditorWindowForProcessor(
             if (found != hostedPluginEditorWindows.end())
                 hostedPluginEditorWindows.erase(found);
         });
+    capture.transferToEditorWindow();
     return true;
 #else
-    juce::ignoreUnused(key, processor, titlePrefix, metadata, showInitially);
+    juce::ignoreUnused(key, target, titlePrefix, metadata, showInitially);
     return false;
 #endif
 }
@@ -10935,33 +11014,17 @@ void JuceEngine::closePluginEditorWindowForNode(
 void JuceEngine::closePluginEditorWindowForKey(const std::string &key)
 {
 #if JUCE_MAC
-    auto found = hostedPluginEditorWindows.find(key);
-    if (found == hostedPluginEditorWindows.end() || found->second == nullptr)
-        return;
-    auto destroyWindow = [this, key]() mutable
-    {
-        auto found = hostedPluginEditorWindows.find(key);
-        if (found == hostedPluginEditorWindows.end() || found->second == nullptr)
-            return;
-
-        found->second->requestDestroyFromHost();
-    };
-    if (auto *mm = juce::MessageManager::getInstance();
-        mm != nullptr && mm->isThisTheMessageThread())
-    {
-        destroyWindow();
-    }
-    else
-    {
-        juce::MessageManager::callAsync(
-            [this, key]() mutable
-            {
-                auto found = hostedPluginEditorWindows.find(key);
-                if (found == hostedPluginEditorWindows.end() || found->second == nullptr)
-                    return;
-                found->second->requestDestroyFromHost();
-            });
-    }
+    // Graph mutation callers may hold graphRenderMutex. Always cross an async
+    // message-thread boundary before invoking AppKit or third-party editor UI.
+    juce::MessageManager::callAsync(
+        [this, key]() mutable
+        {
+            auto found = hostedPluginEditorWindows.find(key);
+            if (found == hostedPluginEditorWindows.end() ||
+                found->second == nullptr)
+                return;
+            found->second->requestDestroyFromHost();
+        });
 #else
     juce::ignoreUnused(key);
 #endif
@@ -10987,18 +11050,15 @@ void JuceEngine::closeAllHostedPluginEditorWindows()
 #if JUCE_MAC
     auto destroyWindows = [this]()
     {
-        std::vector<juce::Component::SafePointer<HostedPluginEditorWindow>> windows;
-        windows.reserve(hostedPluginEditorWindows.size());
         for (auto &entry : hostedPluginEditorWindows)
         {
             if (entry.second != nullptr)
-                windows.emplace_back(entry.second.get());
+                entry.second->prepareForImmediateDestruction();
         }
-        for (auto &window : windows)
-        {
-            if (window != nullptr)
-                window->requestDestroyFromHost();
-        }
+        // Destroy editor components while their retained targets and graph
+        // processors are still alive. This runs before shutdown takes the
+        // graph lock and clears the graph.
+        hostedPluginEditorWindows.clear();
     };
 
     if (auto *messageManager = juce::MessageManager::getInstance())
@@ -11013,11 +11073,179 @@ void JuceEngine::closeAllHostedPluginEditorWindows()
         for (auto &entry : hostedPluginEditorWindows)
         {
             if (entry.second != nullptr)
-                entry.second->requestDestroyFromHost();
+                entry.second->prepareForImmediateDestruction();
         }
+        hostedPluginEditorWindows.clear();
     }
 #endif
 }
+
+#if MIXROOM_ENABLE_TEST_HOOKS && JUCE_MAC
+namespace
+{
+struct HostedPluginEditorLifetimeProbeState
+{
+    bool editorDestroyed = false;
+    bool processorDestroyed = false;
+    bool editorObservedLiveProcessor = false;
+};
+
+class HostedPluginEditorLifetimeProbeProcessor;
+
+class HostedPluginEditorLifetimeProbeEditor final
+    : public juce::AudioProcessorEditor
+{
+public:
+    HostedPluginEditorLifetimeProbeEditor(
+        HostedPluginEditorLifetimeProbeProcessor &processor,
+        std::shared_ptr<HostedPluginEditorLifetimeProbeState> stateIn);
+
+    ~HostedPluginEditorLifetimeProbeEditor() override
+    {
+        state->editorObservedLiveProcessor = !state->processorDestroyed;
+        state->editorDestroyed = true;
+    }
+
+private:
+    std::shared_ptr<HostedPluginEditorLifetimeProbeState> state;
+};
+
+class HostedPluginEditorLifetimeProbeProcessor final
+    : public SimpleGainProcessor
+{
+public:
+    explicit HostedPluginEditorLifetimeProbeProcessor(
+        std::shared_ptr<HostedPluginEditorLifetimeProbeState> stateIn)
+        : state(std::move(stateIn))
+    {
+    }
+
+    ~HostedPluginEditorLifetimeProbeProcessor() override
+    {
+        state->processorDestroyed = true;
+    }
+
+    bool hasEditor() const override { return true; }
+    juce::AudioProcessorEditor *createEditor() override
+    {
+        return new HostedPluginEditorLifetimeProbeEditor(*this, state);
+    }
+
+private:
+    std::shared_ptr<HostedPluginEditorLifetimeProbeState> state;
+};
+
+HostedPluginEditorLifetimeProbeEditor::HostedPluginEditorLifetimeProbeEditor(
+    HostedPluginEditorLifetimeProbeProcessor &processor,
+    std::shared_ptr<HostedPluginEditorLifetimeProbeState> stateIn)
+    : juce::AudioProcessorEditor(processor),
+      state(std::move(stateIn))
+{
+    setSize(320, 200);
+}
+
+std::unique_ptr<HostedPluginEditorWindow> makeLifetimeProbeWindow(
+    const std::shared_ptr<HostedPluginEditorLifetimeProbeProcessor> &processor,
+    std::function<void()> onClose)
+{
+    HostedPluginEditorTarget target;
+    target.sharedProcessor = processor;
+    target.session = std::make_shared<HostedPluginEditorSession>();
+    HostedPluginEditorMetadata metadata;
+    metadata.scope = HostedPluginEditorScopeKind::trackEffect;
+    return std::make_unique<HostedPluginEditorWindow>(
+        "PRO-76 lifetime probe",
+        processor->createEditor(),
+        processor.get(),
+        std::move(target),
+        metadata,
+        false,
+        std::move(onClose));
+}
+} // namespace
+
+extern "C" unsigned int mixroomRunHostedPluginEditorLifetimeRegressionProbe()
+{
+    jassert(juce::MessageManager::getInstance()->isThisTheMessageThread());
+    unsigned int result = 0;
+
+    auto delayedState =
+        std::make_shared<HostedPluginEditorLifetimeProbeState>();
+    auto delayedProcessor =
+        std::make_shared<HostedPluginEditorLifetimeProbeProcessor>(
+            delayedState);
+    std::unique_ptr<HostedPluginEditorWindow> delayedWindow;
+    delayedWindow = makeLifetimeProbeWindow(
+        delayedProcessor,
+        [&delayedWindow]() { delayedWindow.reset(); });
+    delayedWindow->requestDestroyFromHost();
+    delayedProcessor.reset();
+    if (!delayedState->editorDestroyed &&
+        !delayedState->processorDestroyed) {
+        result |= 1u << 0;
+    }
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(1000);
+    if (delayedWindow == nullptr && delayedState->editorDestroyed &&
+        delayedState->editorObservedLiveProcessor &&
+        delayedState->processorDestroyed) {
+        result |= 1u << 1;
+    }
+
+    auto reopenState =
+        std::make_shared<HostedPluginEditorLifetimeProbeState>();
+    auto reopenProcessor =
+        std::make_shared<HostedPluginEditorLifetimeProbeProcessor>(reopenState);
+    std::unique_ptr<HostedPluginEditorWindow> reopenWindow;
+    reopenWindow = makeLifetimeProbeWindow(
+        reopenProcessor,
+        [&reopenWindow]() { reopenWindow.reset(); });
+    reopenWindow->requestDestroyFromHost();
+    reopenWindow->presentFromHost();
+    reopenProcessor.reset();
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(500);
+    if (reopenWindow != nullptr && !reopenState->editorDestroyed &&
+        !reopenState->processorDestroyed) {
+        result |= 1u << 2;
+    }
+
+    reopenWindow->prepareForImmediateDestruction();
+    reopenWindow.reset();
+    if (reopenState->editorDestroyed &&
+        reopenState->editorObservedLiveProcessor &&
+        reopenState->processorDestroyed) {
+        result |= 1u << 3;
+    }
+
+    HostedPluginEditorMetadata captureMetadata;
+    captureMetadata.scope = HostedPluginEditorScopeKind::trackEffect;
+    static int exceptionOwnerToken = 0;
+    bool caughtProbeException = false;
+    try
+    {
+        ScopedHostedPluginWindowCapture capture(
+            captureMetadata, &exceptionOwnerToken);
+        if (capture.wasAcquired())
+            throw 1;
+    }
+    catch (int)
+    {
+        caughtProbeException = true;
+    }
+
+    bool reacquiredAfterException = false;
+    {
+        ScopedHostedPluginWindowCapture capture(
+            captureMetadata, &exceptionOwnerToken);
+        reacquiredAfterException = capture.wasAcquired();
+        if (reacquiredAfterException)
+            capture.endCreation();
+    }
+    if (caughtProbeException && reacquiredAfterException)
+        result |= 1u << 4;
+
+    return result;
+}
+#endif
 
 void JuceEngine::requestHostedPluginEditorCloseForOwner(void *ownerHandle)
 {
@@ -11032,7 +11260,8 @@ void JuceEngine::requestHostedPluginEditorCloseForOwner(void *ownerHandle)
                  it != hostedPluginEditorWindows.end();
                  ++it)
             {
-                if (it->second == nullptr || it->second.get() != ownerHandle)
+                if (it->second == nullptr ||
+                    it->second->getOwnerHandle() != ownerHandle)
                     continue;
 
                 juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
@@ -11059,7 +11288,8 @@ void JuceEngine::setHostedPluginEditorDetachedForOwner(void *ownerHandle,
         {
             for (auto &entry : hostedPluginEditorWindows)
             {
-                if (entry.second == nullptr || entry.second.get() != ownerHandle)
+                if (entry.second == nullptr ||
+                    entry.second->getOwnerHandle() != ownerHandle)
                     continue;
 
                 juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
@@ -11106,7 +11336,8 @@ void JuceEngine::requestHostedPluginAutomationForOwner(void *ownerHandle)
         {
             for (auto &entry : hostedPluginEditorWindows)
             {
-                if (entry.second == nullptr || entry.second.get() != ownerHandle)
+        if (entry.second == nullptr ||
+            entry.second->getOwnerHandle() != ownerHandle)
                     continue;
 
                 juce::Component::SafePointer<HostedPluginEditorWindow> safeWindow(
@@ -11123,28 +11354,35 @@ void JuceEngine::requestHostedPluginAutomationForOwner(void *ownerHandle)
 
 bool JuceEngine::openTrackPluginEditor(int trackRow, int effectIndex)
 {
-    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    juce::AudioProcessorGraph::Node::Ptr pluginNode;
+    {
+        const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
-    if (trackRow < 0 || trackRow >= (int)rows.size())
-        return false;
+        if (trackRow < 0 || trackRow >= (int)rows.size())
+            return false;
 
-    if (auto *group = trackGroupForLeadRowIndex(trackRow))
-        compactTrackGroupFxChain(*group);
-    else
-        compactRowFxChain(trackRow);
-    auto *chainPtr = effectChainForRowApi(trackRow);
-    if (chainPtr == nullptr)
-        return false;
-    auto &chain = *chainPtr;
-    if (effectIndex < 0 || effectIndex >= chain.size())
-        return false;
+        if (auto *group = trackGroupForLeadRowIndex(trackRow))
+            compactTrackGroupFxChain(*group);
+        else
+            compactRowFxChain(trackRow);
+        auto *chainPtr = effectChainForRowApi(trackRow);
+        if (chainPtr == nullptr)
+            return false;
+        auto &chain = *chainPtr;
+        if (effectIndex < 0 || effectIndex >= chain.size())
+            return false;
+        pluginNode = graph.getNodeForId(chain.getReference(effectIndex));
+        if (pluginNode == nullptr || pluginNode->getProcessor() == nullptr)
+            return false;
+    }
 
     HostedPluginEditorMetadata metadata;
     metadata.scope = HostedPluginEditorScopeKind::trackEffect;
     metadata.row = trackRow;
     metadata.effectIndex = effectIndex;
+    // The retained node owns the processor after graphRenderMutex is released.
     return openPluginEditorWindowForNode(
-        chain.getReference(effectIndex),
+        std::move(pluginNode),
         "Track FX",
         metadata);
 }
@@ -13431,18 +13669,26 @@ bool JuceEngine::setMasterEffectStateBase64(int effectIndex,
 
 bool JuceEngine::openMasterPluginEditor(int effectIndex)
 {
-    const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
+    juce::AudioProcessorGraph::Node::Ptr pluginNode;
+    {
+        const std::lock_guard<std::recursive_mutex> renderLock(graphRenderMutex);
 
-    if (!masterEffectChain)
-        return false;
-    if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
-        return false;
+        if (!masterEffectChain)
+            return false;
+        if (effectIndex < 0 || effectIndex >= masterEffectChain->size())
+            return false;
+        pluginNode = graph.getNodeForId(
+            masterEffectChain->getReference(effectIndex));
+        if (pluginNode == nullptr || pluginNode->getProcessor() == nullptr)
+            return false;
+    }
 
     HostedPluginEditorMetadata metadata;
     metadata.scope = HostedPluginEditorScopeKind::masterEffect;
     metadata.effectIndex = effectIndex;
+    // The retained node owns the processor after graphRenderMutex is released.
     return openPluginEditorWindowForNode(
-        masterEffectChain->getReference(effectIndex),
+        std::move(pluginNode),
         "Master FX",
         metadata);
 }

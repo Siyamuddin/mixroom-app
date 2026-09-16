@@ -70,11 +70,22 @@ extern "C" void mixroomConfigureEmbeddedPluginChrome(void *nativeView,
                                                       double scale);
 extern "C" void mixroomReleaseEmbeddedPluginChrome(void *nativeView);
 extern "C" void mixroomCloseHostedPluginNativeWindowsForOwner(void *ownerHandle);
-extern "C" void mixroomAdoptHostedPluginAuxiliaryWindows(int scopeKind,
-                                                          int row,
-                                                          int effectIndex,
-                                                          int clipId,
-                                                          void *ownerHandle);
+extern "C" bool mixroomBeginHostedPluginWindowCapture(int scopeKind,
+                                                       int row,
+                                                       int effectIndex,
+                                                       int clipId,
+                                                       void *ownerHandle);
+extern "C" bool mixroomEndHostedPluginWindowCapture(void *ownerHandle);
+extern "C" bool mixroomHostedPluginWindowCaptureWasCancelled(
+    void *ownerHandle);
+extern "C" void mixroomReleaseHostedPluginWindowCapture(void *ownerHandle);
+extern "C" void mixroomPrepareHostedPluginPrimaryPeerReplacement(
+    void *ownerHandle);
+extern "C" void mixroomNotifyHostedPluginEditorDestroyed(int scopeKind,
+                                                           int row,
+                                                           int effectIndex,
+                                                           int clipId,
+                                                           void *ownerHandle);
 
 class MetronomeAudioCallback;
 class IOSBluetoothDuplexProbeCallback;
@@ -283,6 +294,29 @@ private:
 
 class HostedPluginEditorShell;
 
+struct HostedPluginEditorSession final
+{
+};
+
+struct HostedPluginEditorTarget final
+{
+    juce::AudioProcessorGraph::Node::Ptr node;
+    std::shared_ptr<juce::AudioProcessor> sharedProcessor;
+    std::shared_ptr<HostedPluginEditorSession> session;
+
+    juce::AudioProcessor *getProcessor() const noexcept
+    {
+        if (node != nullptr)
+            return node->getProcessor();
+        return sharedProcessor.get();
+    }
+
+    void *getOwnerHandle() const noexcept
+    {
+        return session.get();
+    }
+};
+
 inline void mixroomResolveHostedPluginEditorMaxSize(int &maxEditorWidth,
                                                     int &maxEditorHeight)
 {
@@ -335,6 +369,7 @@ public:
     HostedPluginEditorWindow(const juce::String &title,
                              juce::AudioProcessorEditor *editor,
                              juce::AudioProcessor *parameterProcessorIn,
+                             HostedPluginEditorTarget targetIn,
                              HostedPluginEditorMetadata metadata,
                              bool showInitially,
                              OnClose onClose);
@@ -355,11 +390,14 @@ public:
 
     void presentFromHost()
     {
+        if (lifecycleState == LifecycleState::destroyed)
+            return;
         closeRequested = false;
 #if JUCE_MAC
         const auto generation = ++presentationGeneration;
         fitMacNativePluginEditorWindow();
 #endif
+        lifecycleState = LifecycleState::open;
         setAlpha(1.0f);
         setVisible(true);
 #if JUCE_MAC
@@ -374,29 +412,32 @@ public:
                 safeThis->fitMacNativePluginEditorWindow();
                 safeThis->toFront(true);
             } });
-        juce::Timer::callAfterDelay(160, [safeThis]()
-                                    {
-            if (safeThis != nullptr)
-            {
-                mixroomAdoptHostedPluginAuxiliaryWindows(
-                    static_cast<int>(safeThis->metadata.scope),
-                    safeThis->metadata.row,
-                    safeThis->metadata.effectIndex,
-                    safeThis->metadata.clipId,
-                    safeThis.getComponent());
-            } });
 #endif
     }
 
     void requestCloseFromHost()
     {
-        closeButtonPressed();
+        requestDestroyFromHost();
     }
 
     void requestDestroyFromHost()
     {
-        destroyOnClose = true;
         closeButtonPressed();
+    }
+
+    void prepareForImmediateDestruction()
+    {
+        if (lifecycleState == LifecycleState::destroyed)
+            return;
+        closeRequested = true;
+        lifecycleState = LifecycleState::destroyed;
+#if JUCE_MAC
+        ++presentationGeneration;
+        mixroomCloseHostedPluginNativeWindowsForOwner(
+            editorTarget.getOwnerHandle());
+#endif
+        releaseEmbeddedNativeChrome();
+        setVisible(false);
     }
 
     void setDetached(bool shouldDetach);
@@ -406,30 +447,41 @@ public:
         return detached;
     }
 
+    void *getOwnerHandle() const noexcept
+    {
+        return editorTarget.getOwnerHandle();
+    }
+
     ~HostedPluginEditorWindow() override;
 
     void closeButtonPressed() override
     {
-        if (closeRequested)
+        if (lifecycleState != LifecycleState::open || closeRequested)
             return;
         closeRequested = true;
 #if JUCE_MAC
-        ++presentationGeneration;
+        const auto closeGeneration = ++presentationGeneration;
+        lifecycleState = LifecycleState::closing;
+        mixroomCloseHostedPluginNativeWindowsForOwner(
+            editorTarget.getOwnerHandle());
 #endif
-        if (destroyOnClose)
-            releaseEmbeddedNativeChrome();
+        releaseEmbeddedNativeChrome();
         setVisible(false);
-        if (!destroyOnClose)
-        {
-            closeRequested = false;
-            return;
-        }
         auto onClose = onCloseFn;
 #if JUCE_MAC
-        juce::Timer::callAfterDelay(250, [onClose = std::move(onClose)]() mutable
-                                    {
-            if (onClose)
-                onClose(); });
+        juce::Component::SafePointer<HostedPluginEditorWindow> safeThis(this);
+        juce::Timer::callAfterDelay(
+            250,
+            [safeThis, closeGeneration, onClose = std::move(onClose)]() mutable
+            {
+                if (safeThis == nullptr ||
+                    safeThis->presentationGeneration != closeGeneration ||
+                    safeThis->lifecycleState != LifecycleState::closing)
+                    return;
+                safeThis->lifecycleState = LifecycleState::destroyed;
+                if (onClose)
+                    onClose();
+            });
 #else
         juce::MessageManager::callAsync([onClose = std::move(onClose)]() mutable
                                         {
@@ -439,6 +491,13 @@ public:
     }
 
 private:
+    enum class LifecycleState
+    {
+        open,
+        closing,
+        destroyed,
+    };
+
     bool attachToFlutterHostView();
     void attachToDesktopWindowFallback();
     void configureDesktopPeerWindow();
@@ -448,6 +507,10 @@ private:
     bool postAutomationRequestForParameterIndex(int parameterIndex);
     bool automationScopeSupported() const noexcept;
 
+    // Declared first so it outlives listener/context teardown. The owned
+    // editor is explicitly cleared in the derived destructor before the
+    // ResizableWindow base destructor runs.
+    HostedPluginEditorTarget editorTarget;
     HostedPluginEditorMetadata metadata;
     juce::AudioProcessor *parameterProcessor = nullptr;
     HostedPluginParameterTouchTracker parameterTouchTracker;
@@ -458,7 +521,7 @@ private:
     bool embeddedInFlutterHostView = false;
     float embeddedNativeViewScale = 1.0f;
     bool closeRequested = false;
-    bool destroyOnClose = false;
+    LifecycleState lifecycleState = LifecycleState::open;
 #if JUCE_MAC
     uint32_t presentationGeneration = 0;
 #endif
@@ -721,6 +784,7 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
     const juce::String &title,
     juce::AudioProcessorEditor *editor,
     juce::AudioProcessor *parameterProcessorIn,
+    HostedPluginEditorTarget targetIn,
     HostedPluginEditorMetadata metadataIn,
     bool showInitially,
     OnClose onClose)
@@ -728,6 +792,7 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
                            juce::Colours::transparentBlack,
                            0,
                            false),
+      editorTarget(std::move(targetIn)),
       metadata(metadataIn),
       parameterProcessor(parameterProcessorIn),
       parameterTouchTracker(parameterProcessorIn),
@@ -908,6 +973,15 @@ inline HostedPluginEditorWindow::HostedPluginEditorWindow(
 
 inline HostedPluginEditorWindow::~HostedPluginEditorWindow()
 {
+#if JUCE_MAC
+    // Auxiliary plugin windows can outlive the primary NSWindow unless they are
+    // explicitly dismissed before the owner pointer becomes invalid.
+    mixroomCloseHostedPluginNativeWindowsForOwner(
+        editorTarget.getOwnerHandle());
+    mixroomPrepareHostedPluginPrimaryPeerReplacement(
+        editorTarget.getOwnerHandle());
+    mixroomReleaseHostedPluginWindowCapture(editorTarget.getOwnerHandle());
+#endif
     releaseEmbeddedNativeChrome();
     if (auto *shell = dynamic_cast<HostedPluginEditorShell *>(getContentComponent()))
     {
@@ -919,6 +993,15 @@ inline HostedPluginEditorWindow::~HostedPluginEditorWindow()
     {
         editor->setHostContext(nullptr);
     }
+    clearContentComponent();
+#if JUCE_MAC
+    mixroomNotifyHostedPluginEditorDestroyed(
+        static_cast<int>(metadata.scope),
+        metadata.row,
+        metadata.effectIndex,
+        metadata.clipId,
+        editorTarget.getOwnerHandle());
+#endif
 }
 
 inline void HostedPluginEditorWindow::setDetached(bool shouldDetach)
@@ -930,14 +1013,19 @@ inline void HostedPluginEditorWindow::setDetached(bool shouldDetach)
         shell->setDetached(detached);
 #if JUCE_MAC
     const bool wasVisible = isVisible();
+    mixroomCloseHostedPluginNativeWindowsForOwner(
+        editorTarget.getOwnerHandle());
     setVisible(false);
+    mixroomPrepareHostedPluginPrimaryPeerReplacement(
+        editorTarget.getOwnerHandle());
     releaseEmbeddedNativeChrome();
     removeFromDesktop();
     attachToDesktopWindowFallback();
     setVisible(wasVisible);
     toFront(true);
 #else
-    mixroomSetHostedPluginWindowDetachedForOwner(this, detached);
+    mixroomSetHostedPluginWindowDetachedForOwner(
+        editorTarget.getOwnerHandle(), detached);
 #endif
 }
 
@@ -994,7 +1082,7 @@ inline bool HostedPluginEditorWindow::attachToFlutterHostView()
                                        displayScale);
         mixroomConfigureEmbeddedPluginChrome(peer->getNativeHandle(),
                                              editorTitle.toRawUTF8(),
-                                             this,
+                                             editorTarget.getOwnerHandle(),
                                              displayScale);
     }
     embeddedInFlutterHostView = true;
@@ -1039,7 +1127,7 @@ inline void HostedPluginEditorWindow::configureDesktopPeerWindow()
             metadata.row,
             metadata.effectIndex,
             metadata.clipId,
-            this,
+            editorTarget.getOwnerHandle(),
             dynamic_cast<HostedPluginEditorShell *>(getContentComponent()) != nullptr,
             directEditor != nullptr && directEditor->isResizable());
 }
@@ -7396,16 +7484,16 @@ private:
     void recordGraphRebuildRequest(bool deferred,
                                    bool batchCommit,
                                    bool projectLoadCommit) noexcept;
-    bool openPluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID,
+    bool openPluginEditorWindowForNode(juce::AudioProcessorGraph::Node::Ptr node,
                                        const juce::String &titlePrefix,
                                        HostedPluginEditorMetadata metadata = {},
                                        bool showInitially = true);
     void closePluginEditorWindowForNode(juce::AudioProcessorGraph::NodeID nodeID);
-    bool openPluginEditorWindowForProcessor(const std::string &key,
-                                            juce::AudioProcessor &processor,
-                                            const juce::String &titlePrefix,
-                                            HostedPluginEditorMetadata metadata = {},
-                                            bool showInitially = true);
+    bool openPluginEditorWindowForTarget(const std::string &key,
+                                         HostedPluginEditorTarget target,
+                                         const juce::String &titlePrefix,
+                                         HostedPluginEditorMetadata metadata = {},
+                                         bool showInitially = true);
     void closePluginEditorWindowForKey(const std::string &key);
     static std::string pluginEditorWindowKeyForClip(int clipId);
     void closeHostedPluginEditorWindowsForRow(const RowState &row);
