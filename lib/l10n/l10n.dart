@@ -1299,6 +1299,12 @@ class L10n {
       'Spacebar Stop Returns to Start': 'Spacebar Stop Returns to Start',
       'When stopping playback with Space, jump back to the point where playback started.':
           'When stopping playback with Space, jump back to the point where playback started.',
+      'Follow Playhead': 'Follow Playhead',
+      'Keep the arrange view on the playhead while playing, recording, looping, or jumping to the start.':
+          'Keep the arrange view on the playhead while playing, recording, looping, or jumping to the start.',
+      'Continuous scrolling': 'Continuous scrolling',
+      'Hold the playhead still and slide the timeline under it, like the piano roll lock.':
+          'Hold the playhead still and slide the timeline under it, like the piano roll lock.',
       'Keyboard Shortcuts': 'Keyboard Shortcuts',
       'View, remap, and reset desktop shortcuts.':
           'View, remap, and reset desktop shortcuts.',
@@ -3529,6 +3535,12 @@ class L10n {
       'Spacebar Stop Returns to Start': '스페이스바 정지 시 시작 위치로 돌아가기',
       'When stopping playback with Space, jump back to the point where playback started.':
           '스페이스바로 재생을 멈추면 재생을 시작했던 위치로 돌아갑니다.',
+      'Follow Playhead': '재생 헤드 따라가기',
+      'Keep the arrange view on the playhead while playing, recording, looping, or jumping to the start.':
+          '재생, 녹음, 루프, 시작 위치로 이동할 때 편집 화면이 재생 헤드를 따라갑니다.',
+      'Continuous scrolling': '연속 스크롤',
+      'Hold the playhead still and slide the timeline under it, like the piano roll lock.':
+          '재생 헤드를 고정하고 타임라인을 그 아래로 밀어 피아노 롤 잠금과 같이 움직입니다.',
       'Keyboard Shortcuts': '키보드 단축키',
       'View, remap, and reset desktop shortcuts.':
           '데스크톱 단축키를 확인하고, 다시 지정하고, 초기화합니다.',
@@ -5127,6 +5139,12 @@ class L10n {
       'Spacebar Stop Returns to Start': '空格停止时返回起点',
       'When stopping playback with Space, jump back to the point where playback started.':
           '用空格停止播放时，跳回播放开始的位置。',
+      'Follow Playhead': '跟随播放头',
+      'Keep the arrange view on the playhead while playing, recording, looping, or jumping to the start.':
+          '在播放、录音、循环或跳回开头时，让编排视图始终跟随播放头。',
+      'Continuous scrolling': '连续滚动',
+      'Hold the playhead still and slide the timeline under it, like the piano roll lock.':
+          '让播放头保持不动，时间线在其下方滑动，和钢琴卷帘锁定一样。',
       'Keyboard Shortcuts': '键盘快捷键',
       'View, remap, and reset desktop shortcuts.': '查看、重新映射和重置桌面快捷键。',
       'Transport': '走带',
@@ -6661,6 +6679,12 @@ class L10n {
       'Spacebar Stop Returns to Start': 'スペース停止時に開始位置へ戻る',
       'When stopping playback with Space, jump back to the point where playback started.':
           'スペースキーで再生を停止したとき、再生を開始した位置へ戻ります。',
+      'Follow Playhead': '再生ヘッドに追従',
+      'Keep the arrange view on the playhead while playing, recording, looping, or jumping to the start.':
+          '再生、録音、ループ、先頭へ移動したときにアレンジ画面が再生ヘッドを追従します。',
+      'Continuous scrolling': '連続スクロール',
+      'Hold the playhead still and slide the timeline under it, like the piano roll lock.':
+          '再生ヘッドを固定し、タイムラインをその下で滑らせます。ピアノロールのロックと同じ動きです。',
       'Keyboard Shortcuts': 'キーボードショートカット',
       'View, remap, and reset desktop shortcuts.':
           'デスクトップショートカットの確認、割り当て変更、リセットを行います。',

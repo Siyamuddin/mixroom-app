@@ -6021,6 +6021,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   bool _liveMidiEventPlaybackSupported = false;
   bool _desktopKeyboardMidiEnabled = false;
   bool _desktopSpacebarStopReturnsToStart = false;
+  bool _desktopFollowPlayhead = false;
+  bool _desktopFollowPlayheadContinuous = false;
   bool _allowMultipleExpandedRows = true;
   bool _expandRowsOnTrackSelect = true;
   bool _desktopShortcutSettingsOpen = false;
@@ -14551,6 +14553,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           PlatformCapabilities.current.isDesktop &&
           ((uiSettings?["desktopSpacebarStopReturnsToStart"] as bool?) ??
               false);
+      _desktopFollowPlayhead =
+          PlatformCapabilities.current.isDesktop &&
+          ((uiSettings?["desktopFollowPlayhead"] as bool?) ?? false);
+      _desktopFollowPlayheadContinuous =
+          PlatformCapabilities.current.isDesktop &&
+          ((uiSettings?["desktopFollowPlayheadContinuous"] as bool?) ??
+              false);
       _allowMultipleExpandedRows =
           (uiSettings?["allowMultipleExpandedRows"] as bool?) ?? true;
       _expandRowsOnTrackSelect =
@@ -17778,6 +17787,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         "showProducerCaptureUi": _showProducerCaptureUi,
         "desktopKeyboardMidiEnabled": _desktopKeyboardMidiEnabled,
         "desktopSpacebarStopReturnsToStart": _desktopSpacebarStopReturnsToStart,
+        "desktopFollowPlayhead": _desktopFollowPlayhead,
+        "desktopFollowPlayheadContinuous": _desktopFollowPlayheadContinuous,
         "allowMultipleExpandedRows": _allowMultipleExpandedRows,
         "expandRowsOnTrackSelect": _expandRowsOnTrackSelect,
         "crossfadeMode": _projectCrossfadeMode,
@@ -20462,6 +20473,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _syncTransportClock(newStartPoint, playing: false);
       _isPlaying = false;
     });
+    // Restart pressed while already stopped at the start point does not
+    // change the clock, so the timeline's follow listener never fires.
+    // Bring the playhead into view explicitly in that case.
+    if (_desktopFollowPlayhead && PlatformCapabilities.current.isDesktop) {
+      _timelineController.snapFollowPlayhead();
+    }
 
     _stopMeterPolling();
   }
@@ -43485,6 +43502,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                 const SizedBox(height: 9),
                                 _buildDesktopSpacebarStopToggle(),
                                 const SizedBox(height: 9),
+                                _buildDesktopFollowPlayheadToggle(),
+                                const SizedBox(height: 9),
+                                _buildDesktopFollowPlayheadContinuousToggle(),
+                                const SizedBox(height: 9),
                                 _buildDesktopKeyboardShortcutsLauncher(),
                                 const SizedBox(height: 9),
                                 _buildDesktopPluginManagerLauncher(),
@@ -44112,6 +44133,101 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               _setStateAndRefreshProjectSettings(
                 () => _desktopSpacebarStopReturnsToStart = v,
               );
+              _scheduleProjectAutosave();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopFollowPlayheadToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  L10n.translate(context, 'Follow Playhead'),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  L10n.translate(
+                    context,
+                    'Keep the arrange view on the playhead while playing, recording, looping, or jumping to the start.',
+                  ),
+                  style: const TextStyle(
+                    color: Color(0xB8F4F4F4),
+                    fontSize: 12.2,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          CupertinoSwitch(
+            value: _desktopFollowPlayhead,
+            activeTrackColor: const Color(0xFF1F89E3),
+            onChanged: (v) {
+              // The timeline receives this flag as a widget prop, so the
+              // editor tree must rebuild too (not just the settings dialog).
+              _refreshProjectSettingsAndEditor(
+                () => _desktopFollowPlayhead = v,
+              );
+              _scheduleProjectAutosave();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopFollowPlayheadContinuousToggle() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  L10n.translate(context, 'Continuous scrolling'),
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  L10n.translate(
+                    context,
+                    'Hold the playhead still and slide the timeline under it, like the piano roll lock.',
+                  ),
+                  style: const TextStyle(
+                    color: Color(0xB8F4F4F4),
+                    fontSize: 12.2,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          CupertinoSwitch(
+            value: _desktopFollowPlayheadContinuous,
+            activeTrackColor: const Color(0xFF1F89E3),
+            onChanged: (v) {
+              _refreshProjectSettingsAndEditor(() {
+                _desktopFollowPlayheadContinuous = v;
+                if (v) {
+                  _desktopFollowPlayhead = true;
+                }
+              });
               _scheduleProjectAutosave();
             },
           ),
@@ -87039,6 +87155,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           controller: _timelineController,
                                           transportClockListenable:
                                               _transportClock,
+                                          followPlayheadOnDesktop:
+                                              _desktopFollowPlayhead,
+                                          followPlayheadContinuousOnDesktop:
+                                              _desktopFollowPlayhead &&
+                                              _desktopFollowPlayheadContinuous,
                                           rows: _rows,
                                           frozenRowDescription:
                                               _frozenRowDescription,

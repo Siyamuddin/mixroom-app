@@ -644,6 +644,16 @@ class AudioCanvasTimeline extends StatefulWidget {
   })
   onTrimClipCommit;
   final ValueListenable<Duration> transportClockListenable;
+
+  /// Desktop only. When true, the arrange view page-flips so the playhead
+  /// stays on screen during playback, recording, loop wraps and seeks.
+  /// Mobile/tablet layouts ignore this and keep their own follow behavior.
+  final bool followPlayheadOnDesktop;
+
+  /// Desktop only. When true with [followPlayheadOnDesktop], the playhead
+  /// stays pinned and the arrange view slides under it (FL continuous /
+  /// piano-roll lock). Ignored when follow is off.
+  final bool followPlayheadContinuousOnDesktop;
   final void Function(double ms) onScrubRequested;
   final bool isPlaying;
   final Duration maxDuration;
@@ -902,6 +912,8 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.onTrimClip,
     required this.onTrimClipCommit,
     required this.transportClockListenable,
+    this.followPlayheadOnDesktop = false,
+    this.followPlayheadContinuousOnDesktop = false,
     required this.onScrubRequested,
     required this.isPlaying,
     required this.maxDuration,
@@ -1052,6 +1064,7 @@ class AudioCanvasTimelineController {
   _placementForExternalSampleDrop;
   void Function(double deltaMs)? _panByMs;
   VoidCallback? _ensurePlayheadVisible;
+  VoidCallback? _snapFollowPlayhead;
   void Function(int row)? _ensureRowVisible;
   final ValueNotifier<TimelineTopControlsState> _topControls =
       ValueNotifier<TimelineTopControlsState>(TimelineTopControlsState.initial);
@@ -1096,6 +1109,7 @@ class AudioCanvasTimelineController {
     placementForExternalSampleDrop,
     required void Function(double deltaMs) panByMs,
     required VoidCallback ensurePlayheadVisible,
+    required VoidCallback snapFollowPlayhead,
     required void Function(int row) ensureRowVisible,
   }) {
     _ensureRowExpanded = ensureRowExpanded;
@@ -1117,6 +1131,7 @@ class AudioCanvasTimelineController {
     _placementForExternalSampleDrop = placementForExternalSampleDrop;
     _panByMs = panByMs;
     _ensurePlayheadVisible = ensurePlayheadVisible;
+    _snapFollowPlayhead = snapFollowPlayhead;
     _ensureRowVisible = ensureRowVisible;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _publishTopControlsState?.call();
@@ -1148,6 +1163,7 @@ class AudioCanvasTimelineController {
     placementForExternalSampleDrop,
     required void Function(double deltaMs) panByMs,
     required VoidCallback ensurePlayheadVisible,
+    required VoidCallback snapFollowPlayhead,
     required void Function(int row) ensureRowVisible,
   }) {
     if (identical(_ensureRowExpanded, ensureRowExpanded)) {
@@ -1221,6 +1237,9 @@ class AudioCanvasTimelineController {
     }
     if (identical(_ensurePlayheadVisible, ensurePlayheadVisible)) {
       _ensurePlayheadVisible = null;
+    }
+    if (identical(_snapFollowPlayhead, snapFollowPlayhead)) {
+      _snapFollowPlayhead = null;
     }
     if (identical(_ensureRowVisible, ensureRowVisible)) {
       _ensureRowVisible = null;
@@ -1310,6 +1329,12 @@ class AudioCanvasTimelineController {
   /// Nudges the view if the playhead would otherwise leave the viewport.
   void ensurePlayheadVisible() {
     _ensurePlayheadVisible?.call();
+  }
+
+  /// Re-arms follow and snaps the view to the playhead (page: on-screen,
+  /// continuous: pinned). Used by restart when the clock value does not change.
+  void snapFollowPlayhead() {
+    _snapFollowPlayhead?.call();
   }
 
   /// Scrolls vertically so [row] is on-screen when it is not hidden.
@@ -1605,6 +1630,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       _usesTabletDawLayout ? _headerWidth : kTimelineUnderlayLeft;
   double _pixelsPerMs = 0.1; // Initial zoom level
   double _scrollOffsetMs = 0.0;
+
+  // Desktop "follow playhead" (PRO-75) bookkeeping.
+  // Following pauses when the user pans away during playback and resumes on
+  // the next transport change or once the playhead is back in view.
+  bool _followPlayheadSuspended = false;
+  double? _followLastScrollOffsetMs;
+  double? _followLastPixelsPerMs;
   int _selectedClipIndex = -1;
   final Set<int> _selectedClipIndices = <int>{};
   int _clipVisualStackCounter = 0;
@@ -6285,9 +6317,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       panByMs: _panTimelineByMs,
       ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+      snapFollowPlayhead: _snapDesktopFollowPlayhead,
       ensureRowVisible: _ensureRowVisibleInViewport,
     );
     _syncRowUiState();
+    widget.transportClockListenable.addListener(_onTransportClockForFollow);
     _verticalScrollController.addListener(() {
       setState(() {
         _syncVerticalScrollOffsetFromController();
@@ -6314,6 +6348,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   void didUpdateWidget(covariant AudioCanvasTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(
+      oldWidget.transportClockListenable,
+      widget.transportClockListenable,
+    )) {
+      oldWidget.transportClockListenable.removeListener(
+        _onTransportClockForFollow,
+      );
+      widget.transportClockListenable.addListener(_onTransportClockForFollow);
+    }
+    if (oldWidget.followPlayheadOnDesktop != widget.followPlayheadOnDesktop ||
+        oldWidget.followPlayheadContinuousOnDesktop !=
+            widget.followPlayheadContinuousOnDesktop ||
+        oldWidget.isPlaying != widget.isPlaying ||
+        oldWidget.isRecording != widget.isRecording) {
+      // Any transport change (play, stop, record, restart) or toggling the
+      // setting re-arms following and catches the playhead once.
+      _followPlayheadSuspended = false;
+      _followLastScrollOffsetMs = null;
+      _followLastPixelsPerMs = null;
+      if (widget.followPlayheadOnDesktop) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _snapDesktopFollowPlayhead();
+        });
+      }
+    }
     if (oldWidget.loopEnabled != widget.loopEnabled ||
         oldWidget.loopStartMs != widget.loopStartMs ||
         oldWidget.loopEndMs != widget.loopEndMs) {
@@ -6349,6 +6409,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
         panByMs: _panTimelineByMs,
         ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+        snapFollowPlayhead: _snapDesktopFollowPlayhead,
         ensureRowVisible: _ensureRowVisibleInViewport,
       );
       widget.controller?._bind(
@@ -6372,6 +6433,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
         panByMs: _panTimelineByMs,
         ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+        snapFollowPlayhead: _snapDesktopFollowPlayhead,
         ensureRowVisible: _ensureRowVisibleInViewport,
       );
     }
@@ -6515,11 +6577,13 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       placementForExternalSampleDrop: _sampleDropPlacementForGlobalOffset,
       panByMs: _panTimelineByMs,
       ensurePlayheadVisible: _ensurePlayheadVisibleInViewport,
+      snapFollowPlayhead: _snapDesktopFollowPlayhead,
       ensureRowVisible: _ensureRowVisibleInViewport,
     );
     widget.controller?._setHorizontalScrollbarState(
       TimelineHorizontalScrollbarState.hidden,
     );
+    widget.transportClockListenable.removeListener(_onTransportClockForFollow);
     _verticalScrollController.dispose();
     _timelineFocusNode.dispose();
     super.dispose();
@@ -7417,6 +7481,169 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       viewportWidth: viewportWidth,
       targetScrollMs: targetScrollMs,
     );
+  }
+
+  /// Fraction of the viewport kept between the left edge and the playhead
+  /// after a follow "page flip", so the playhead lands slightly inset.
+  static const double _kFollowPlayheadLeftInsetFraction = 0.08;
+
+  /// Where continuous follow pins the playhead, matching piano-roll lock.
+  static const double _kFollowPlayheadContinuousAnchorFraction = 0.42;
+
+  bool get _desktopFollowPageActive =>
+      PlatformCapabilities.current.isDesktop &&
+      widget.followPlayheadOnDesktop &&
+      !widget.followPlayheadContinuousOnDesktop;
+
+  bool get _desktopFollowContinuousActive =>
+      PlatformCapabilities.current.isDesktop &&
+      widget.followPlayheadOnDesktop &&
+      widget.followPlayheadContinuousOnDesktop;
+
+  void _baselineFollowScroll() {
+    _followLastScrollOffsetMs = _scrollOffsetMs;
+    _followLastPixelsPerMs = _pixelsPerMs;
+  }
+
+  void _detectFollowUserScroll() {
+    final double? lastScroll = _followLastScrollOffsetMs;
+    final double? lastZoom = _followLastPixelsPerMs;
+    final bool zoomUnchanged = lastZoom != null && lastZoom == _pixelsPerMs;
+    final bool userScrolledAway =
+        lastScroll != null &&
+        zoomUnchanged &&
+        (_scrollOffsetMs - lastScroll).abs() > 0.5;
+    if (userScrolledAway ||
+        (_isUserInteracting && _interactionMode == 'pan') ||
+        _horizontalScrollbarDragging) {
+      _followPlayheadSuspended = true;
+    }
+  }
+
+  void _onTransportClockForFollow() {
+    if (!mounted || !_desktopFollowPageActive) return;
+    // The clock normally notifies from the transport ticker or from input
+    // handlers, where setState is safe. Never mutate layout state from
+    // inside a build/layout pass; defer to the end of the frame instead.
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _applyDesktopFollowPlayhead();
+      });
+      return;
+    }
+    _applyDesktopFollowPlayhead();
+  }
+
+  /// Page-flip follow. Only runs when continuous is off so its own scroll
+  /// writes are never treated as a user pan.
+  void _applyDesktopFollowPlayhead() {
+    if (!mounted || !_desktopFollowPageActive) return;
+    if (_pixelsPerMs <= 0.0 || !_pixelsPerMs.isFinite) return;
+    final double viewportWidth = _getViewportWidth(context);
+    if (viewportWidth <= 0.0) return;
+
+    final double viewportMs = viewportWidth / _pixelsPerMs;
+    final double playheadMs = _currentPlayheadMs;
+    if (!playheadMs.isFinite) return;
+
+    _detectFollowUserScroll();
+
+    final double visibleStartMs = _scrollOffsetMs;
+    final double visibleEndMs = _scrollOffsetMs + viewportMs;
+    final bool playheadVisible =
+        playheadMs >= visibleStartMs && playheadMs <= visibleEndMs;
+
+    if (playheadVisible) {
+      _followPlayheadSuspended = false;
+    } else if (!_followPlayheadSuspended) {
+      _applyFollowScroll(
+        targetScrollMs:
+            playheadMs - viewportMs * _kFollowPlayheadLeftInsetFraction,
+        viewportWidth: viewportWidth,
+      );
+    }
+
+    _baselineFollowScroll();
+  }
+
+  /// Continuous follow. Mutates [_scrollOffsetMs] so the playhead stays at
+  /// 42% of the viewport. No setState during clock-driven builds; the
+  /// existing ValueListenableBuilder already rebuilds clips and the ruler.
+  void _applyDesktopContinuousFollow({bool forceSetState = false}) {
+    if (!mounted || !_desktopFollowContinuousActive) return;
+    if (_pixelsPerMs <= 0.0 || !_pixelsPerMs.isFinite) return;
+    final double viewportWidth = _getViewportWidth(context);
+    if (viewportWidth <= 0.0) return;
+
+    _detectFollowUserScroll();
+    if (_followPlayheadSuspended) {
+      _baselineFollowScroll();
+      return;
+    }
+
+    final double playheadMs = _currentPlayheadMs;
+    if (!playheadMs.isFinite) return;
+    final double pinPx =
+        viewportWidth * _kFollowPlayheadContinuousAnchorFraction;
+    final double targetScrollMs = playheadMs - pinPx / _pixelsPerMs;
+    if (!targetScrollMs.isFinite) {
+      _baselineFollowScroll();
+      return;
+    }
+
+    final double before = _scrollOffsetMs;
+    _scrollOffsetMs = targetScrollMs;
+    _clampScroll();
+    final double after = _scrollOffsetMs;
+    if ((after - before).abs() <= 0.5) {
+      _scrollOffsetMs = before;
+      _baselineFollowScroll();
+      return;
+    }
+    if (forceSetState) {
+      setState(() {});
+      _publishHorizontalScrollbarState(viewportWidth: viewportWidth);
+    }
+    _baselineFollowScroll();
+  }
+
+  void _snapDesktopFollowPlayhead() {
+    if (!mounted) return;
+    _followPlayheadSuspended = false;
+    _followLastScrollOffsetMs = null;
+    _followLastPixelsPerMs = null;
+    if (_desktopFollowContinuousActive) {
+      _applyDesktopContinuousFollow(forceSetState: true);
+      return;
+    }
+    if (_desktopFollowPageActive) {
+      _ensurePlayheadVisibleInViewport();
+    }
+  }
+
+  /// Applies a programmatic follow scroll. Intentionally does not call
+  /// [AudioCanvasTimeline.onTutorialTimelineScrolled]: that callback marks a
+  /// tutorial step as completed by the user, and automatic following must not
+  /// trigger it.
+  void _applyFollowScroll({
+    required double targetScrollMs,
+    required double viewportWidth,
+  }) {
+    if (!targetScrollMs.isFinite) return;
+    final double before = _scrollOffsetMs;
+    _scrollOffsetMs = targetScrollMs;
+    _clampScroll();
+    final double after = _scrollOffsetMs;
+    if ((after - before).abs() <= 0.5) {
+      // Clamped to where we already are (for example at the project end).
+      // Leave state untouched and avoid a redundant rebuild.
+      _scrollOffsetMs = before;
+      return;
+    }
+    setState(() {});
+    _publishHorizontalScrollbarState(viewportWidth: viewportWidth);
   }
 
   void _ensureRowVisibleInViewport(int row) {
@@ -11089,18 +11316,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                                       valueListenable:
                                           widget.transportClockListenable,
                                       builder: (context, clock, __) {
-                                        final playheadPx =
-                                            PlatformCapabilities
-                                                .current
-                                                .isDesktop
-                                            ? _getPlayheadPx(context)
-                                            : mobilePlayheadPx;
-                                        _syncPlaybackViewport(playheadPx);
+                                        final playheadPxAfterFollow =
+                                            _syncPlaybackViewport(
+                                          PlatformCapabilities
+                                                  .current
+                                                  .isDesktop
+                                              ? _getPlayheadPx(context)
+                                              : mobilePlayheadPx,
+                                        );
                                         return _buildPlaybackDrivenTimelineLayers(
                                           viewportWidth: viewportWidth,
                                           visibleTimelineHeight:
                                               visibleTimelineHeight,
-                                          playheadPx: playheadPx,
+                                          playheadPx: playheadPxAfterFollow,
                                           transportMs:
                                               clock.inMicroseconds.toDouble() /
                                               1000.0,
@@ -11170,15 +11398,19 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  void _syncPlaybackViewport(double playheadPx) {
+  double _syncPlaybackViewport(double playheadPx) {
     if (PlatformCapabilities.current.isDesktop) {
-      return;
+      _applyDesktopContinuousFollow();
+      if (_desktopFollowContinuousActive && !_followPlayheadSuspended) {
+        return _getPlayheadPx(context);
+      }
+      return playheadPx;
     }
     if (_scrollOffsetMs == 0.0 && _currentPlayheadMs == 0.0) {
       _scrollOffsetMs = -(playheadPx) / _pixelsPerMs;
     }
     if (_isUserInteracting && _interactionMode == 'pan') {
-      return;
+      return playheadPx;
     }
 
     final int expectedRestartMs = (_loopEnabled && _loopStartMs != null)
@@ -11203,6 +11435,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         _clampScroll();
       }
     }
+    return playheadPx;
   }
 
   void _scheduleWaveformDetailViewport({
