@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,8 @@ import 'package:mixroom/helpers/entitlement_service.dart';
 import 'package:mixroom/helpers/iap_service.dart';
 import 'package:mixroom/helpers/password_policy.dart';
 import 'package:mixroom/helpers/app_popup.dart';
+import 'package:mixroom/helpers/profile_avatar_codec.dart';
+import 'package:mixroom/helpers/profile_avatar_picker.dart';
 import 'package:mixroom/helpers/project_version_preferences.dart';
 import 'package:mixroom/l10n/l10n.dart';
 import 'package:mixroom/models/feedback_models.dart';
@@ -32,6 +35,7 @@ import 'package:mixroom/widgets/account_glass_ui.dart';
 import 'package:mixroom/widgets/email_verification_sheet.dart';
 import 'package:mixroom/widgets/language_selector.dart';
 import 'package:mixroom/widgets/mixroom_glass_dropdown.dart';
+import 'package:mixroom/widgets/mixroom_profile_avatar.dart';
 import 'package:mixroom/widgets/remote_welcome_onboarding_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -199,6 +203,8 @@ class _AccountBodyState extends State<_AccountBody> {
   DateTime? _selectedBirthdateUtc;
   bool _isEditing = false;
   bool _isSaving = false;
+  bool _isAvatarBusy = false;
+  bool _isAvatarFlowOpen = false;
 
   @override
   void initState() {
@@ -416,6 +422,148 @@ class _AccountBodyState extends State<_AccountBody> {
     }
   }
 
+  String? get _avatarUrl {
+    final url = widget.appUser?.avatarUrl?.trim() ?? '';
+    return url.isEmpty ? null : url;
+  }
+
+  void _showProfileBackendUnavailable() {
+    showAppSnackBar(
+      context,
+      'Username, birthday, and bio require the deployed account backend before they can be saved.',
+    );
+  }
+
+  Future<void> _onAvatarTap() async {
+    if (_isAvatarBusy || _isAvatarFlowOpen) return;
+    if (!widget.canEditAppProfile) {
+      _showProfileBackendUnavailable();
+      return;
+    }
+    final avatarUrl = _avatarUrl;
+    if (avatarUrl != null) {
+      await showMixroomProfileAvatarViewer(
+        context: context,
+        avatarUrl: avatarUrl,
+        onChangePhoto: () {
+          unawaited(_changeAvatar());
+        },
+        onRemovePhoto: () {
+          unawaited(_removeAvatar());
+        },
+      );
+      return;
+    }
+    await _changeAvatar();
+  }
+
+  Future<void> _changeAvatar() async {
+    if (_isAvatarBusy || _isAvatarFlowOpen) return;
+    if (!widget.canEditAppProfile) {
+      _showProfileBackendUnavailable();
+      return;
+    }
+
+    _isAvatarFlowOpen = true;
+    Uint8List? cropped;
+    try {
+      cropped = await ProfileAvatarPicker.pickAndCrop(context);
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        ProfileAvatarPicker.messageForPickerError(error, null) ??
+            "Couldn't read that image.",
+      );
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      showAppSnackBar(context, "Couldn't read that image.");
+      return;
+    } finally {
+      _isAvatarFlowOpen = false;
+    }
+    if (cropped == null || !mounted) return;
+
+    setState(() => _isAvatarBusy = true);
+    try {
+      final encoded = await compute(
+        ProfileAvatarCodec.encodeJpegIsolate,
+        cropped,
+      );
+      final error = encoded['error'] as String?;
+      if (error != null) {
+        throw ProfileAvatarCodecException(error);
+      }
+      final jpeg = encoded['bytes'] as Uint8List?;
+      if (jpeg == null || jpeg.isEmpty) {
+        throw const ProfileAvatarCodecException("Couldn't read that image.");
+      }
+      await context.read<AppUserService>().uploadAvatar(jpeg);
+      if (!mounted) return;
+      showAppSnackBar(context, 'Photo updated');
+    } on ProfileAvatarCodecException catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(context, error.message);
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        error.toString().replaceFirst('Bad state: ', ''),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isAvatarBusy = false);
+      }
+    }
+  }
+
+  Future<void> _removeAvatar() async {
+    if (_isAvatarBusy || _isAvatarFlowOpen) return;
+    if (!widget.canEditAppProfile) {
+      _showProfileBackendUnavailable();
+      return;
+    }
+
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return CupertinoAlertDialog(
+          title: Text(L10n.translate(context, 'Remove profile photo?')),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(L10n.translate(context, 'Cancel')),
+            ),
+            CupertinoDialogAction(
+              isDestructiveAction: true,
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text(L10n.translate(context, 'Remove')),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isAvatarBusy = true);
+    try {
+      await context.read<AppUserService>().deleteAvatar();
+      if (!mounted) return;
+      showAppSnackBar(context, 'Photo removed');
+    } catch (error) {
+      if (!mounted) return;
+      showAppSnackBar(
+        context,
+        error.toString().replaceFirst('Bad state: ', ''),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isAvatarBusy = false);
+      }
+    }
+  }
+
   Future<void> _openFeedbackComposer() async {
     final authService = context.read<AuthService>();
     await showDialog<void>(
@@ -497,9 +645,9 @@ class _AccountBodyState extends State<_AccountBody> {
   }
 
   void _openSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const _AccountSettingsScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const _AccountSettingsScreen()));
   }
 
   @override
@@ -542,6 +690,9 @@ class _AccountBodyState extends State<_AccountBody> {
             isEditing: _isEditing,
             onEditToggle: _handleEditToggle,
             onOpenSettings: _openSettings,
+            avatarUrl: _avatarUrl,
+            isAvatarBusy: _isAvatarBusy,
+            onAvatarTap: _onAvatarTap,
           )
         else
           _ProfileHero(
@@ -550,6 +701,9 @@ class _AccountBodyState extends State<_AccountBody> {
             overrideName: _nameController.text,
             isEditing: _isEditing,
             onEditToggle: _handleEditToggle,
+            avatarUrl: _avatarUrl,
+            isAvatarBusy: _isAvatarBusy,
+            onAvatarTap: _onAvatarTap,
           ),
         if (needsEmailVerification) ...[
           const SizedBox(height: 10),
@@ -746,11 +900,17 @@ class _EmbeddedAccountChrome extends StatelessWidget {
     required this.isEditing,
     required this.onEditToggle,
     required this.onOpenSettings,
+    this.avatarUrl,
+    this.isAvatarBusy = false,
+    this.onAvatarTap,
   });
 
   final bool isEditing;
   final VoidCallback onEditToggle;
   final VoidCallback onOpenSettings;
+  final String? avatarUrl;
+  final bool isAvatarBusy;
+  final VoidCallback? onAvatarTap;
 
   @override
   Widget build(BuildContext context) {
@@ -793,41 +953,25 @@ class _EmbeddedAccountChrome extends StatelessWidget {
         Center(
           child: SizedBox(
             width: 112,
-            height: 104,
+            height: 112,
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
                 Positioned(
                   left: 4,
-                  child: Container(
-                    width: 104,
-                    height: 104,
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: <Color>[
-                          Color(0xFF5B5B5B),
-                          Color(0xFF3E4244),
-                        ],
+                  top: 4,
+                  child: MixroomProfileAvatar(
+                    size: 104,
+                    avatarUrl: avatarUrl,
+                    isBusy: isAvatarBusy,
+                    onTap: onAvatarTap,
+                    backgroundColor: const Color(0xFF4A4E50),
+                    emptyChild: Center(
+                      child: SvgPicture.asset(
+                        kMixroomShellAccountProfileHeadAsset,
+                        width: 54,
+                        height: 54,
                       ),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.42),
-                        width: 0.8,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.38),
-                          blurRadius: 18,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    alignment: Alignment.center,
-                    child: SvgPicture.asset(
-                      kMixroomShellAccountProfileHeadAsset,
-                      width: 54,
-                      height: 54,
                     ),
                   ),
                 ),
@@ -1573,16 +1717,16 @@ class _SignInMethodRow extends StatelessWidget {
                 : Icon(icon, color: kAccountGlassText, size: 25),
           ),
           const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            providerLabel,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14.5,
-              fontWeight: FontWeight.w600,
+          Expanded(
+            child: Text(
+              providerLabel,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ),
           Text(
             L10n.translate(context, stateLabel),
             style: TextStyle(
@@ -1604,6 +1748,9 @@ class _ProfileHero extends StatelessWidget {
     required this.overrideName,
     required this.isEditing,
     required this.onEditToggle,
+    this.avatarUrl,
+    this.isAvatarBusy = false,
+    this.onAvatarTap,
   });
 
   final AuthUserProfile user;
@@ -1611,6 +1758,9 @@ class _ProfileHero extends StatelessWidget {
   final String overrideName;
   final bool isEditing;
   final VoidCallback? onEditToggle;
+  final String? avatarUrl;
+  final bool isAvatarBusy;
+  final VoidCallback? onAvatarTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1638,12 +1788,17 @@ class _ProfileHero extends StatelessWidget {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 30,
-            backgroundColor: Colors.white.withOpacity(0.20),
-            child: Text(
-              _initials(displayName),
-              style: const TextStyle(
+          Padding(
+            padding: const EdgeInsets.only(right: 6, top: 2, bottom: 2),
+            child: MixroomProfileAvatar(
+              size: 60,
+              avatarUrl: avatarUrl,
+              initials: _initials(displayName),
+              isBusy: isAvatarBusy,
+              onTap: onAvatarTap,
+              backgroundColor: Colors.white.withValues(alpha: 0.20),
+              borderColor: Colors.white.withValues(alpha: 0.42),
+              initialsStyle: const TextStyle(
                 color: Colors.white,
                 fontSize: 22,
                 fontWeight: FontWeight.w800,

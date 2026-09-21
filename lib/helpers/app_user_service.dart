@@ -244,6 +244,113 @@ class AppUserService extends ChangeNotifier {
     }
   }
 
+  Future<void> uploadAvatar(List<int> jpegBytes) async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) {
+      throw StateError('No active account.');
+    }
+    if (!supportsRemoteProfileEdits) {
+      throw StateError('App profile backend is not configured yet.');
+    }
+
+    final imageData = 'data:image/jpeg;base64,${base64Encode(jpegBytes)}';
+    try {
+      final response = await auth.authorizedRequest(
+        (token) => _httpClient
+            .post(
+              _buildUri('/v1/users/me/avatar'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $token',
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode(<String, String>{'image_data': imageData}),
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Session expired. Please sign in again.');
+        }
+        throw StateError(
+          _extractErrorMessage(
+                response.body,
+                fallback: 'Could not update your photo.',
+              ) ??
+              'Could not update your photo.',
+        );
+      }
+
+      _current = _parseProfileResponse(
+        response.body,
+        fallbackUser: auth.signedInUser ?? user,
+      );
+      _lastSyncedAtUtc = DateTime.now().toUtc();
+      _lastError = null;
+      _isInitialized = true;
+      await _writeCachedProfile(user.userId, _current!);
+    } catch (e) {
+      _lastError = e.toString().replaceFirst('Bad state: ', '');
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> deleteAvatar() async {
+    final auth = _auth;
+    final user = auth?.signedInUser;
+    if (auth == null || user == null) {
+      throw StateError('No active account.');
+    }
+    if (!supportsRemoteProfileEdits) {
+      throw StateError('App profile backend is not configured yet.');
+    }
+
+    try {
+      final response = await auth.authorizedRequest(
+        (token) => _httpClient
+            .delete(
+              _buildUri('/v1/users/me/avatar'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $token',
+                'Accept': 'application/json',
+              },
+            )
+            .timeout(Duration(seconds: AppApiConfig.requestTimeoutSeconds)),
+      );
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw StateError('Session expired. Please sign in again.');
+        }
+        throw StateError(
+          _extractErrorMessage(
+                response.body,
+                fallback: 'Could not remove your photo.',
+              ) ??
+              'Could not remove your photo.',
+        );
+      }
+
+      _current = _parseProfileResponse(
+        response.body,
+        fallbackUser: auth.signedInUser ?? user,
+      );
+      _lastSyncedAtUtc = DateTime.now().toUtc();
+      _lastError = null;
+      _isInitialized = true;
+      await _writeCachedProfile(user.userId, _current!);
+    } catch (e) {
+      _lastError = e.toString().replaceFirst('Bad state: ', '');
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
+  }
+
   Future<void> updateNewsletterPreference({
     required bool newsletterOptIn,
     String? localeCode,
