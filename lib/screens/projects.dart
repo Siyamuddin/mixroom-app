@@ -58,12 +58,14 @@ class ProjectsScreen extends StatefulWidget {
     this.onUpgradeRequested,
     this.demoOnly = false,
     this.hideDemoProjects = false,
+    this.cloudProjectService,
   });
 
   final int scrollToTopSignal;
   final VoidCallback? onUpgradeRequested;
   final bool demoOnly;
   final bool hideDemoProjects;
+  final CloudProjectService? cloudProjectService;
 
   @override
   State<ProjectsScreen> createState() => _ProjectsScreenState();
@@ -124,6 +126,7 @@ class _CloudProjectDestination {
     : workspaceId = '',
       organizationId = '',
       label = 'Personal Cloud',
+      localizeLabel = true,
       subtitle = 'Only you can access this project',
       icon = Icons.person_rounded,
       canWrite = true,
@@ -133,6 +136,7 @@ class _CloudProjectDestination {
     required this.workspaceId,
     required this.organizationId,
     required this.label,
+    this.localizeLabel = false,
     required this.subtitle,
     required this.canWrite,
     required this.status,
@@ -141,6 +145,7 @@ class _CloudProjectDestination {
   final String workspaceId;
   final String organizationId;
   final String label;
+  final bool localizeLabel;
   final String subtitle;
   final IconData icon;
   final bool canWrite;
@@ -148,6 +153,18 @@ class _CloudProjectDestination {
 
   bool get isPersonal => workspaceId.isEmpty;
   bool get isReadOnly => !canWrite;
+}
+
+class _CloudProjectDeleteBatchResult {
+  const _CloudProjectDeleteBatchResult({
+    required this.deletedProjectIds,
+    required this.failures,
+    required this.localCleanupFailureIds,
+  });
+
+  final Set<String> deletedProjectIds;
+  final Map<String, Object> failures;
+  final Set<String> localCleanupFailureIds;
 }
 
 class _ProjectsScreenState extends State<ProjectsScreen> {
@@ -172,7 +189,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   CloudSyncMode _cloudSyncMode = CloudSyncMode.auto;
   String _selectedCloudWorkspaceId = '';
   bool _filePickerInFlight = false;
-  final CloudProjectService _cloudProjectService = CloudProjectService();
+  late final CloudProjectService _cloudProjectService;
+  late final bool _ownsCloudProjectService;
   StreamSubscription<String>? _importSub;
   StreamSubscription<List<DesktopFileDropItem>>? _desktopDropSub;
   Future<void>? _projectRefreshInFlight;
@@ -196,11 +214,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   _ProjectLibraryTab _libraryTab = _ProjectLibraryTab.yourProjects;
   final Set<String> _selectedProjectPaths = <String>{};
   final Set<String> _selectedBundledDemoAssetPaths = <String>{};
+  final Set<String> _selectedCloudProjectIds = <String>{};
   final Set<String> _expandedFamilyIds = <String>{};
   final Set<String> _cloudProjectsInFlight = <String>{};
   final ProjectVersionStore _projectVersionStore = const ProjectVersionStore();
   bool _selectionModePinned = false;
   bool _demoTileView = true;
+  String? _selectionAccountUserId;
 
   String _projectActionKeyToken(String name) =>
       Uri.encodeComponent(name.trim());
@@ -233,8 +253,28 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  String get _signedInUserId =>
+      context.read<AuthService>().signedInUser?.userId.trim() ?? '';
+
+  bool _canDeleteCloudProject(CloudProjectAccessItem cloud) {
+    final userId = _signedInUserId;
+    return cloud.canWrite &&
+        userId.isNotEmpty &&
+        cloud.ownerUserId.trim() == userId;
+  }
+
+  void _replaceCloudProjects(List<CloudProjectAccessItem> projects) {
+    _cloudProjects = projects;
+    final validProjectIds = projects
+        .where(_canSelectCloudProject)
+        .map((project) => project.projectId)
+        .toSet();
+    _selectedCloudProjectIds.retainAll(validProjectIds);
+  }
+
   void _clearCloudProjectState() {
     _cloudProjects = <CloudProjectAccessItem>[];
+    _selectedCloudProjectIds.clear();
     _cloudStorage = null;
     _cloudError = null;
     _cloudLoading = false;
@@ -243,6 +283,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   @override
   void initState() {
     super.initState();
+    _ownsCloudProjectService = widget.cloudProjectService == null;
+    _cloudProjectService = widget.cloudProjectService ?? CloudProjectService();
     if (widget.demoOnly) {
       _libraryTab = _ProjectLibraryTab.demoProjects;
     }
@@ -303,6 +345,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final userId =
+        context.read<AuthService>().signedInUser?.userId.trim() ?? '';
+    final previousUserId = _selectionAccountUserId;
+    if (previousUserId != null && previousUserId != userId) {
+      _selectedCloudProjectIds.clear();
+      if (_libraryTab == _ProjectLibraryTab.cloudProjects) {
+        _selectionModePinned = false;
+      }
+    }
+    _selectionAccountUserId = userId;
+  }
+
+  @override
   void didUpdateWidget(covariant ProjectsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.scrollToTopSignal != widget.scrollToTopSignal) {
@@ -343,7 +400,9 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     ProjectManager.cloudProjectSyncInFlight.removeListener(
       _handleCloudProjectSyncActivityChanged,
     );
-    _cloudProjectService.close();
+    if (_ownsCloudProjectService) {
+      _cloudProjectService.close();
+    }
     _libraryPageController.dispose();
     for (final controller in _libraryScrollControllers.values) {
       controller.dispose();
@@ -375,10 +434,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final current = Set<String>.from(
       ProjectManager.cloudProjectSyncInFlight.value,
     );
+    final started = current.difference(_observedCloudProjectSyncs);
     final completed = _observedCloudProjectSyncs.difference(current);
     _observedCloudProjectSyncs = current;
     _settlingCloudProjectSyncs.addAll(completed);
-    setState(() {});
+    setState(() => _selectedCloudProjectIds.removeAll(started));
     if (completed.isNotEmpty) {
       unawaited(_finishSettlingCloudProjectSyncs(completed));
     }
@@ -455,10 +515,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
     try {
       _projects = await ProjectManager.listProjects();
-      final bundledDemoProjects =
-          await ProjectManager.listBundledDemoProjectAssets();
-      final dismissedDemoAssetPaths =
-          await ProjectManager.listDismissedBundledDemoAssetPaths();
+      final bundledDemoProjects = widget.hideDemoProjects
+          ? const <BundledDemoProjectAsset>[]
+          : await ProjectManager.listBundledDemoProjectAssets();
+      final dismissedDemoAssetPaths = widget.hideDemoProjects
+          ? const <String>{}
+          : await ProjectManager.listDismissedBundledDemoAssetPaths();
       final importedDemoAssetPaths = _projects
           .map((project) => project.bundledDemoAssetPath)
           .whereType<String>()
@@ -506,7 +568,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     } catch (e) {
       _projects = <ProjectMeta>[];
       _bundledDemoProjects = <BundledDemoProjectAsset>[];
-      _cloudProjects = <CloudProjectAccessItem>[];
+      _replaceCloudProjects(const <CloudProjectAccessItem>[]);
       _loadError = _friendlyLoadError(e);
     } finally {
       if (mounted) {
@@ -522,7 +584,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
     final snapshot = context.read<EntitlementService>().cloudProjectsAccess;
     if (snapshot == null) return;
-    _cloudProjects = snapshot.cloudProjects;
+    _replaceCloudProjects(snapshot.cloudProjects);
     _cloudStorage = snapshot.storage;
     _cloudError = null;
   }
@@ -552,7 +614,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
     try {
       final snapshot = await _cloudProjectService.listProjects(auth: auth);
-      _cloudProjects = snapshot.cloudProjects;
+      _replaceCloudProjects(snapshot.cloudProjects);
       _cloudStorage = snapshot.storage;
       _cloudError = null;
     } catch (e) {
@@ -1264,8 +1326,56 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   bool _isBundledDemoSelected(BundledDemoProjectAsset demo) =>
       _selectedBundledDemoAssetPaths.contains(demo.assetPath);
 
+  bool _isCloudProjectSelected(CloudProjectAccessItem cloud) =>
+      _selectedCloudProjectIds.contains(cloud.projectId);
+
+  bool _cloudProjectIsBusy(CloudProjectAccessItem cloud) {
+    final local = _localProjectForCloud(cloud);
+    if (local != null) {
+      return _localCloudSyncInFlight(local, cloud);
+    }
+    final editorSyncs = ProjectManager.cloudProjectSyncInFlight.value;
+    return _cloudProjectsInFlight.contains(cloud.projectId) ||
+        editorSyncs.contains(cloud.projectId) ||
+        _settlingCloudProjectSyncs.contains(cloud.projectId);
+  }
+
+  bool _canSelectCloudProject(CloudProjectAccessItem cloud) =>
+      _canDeleteCloudProject(cloud) && !_cloudProjectIsBusy(cloud);
+
+  void _showCloudSelectionUnavailable(CloudProjectAccessItem cloud) {
+    final String message;
+    if (!cloud.canWrite) {
+      message =
+          'This cloud project is read-only. Renew or unlock it to make changes.';
+    } else if (cloud.ownerUserId.trim() != _signedInUserId) {
+      message = 'Only the project owner can delete this cloud project.';
+    } else {
+      message = 'Please wait for this cloud project to finish syncing.';
+    }
+    showAppSnackBar(
+      context,
+      L10n.translate(context, message),
+      tone: AppPopupTone.warning,
+    );
+  }
+
+  void _toggleCloudProjectSelection(CloudProjectAccessItem cloud) {
+    if (!_canSelectCloudProject(cloud)) {
+      _showCloudSelectionUnavailable(cloud);
+      return;
+    }
+    setState(() {
+      if (!_selectedCloudProjectIds.add(cloud.projectId)) {
+        _selectedCloudProjectIds.remove(cloud.projectId);
+      }
+    });
+  }
+
   int get _selectedEntryCount =>
-      _selectedProjectPaths.length + _selectedBundledDemoAssetPaths.length;
+      _selectedProjectPaths.length +
+      _selectedBundledDemoAssetPaths.length +
+      _selectedCloudProjectIds.length;
 
   bool get _selectionMode => _selectionModePinned || _selectedEntryCount > 0;
 
@@ -1408,11 +1518,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       final planLabel = (organization?.planLabel ?? '').trim();
       final canWrite = workspace.canWrite && (organization?.canWrite ?? true);
       final label = orgName.isNotEmpty ? orgName : workspace.name;
+      final usesFallbackLabel = label.isEmpty;
       destinations.add(
         _CloudProjectDestination.workspace(
           workspaceId: workspaceId,
           organizationId: workspace.organizationId,
-          label: label.isEmpty ? 'Shared Cloud' : label,
+          label: usesFallbackLabel ? 'Shared Cloud' : label,
+          localizeLabel: usesFallbackLabel,
           subtitle: canWrite
               ? (planLabel.isEmpty ? 'Shared cloud project space' : planLabel)
               : 'Read-only cloud storage',
@@ -1429,13 +1541,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
         final workspaceId = location.workspaceId.trim();
         if (workspaceId.isEmpty || !seenWorkspaceIds.add(workspaceId)) continue;
         final planLabel = defaultPlanLabelForCode(location.planCode);
+        final usesFallbackLabel = location.label.trim().isEmpty;
         destinations.add(
           _CloudProjectDestination.workspace(
             workspaceId: workspaceId,
             organizationId: location.organizationId,
-            label: location.label.trim().isEmpty
-                ? 'Shared Cloud'
-                : location.label.trim(),
+            label: usesFallbackLabel ? 'Shared Cloud' : location.label.trim(),
+            localizeLabel: usesFallbackLabel,
             subtitle: location.canWrite
                 ? (planLabel.isEmpty ? 'Shared cloud project space' : planLabel)
                 : 'Read-only cloud storage',
@@ -1473,6 +1585,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       workspaceId: workspaceId,
       organizationId: cloud.organizationId,
       label: 'Shared Cloud',
+      localizeLabel: true,
       subtitle: 'Team project space',
       canWrite: cloud.canWrite,
       status: cloud.canWrite ? 'active' : 'locked',
@@ -1489,6 +1602,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       }
     }
     return destinations.first;
+  }
+
+  String _localizedCloudDestinationLabel(_CloudProjectDestination destination) {
+    if (destination.localizeLabel) {
+      return L10n.translate(context, destination.label);
+    }
+    return destination.label;
   }
 
   bool _cloudProjectIsInDestination(
@@ -1545,7 +1665,10 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    existing == null ? 'Save project to' : 'Sync project to',
+                    L10n.translate(
+                      context,
+                      existing == null ? 'Save project to' : 'Sync project to',
+                    ),
                     style: const TextStyle(
                       fontFamily: 'Pretendard',
                       color: Colors.white,
@@ -1565,7 +1688,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                             : Colors.white.withValues(alpha: 0.48),
                       ),
                       title: Text(
-                        destination.label,
+                        _localizedCloudDestinationLabel(destination),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -1576,10 +1699,13 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         ),
                       ),
                       subtitle: Text(
-                        _destinationSubtitle(
-                          destination: destination,
-                          existing: existing,
-                          entitlement: entitlement,
+                        L10n.translate(
+                          context,
+                          _destinationSubtitle(
+                            destination: destination,
+                            existing: existing,
+                            entitlement: entitlement,
+                          ),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1671,7 +1797,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
-                                  destination.label,
+                                  _localizedCloudDestinationLabel(destination),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -1725,7 +1851,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     required EntitlementService entitlement,
   }) {
     if (!destination.canWrite) {
-      return L10n.translate(context, 'Read-only cloud storage');
+      return 'Read-only cloud storage';
     }
     if (existing != null) {
       final current = _destinationForCloudProject(existing, entitlement);
@@ -1742,7 +1868,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       cloud,
       context.read<EntitlementService>(),
     );
-    return destination.label;
+    return _localizedCloudDestinationLabel(destination);
   }
 
   String _cloudProjectPersonLabel(
@@ -1799,16 +1925,20 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }) {
     final normalized = workspaceId.trim();
     if (normalized.isEmpty) {
-      return const _CloudProjectDestination.personal().label;
+      return L10n.translate(context, 'Personal Cloud');
     }
     final entitlement = context.read<EntitlementService>();
     for (final destination in _availableCloudDestinations(entitlement)) {
-      if (destination.workspaceId == normalized) return destination.label;
+      if (destination.workspaceId == normalized) {
+        return _localizedCloudDestinationLabel(destination);
+      }
     }
     if (cloud != null) {
-      return _destinationForCloudProject(cloud, entitlement).label;
+      return _localizedCloudDestinationLabel(
+        _destinationForCloudProject(cloud, entitlement),
+      );
     }
-    return 'Shared Cloud';
+    return L10n.translate(context, 'Shared Cloud');
   }
 
   String? _localCloudLocationLabel(
@@ -2097,6 +2227,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       _selectionModePinned = false;
       _selectedProjectPaths.clear();
       _selectedBundledDemoAssetPaths.clear();
+      _selectedCloudProjectIds.clear();
     });
   }
 
@@ -2120,6 +2251,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       _selectionModePinned = false;
       _selectedProjectPaths.clear();
       _selectedBundledDemoAssetPaths.clear();
+      _selectedCloudProjectIds.clear();
     });
     if (animatePage && _libraryPageController.hasClients) {
       unawaited(
@@ -2166,12 +2298,16 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     setState(() {
       _selectedProjectPaths.clear();
       _selectedBundledDemoAssetPaths.clear();
+      _selectedCloudProjectIds.clear();
       for (final entry in visibleEntries) {
         if (entry.isBundledDemo) {
           final demo = entry.bundledDemo!;
           _selectedBundledDemoAssetPaths.add(demo.assetPath);
         } else if (entry.isCloudProject) {
-          continue;
+          final cloud = entry.cloudProject!;
+          if (_canSelectCloudProject(cloud)) {
+            _selectedCloudProjectIds.add(cloud.projectId);
+          }
         } else {
           for (final project
               in entry.family?.members ?? const <ProjectMeta>[]) {
@@ -3093,17 +3229,34 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     await _refresh();
   }
 
+  Future<void> _deleteSelectedEntries() {
+    if (_libraryTab == _ProjectLibraryTab.cloudProjects) {
+      return _deleteSelectedCloudProjects();
+    }
+    return _deleteSelectedProjects();
+  }
+
   Future<void> _showProjectTools() async {
     final visibleEntries = _visibleEntries();
+    final selectableVisibleEntries = visibleEntries
+        .where((entry) {
+          if (!entry.isCloudProject) return true;
+          return _canSelectCloudProject(entry.cloudProject!);
+        })
+        .toList(growable: false);
     final allVisibleSelected =
-        visibleEntries.isNotEmpty &&
-        visibleEntries.every((entry) {
+        selectableVisibleEntries.isNotEmpty &&
+        selectableVisibleEntries.every((entry) {
           if (entry.isBundledDemo) {
             return _selectedBundledDemoAssetPaths.contains(
               entry.bundledDemo!.assetPath,
             );
           }
-          if (entry.isCloudProject) return true;
+          if (entry.isCloudProject) {
+            return _selectedCloudProjectIds.contains(
+              entry.cloudProject!.projectId,
+            );
+          }
           final members = entry.family?.members ?? const <ProjectMeta>[];
           if (members.isEmpty) return true;
           return members.every(
@@ -3155,9 +3308,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                   context,
                   allVisibleSelected ? 'Clear selection' : 'Select all',
                 ),
-                onTap: () => Navigator.of(
-                  context,
-                ).pop(allVisibleSelected ? 'clear' : 'select_all'),
+                onTap: selectableVisibleEntries.isEmpty
+                    ? null
+                    : () => Navigator.of(
+                        context,
+                      ).pop(allVisibleSelected ? 'clear' : 'select_all'),
               ),
             ],
           ),
@@ -3300,7 +3455,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                 ),
                 onTap: () => Navigator.of(context).pop('open'),
               ),
-              if (project.canWrite) ...[
+              if (_canDeleteCloudProject(project)) ...[
                 const SizedBox(height: 4),
                 _ProjectToolAction(
                   icon: Icons.delete_outline_rounded,
@@ -3864,7 +4019,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       if (!mounted) return;
       showAppSnackBar(
         context,
-        '${L10n.translate(context, 'Project synced to cloud')} • ${destination.label}',
+        '${L10n.translate(context, 'Project synced to cloud')} • ${_localizedCloudDestinationLabel(destination)}',
         tone: AppPopupTone.success,
       );
     } catch (e) {
@@ -4156,6 +4311,206 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     }
   }
 
+  Future<void> _detachLocalProjectFromCloud(
+    CloudProjectAccessItem cloud,
+  ) async {
+    final local = _localProjectForCloud(cloud);
+    if (local == null) return;
+    final json = await ProjectManager.readProjectJson(local.dir);
+    final linkedCloudProjectId =
+        (json['cloudProjectId'] ?? json['cloud_project_id'] ?? '')
+            .toString()
+            .trim();
+    if (linkedCloudProjectId != cloud.projectId) return;
+    ProjectManager.stripCloudSyncMetadata(json);
+    await ProjectManager.writeProjectJson(local.dir, json);
+  }
+
+  Future<_CloudProjectDeleteBatchResult> _performCloudProjectDeletes(
+    List<CloudProjectAccessItem> projects,
+  ) async {
+    final auth = context.read<AuthService>();
+    final entitlement = context.read<EntitlementService>();
+    final projectIds = projects.map((project) => project.projectId).toSet();
+    final deletedProjectIds = <String>{};
+    final failures = <String, Object>{};
+    final localCleanupFailureIds = <String>{};
+
+    setState(() => _cloudProjectsInFlight.addAll(projectIds));
+    showLoadingDialog(
+      context,
+      message: L10n.translate(context, 'Deleting from cloud…'),
+    );
+    try {
+      for (final project in projects) {
+        try {
+          await _cloudProjectService.deleteProject(
+            auth: auth,
+            projectId: project.projectId,
+          );
+          deletedProjectIds.add(project.projectId);
+        } catch (error) {
+          failures[project.projectId] = error;
+          continue;
+        }
+        try {
+          await _detachLocalProjectFromCloud(project);
+        } catch (error) {
+          localCleanupFailureIds.add(project.projectId);
+          debugPrint(
+            'Failed to detach local copy of deleted cloud project '
+            '${project.projectId}: $error',
+          );
+        }
+      }
+
+      try {
+        await entitlement.refreshAccountSurface(force: true);
+      } catch (error) {
+        debugPrint('Failed to refresh cloud account surface: $error');
+      }
+      await _refresh(includeCloud: true);
+    } finally {
+      if (mounted) {
+        final navigator = Navigator.of(context, rootNavigator: true);
+        if (navigator.canPop()) navigator.pop();
+        setState(() => _cloudProjectsInFlight.removeAll(projectIds));
+      } else {
+        _cloudProjectsInFlight.removeAll(projectIds);
+      }
+    }
+
+    return _CloudProjectDeleteBatchResult(
+      deletedProjectIds: deletedProjectIds,
+      failures: failures,
+      localCleanupFailureIds: localCleanupFailureIds,
+    );
+  }
+
+  List<CloudProjectAccessItem> _selectedCloudProjectsForDeletion() {
+    return _cloudProjects
+        .where(
+          (project) =>
+              _selectedCloudProjectIds.contains(project.projectId) &&
+              _canSelectCloudProject(project),
+        )
+        .toList(growable: false);
+  }
+
+  String _translatedCountMessage(
+    String key,
+    int count, {
+    String? singularKey,
+  }) => L10n.translate(
+    context,
+    count == 1 && singularKey != null ? singularKey : key,
+  ).replaceAll('{count}', '$count');
+
+  Future<void> _deleteSelectedCloudProjects() async {
+    final selectedProjects = _selectedCloudProjectsForDeletion();
+    if (selectedProjects.isEmpty) return;
+    final confirmationMessage = _translatedCountMessage(
+      '{count} cloud projects will be deleted from cloud storage. Local copies on this device will remain.',
+      selectedProjects.length,
+      singularKey:
+          '1 cloud project will be deleted from cloud storage. Local copies on this device will remain.',
+    );
+    final ok = await _showDeleteProjectsDialog(
+      message: confirmationMessage,
+      dialogKey: _deleteDialogKey,
+      cancelKey: _deleteCancelKey,
+      confirmKey: _deleteConfirmKey,
+    );
+    if (!ok || !mounted) return;
+
+    final confirmedIds = selectedProjects
+        .map((project) => project.projectId)
+        .toSet();
+    final currentProjects = _cloudProjects
+        .where(
+          (project) =>
+              confirmedIds.contains(project.projectId) &&
+              _canSelectCloudProject(project),
+        )
+        .toList(growable: false);
+    if (currentProjects.length != selectedProjects.length) {
+      setState(() {
+        _selectedCloudProjectIds.retainAll(
+          currentProjects.map((project) => project.projectId).toSet(),
+        );
+      });
+      showAppSnackBar(
+        context,
+        L10n.translate(
+          context,
+          'Cloud project access changed. Review your selection and try again.',
+        ),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
+
+    final result = await _performCloudProjectDeletes(currentProjects);
+    if (!mounted) return;
+    setState(() {
+      _selectedCloudProjectIds.removeAll(result.deletedProjectIds);
+      final remainingIds = _cloudProjects
+          .where(_canSelectCloudProject)
+          .map((project) => project.projectId)
+          .toSet();
+      _selectedCloudProjectIds.retainAll(remainingIds);
+      _selectedCloudProjectIds.addAll(
+        result.failures.keys.where(remainingIds.contains),
+      );
+      if (result.failures.isEmpty) {
+        _selectionModePinned = false;
+      } else {
+        _selectionModePinned = true;
+      }
+    });
+
+    final deletedCount = result.deletedProjectIds.length;
+    final failedCount = result.failures.length;
+    final cleanupFailureCount = result.localCleanupFailureIds.length;
+    final parts = <String>[];
+    if (deletedCount > 0) {
+      parts.add(
+        _translatedCountMessage(
+          '{count} cloud projects deleted.',
+          deletedCount,
+          singularKey: '1 cloud project deleted.',
+        ),
+      );
+    }
+    if (failedCount > 0) {
+      parts.add(
+        _translatedCountMessage(
+          '{count} cloud projects could not be deleted.',
+          failedCount,
+          singularKey: '1 cloud project could not be deleted.',
+        ),
+      );
+    }
+    if (cleanupFailureCount > 0) {
+      parts.add(
+        _translatedCountMessage(
+          '{count} local copies could not be unlinked from cloud.',
+          cleanupFailureCount,
+          singularKey: '1 local copy could not be unlinked from cloud.',
+        ),
+      );
+    }
+    showAppSnackBar(
+      context,
+      parts.join(' '),
+      tone: failedCount > 0
+          ? AppPopupTone.error
+          : cleanupFailureCount > 0
+          ? AppPopupTone.warning
+          : AppPopupTone.success,
+    );
+  }
+
   Future<void> _deleteCloudProject(CloudProjectAccessItem cloud) async {
     if (!_cloudProjectsFeatureEnabled) {
       showAppSnackBar(
@@ -4165,15 +4520,8 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       );
       return;
     }
-    if (!cloud.canWrite) {
-      showAppSnackBar(
-        context,
-        L10n.translate(
-          context,
-          'This cloud project is read-only. Renew or unlock it to make changes.',
-        ),
-        tone: AppPopupTone.warning,
-      );
+    if (!_canSelectCloudProject(cloud)) {
+      _showCloudSelectionUnavailable(cloud);
       return;
     }
     final ok = await _showDeleteProjectsDialog(
@@ -4181,58 +4529,53 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           '“${cloud.name}” ${L10n.translate(context, 'will be deleted from cloud storage. Local copies on this device will remain.')}',
     );
     if (!ok || !mounted) return;
-
-    final auth = context.read<AuthService>();
-    final entitlement = context.read<EntitlementService>();
-    if (_cloudProjectsInFlight.contains(cloud.projectId)) return;
-    setState(() => _cloudProjectsInFlight.add(cloud.projectId));
-    showLoadingDialog(
-      context,
-      message: L10n.translate(context, 'Deleting from cloud…'),
+    final current = _cloudProjects.where(
+      (project) =>
+          project.projectId == cloud.projectId &&
+          _canSelectCloudProject(project),
     );
-    try {
-      await _cloudProjectService.deleteProject(
-        auth: auth,
-        projectId: cloud.projectId,
-      );
-      final local = _localProjectForCloud(cloud);
-      if (local != null) {
-        final json = await ProjectManager.readProjectJson(local.dir);
-        if ((json['cloudProjectId'] ?? json['cloud_project_id'] ?? '')
-                .toString() ==
-            cloud.projectId) {
-          json.remove('cloudProjectId');
-          json.remove('cloud_project_id');
-          json.remove('cloudDocumentRevision');
-          json.remove('cloudSyncedAt');
-          await ProjectManager.writeProjectJson(local.dir, json);
-        }
-      }
-      await entitlement.refreshAccountSurface(force: true);
-      await _refresh(includeCloud: true);
-      if (!mounted) return;
+    if (current.isEmpty) {
       showAppSnackBar(
         context,
-        L10n.translate(context, 'Cloud project deleted'),
-        tone: AppPopupTone.success,
+        L10n.translate(
+          context,
+          'Cloud project access changed. Review your selection and try again.',
+        ),
+        tone: AppPopupTone.warning,
       );
-    } catch (e) {
-      if (!mounted) return;
+      return;
+    }
+
+    final result = await _performCloudProjectDeletes(<CloudProjectAccessItem>[
+      current.first,
+    ]);
+    if (!mounted) return;
+    if (result.failures.isNotEmpty) {
+      final error = result.failures.values.first;
       showAppSnackBar(
         context,
-        '${L10n.translate(context, 'Cloud delete failed')}: ${_cleanCloudError(e)}',
+        '${L10n.translate(context, 'Cloud delete failed')}: ${_cleanCloudError(error)}',
         tone: AppPopupTone.error,
       );
-    } finally {
-      if (mounted && Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-      if (mounted) {
-        setState(() => _cloudProjectsInFlight.remove(cloud.projectId));
-      } else {
-        _cloudProjectsInFlight.remove(cloud.projectId);
-      }
+      return;
     }
+    if (result.localCleanupFailureIds.isNotEmpty) {
+      showAppSnackBar(
+        context,
+        _translatedCountMessage(
+          '{count} local copies could not be unlinked from cloud.',
+          result.localCleanupFailureIds.length,
+          singularKey: '1 local copy could not be unlinked from cloud.',
+        ),
+        tone: AppPopupTone.warning,
+      );
+      return;
+    }
+    showAppSnackBar(
+      context,
+      L10n.translate(context, 'Cloud project deleted'),
+      tone: AppPopupTone.success,
+    );
   }
 
   String _formatLastOpened(DateTime dateTime) {
@@ -4284,7 +4627,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     final destination = _selectedCloudDestination(entitlement);
     final storage = _cloudStorage;
     final storageLocation = _cloudStorageLocationForDestination(destination);
-    final label = destination.label;
+    final label = _localizedCloudDestinationLabel(destination);
     if (storage == null) return label;
     final limit = storageLocation?.limitBytes ?? storage.limitBytes;
     if (limit == null || limit <= 0) {
@@ -5057,7 +5400,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     children: [
                       Expanded(
                         child: Text(
-                          selectedDestination.label,
+                          _localizedCloudDestinationLabel(selectedDestination),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -5538,6 +5881,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                         ),
                         const SizedBox(width: 8),
                         MixroomShellRoundButton(
+                          key: const ValueKey('projects_selection_toggle'),
                           size: 44,
                           active: _selectionMode,
                           icon: Icon(
@@ -5574,12 +5918,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                             ),
                           ),
                           TextButton(
+                            key: const ValueKey('projects_selection_cancel'),
                             onPressed: _clearSelection,
                             child: Text(L10n.translate(context, 'Cancel')),
                           ),
                           const SizedBox(width: 4),
                           ElevatedButton(
-                            onPressed: _deleteSelectedProjects,
+                            key: const ValueKey('projects_selection_delete'),
+                            onPressed: _deleteSelectedEntries,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF56708F),
                               foregroundColor: Colors.white,
@@ -5913,29 +6259,18 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                           final local = _localProjectForCloud(
                                             cloud,
                                           );
+                                          final inFlight = _cloudProjectIsBusy(
+                                            cloud,
+                                          );
+                                          final selectable =
+                                              _canSelectCloudProject(cloud);
+                                          final selected =
+                                              _isCloudProjectSelected(cloud);
                                           final frozenMix =
                                               localFrozenMixSibling(
                                                 projects: _projects,
                                                 localProject: local,
                                               );
-                                          final inFlight = local == null
-                                              ? _cloudProjectsInFlight.contains(
-                                                      cloud.projectId,
-                                                    ) ||
-                                                    ProjectManager
-                                                        .cloudProjectSyncInFlight
-                                                        .value
-                                                        .contains(
-                                                          cloud.projectId,
-                                                        ) ||
-                                                    _settlingCloudProjectSyncs
-                                                        .contains(
-                                                          cloud.projectId,
-                                                        )
-                                              : _localCloudSyncInFlight(
-                                                  local,
-                                                  cloud,
-                                                );
                                           final localCloudStatus = local == null
                                               ? null
                                               : _localCloudStatus(
@@ -5988,11 +6323,27 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                     ? '$availabilityLabel • $locationLabel'
                                                     : locationLabel),
                                           ].join(' • ');
+                                          final semanticLabel = L10n.translate(
+                                            context,
+                                            _selectionMode
+                                                ? selected
+                                                      ? 'Deselect cloud project {name}'
+                                                      : selectable
+                                                      ? 'Select cloud project {name}'
+                                                      : 'Cloud project {name} cannot be selected for deletion'
+                                                : 'Open cloud project {name}',
+                                          ).replaceAll('{name}', cloud.name);
                                           return Semantics(
+                                            key: ValueKey(
+                                              'cloud_project_card_${cloud.projectId}',
+                                            ),
                                             button: true,
-                                            enabled: !inFlight,
-                                            label:
-                                                'Open cloud project ${cloud.name}, $secondaryDetailLine',
+                                            enabled:
+                                                _selectionMode || !inFlight,
+                                            selected: _selectionMode
+                                                ? selected
+                                                : null,
+                                            label: semanticLabel,
                                             child: ExcludeSemantics(
                                               child: Material(
                                                 color: Colors.transparent,
@@ -6000,11 +6351,38 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                     BorderRadius.circular(24),
                                                 clipBehavior: Clip.antiAlias,
                                                 child: InkWell(
-                                                  onTap: inFlight
+                                                  onLongPress: () {
+                                                    if (selectable) {
+                                                      _toggleCloudProjectSelection(
+                                                        cloud,
+                                                      );
+                                                    } else {
+                                                      _showCloudSelectionUnavailable(
+                                                        cloud,
+                                                      );
+                                                    }
+                                                  },
+                                                  onTap:
+                                                      inFlight &&
+                                                          !_selectionMode
                                                       ? null
-                                                      : () => _openCloudProject(
-                                                          cloud,
-                                                        ),
+                                                      : () {
+                                                          if (_selectionMode) {
+                                                            if (selectable) {
+                                                              _toggleCloudProjectSelection(
+                                                                cloud,
+                                                              );
+                                                            } else {
+                                                              _showCloudSelectionUnavailable(
+                                                                cloud,
+                                                              );
+                                                            }
+                                                            return;
+                                                          }
+                                                          _openCloudProject(
+                                                            cloud,
+                                                          );
+                                                        },
                                                   splashFactory:
                                                       InkRipple.splashFactory,
                                                   splashColor: Colors.white
@@ -6019,12 +6397,19 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                           12,
                                                           16,
                                                         ),
-                                                    color: const Color.fromRGBO(
-                                                      244,
-                                                      244,
-                                                      244,
-                                                      0.30,
-                                                    ),
+                                                    color: selected
+                                                        ? const Color.fromRGBO(
+                                                            193,
+                                                            221,
+                                                            249,
+                                                            0.34,
+                                                          )
+                                                        : const Color.fromRGBO(
+                                                            244,
+                                                            244,
+                                                            244,
+                                                            0.30,
+                                                          ),
                                                     child: Row(
                                                       crossAxisAlignment:
                                                           CrossAxisAlignment
@@ -6237,7 +6622,70 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                                         const SizedBox(
                                                           width: 8,
                                                         ),
-                                                        if (inFlight)
+                                                        if (_selectionMode &&
+                                                            inFlight)
+                                                          const Padding(
+                                                            padding:
+                                                                EdgeInsets.only(
+                                                                  top: 10,
+                                                                ),
+                                                            child: SizedBox(
+                                                              width: 22,
+                                                              height: 22,
+                                                              child:
+                                                                  CircularProgressIndicator(
+                                                                    strokeWidth:
+                                                                        2,
+                                                                  ),
+                                                            ),
+                                                          )
+                                                        else if (_selectionMode &&
+                                                            selectable)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets.only(
+                                                                  top: 12,
+                                                                ),
+                                                            child: selected
+                                                                ? SvgPicture.asset(
+                                                                    kMixroomShellCheckboxCheckedAsset,
+                                                                    width: 22,
+                                                                    height: 22,
+                                                                  )
+                                                                : Container(
+                                                                    width: 22,
+                                                                    height: 22,
+                                                                    decoration: BoxDecoration(
+                                                                      shape: BoxShape
+                                                                          .circle,
+                                                                      border: Border.all(
+                                                                        color: Colors
+                                                                            .white
+                                                                            .withValues(
+                                                                              alpha: 0.6,
+                                                                            ),
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                          )
+                                                        else if (_selectionMode)
+                                                          Padding(
+                                                            padding:
+                                                                const EdgeInsets.only(
+                                                                  top: 11,
+                                                                ),
+                                                            child: Icon(
+                                                              Icons
+                                                                  .lock_rounded,
+                                                              color: Colors
+                                                                  .white
+                                                                  .withValues(
+                                                                    alpha: 0.46,
+                                                                  ),
+                                                              size: 22,
+                                                            ),
+                                                          )
+                                                        else if (inFlight)
                                                           const Padding(
                                                             padding:
                                                                 EdgeInsets.only(
@@ -6752,33 +7200,40 @@ class _ProjectToolAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          child: Row(
-            children: [
-              Icon(icon, color: Colors.white, size: 17),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontFamily: 'Pretendard',
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
+    final enabled = onTap != null;
+    return Semantics(
+      enabled: enabled,
+      child: Opacity(
+        opacity: enabled ? 1 : 0.45,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(22),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+              child: Row(
+                children: [
+                  Icon(icon, color: Colors.white, size: 17),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontFamily: 'Pretendard',
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

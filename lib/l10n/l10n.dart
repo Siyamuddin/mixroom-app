@@ -383,6 +383,10 @@ class L10n {
       'Could not load projects.': 'Could not load projects.',
       'Retry': 'Retry',
       "Audio couldn't start.": "Audio couldn't start.",
+      'Audio is unavailable, so this project has not loaded. Your saved project remains unchanged.':
+          'Audio is unavailable, so this project has not loaded. Your saved project remains unchanged.',
+      'This project could not be opened safely. Reopen it to try again.':
+          'This project could not be opened safely. Reopen it to try again.',
       'No saved projects yet.': 'No saved projects yet.',
       'Could not load video projects.': 'Could not load video projects.',
       'No saved video projects yet.': 'No saved video projects yet.',
@@ -425,6 +429,19 @@ class L10n {
       'Last opened': 'Last opened',
       'Edit': 'Edit',
       'Rename': 'Rename',
+      'Delete from Device': 'Delete from Device',
+      'Download & Open': 'Download & Open',
+      'Sync to Cloud': 'Sync to Cloud',
+      'Sync Now': 'Sync Now',
+      'Save project to': 'Save project to',
+      'Sync project to': 'Sync project to',
+      'Personal Cloud': 'Personal Cloud',
+      'Only you can access this project': 'Only you can access this project',
+      'Shared Cloud': 'Shared Cloud',
+      'Shared cloud project space': 'Shared cloud project space',
+      'Current cloud location': 'Current cloud location',
+      'Create a new cloud copy here': 'Create a new cloud copy here',
+      'Team project space': 'Team project space',
       'Share / Export': 'Share / Export',
       'Save (.mixroom)': 'Save (.mixroom)',
       'Version History': 'Version History',
@@ -1257,9 +1274,12 @@ class L10n {
           'Optional notes: intent, remaining issues, or other context',
       'producer_capture_review_title': 'How did your mix go?',
       'producer_capture_review_progress': '{current} of {total}',
-      'producer_capture_review_single': 'Optional feedback on this captured change. It helps us understand your mixing decisions.',
-      'producer_capture_review_multiple': 'Optional feedback on these {count} captured changes. It helps us understand your mixing decisions.',
-      'producer_capture_review_hint': 'For the next two questions, select all that apply. Preselected answers are suggestions you can change.',
+      'producer_capture_review_single':
+          'Optional feedback on this captured change. It helps us understand your mixing decisions.',
+      'producer_capture_review_multiple':
+          'Optional feedback on these {count} captured changes. It helps us understand your mixing decisions.',
+      'producer_capture_review_hint':
+          'For the next two questions, select all that apply. Preselected answers are suggestions you can change.',
       'producer_capture_summary_time': 'Changes around {time}',
       'producer_capture_summary_prompt': 'AI request: {prompt}',
       'producer_capture_summary_levels': 'Levels adjusted',
@@ -1776,6 +1796,7 @@ class L10n {
       'Preview an audio file.': 'Preview an audio file.',
       'Hold and drag a file into the timeline.':
           'Hold and drag a file into the timeline.',
+      'Drop to create a new row': 'Drop to create a new row',
       'Hold a folder button to remove it.':
           'Hold a folder button to remove it.',
       'Use the bottom waveform to seek preview playback.':
@@ -2089,6 +2110,31 @@ class L10n {
           'Cloud download failed. Your project was left unchanged',
       'Cloud file browser': 'Cloud file browser',
       'Cloud project deleted': 'Cloud project deleted',
+      'Only the project owner can delete this cloud project.':
+          'Only the project owner can delete this cloud project.',
+      'Please wait for this cloud project to finish syncing.':
+          'Please wait for this cloud project to finish syncing.',
+      'Cloud project access changed. Review your selection and try again.':
+          'Cloud project access changed. Review your selection and try again.',
+      '{count} cloud projects will be deleted from cloud storage. Local copies on this device will remain.':
+          '{count} cloud projects will be deleted from cloud storage. Local copies on this device will remain.',
+      '1 cloud project will be deleted from cloud storage. Local copies on this device will remain.':
+          '1 cloud project will be deleted from cloud storage. Local copies on this device will remain.',
+      '{count} cloud projects deleted.': '{count} cloud projects deleted.',
+      '1 cloud project deleted.': '1 cloud project deleted.',
+      '{count} cloud projects could not be deleted.':
+          '{count} cloud projects could not be deleted.',
+      '1 cloud project could not be deleted.':
+          '1 cloud project could not be deleted.',
+      '{count} local copies could not be unlinked from cloud.':
+          '{count} local copies could not be unlinked from cloud.',
+      '1 local copy could not be unlinked from cloud.':
+          '1 local copy could not be unlinked from cloud.',
+      'Select cloud project {name}': 'Select cloud project {name}',
+      'Deselect cloud project {name}': 'Deselect cloud project {name}',
+      'Cloud project {name} cannot be selected for deletion':
+          'Cloud project {name} cannot be selected for deletion',
+      'Open cloud project {name}': 'Open cloud project {name}',
       'Cloud projects': 'Cloud projects',
       'Cloud projects are not available.': 'Cloud projects are not available.',
       'Cloud sync failed': 'Cloud sync failed',
@@ -2693,6 +2739,10 @@ class L10n {
       'Could not load projects.': '프로젝트를 불러올 수 없습니다.',
       'Retry': '다시 시도',
       "Audio couldn't start.": '오디오를 시작할 수 없습니다.',
+      'Audio is unavailable, so this project has not loaded. Your saved project remains unchanged.':
+          '오디오를 사용할 수 없어 프로젝트를 불러오지 못했습니다. 저장된 프로젝트는 변경되지 않았습니다.',
+      'This project could not be opened safely. Reopen it to try again.':
+          '이 프로젝트를 안전하게 열 수 없습니다. 다시 열어 시도해 주세요.',
       'No saved projects yet.': '저장된 프로젝트가 아직 없습니다.',
       'Could not load video projects.': '비디오 프로젝트를 불러올 수 없습니다.',
       'No saved video projects yet.': '저장된 비디오 프로젝트가 아직 없습니다.',
@@ -2734,6 +2784,19 @@ class L10n {
       'Last opened': '마지막으로 연 시간',
       'Edit': '편집',
       'Rename': '이름 변경',
+      'Delete from Device': '이 기기에서 삭제',
+      'Download & Open': '다운로드하여 열기',
+      'Sync to Cloud': '클라우드에 동기화',
+      'Sync Now': '지금 동기화',
+      'Save project to': '프로젝트 저장 위치',
+      'Sync project to': '프로젝트 동기화 위치',
+      'Personal Cloud': '개인 클라우드',
+      'Only you can access this project': '나만 이 프로젝트에 접근할 수 있습니다',
+      'Shared Cloud': '공유 클라우드',
+      'Shared cloud project space': '공유 클라우드 프로젝트 공간',
+      'Current cloud location': '현재 클라우드 위치',
+      'Create a new cloud copy here': '여기에 새 클라우드 복사본 만들기',
+      'Team project space': '팀 프로젝트 공간',
       'Share / Export': '공유 / 파일 저장',
       'Save (.mixroom)': '저장 (.mixroom)',
       'Version History': '버전 기록',
@@ -3514,9 +3577,12 @@ class L10n {
       'producer_capture_notes': '선택 메모: 의도, 남은 문제 또는 기타 정보',
       'producer_capture_review_title': '믹싱 결과는 어땠나요?',
       'producer_capture_review_progress': '{current}/{total}',
-      'producer_capture_review_single': '기록된 변경에 대한 선택 피드백입니다. 믹싱 의도를 이해하는 데 도움이 됩니다.',
-      'producer_capture_review_multiple': '기록된 {count}개 변경에 대한 선택 피드백입니다. 믹싱 의도를 이해하는 데 도움이 됩니다.',
-      'producer_capture_review_hint': '다음 두 질문은 여러 항목을 선택할 수 있습니다. 미리 선택된 답변은 추천이므로 자유롭게 수정하세요.',
+      'producer_capture_review_single':
+          '기록된 변경에 대한 선택 피드백입니다. 믹싱 의도를 이해하는 데 도움이 됩니다.',
+      'producer_capture_review_multiple':
+          '기록된 {count}개 변경에 대한 선택 피드백입니다. 믹싱 의도를 이해하는 데 도움이 됩니다.',
+      'producer_capture_review_hint':
+          '다음 두 질문은 여러 항목을 선택할 수 있습니다. 미리 선택된 답변은 추천이므로 자유롭게 수정하세요.',
       'producer_capture_summary_time': '{time} 무렵의 변경',
       'producer_capture_summary_prompt': 'AI 요청: {prompt}',
       'producer_capture_summary_levels': '레벨 조정',
@@ -4003,6 +4069,7 @@ class L10n {
           '폴더 버튼을 탭해 현재 폴더를 전환합니다.',
       'Preview an audio file.': '오디오 파일을 미리 듣습니다.',
       'Hold and drag a file into the timeline.': '파일을 길게 눌러 타임라인으로 드래그합니다.',
+      'Drop to create a new row': '놓아서 새 트랙 만들기',
       'Hold a folder button to remove it.': '폴더 버튼을 길게 눌러 제거합니다.',
       'Use the bottom waveform to seek preview playback.':
           '아래 파형에서 미리듣기 재생 위치를 이동합니다.',
@@ -4302,6 +4369,30 @@ class L10n {
           '클라우드 다운로드에 실패했습니다. 이 기기의 프로젝트는 그대로입니다',
       'Cloud file browser': '클라우드 파일 브라우저',
       'Cloud project deleted': '클라우드 프로젝트가 삭제되었습니다',
+      'Only the project owner can delete this cloud project.':
+          '프로젝트 소유자만 이 클라우드 프로젝트를 삭제할 수 있습니다.',
+      'Please wait for this cloud project to finish syncing.':
+          '이 클라우드 프로젝트의 동기화가 완료될 때까지 기다려 주세요.',
+      'Cloud project access changed. Review your selection and try again.':
+          '클라우드 프로젝트 접근 권한이 변경되었습니다. 선택 항목을 확인한 후 다시 시도해 주세요.',
+      '{count} cloud projects will be deleted from cloud storage. Local copies on this device will remain.':
+          '클라우드 프로젝트 {count}개가 클라우드 저장소에서 삭제됩니다. 이 기기의 로컬 복사본은 유지됩니다.',
+      '1 cloud project will be deleted from cloud storage. Local copies on this device will remain.':
+          '클라우드 프로젝트 1개가 클라우드 저장소에서 삭제됩니다. 이 기기의 로컬 복사본은 유지됩니다.',
+      '{count} cloud projects deleted.': '클라우드 프로젝트 {count}개를 삭제했습니다.',
+      '1 cloud project deleted.': '클라우드 프로젝트 1개를 삭제했습니다.',
+      '{count} cloud projects could not be deleted.':
+          '클라우드 프로젝트 {count}개를 삭제하지 못했습니다.',
+      '1 cloud project could not be deleted.': '클라우드 프로젝트 1개를 삭제하지 못했습니다.',
+      '{count} local copies could not be unlinked from cloud.':
+          '로컬 복사본 {count}개의 클라우드 연결을 해제하지 못했습니다.',
+      '1 local copy could not be unlinked from cloud.':
+          '로컬 복사본 1개의 클라우드 연결을 해제하지 못했습니다.',
+      'Select cloud project {name}': '클라우드 프로젝트 {name} 선택',
+      'Deselect cloud project {name}': '클라우드 프로젝트 {name} 선택 해제',
+      'Cloud project {name} cannot be selected for deletion':
+          '삭제할 수 없어 클라우드 프로젝트 {name}을(를) 선택할 수 없습니다',
+      'Open cloud project {name}': '클라우드 프로젝트 {name} 열기',
       'Cloud projects': '클라우드 프로젝트',
       'Cloud projects are not available.': '클라우드 프로젝트를 사용할 수 없습니다.',
       'Cloud sync failed': '클라우드 동기화 실패',
@@ -4596,6 +4687,27 @@ class L10n {
       'Latest': '最新',
       'Update now': '立即更新',
       'Later': '稍后',
+      'Only the project owner can delete this cloud project.':
+          '只有项目所有者才能删除此云项目。',
+      'Please wait for this cloud project to finish syncing.': '请等待此云项目完成同步。',
+      'Cloud project access changed. Review your selection and try again.':
+          '云项目访问权限已更改。请检查所选项目后重试。',
+      '{count} cloud projects will be deleted from cloud storage. Local copies on this device will remain.':
+          '将从云存储中删除 {count} 个云项目。此设备上的本地副本将保留。',
+      '1 cloud project will be deleted from cloud storage. Local copies on this device will remain.':
+          '将从云存储中删除 1 个云项目。此设备上的本地副本将保留。',
+      '{count} cloud projects deleted.': '已删除 {count} 个云项目。',
+      '1 cloud project deleted.': '已删除 1 个云项目。',
+      '{count} cloud projects could not be deleted.': '有 {count} 个云项目无法删除。',
+      '1 cloud project could not be deleted.': '有 1 个云项目无法删除。',
+      '{count} local copies could not be unlinked from cloud.':
+          '有 {count} 个本地副本无法与云端解除关联。',
+      '1 local copy could not be unlinked from cloud.': '有 1 个本地副本无法与云端解除关联。',
+      'Select cloud project {name}': '选择云项目 {name}',
+      'Deselect cloud project {name}': '取消选择云项目 {name}',
+      'Cloud project {name} cannot be selected for deletion':
+          '无法选择云项目 {name} 进行删除',
+      'Open cloud project {name}': '打开云项目 {name}',
       'Replace cloud version?': '替换云端版本？',
       'The cloud copy changed on another device or account. Replace it with this device\'s version?':
           '云端副本已在其他设备或账户上更改。要用此设备上的版本替换它吗？',
@@ -4702,6 +4814,19 @@ class L10n {
       'Your Projects': '你的项目',
       'Demo Projects': '演示项目',
       'Prepared by Mixroom for you': '由 Mixroom 为你准备',
+      'Delete from Device': '从此设备删除',
+      'Download & Open': '下载并打开',
+      'Sync to Cloud': '同步到云端',
+      'Sync Now': '立即同步',
+      'Save project to': '项目保存位置',
+      'Sync project to': '项目同步位置',
+      'Personal Cloud': '个人云',
+      'Only you can access this project': '仅您可以访问此项目',
+      'Shared Cloud': '共享云',
+      'Shared cloud project space': '共享云项目空间',
+      'Current cloud location': '当前云位置',
+      'Create a new cloud copy here': '在此创建新的云端副本',
+      'Team project space': '团队项目空间',
       'Save (.mixroom)': '保存 (.mixroom)',
       'Version History': '版本历史',
       'Settings': '设置',
@@ -5095,6 +5220,10 @@ class L10n {
       'Gain:': '增益:',
       'Project saved': '项目已保存',
       "Audio couldn't start.": '无法启动音频。',
+      'Audio is unavailable, so this project has not loaded. Your saved project remains unchanged.':
+          '音频当前不可用，因此项目尚未加载。已保存的项目不会受到影响。',
+      'This project could not be opened safely. Reopen it to try again.':
+          '无法安全打开此项目。请重新打开后再试。',
       'Downloading update…': '正在下载更新…',
       "Couldn't check for cloud updates. Opened the copy on this device.":
           '无法检查云端更新。已打开此设备上的副本。',
@@ -5360,6 +5489,7 @@ class L10n {
       'Tap a folder button to switch the current folder.': '点击文件夹按钮切换当前文件夹。',
       'Preview an audio file.': '预听音频文件。',
       'Hold and drag a file into the timeline.': '长按并将文件拖入时间线。',
+      'Drop to create a new row': '松开以创建新轨道',
       'Hold a folder button to remove it.': '长按文件夹按钮将其移除。',
       'Use the bottom waveform to seek preview playback.': '使用底部波形定位预听播放位置。',
       'Insert at playhead': '插入到播放头',
@@ -5874,6 +6004,10 @@ class L10n {
       'Could not load projects.': 'プロジェクトを読み込めませんでした。',
       'Retry': '再試行',
       "Audio couldn't start.": 'オーディオを開始できませんでした。',
+      'Audio is unavailable, so this project has not loaded. Your saved project remains unchanged.':
+          'オーディオを利用できないため、プロジェクトは読み込まれていません。保存済みのプロジェクトは変更されていません。',
+      'This project could not be opened safely. Reopen it to try again.':
+          'このプロジェクトを安全に開けませんでした。もう一度開いてお試しください。',
       'No saved projects yet.': '保存されたプロジェクトはまだありません。',
       'Could not load video projects.': 'ビデオプロジェクトを読み込めませんでした。',
       'No saved video projects yet.': '保存されたビデオプロジェクトはまだありません。',
@@ -5915,6 +6049,19 @@ class L10n {
       'Last opened': '最終オープン',
       'Edit': '編集',
       'Rename': '名前を変更',
+      'Delete from Device': 'このデバイスから削除',
+      'Download & Open': 'ダウンロードして開く',
+      'Sync to Cloud': 'クラウドに同期',
+      'Sync Now': '今すぐ同期',
+      'Save project to': 'プロジェクトの保存先',
+      'Sync project to': 'プロジェクトの同期先',
+      'Personal Cloud': 'パーソナルクラウド',
+      'Only you can access this project': 'このプロジェクトには自分だけがアクセスできます',
+      'Shared Cloud': '共有クラウド',
+      'Shared cloud project space': '共有クラウドのプロジェクトスペース',
+      'Current cloud location': '現在のクラウド保存先',
+      'Create a new cloud copy here': 'ここに新しいクラウドコピーを作成',
+      'Team project space': 'チームプロジェクトスペース',
       'Share / Export': '共有 / 書き出し',
       'Save (.mixroom)': '保存 (.mixroom)',
       'Version History': 'バージョン履歴',
@@ -6693,9 +6840,12 @@ class L10n {
       'producer_capture_notes': '任意のメモ：意図、残った問題、その他の情報',
       'producer_capture_review_title': 'ミックスの結果はいかがでしたか？',
       'producer_capture_review_progress': '{current}/{total}',
-      'producer_capture_review_single': '記録した変更への任意のフィードバックです。ミックスの意図を理解するのに役立ちます。',
-      'producer_capture_review_multiple': '記録した{count}件の変更への任意のフィードバックです。ミックスの意図を理解するのに役立ちます。',
-      'producer_capture_review_hint': '次の2問は複数選択できます。選択済みの回答は候補です。必要に応じて変更してください。',
+      'producer_capture_review_single':
+          '記録した変更への任意のフィードバックです。ミックスの意図を理解するのに役立ちます。',
+      'producer_capture_review_multiple':
+          '記録した{count}件の変更への任意のフィードバックです。ミックスの意図を理解するのに役立ちます。',
+      'producer_capture_review_hint':
+          '次の2問は複数選択できます。選択済みの回答は候補です。必要に応じて変更してください。',
       'producer_capture_summary_time': '{time}頃の変更',
       'producer_capture_summary_prompt': 'AIへの依頼：{prompt}',
       'producer_capture_summary_levels': 'レベル調整',
@@ -7172,6 +7322,7 @@ class L10n {
           'フォルダーボタンをタップして現在のフォルダーを切り替えます。',
       'Preview an audio file.': 'オーディオファイルを試聴します。',
       'Hold and drag a file into the timeline.': 'ファイルを長押ししてタイムラインへドラッグします。',
+      'Drop to create a new row': 'ドロップして新しいトラックを作成',
       'Hold a folder button to remove it.': 'フォルダーボタンを長押しして削除します。',
       'Use the bottom waveform to seek preview playback.': '下の波形で試聴再生位置を移動します。',
       'Insert at playhead': '再生ヘッド位置に挿入',
@@ -7475,6 +7626,30 @@ class L10n {
           'クラウドのダウンロードに失敗しました。このデバイスのプロジェクトはそのままです',
       'Cloud file browser': 'クラウドファイルブラウザー',
       'Cloud project deleted': 'クラウドプロジェクトを削除しました',
+      'Only the project owner can delete this cloud project.':
+          'このクラウドプロジェクトを削除できるのはプロジェクトの所有者だけです。',
+      'Please wait for this cloud project to finish syncing.':
+          'このクラウドプロジェクトの同期が完了するまでお待ちください。',
+      'Cloud project access changed. Review your selection and try again.':
+          'クラウドプロジェクトのアクセス権が変更されました。選択内容を確認してもう一度お試しください。',
+      '{count} cloud projects will be deleted from cloud storage. Local copies on this device will remain.':
+          '{count}件のクラウドプロジェクトをクラウドストレージから削除します。このデバイスのローカルコピーは保持されます。',
+      '1 cloud project will be deleted from cloud storage. Local copies on this device will remain.':
+          '1件のクラウドプロジェクトをクラウドストレージから削除します。このデバイスのローカルコピーは保持されます。',
+      '{count} cloud projects deleted.': 'クラウドプロジェクトを{count}件削除しました。',
+      '1 cloud project deleted.': 'クラウドプロジェクトを1件削除しました。',
+      '{count} cloud projects could not be deleted.':
+          '{count}件のクラウドプロジェクトを削除できませんでした。',
+      '1 cloud project could not be deleted.': '1件のクラウドプロジェクトを削除できませんでした。',
+      '{count} local copies could not be unlinked from cloud.':
+          '{count}件のローカルコピーをクラウドから切り離せませんでした。',
+      '1 local copy could not be unlinked from cloud.':
+          '1件のローカルコピーをクラウドから切り離せませんでした。',
+      'Select cloud project {name}': 'クラウドプロジェクト{name}を選択',
+      'Deselect cloud project {name}': 'クラウドプロジェクト{name}の選択を解除',
+      'Cloud project {name} cannot be selected for deletion':
+          'クラウドプロジェクト{name}は削除対象として選択できません',
+      'Open cloud project {name}': 'クラウドプロジェクト{name}を開く',
       'Cloud projects': 'クラウドプロジェクト',
       'Cloud projects are not available.': 'クラウドプロジェクトは利用できません。',
       'Cloud sync failed': 'クラウド同期に失敗しました',

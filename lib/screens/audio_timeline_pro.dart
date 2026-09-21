@@ -81,18 +81,28 @@ class _QuantizePreset {
   const _QuantizePreset({required this.divisionsPerBar, required this.label});
 }
 
+enum SampleDropTargetKind { existingRow, appendNewAudioRow }
+
 class SampleDropPlacement {
-  final int row;
+  final SampleDropTargetKind targetKind;
+  final int? row;
   final double startMs;
   final double endMs;
   final bool allowed;
 
   const SampleDropPlacement({
-    required this.row,
+    this.targetKind = SampleDropTargetKind.existingRow,
+    this.row,
     required this.startMs,
     required this.endMs,
     required this.allowed,
-  });
+  }) : assert(
+         targetKind != SampleDropTargetKind.existingRow || row != null,
+         'Existing-row drops require a row index.',
+       );
+
+  bool get appendsNewAudioRow =>
+      targetKind == SampleDropTargetKind.appendNewAudioRow;
 }
 
 class _PendingPaintPaste {
@@ -605,6 +615,10 @@ class AudioCanvasTimeline extends StatefulWidget {
   final Future<void> Function(int row)? onInsertInstrumentLaneBelow;
   final Future<void> Function(int row)? onChangeInstrumentLane;
   final Future<void> Function(int row) onDeleteRow;
+
+  /// Deletes [rows] as one editor operation. When omitted, deletion falls
+  /// back to [onDeleteRow] for each row in descending source-index order.
+  final Future<void> Function(List<int> rows)? onDeleteRows;
   final Future<void> Function(int fromIndex, int toIndex) onMoveRow;
 
   /// Moves [rows] as one block by [delta] positions in a single undo step.
@@ -826,6 +840,10 @@ class AudioCanvasTimeline extends StatefulWidget {
   getRowStereoScope;
   final Future<void> Function(SampleDragData data, int row, double timeMs)?
   onExternalSampleDrop;
+  final Future<void> Function(SampleDragData data, double timeMs)?
+  onExternalSampleDropToNewRow;
+  final VoidCallback? onExternalSampleNewRowUnavailable;
+  final bool canCreateRowFromSampleDrop;
   final VoidCallback? onExternalSampleDragEntered;
   final bool externalSampleDragActive;
   final ValueListenable<bool>? externalSampleDragPassThrough;
@@ -894,6 +912,7 @@ class AudioCanvasTimeline extends StatefulWidget {
     this.onInsertInstrumentLaneBelow,
     this.onChangeInstrumentLane,
     required this.onDeleteRow,
+    this.onDeleteRows,
     required this.onMoveRow,
     this.onMoveRows,
     this.onDuplicateRows,
@@ -1024,6 +1043,9 @@ class AudioCanvasTimeline extends StatefulWidget {
     required this.getRowEqWaveform,
     required this.getRowStereoScope,
     this.onExternalSampleDrop,
+    this.onExternalSampleDropToNewRow,
+    this.onExternalSampleNewRowUnavailable,
+    this.canCreateRowFromSampleDrop = false,
     this.onExternalSampleDragEntered,
     this.externalSampleDragActive = false,
     this.externalSampleDragPassThrough,
@@ -1060,7 +1082,11 @@ class AudioCanvasTimelineController {
   void Function(Offset globalOffset, {SampleDragData? data})?
   _updateExternalSampleDropPreview;
   VoidCallback? _clearExternalSampleDropPreview;
-  SampleDropPlacement? Function(Offset globalOffset, {SampleDragData? data})?
+  SampleDropPlacement? Function(
+    Offset globalOffset, {
+    SampleDragData? data,
+    bool allowNewRow,
+  })?
   _placementForExternalSampleDrop;
   void Function(double deltaMs)? _panByMs;
   VoidCallback? _ensurePlayheadVisible;
@@ -1105,6 +1131,7 @@ class AudioCanvasTimelineController {
     required SampleDropPlacement? Function(
       Offset globalOffset, {
       SampleDragData? data,
+      bool allowNewRow,
     })
     placementForExternalSampleDrop,
     required void Function(double deltaMs) panByMs,
@@ -1159,6 +1186,7 @@ class AudioCanvasTimelineController {
     required SampleDropPlacement? Function(
       Offset globalOffset, {
       SampleDragData? data,
+      bool allowNewRow,
     })
     placementForExternalSampleDrop,
     required void Function(double deltaMs) panByMs,
@@ -1317,8 +1345,13 @@ class AudioCanvasTimelineController {
   SampleDropPlacement? placementForExternalSampleDrop(
     Offset globalOffset, {
     SampleDragData? data,
+    bool allowNewRow = false,
   }) {
-    return _placementForExternalSampleDrop?.call(globalOffset, data: data);
+    return _placementForExternalSampleDrop?.call(
+      globalOffset,
+      data: data,
+      allowNewRow: allowNewRow,
+    );
   }
 
   /// Scrolls the arrange view by [deltaMs] without moving the playhead.
@@ -1919,11 +1952,20 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   bool _magnetMenuShownFromHold = false;
   final GlobalKey _magnetButtonKey = GlobalKey();
   final GlobalKey _externalSampleDropTargetKey = GlobalKey();
+  SampleDropTargetKind? _externalSampleDropTargetKind;
   int? _externalSampleDropRow;
   double? _externalSampleDropStartMs;
   double? _externalSampleDropEndMs;
   bool _externalSampleDropAllowed = true;
   bool _externalSampleDragInsideTimeline = false;
+  bool _externalSampleDropAllowsNewRow = false;
+  bool get _showsSampleDropNewRowGhost =>
+      _externalSampleDropTargetKind == SampleDropTargetKind.appendNewAudioRow &&
+      _externalSampleDropAllowsNewRow &&
+      widget.onExternalSampleDropToNewRow != null;
+  bool get _externalSampleDragIsActive =>
+      widget.externalSampleDragPassThrough?.value ??
+      widget.externalSampleDragActive;
   List<_TimelineAutomationClipVisual> _timelineAutomationClipVisualCache =
       const <_TimelineAutomationClipVisual>[];
   TimelineRowVisibilityMap? _cachedRowVisibilityMap;
@@ -2158,24 +2200,45 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
 
   List<int> _selectedRowsForDelete(int? anchorRow) {
     final selected = _selectedRowIndices.toList()..sort();
+    List<int> targets;
     if (anchorRow != null &&
         selected.length > 1 &&
         selected.contains(anchorRow)) {
-      return selected.reversed.toList(growable: false);
+      targets = selected;
+    } else if (anchorRow != null) {
+      targets = <int>[anchorRow];
+    } else if (selected.isNotEmpty) {
+      targets = selected;
+    } else if (_selectedRowIndex >= 0 && _selectedRowIndex < _rowCount) {
+      targets = <int>[_selectedRowIndex];
+    } else {
+      return const <int>[];
     }
-    if (anchorRow != null) return <int>[anchorRow];
-    if (selected.isNotEmpty) {
-      return selected.reversed.toList(growable: false);
+
+    final rows = <int>{};
+    for (final target in targets) {
+      if (target < 0 || target >= _rowCount) continue;
+      rows.add(target);
+      final visibilityEntry = _visibilityEntryForSourceRow(target);
+      if (visibilityEntry?.isGroupFirstRow == true &&
+          visibilityEntry?.isGroupCollapsed == true) {
+        rows.addAll(visibilityEntry!.hiddenCollapsedSourceRows);
+      }
     }
-    if (_selectedRowIndex >= 0 && _selectedRowIndex < _rowCount) {
-      return <int>[_selectedRowIndex];
-    }
-    return const <int>[];
+    final ordered = rows.where((row) => row >= 0 && row < _rowCount).toList()
+      ..sort((a, b) => b.compareTo(a));
+    return ordered;
   }
 
   Future<void> _deleteRowsInOrder(List<int> rows) async {
-    for (final row in rows) {
-      if (row < 0 || row >= _rowCount) continue;
+    final ordered = rows.where((row) => row >= 0 && row < _rowCount).toSet()
+      .toList()
+      ..sort((a, b) => b.compareTo(a));
+    if (ordered.length > 1 && widget.onDeleteRows != null) {
+      await widget.onDeleteRows!(ordered);
+      return;
+    }
+    for (final row in ordered) {
       await widget.onDeleteRow(row);
     }
   }
@@ -5595,21 +5658,31 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  void _clearExternalSampleDropPreview() {
+  void _clearExternalSampleDropPreview({bool preserveDragContext = false}) {
     final wasInsideTimeline = _externalSampleDragInsideTimeline;
     if (!wasInsideTimeline &&
+        _externalSampleDropTargetKind == null &&
         _externalSampleDropRow == null &&
         _externalSampleDropStartMs == null &&
         _externalSampleDropEndMs == null) {
       return;
     }
     setState(() {
-      _externalSampleDragInsideTimeline = false;
+      if (!preserveDragContext) {
+        _externalSampleDragInsideTimeline = false;
+        _externalSampleDropAllowsNewRow = false;
+      }
+      _externalSampleDropTargetKind = null;
       _externalSampleDropRow = null;
       _externalSampleDropStartMs = null;
       _externalSampleDropEndMs = null;
       _externalSampleDropAllowed = true;
     });
+  }
+
+  void _handleExternalSampleDragActivityChanged() {
+    if (!mounted || _externalSampleDragIsActive) return;
+    _clearExternalSampleDropPreview();
   }
 
   double _sampleDropDurationMs(SampleDragData? data) {
@@ -5626,6 +5699,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   SampleDropPlacement? _sampleDropPlacementForGlobalOffset(
     Offset globalOffset, {
     SampleDragData? data,
+    bool allowNewRow = false,
   }) {
     final targetContext = _externalSampleDropTargetKey.currentContext;
     if (targetContext == null) return null;
@@ -5642,24 +5716,32 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         local.dy > renderObject.size.height) {
       return null;
     }
-    final row = _rowForLocalY(local.dy);
-    if (row == null) return null;
     final rawMs = (_scrollOffsetMs + local.dx / _pixelsPerMs)
         .clamp(0.0, double.infinity)
         .toDouble();
     final startMs = _magnetEnabled ? _segmentStartMsForTap(rawMs) : rawMs;
     final endMs = startMs + _sampleDropDurationMs(data);
+    final row = _rowForLocalY(local.dy);
+    if (row == null) {
+      final newRowTop = _timelinePaintHeight;
+      final newRowBottom = newRowTop + _rowHeight;
+      final withinNewRowLane =
+          local.dy >= newRowTop && local.dy <= newRowBottom;
+      if (!allowNewRow || !withinNewRowLane) return null;
+      return SampleDropPlacement(
+        targetKind: SampleDropTargetKind.appendNewAudioRow,
+        startMs: startMs,
+        endMs: endMs,
+        allowed: widget.canCreateRowFromSampleDrop,
+      );
+    }
     return SampleDropPlacement(
+      targetKind: SampleDropTargetKind.existingRow,
       row: row,
       startMs: startMs,
       endMs: endMs,
       allowed: !_isInstrumentLane(row),
     );
-  }
-
-  void _logSampleDrop(String event) {
-    if (!kDebugMode) return;
-    debugPrint('[SampleDrop] $event');
   }
 
   /// Pass hits through timeline chrome while a File Browser sample is dragged.
@@ -5675,26 +5757,33 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     Offset globalOffset, {
     SampleDragData? data,
     bool notifyEntered = false,
+    bool allowNewRow = false,
   }) {
-    final placement = _sampleDropPlacementForGlobalOffset(
-      globalOffset,
-      data: data,
-    );
-    if (placement == null) {
-      _clearExternalSampleDropPreview();
-      return false;
-    }
-    if (notifyEntered && !_externalSampleDragInsideTimeline) {
+    final enteringTimeline =
+        notifyEntered && !_externalSampleDragInsideTimeline;
+    if (enteringTimeline) {
       _externalSampleDragInsideTimeline = true;
       widget.onExternalSampleDragEntered?.call();
     }
-    if (_externalSampleDropRow == placement.row &&
+    _externalSampleDropAllowsNewRow = allowNewRow;
+    final placement = _sampleDropPlacementForGlobalOffset(
+      globalOffset,
+      data: data,
+      allowNewRow: allowNewRow,
+    );
+    if (placement == null) {
+      _clearExternalSampleDropPreview(preserveDragContext: true);
+      return false;
+    }
+    if (_externalSampleDropTargetKind == placement.targetKind &&
+        _externalSampleDropRow == placement.row &&
         _externalSampleDropStartMs == placement.startMs &&
         _externalSampleDropEndMs == placement.endMs &&
         _externalSampleDropAllowed == placement.allowed) {
       return true;
     }
     setState(() {
+      _externalSampleDropTargetKind = placement.targetKind;
       _externalSampleDropRow = placement.row;
       _externalSampleDropStartMs = placement.startMs;
       _externalSampleDropEndMs = placement.endMs;
@@ -6321,6 +6410,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       ensureRowVisible: _ensureRowVisibleInViewport,
     );
     _syncRowUiState();
+    widget.externalSampleDragPassThrough?.addListener(
+      _handleExternalSampleDragActivityChanged,
+    );
     widget.transportClockListenable.addListener(_onTransportClockForFollow);
     _verticalScrollController.addListener(() {
       setState(() {
@@ -6348,6 +6440,17 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
   @override
   void didUpdateWidget(covariant AudioCanvasTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(
+      oldWidget.externalSampleDragPassThrough,
+      widget.externalSampleDragPassThrough,
+    )) {
+      oldWidget.externalSampleDragPassThrough?.removeListener(
+        _handleExternalSampleDragActivityChanged,
+      );
+      widget.externalSampleDragPassThrough?.addListener(
+        _handleExternalSampleDragActivityChanged,
+      );
+    }
     if (!identical(
       oldWidget.transportClockListenable,
       widget.transportClockListenable,
@@ -6533,13 +6636,16 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return !clips.any((clip) => clip.id == clipId);
     });
     if (widget.onExternalSampleDrop == null &&
-        (_externalSampleDropRow != null ||
+        widget.onExternalSampleDropToNewRow == null &&
+        (_externalSampleDropTargetKind != null ||
+            _externalSampleDropRow != null ||
             _externalSampleDropStartMs != null ||
             _externalSampleDropEndMs != null)) {
       _clearExternalSampleDropPreview();
     }
-    if (!widget.externalSampleDragActive &&
-        (_externalSampleDropRow != null ||
+    if (!_externalSampleDragIsActive &&
+        (_externalSampleDropTargetKind != null ||
+            _externalSampleDropRow != null ||
             _externalSampleDropStartMs != null ||
             _externalSampleDropEndMs != null ||
             _externalSampleDragInsideTimeline)) {
@@ -6556,6 +6662,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     _waveformDetailViewportTimer?.cancel();
     _waveformDetailViewportTimer = null;
     _pendingWaveformDetailViewportSignature = null;
+    widget.externalSampleDragPassThrough?.removeListener(
+      _handleExternalSampleDragActivityChanged,
+    );
     widget.controller?._unbind(
       ensureRowExpanded: ensureRowExpanded,
       showMasterAutomationLane: showMasterAutomationLane,
@@ -11358,7 +11467,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                               bottom: 0,
                               width: headerWidth,
                               child: RepaintBoundary(
-                                child: _buildTabletHeaderFooter(headerWidth),
+                                child: _ignoreDuringSampleDrag(
+                                  _buildTabletHeaderFooter(headerWidth),
+                                ),
                               ),
                             ),
                           if (_usesTabletDawLayout)
@@ -11765,7 +11876,8 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                 ),
               );
 
-              if (widget.onExternalSampleDrop == null) {
+              if (widget.onExternalSampleDrop == null &&
+                  widget.onExternalSampleDropToNewRow == null) {
                 return timelineContent;
               }
 
@@ -11775,14 +11887,11 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   final pointer = sampleDragPointerFromFeedbackOffset(
                     details.offset,
                   );
-                  final previewed = _updateExternalSampleDropPreview(
+                  _updateExternalSampleDropPreview(
                     pointer,
                     data: details.data,
                     notifyEntered: true,
-                  );
-                  _logSampleDrop(
-                    'willAccept ghost=${details.offset} pointer=$pointer '
-                    'previewed=$previewed',
+                    allowNewRow: true,
                   );
                   // Always claim this target. Flutter will not re-run
                   // willAccept while the pointer stays inside, so rejecting
@@ -11793,10 +11902,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   _updateExternalSampleDropPreview(
                     sampleDragPointerFromFeedbackOffset(details.offset),
                     data: details.data,
+                    allowNewRow: true,
                   );
                 },
                 onLeave: (_) {
-                  _logSampleDrop('leave');
                   _clearExternalSampleDropPreview();
                 },
                 onAcceptWithDetails: (details) {
@@ -11806,25 +11915,36 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   final placement = _sampleDropPlacementForGlobalOffset(
                     pointer,
                     data: details.data,
+                    allowNewRow: true,
                   );
                   _clearExternalSampleDropPreview();
-                  if (placement == null || !placement.allowed) {
-                    _logSampleDrop(
-                      'reject pointer=$pointer row=${placement?.row} '
-                      'allowed=${placement?.allowed}',
-                    );
+                  if (placement == null) {
                     return;
                   }
-                  _logSampleDrop(
-                    'accept pointer=$pointer row=${placement.row} '
-                    'ms=${placement.startMs.toStringAsFixed(0)}',
-                  );
+                  if (placement.appendsNewAudioRow) {
+                    if (!placement.allowed) {
+                      widget.onExternalSampleNewRowUnavailable?.call();
+                      return;
+                    }
+                    final dropToNewRow = widget.onExternalSampleDropToNewRow;
+                    if (dropToNewRow == null) return;
+                    final SampleDragData data = details.data;
+                    final double startMs = placement.startMs;
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      unawaited(dropToNewRow(data, startMs));
+                    });
+                    return;
+                  }
+                  final row = placement.row;
+                  if (!placement.allowed || row == null) {
+                    return;
+                  }
                   // Insert after this frame so Flutter can tear down the
                   // drag overlay before the editor rebuilds. Doing both
                   // on the same frame has crashed the raster thread
                   // (EXC_BAD_ACCESS in drawText).
                   final SampleDragData data = details.data;
-                  final int row = placement.row;
                   final double startMs = placement.startMs;
                   final drop = widget.onExternalSampleDrop;
                   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -11833,52 +11953,10 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
                   });
                 },
                 builder: (_, candidateData, ___) {
-                  final showDropOverlay =
-                      candidateData.isNotEmpty ||
-                      _externalSampleDragInsideTimeline ||
-                      _externalSampleDropRow != null;
-                  // Keep this Stack in the tree even when idle. Wrapping
-                  // and unwrapping timelineContent on drop remounts the
-                  // arrangement and makes the editor window blink.
-                  return Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      timelineContent,
-                      if (showDropOverlay)
-                        IgnorePointer(
-                          child: Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: const Color.fromRGBO(
-                                  43,
-                                  136,
-                                  222,
-                                  0.08,
-                                ),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: _externalSampleDropAllowed == false
-                                      ? const Color.fromRGBO(
-                                          255,
-                                          150,
-                                          120,
-                                          0.70,
-                                        )
-                                      : const Color.fromRGBO(
-                                          124,
-                                          185,
-                                          235,
-                                          0.62,
-                                        ),
-                                  width: 1.4,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
+                  // Claiming the DragTarget lets a pointer recover from blank
+                  // space, but only row/clip previews communicate validity.
+                  // A canvas-wide highlight made invalid space look droppable.
+                  return timelineContent;
                 },
               );
             },
@@ -11888,14 +11966,25 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
         if (_selectionArmIndicatorAt != null)
           _buildSelectionArmIndicatorOverlay(),
         ..._buildExpandedRows(viewportWidth, visibleRowLayouts),
-        Positioned(
-          top: _addRowSectionTop,
-          left: 0,
-          right: 0,
-          child: _ignoreDuringSampleDrag(
-            Center(child: _buildAddRowPill()),
+        if (_showsSampleDropNewRowGhost)
+          Positioned(
+            top: _timelinePaintHeight,
+            left: _headerWidth,
+            right: 0,
+            height: _rowHeight,
+            child: IgnorePointer(child: _buildSampleDropNewRowGhost()),
           ),
-        ),
+        if (!widget.rowGroupingSelectionMode ||
+            PlatformCapabilities.current.isDesktop ||
+            _usesTabletDawLayout)
+          Positioned(
+            top: _addRowSectionTop,
+            left: 0,
+            right: 0,
+            child: _ignoreDuringSampleDrag(
+              Center(child: _buildAddRowPill()),
+            ),
+          ),
         _buildPastePopup(viewportWidth),
         _buildAutomationClipTestOverlay(
           viewportWidth,
@@ -14506,22 +14595,34 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     // Structural actions (move, duplicate, delete) follow the header
     // multi-selection so the menu reads and behaves in bulk.
     final menuRows = _selectedRowsForHeaderAction(row);
-    final menuRowCount = menuRows.length;
-    final isMultiRowMenu = menuRowCount > 1;
-    String bulkLabel(String singular, String pluralKey) {
-      if (!isMultiRowMenu) return L10n.translate(context, singular);
+    String bulkLabel(String singular, String pluralKey, int count) {
+      if (count <= 1) return L10n.translate(context, singular);
       return L10n.translateWithParams(context, pluralKey, <String, String>{
-        'count': '$menuRowCount',
+        'count': '$count',
       });
     }
 
-    final moveUpLabel = bulkLabel('Move Up', 'Move {count} Rows Up');
-    final moveDownLabel = bulkLabel('Move Down', 'Move {count} Rows Down');
+    final moveUpLabel = bulkLabel(
+      'Move Up',
+      'Move {count} Rows Up',
+      menuRows.length,
+    );
+    final moveDownLabel = bulkLabel(
+      'Move Down',
+      'Move {count} Rows Down',
+      menuRows.length,
+    );
     final duplicateLabel = bulkLabel(
       'Duplicate Row',
       'Duplicate {count} Rows',
+      menuRows.length,
     );
-    final deleteLabel = bulkLabel('Delete Row', 'Delete {count} Rows');
+    final deleteRows = _selectedRowsForDelete(row);
+    final deleteLabel = bulkLabel(
+      'Delete Row',
+      'Delete {count} Rows',
+      deleteRows.length,
+    );
     final canDuplicateRows = widget.onDuplicateRows != null;
     final canEditGroup =
         rowGroup != null &&
@@ -14887,7 +14988,7 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
       return widget.onDuplicateRows?.call(menuRows);
     }
     if (action == 'delete') {
-      return _deleteRowsInOrder(_selectedRowsForDelete(row));
+      return _deleteRowsInOrder(deleteRows);
     }
     if (action == 'create_group') {
       return widget.onCreateRowGroup?.call(groupingRows);
@@ -15267,6 +15368,107 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSampleDropNewRowGhost() {
+    final enabled = widget.canCreateRowFromSampleDrop;
+    final highlighted =
+        _externalSampleDropTargetKind == SampleDropTargetKind.appendNewAudioRow;
+    final semanticLabel = L10n.translate(context, 'Drop to create a new row');
+    return Semantics(
+      key: const ValueKey('timeline_sample_new_row_drop_target'),
+      container: true,
+      enabled: enabled,
+      label: semanticLabel,
+      child: ExcludeSemantics(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final previewStartMs = _externalSampleDropStartMs;
+            final previewEndMs = _externalSampleDropEndMs;
+            const timelineLeft = 0.0;
+            final timelineRight = constraints.maxWidth;
+            final rawPreviewLeft = previewStartMs == null
+                ? timelineLeft
+                : timelineLeft +
+                    (previewStartMs - _scrollOffsetMs) * _pixelsPerMs;
+            final rawPreviewRight = previewEndMs == null
+                ? rawPreviewLeft
+                : timelineLeft +
+                    (previewEndMs - _scrollOffsetMs) * _pixelsPerMs;
+            final previewLeft =
+                rawPreviewLeft.clamp(timelineLeft, timelineRight).toDouble();
+            final previewRight =
+                rawPreviewRight.clamp(timelineLeft, timelineRight).toDouble();
+            final previewWidth = math.max(0.0, previewRight - previewLeft);
+            return Stack(
+              clipBehavior: Clip.hardEdge,
+              children: <Widget>[
+                Positioned(
+                  key: const ValueKey('timeline_sample_new_row_ghost_canvas'),
+                  left: 0,
+                  top: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: _timelineRowFillColor(
+                        widget.rows.length.isEven,
+                      ).withValues(alpha: 0.62),
+                      border: Border(
+                        top: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.055),
+                        ),
+                        bottom: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.055),
+                        ),
+                      ),
+                    ),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        CustomPaint(
+                          painter: _SampleDropGhostGridPainter(
+                            pixelsPerMs: _pixelsPerMs,
+                            scrollOffsetMs: _scrollOffsetMs,
+                            bpm: widget.bpm,
+                            beatsPerBar: widget.beatsPerBar,
+                            beatUnit: widget.beatUnit,
+                            quantizeDivisions:
+                                _effectiveQuantizeDivisionsPerBar,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (highlighted && previewWidth > 0.0)
+                  Positioned(
+                    key: const ValueKey('timeline_sample_new_row_drop_preview'),
+                    left: previewLeft,
+                    top: 3,
+                    width: previewWidth,
+                    bottom: 3,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: enabled
+                            ? const Color(0x946EE7B7)
+                            : const Color(0x82FF4F5E),
+                        border: Border.all(
+                          color: enabled
+                              ? const Color(0xE6B7FFE3)
+                              : const Color(0xE6FFB1B8),
+                          width: 1.15,
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -16075,7 +16277,9 @@ class _AudioCanvasTimelineState extends State<AudioCanvasTimeline> {
     );
   }
 
-  double get _addRowSectionTop => _timelinePaintHeight + kHeaderFooterHeight;
+  double get _addRowSectionTop =>
+      _timelinePaintHeight +
+      kHeaderFooterHeight;
 
   Widget _buildTabletTrackHeaderButton({
     required String label,
@@ -19943,6 +20147,128 @@ class _CollapsedGroupSummary {
   });
 }
 
+void _paintTimelineGrid(
+  Canvas canvas,
+  Size size, {
+  required double bpm,
+  required int beatsPerBar,
+  required int beatUnit,
+  required int quantizeDivisions,
+  required double pixelsPerMs,
+  required double scrollOffsetMs,
+  required double viewportWidth,
+}) {
+  final safeBeatsPerBar = math.max(1, beatsPerBar);
+  final safeBeatUnit = math.max(1, beatUnit);
+  final msPerBar = (60000 / bpm) * safeBeatsPerBar * 4.0 / safeBeatUnit;
+  final msPerBeat = msPerBar / safeBeatsPerBar;
+  final pxPerBar = msPerBar * pixelsPerMs;
+  final zoomVisibility = ((pxPerBar - 3.0) / 18.0).clamp(0.0, 1.0);
+  final opacityScale = 0.35 + (0.65 * zoomVisibility);
+
+  final majorPaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.08 * opacityScale)
+    ..strokeWidth = 1.5;
+  final beatPaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.06 * opacityScale)
+    ..strokeWidth = 1.1;
+  final minorPaint = Paint()
+    ..color = Colors.white.withValues(alpha: 0.04 * opacityScale)
+    ..strokeWidth = 1;
+
+  final subdivisions = math.max(1, quantizeDivisions);
+  final msPerSubdivision = msPerBar / subdivisions;
+  final visibleStartMs = scrollOffsetMs;
+  final visibleEndMs = scrollOffsetMs + viewportWidth / pixelsPerMs;
+  final rawStartBar = (visibleStartMs / msPerBar).floor();
+  final rawEndBar = (visibleEndMs / msPerBar).ceil();
+  final startBar = math.max(0, math.min(rawStartBar, rawEndBar));
+  final endBar = math.max(0, math.max(rawStartBar, rawEndBar));
+
+  for (int bar = startBar; bar <= endBar; bar++) {
+    final barMs = bar * msPerBar;
+    final barX = (barMs - scrollOffsetMs) * pixelsPerMs;
+    if (barX >= 0 && barX <= viewportWidth) {
+      canvas.drawLine(Offset(barX, 0), Offset(barX, size.height), majorPaint);
+    }
+
+    final firstVisibleSubdivision = math.max(
+      1,
+      ((visibleStartMs - barMs) / msPerSubdivision).ceil(),
+    );
+    final lastVisibleSubdivision = math.min(
+      subdivisions - 1,
+      ((visibleEndMs - barMs) / msPerSubdivision).floor(),
+    );
+    for (
+      int sub = firstVisibleSubdivision;
+      sub <= lastVisibleSubdivision;
+      sub++
+    ) {
+      final subMs = barMs + sub * msPerSubdivision;
+      final subX = (subMs - scrollOffsetMs) * pixelsPerMs;
+      if (subX >= 0 && subX <= viewportWidth) {
+        canvas.drawLine(Offset(subX, 0), Offset(subX, size.height), minorPaint);
+      }
+    }
+
+    for (int beat = 1; beat < safeBeatsPerBar; beat++) {
+      final beatMs = barMs + (beat * msPerBeat);
+      final beatX = (beatMs - scrollOffsetMs) * pixelsPerMs;
+      if (beatX >= 0 && beatX <= viewportWidth) {
+        canvas.drawLine(
+          Offset(beatX, 0),
+          Offset(beatX, size.height),
+          beatPaint,
+        );
+      }
+    }
+  }
+}
+
+class _SampleDropGhostGridPainter extends CustomPainter {
+  final double pixelsPerMs;
+  final double scrollOffsetMs;
+  final double bpm;
+  final int beatsPerBar;
+  final int beatUnit;
+  final int quantizeDivisions;
+
+  const _SampleDropGhostGridPainter({
+    required this.pixelsPerMs,
+    required this.scrollOffsetMs,
+    required this.bpm,
+    required this.beatsPerBar,
+    required this.beatUnit,
+    required this.quantizeDivisions,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _paintTimelineGrid(
+      canvas,
+      size,
+      bpm: bpm,
+      beatsPerBar: beatsPerBar,
+      beatUnit: beatUnit,
+      quantizeDivisions: quantizeDivisions,
+      pixelsPerMs: pixelsPerMs,
+      scrollOffsetMs: scrollOffsetMs,
+      viewportWidth: size.width,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SampleDropGhostGridPainter oldDelegate) {
+    return oldDelegate.pixelsPerMs != pixelsPerMs ||
+        oldDelegate.scrollOffsetMs != scrollOffsetMs ||
+        oldDelegate.bpm != bpm ||
+        oldDelegate.beatsPerBar != beatsPerBar ||
+        oldDelegate.beatUnit != beatUnit ||
+        oldDelegate.quantizeDivisions != quantizeDivisions;
+  }
+}
+
 // === Custom painter for the timeline ===
 class _TimelinePainter extends CustomPainter {
   final List<TimelineRow> rows;
@@ -20394,7 +20720,6 @@ class _TimelinePainter extends CustomPainter {
         Offset(viewportWidth, currentY + totalRowHeight),
         linePaint,
       );
-
     }
 
     if (highlightedSegmentRow != null &&
@@ -20472,47 +20797,6 @@ class _TimelinePainter extends CustomPainter {
       _drawGrid(canvas, size); // Note: _drawGrid doesn't use vertical position
     }
 
-    // === RECORDING PREVIEW ==========================================
-    if (isRecording && recordingRowIndex != null) {
-      final int recRow = recordingRowIndex!;
-      if (!_isRowHiddenByCollapsedGroup(recRow)) {
-        // Compute the row's vertical position on screen
-        final recY = _rowTopForIndex(recRow);
-
-        // final double recRowHeight = _AudioCanvasTimelineState.kRowHeight;
-        // final Rect recRect = Rect.fromLTWH(
-        //   0,
-        //   recY,
-        //   viewportWidth,
-        //   recRowHeight,
-        // );
-
-        final double recYTop = recY + 2;
-        final double recHeight = rowHeight - 4;
-
-        final Rect recRect = Rect.fromLTWH(
-          0,
-          recYTop,
-          viewportWidth,
-          recHeight,
-        );
-
-        final double recDurationMs = playheadMs - recordingStartMs;
-        if (recDurationMs > 0) {
-          _paintRecordingPreview(
-            canvas,
-            recRect,
-            pixelsPerMs,
-            recordingStartMs - scrollOffsetMs,
-            recDurationMs,
-            recordingPeaks,
-            recordingPeakTimesMs,
-          );
-        }
-      }
-    }
-    // ================================================================
-
     final overlapMode = _normalizedClipOverlapMode();
     final overlappingClipIndices = overlapMode == 'off'
         ? _computeOverlapByClip()
@@ -20571,6 +20855,7 @@ class _TimelinePainter extends CustomPainter {
       }
     }
     _drawCrossfadeVisuals(canvas, crossfadeVisuals);
+    _drawRecordingPreviewLayer(canvas, playheadMs);
     if (!isMsUnderlayPass && foregroundGridEnabled) {
       _drawGrid(canvas, size);
     }
@@ -20842,85 +21127,17 @@ class _TimelinePainter extends CustomPainter {
   // }
 
   void _drawGrid(Canvas canvas, Size size) {
-    final safeBeatsPerBar = math.max(1, beatsPerBar);
-    final safeBeatUnit = math.max(1, beatUnit);
-    final msPerBar = (60000 / bpm) * safeBeatsPerBar * 4.0 / safeBeatUnit;
-    final msPerBeat = msPerBar / safeBeatsPerBar;
-    final pxPerBar = msPerBar * pixelsPerMs;
-    final zoomVisibility = ((pxPerBar - 3.0) / 18.0).clamp(0.0, 1.0);
-    final opacityScale = 0.35 + (0.65 * zoomVisibility);
-
-    final majorPaint = Paint()
-      ..color = Colors.white.withOpacity(0.08 * opacityScale)
-      ..strokeWidth = 1.5;
-
-    final beatPaint = Paint()
-      ..color = Colors.white.withOpacity(0.06 * opacityScale)
-      ..strokeWidth = 1.1;
-
-    final minorPaint = Paint()
-      ..color = Colors.white.withOpacity(0.04 * opacityScale)
-      ..strokeWidth = 1;
-
-    final subdivisions = math.max(1, quantizeDivisions);
-    final msPerSubdivision = msPerBar / subdivisions;
-
-    final visibleStartMs = scrollOffsetMs;
-    final visibleEndMs = scrollOffsetMs + viewportWidth / pixelsPerMs;
-
-    // ✅ CLAMP so nothing appears before bar 1
-    final rawStartBar = (visibleStartMs / msPerBar).floor();
-    final rawEndBar = (visibleEndMs / msPerBar).ceil();
-    final startBar = math.max(0, math.min(rawStartBar, rawEndBar));
-    final endBar = math.max(0, math.max(rawStartBar, rawEndBar));
-
-    for (int bar = startBar; bar <= endBar; bar++) {
-      final barMs = bar * msPerBar;
-      final barX = (barMs - scrollOffsetMs) * pixelsPerMs;
-
-      if (barX >= 0 && barX <= viewportWidth) {
-        // === BAR LINE ===
-        canvas.drawLine(Offset(barX, 0), Offset(barX, size.height), majorPaint);
-      }
-
-      // Subdivisions inside each bar are driven by magnet quantize setting.
-      // At deep zoom only a small portion of the bar is visible, so avoid
-      // scanning hundreds of offscreen subdivisions on every paint.
-      final firstVisibleSubdivision = math.max(
-        1,
-        ((visibleStartMs - barMs) / msPerSubdivision).ceil(),
-      );
-      final lastVisibleSubdivision = math.min(
-        subdivisions - 1,
-        ((visibleEndMs - barMs) / msPerSubdivision).floor(),
-      );
-      for (int sub = firstVisibleSubdivision;
-          sub <= lastVisibleSubdivision;
-          sub++) {
-        final subMs = barMs + sub * msPerSubdivision;
-        final subX = (subMs - scrollOffsetMs) * pixelsPerMs;
-
-        if (subX >= 0 && subX <= viewportWidth) {
-          canvas.drawLine(
-            Offset(subX, 0),
-            Offset(subX, size.height),
-            minorPaint,
-          );
-        }
-      }
-
-      for (int beat = 1; beat < safeBeatsPerBar; beat++) {
-        final beatMs = barMs + (beat * msPerBeat);
-        final beatX = (beatMs - scrollOffsetMs) * pixelsPerMs;
-        if (beatX >= 0 && beatX <= viewportWidth) {
-          canvas.drawLine(
-            Offset(beatX, 0),
-            Offset(beatX, size.height),
-            beatPaint,
-          );
-        }
-      }
-    }
+    _paintTimelineGrid(
+      canvas,
+      size,
+      bpm: bpm,
+      beatsPerBar: beatsPerBar,
+      beatUnit: beatUnit,
+      quantizeDivisions: quantizeDivisions,
+      pixelsPerMs: pixelsPerMs,
+      scrollOffsetMs: scrollOffsetMs,
+      viewportWidth: viewportWidth,
+    );
   }
 
   Set<int> _computeOverlapByClip() {
@@ -22116,6 +22333,39 @@ class _TimelinePainter extends CustomPainter {
 
     canvas.drawLine(Offset(x, top), Offset(x, bottom), glowPaint);
     canvas.drawLine(Offset(x, top), Offset(x, bottom), linePaint);
+  }
+
+  void _drawRecordingPreviewLayer(Canvas canvas, double playheadMs) {
+    if (!isRecording || recordingRowIndex == null || recordingPeaks.isEmpty) {
+      return;
+    }
+    final recRow = recordingRowIndex!;
+    if (recRow < 0 ||
+        recRow >= rows.length ||
+        recRow >= rowExpanded.length ||
+        _isRowHiddenByCollapsedGroup(recRow)) {
+      return;
+    }
+
+    final recDurationMs = playheadMs - recordingStartMs;
+    if (!recDurationMs.isFinite || recDurationMs <= 0) return;
+
+    final recY = _rowTopForIndex(recRow);
+    final recRect = Rect.fromLTWH(
+      0,
+      recY + 2,
+      viewportWidth,
+      rowHeight - 4,
+    );
+    _paintRecordingPreview(
+      canvas,
+      recRect,
+      pixelsPerMs,
+      recordingStartMs - scrollOffsetMs,
+      recDurationMs,
+      recordingPeaks,
+      recordingPeakTimesMs,
+    );
   }
 
   void _paintRecordingPreview(

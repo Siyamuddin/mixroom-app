@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -15,6 +16,7 @@ import 'package:mixroom/helpers/waveform_detail.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:mixroom/screens/audio_timeline_pro.dart';
 import 'package:mixroom/widgets/effects_panel.dart';
+import 'package:mixroom/widgets/sample_browser_panel.dart';
 
 const double _kTestTimelineWidth = 800.0;
 const double _kTestTimelineHeight = 600.0;
@@ -264,6 +266,85 @@ CustomPainter _timelineClipPainter(WidgetTester tester) {
   fail('Timeline painter with visible clip indices was not found.');
 }
 
+CustomPainter _timelineForegroundPainter(WidgetTester tester) {
+  for (final customPaint in tester.widgetList<CustomPaint>(
+    find.descendant(
+      of: find.byType(AudioCanvasTimeline),
+      matching: find.byType(CustomPaint),
+    ),
+  )) {
+    final painter = customPaint.painter;
+    if (painter == null) continue;
+    try {
+      final indices = (painter as dynamic).visibleClipIndices;
+      final leftExtension = (painter as dynamic).leftVisibleExtensionPx;
+      if (indices is List<int> && leftExtension == 0.0) return painter;
+    } on NoSuchMethodError {
+      // Other timeline painters do not expose clip visibility.
+    }
+  }
+  fail('Foreground timeline painter was not found.');
+}
+
+class _TimelinePaintSnapshot {
+  const _TimelinePaintSnapshot({
+    required this.bytes,
+    required this.width,
+    required this.height,
+  });
+
+  final ByteData bytes;
+  final int width;
+  final int height;
+
+  List<int> pixelAt(int x, int y) {
+    assert(x >= 0 && x < width);
+    assert(y >= 0 && y < height);
+    final offset = ((y * width) + x) * 4;
+    return <int>[
+      bytes.getUint8(offset),
+      bytes.getUint8(offset + 1),
+      bytes.getUint8(offset + 2),
+      bytes.getUint8(offset + 3),
+    ];
+  }
+
+  Uint8List get rgbaBytes => bytes.buffer.asUint8List(
+        bytes.offsetInBytes,
+        bytes.lengthInBytes,
+      );
+}
+
+Future<_TimelinePaintSnapshot> _renderTimelineForeground(
+  WidgetTester tester,
+) async {
+  final dynamic painter = _timelineForegroundPainter(tester);
+  final width = (painter.viewportWidth as double).ceil();
+  final rowHeight = painter.rowHeight as double;
+  final rows = painter.rows as List;
+  final height = (rowHeight * rows.length).ceil().clamp(1, 600).toInt();
+  final recorder = ui.PictureRecorder();
+  final canvas = ui.Canvas(recorder);
+  painter.paint(canvas, ui.Size(width.toDouble(), height.toDouble()));
+  final picture = recorder.endRecording();
+  final bytes = await tester.runAsync(() async {
+    final image = await picture.toImage(width, height);
+    picture.dispose();
+    final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    image.dispose();
+    if (data == null) {
+      throw StateError('Timeline painter did not produce RGBA pixels.');
+    }
+    return data;
+  });
+  if (bytes == null) fail('Timeline painter did not produce RGBA pixels.');
+  return _TimelinePaintSnapshot(
+    bytes: bytes,
+    width: width,
+    height: height,
+  );
+}
+
 List<int> _paintedTimelineClipIndices(WidgetTester tester) {
   final indices = (_timelineClipPainter(tester) as dynamic).visibleClipIndices;
   return List<int>.of(indices as List<int>);
@@ -467,12 +548,14 @@ Widget _buildHarness({
   Future<void> Function(int clipIndex)? onCreateSamplerFromClip,
   Future<void> Function(int clipIndex)? onDeleteClip,
   Future<void> Function(int row)? onDeleteRow,
+  Future<void> Function(List<int> rows)? onDeleteRows,
   Future<void> Function(int clipIndex, double startMs)? onStartClipLoopPreview,
   Future<void> Function(int clipIndex, double startMs)? onSeekClipLoopPreview,
   Future<void> Function()? onStopClipLoopPreview,
   Future<void> Function()? onAddInstrumentLane,
   Future<void> Function()? onOpenCaptureDeck,
   Future<void> Function()? onGroupRowsPressed,
+  VoidCallback? onCancelRowGroupingPressed,
   Future<void> Function(int row)? onChangeInstrumentLane,
   Future<void> Function(int row)? onAddAudioToRow,
   Future<void> Function(int row, double timeMs)?
@@ -550,6 +633,11 @@ Widget _buildHarness({
   ValueNotifier<Duration>? transportClockListenable,
   void Function(double ms)? onScrubRequested,
   bool isPlaying = false,
+  bool isRecording = false,
+  int? recordingRowIndex,
+  double recordingStartMs = 0.0,
+  List<double> recordingPeaks = const <double>[],
+  List<double> recordingPeakTimesMs = const <double>[],
   bool loopEnabled = false,
   int loopStartMs = 0,
   int loopEndMs = 0,
@@ -558,6 +646,14 @@ Widget _buildHarness({
   VoidCallback? onTutorialTimelineScrolled,
   VoidCallback? onTutorialTimelineZoomed,
   ValueChanged<WaveformDetailViewport>? onWaveformDetailViewportSettled,
+  Future<void> Function(SampleDragData data, int row, double timeMs)?
+      onExternalSampleDrop,
+  Future<void> Function(SampleDragData data, double timeMs)?
+      onExternalSampleDropToNewRow,
+  VoidCallback? onExternalSampleNewRowUnavailable,
+  bool canCreateRowFromSampleDrop = false,
+  ValueListenable<bool>? externalSampleDragPassThrough,
+  Widget? sampleDragSource,
 }) {
   final rows = rowsOverride ??
       <TimelineRow>[
@@ -588,7 +684,10 @@ Widget _buildHarness({
       body: SizedBox(
         width: _kTestTimelineWidth,
         height: _kTestTimelineHeight,
-        child: AudioCanvasTimeline(
+        child: Stack(
+          fit: StackFit.expand,
+          children: <Widget>[
+            AudioCanvasTimeline(
           controller: controller,
           allowMultipleExpandedRows: allowMultipleExpandedRows,
           expandRowsOnTrackSelect: expandRowsOnTrackSelect,
@@ -638,17 +737,19 @@ Widget _buildHarness({
           onWaveformDetailViewportSettled: onWaveformDetailViewportSettled,
           getY: (clip) => clip.y,
           onSelectRow: onSelectRow ?? (_) {},
-          recordingInProgress: false,
+          recordingInProgress: isRecording,
           onToggleExpanded: (_) {},
           onAddRow: () async {},
           onAddInstrumentLane: onAddInstrumentLane,
           onOpenCaptureDeck: onOpenCaptureDeck,
           onGroupRowsPressed: onGroupRowsPressed,
+          onCancelRowGroupingPressed: onCancelRowGroupingPressed,
           onInsertRowAbove: (_) async {},
           onInsertRowBelow: (_) async {},
           onAddAudioToRow: onAddAudioToRow,
           onChangeInstrumentLane: onChangeInstrumentLane,
           onDeleteRow: onDeleteRow ?? (_) async {},
+          onDeleteRows: onDeleteRows,
           onMoveRow: onMoveRow ?? (_, __) async {},
           onMoveRows: onMoveRows,
           onDuplicateRows: onDuplicateRows,
@@ -675,10 +776,11 @@ Widget _buildHarness({
           beatsPerBar: beatsPerBar,
           selectedClipIndex: selectedClipIndex,
           selectedClipIndices: selectedClipIndices,
-          isRecording: false,
-          recordingRowIndex: null,
-          recordingStartMs: 0.0,
-          recordingPeaks: const <double>[],
+          isRecording: isRecording,
+          recordingRowIndex: recordingRowIndex,
+          recordingStartMs: recordingStartMs,
+          recordingPeaks: recordingPeaks,
+          recordingPeakTimesMs: recordingPeakTimesMs,
           getRowEffects: (_) async => rowEffects,
           getRowEffectIds: (_) async => List<String>.generate(
             rowEffects.length,
@@ -757,12 +859,21 @@ Widget _buildHarness({
           getRowCompressorMeter: (_, __) async => const <double>[0.0, 0.0],
           getRowEqWaveform: (_, __, ___) async => const <double>[0.0, 0.0],
           getRowStereoScope: (_, __, ___) async => const <double>[0.0, 0.0],
-          onExternalSampleDrop: null,
+          onExternalSampleDrop: onExternalSampleDrop,
+          onExternalSampleDropToNewRow: onExternalSampleDropToNewRow,
+          onExternalSampleNewRowUnavailable:
+              onExternalSampleNewRowUnavailable,
+          canCreateRowFromSampleDrop: canCreateRowFromSampleDrop,
           onExternalSampleDragEntered: null,
           externalSampleDragActive: false,
+          externalSampleDragPassThrough: externalSampleDragPassThrough,
           tutorialHighlighter: null,
           bottomDockInset: 0.0,
           useTabletDawLayout: useTabletDawLayout,
+            ),
+          if (sampleDragSource != null)
+            Positioned(left: 8, top: 8, child: sampleDragSource),
+          ],
         ),
       ),
     ),
@@ -770,6 +881,587 @@ Widget _buildHarness({
 }
 
 void main() {
+  testWidgets(
+    'File Browser placement exposes one append lane without changing Finder targeting',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      final controller = AudioCanvasTimelineController();
+      const data = SampleDragData(
+        filePath: '/tmp/kick.wav',
+        label: 'kick',
+        duration: Duration(milliseconds: 1234),
+      );
+      try {
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: const <AudioTrack>[],
+            controller: controller,
+            onMoveClipCommit: (_, __, ___) async {},
+            onExternalSampleDropToNewRow: (_, __) async {},
+            canCreateRowFromSampleDrop: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final origin = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+        final existingPointer = origin + const Offset(337, 80);
+        final appendPointer = origin + const Offset(337, 160);
+        final invalidBlankPointer = origin + const Offset(337, 300);
+
+        final existing = controller.placementForExternalSampleDrop(
+          existingPointer,
+          data: data,
+          allowNewRow: true,
+        );
+        expect(existing?.targetKind, SampleDropTargetKind.existingRow);
+        expect(existing?.row, 0);
+
+        final snapped = controller.placementForExternalSampleDrop(
+          appendPointer,
+          data: data,
+          allowNewRow: true,
+        );
+        expect(snapped?.targetKind, SampleDropTargetKind.appendNewAudioRow);
+        expect(snapped?.row, isNull);
+        expect(snapped?.startMs, 2500.0);
+        expect(snapped?.endMs, 3734.0);
+        expect(snapped?.allowed, isTrue);
+
+        controller.toggleMagnet();
+        await tester.pump();
+        final unsnapped = controller.placementForExternalSampleDrop(
+          appendPointer,
+          data: data,
+          allowNewRow: true,
+        );
+        expect(unsnapped?.startMs, 2570.0);
+        expect(unsnapped?.endMs, 3804.0);
+
+        controller.panByMs(1000.0);
+        await tester.pump();
+        final scrolled = controller.placementForExternalSampleDrop(
+          appendPointer,
+          data: data,
+          allowNewRow: true,
+        );
+        expect(scrolled?.startMs, 3570.0);
+        expect(scrolled?.endMs, 4804.0);
+
+        expect(
+          controller.placementForExternalSampleDrop(
+            invalidBlankPointer,
+            data: data,
+            allowNewRow: true,
+          ),
+          isNull,
+        );
+        expect(
+          controller.placementForExternalSampleDrop(appendPointer, data: data),
+          isNull,
+          reason: 'controller-driven Finder drops remain existing-row-only',
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets('append lane follows the complete visible folded structure', (
+    tester,
+  ) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    final controller = AudioCanvasTimelineController();
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'rhythm'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'rhythm'),
+      TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+    ];
+    const groups = <TrackGroup>[
+      TrackGroup(
+        id: 'rhythm',
+        name: 'Rhythm',
+        rowIds: <int>[1, 2],
+        collapsed: true,
+      ),
+    ];
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          controller: controller,
+          rowsOverride: rows,
+          trackGroupsOverride: groups,
+          onMoveClipCommit: (_, __, ___) async {},
+          onExternalSampleDropToNewRow: (_, __) async {},
+          canCreateRowFromSampleDrop: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final origin = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+      final finalVisibleRow = controller.placementForExternalSampleDrop(
+        origin + const Offset(337, 170),
+        allowNewRow: true,
+      );
+      final appended = controller.placementForExternalSampleDrop(
+        origin + const Offset(337, 240),
+        allowNewRow: true,
+      );
+
+      expect(finalVisibleRow?.targetKind, SampleDropTargetKind.existingRow);
+      expect(finalVisibleRow?.row, 2);
+      expect(appended?.targetKind, SampleDropTargetKind.appendNewAudioRow);
+      expect(appended?.row, isNull);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets(
+    'File Browser drag can recover from blank space and append exactly once',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      final controller = AudioCanvasTimelineController();
+      final drops = <({SampleDragData data, double timeMs})>[];
+      try {
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: const <AudioTrack>[],
+            controller: controller,
+            onMoveClipCommit: (_, __, ___) async {},
+            onExternalSampleDropToNewRow: (data, timeMs) async {
+              drops.add((data: data, timeMs: timeMs));
+            },
+            canCreateRowFromSampleDrop: true,
+            sampleDragSource: buildSampleFileDraggable(
+              data: const SampleDragData(
+                filePath: '/tmp/kick.wav',
+                label: 'kick',
+                duration: Duration(milliseconds: 900),
+              ),
+              feedback: const SizedBox(width: 84, height: 56),
+              childWhenDragging: const SizedBox.shrink(),
+              child: const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('kick.wav'),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        controller.toggleMagnet();
+        await tester.pump();
+
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+          findsNothing,
+        );
+        expect(find.text('Add Row'), findsOneWidget);
+        final origin = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('kick.wav')),
+        );
+        await gesture.moveBy(const Offset(24, 16));
+        await tester.pump();
+        await gesture.moveTo(origin + const Offset(337, 300));
+        await tester.pump();
+
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+          findsNothing,
+          reason: 'the temporary row appears only over the append target',
+        );
+        expect(
+          find.text('Add Row'),
+          findsOneWidget,
+          reason: 'the append preview must not replace existing row controls',
+        );
+
+        await gesture.moveTo(origin + const Offset(337, 160));
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_ghost_header')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_ghost_name')),
+          findsNothing,
+        );
+        expect(find.text('Track 2'), findsNothing);
+        expect(find.text('Drop to create a new row'), findsNothing);
+        final ghostCanvas = find.byKey(
+          const ValueKey('timeline_sample_new_row_ghost_canvas'),
+        );
+        expect(
+          tester.getRect(ghostCanvas).left,
+          tester
+              .getRect(find.byKey(const ValueKey('timeline_row_header_0')))
+              .right,
+          reason: 'the preview belongs only to the timeline canvas',
+        );
+
+        final previewFinder = find.byKey(
+          const ValueKey('timeline_sample_new_row_drop_preview'),
+        );
+        expect(previewFinder, findsOneWidget);
+        final firstPreviewRect = tester.getRect(previewFinder);
+
+        await gesture.moveTo(origin + const Offset(437, 160));
+        await tester.pump();
+        final movedPreviewRect = tester.getRect(previewFinder);
+        expect(movedPreviewRect.left - firstPreviewRect.left, 100.0);
+
+        await gesture.moveTo(origin + const Offset(337, 300));
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+          findsNothing,
+          reason: 'leaving the append lane must remove its valid indicator',
+        );
+        expect(previewFinder, findsNothing);
+
+        await gesture.moveTo(origin + const Offset(337, 160));
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+          findsOneWidget,
+          reason: 'the claimed DragTarget must recover after invalid space',
+        );
+        await gesture.up();
+        await tester.pump();
+        await tester.pump();
+
+        expect(drops, hasLength(1));
+        expect(drops.single.data.filePath, '/tmp/kick.wav');
+        expect(drops.single.timeMs, 2570.0);
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+          findsNothing,
+        );
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'tablet append ghost stays canvas-only beside the footer',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      final dragActivity = ValueNotifier<bool>(false);
+      final controller = AudioCanvasTimelineController();
+      try {
+        await tester.pumpWidget(
+          _buildHarness(
+            clips: const <AudioTrack>[],
+            controller: controller,
+            rowsOverride: List<TimelineRow>.generate(
+              8,
+              (index) => TimelineRow(
+                rowId: index + 1,
+                name: 'Track ${index + 1}',
+                iconId: 0,
+              ),
+            ),
+            onMoveClipCommit: (_, __, ___) async {},
+            onExternalSampleDropToNewRow: (_, __) async {},
+            canCreateRowFromSampleDrop: true,
+            useTabletDawLayout: true,
+            externalSampleDragPassThrough: dragActivity,
+            sampleDragSource: buildSampleFileDraggable(
+              data: const SampleDragData(
+                filePath: '/tmp/kick.wav',
+                label: 'kick',
+                duration: Duration(milliseconds: 900),
+              ),
+              feedback: const SizedBox(width: 84, height: 56),
+              childWhenDragging: const SizedBox.shrink(),
+              child: const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('kick.wav'),
+              ),
+              onDragStarted: () => dragActivity.value = true,
+              onDragEnd: (_) => dragActivity.value = false,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final footer = find.byKey(
+          const ValueKey('tablet_footer_group_rows_button'),
+        );
+        expect(footer, findsOneWidget);
+        final timelineScroll = tester.widget<SingleChildScrollView>(
+          find.descendant(
+            of: find.byType(AudioCanvasTimeline),
+            matching: find.byType(SingleChildScrollView),
+          ),
+        );
+        timelineScroll.controller!.jumpTo(
+          timelineScroll.controller!.position.maxScrollExtent,
+        );
+        await tester.pump();
+        final initialScrollOffset = timelineScroll.controller!.offset;
+        final initialFinalRowRect = tester.getRect(
+          find.byKey(const ValueKey('timeline_tablet_row_header_7')),
+        );
+
+        final origin = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.text('kick.wav')),
+        );
+        await gesture.moveBy(const Offset(24, 16));
+        await tester.pump();
+        await gesture.moveTo(origin + const Offset(500, 80));
+        await tester.pump();
+        await tester.pump();
+
+        final ghost = find.byKey(
+          const ValueKey('timeline_sample_new_row_drop_target'),
+        );
+        final ghostCanvas = find.byKey(
+          const ValueKey('timeline_sample_new_row_ghost_canvas'),
+        );
+        expect(
+          ghost,
+          findsNothing,
+          reason: 'hovering an existing row must not append a preview row',
+        );
+        expect(footer, findsOneWidget);
+        expect(
+          timelineScroll.controller!.offset,
+          closeTo(initialScrollOffset, 0.01),
+          reason: 'starting a drag must not move the existing timeline',
+        );
+        expect(
+          tester.getRect(
+            find.byKey(const ValueKey('timeline_tablet_row_header_7')),
+          ),
+          initialFinalRowRect,
+          reason: 'starting a drag must not shift existing track geometry',
+        );
+
+        final finalRowBottom = tester
+            .getRect(find.byKey(const ValueKey('timeline_tablet_row_header_7')))
+            .bottom;
+        await gesture.moveTo(Offset(origin.dx + 500, finalRowBottom + 10));
+        await tester.pump();
+        await tester.pump();
+
+        expect(ghost, findsOneWidget);
+        for (var step = 0; step < 6; step += 1) {
+          await gesture.moveBy(const Offset(0, 6));
+          await tester.pump();
+          expect(
+            ghost,
+            findsOneWidget,
+            reason:
+                'slow downward movement must remain inside the revealed row',
+          );
+        }
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_ghost_header')),
+          findsNothing,
+        );
+        expect(ghostCanvas, findsOneWidget);
+        expect(find.text('+ Audio Row'), findsOneWidget);
+        expect(find.text('+ MIDI Row'), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_ghost_gain')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_ghost_ms')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('timeline_sample_new_row_drop_preview')),
+          findsOneWidget,
+          reason: 'the clip is highlighted only inside the append target',
+        );
+        final ghostCanvasBox = tester.widget<DecoratedBox>(
+          find.descendant(of: ghostCanvas, matching: find.byType(DecoratedBox)),
+        );
+        final ghostCanvasDecoration = ghostCanvasBox.decoration as BoxDecoration;
+        expect(
+          ghostCanvasDecoration.color,
+          isNot(const Color(0x946EE7B7)),
+          reason: 'the row stays neutral; green belongs only to the clip',
+        );
+        final previewBox = tester.widget<DecoratedBox>(
+          find.descendant(
+            of: find.byKey(
+              const ValueKey('timeline_sample_new_row_drop_preview'),
+            ),
+            matching: find.byType(DecoratedBox),
+          ),
+        );
+        expect(
+          (previewBox.decoration as BoxDecoration).color,
+          const Color(0x946EE7B7),
+        );
+
+        final ghostRect = tester.getRect(ghost);
+        final canvasRect = tester.getRect(ghostCanvas);
+        expect(canvasRect.top, ghostRect.top);
+        expect(canvasRect.height, ghostRect.height);
+        expect(
+          canvasRect.left,
+          tester
+              .getRect(
+                find.byKey(const ValueKey('timeline_tablet_row_header_7')),
+              )
+              .right,
+          reason: 'the ghost must leave the header/footer controls untouched',
+        );
+        expect(
+          timelineScroll.controller!.offset,
+          closeTo(initialScrollOffset, 0.01),
+          reason: 'revealing the ghost must not scroll the timeline',
+        );
+        expect(
+          tester.getRect(
+            find.byKey(const ValueKey('timeline_tablet_row_header_7')),
+          ),
+          initialFinalRowRect,
+          reason: 'revealing the ghost must not shift existing tracks',
+        );
+        expect(
+          controller.placementForExternalSampleDrop(
+            Offset(canvasRect.center.dx, ghostRect.bottom + 45),
+            allowNewRow: true,
+          ),
+          isNull,
+          reason: 'the reveal handoff must not accept a second invisible row',
+        );
+
+        dragActivity.value = false;
+        await tester.pump();
+        await tester.pump();
+        expect(ghost, findsNothing);
+        expect(footer, findsOneWidget);
+        expect(
+          timelineScroll.controller!.offset,
+          closeTo(initialScrollOffset, 0.01),
+        );
+        await gesture.cancel();
+      } finally {
+        dragActivity.dispose();
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets('unavailable append ghost reports row-limit feedback', (
+    tester,
+  ) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    var unavailableCalls = 0;
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          onMoveClipCommit: (_, __, ___) async {},
+          onExternalSampleDropToNewRow: (_, __) async {
+            fail('An unavailable append target must not insert a sample.');
+          },
+          onExternalSampleNewRowUnavailable: () {
+            unavailableCalls += 1;
+          },
+          canCreateRowFromSampleDrop: false,
+          sampleDragSource: buildSampleFileDraggable(
+            data: const SampleDragData(
+              filePath: '/tmp/kick.wav',
+              label: 'kick',
+            ),
+            feedback: const SizedBox(width: 84, height: 56),
+            childWhenDragging: const SizedBox.shrink(),
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('kick.wav'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final origin = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('kick.wav')),
+      );
+      await gesture.moveBy(const Offset(24, 16));
+      await tester.pump();
+      await gesture.moveTo(origin + const Offset(337, 160));
+      await tester.pump();
+
+      final semantics = tester.getSemantics(
+        find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+      );
+      expect(semantics.flagsCollection.isEnabled, ui.Tristate.isFalse);
+
+      await gesture.up();
+      await tester.pump();
+      expect(unavailableCalls, 1);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('Android long-press sample drag reaches the append lane', (
+    tester,
+  ) async {
+    _setTestTargetPlatform(TargetPlatform.android);
+    final drops = <double>[];
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          onMoveClipCommit: (_, __, ___) async {},
+          onExternalSampleDropToNewRow: (_, timeMs) async {
+            drops.add(timeMs);
+          },
+          canCreateRowFromSampleDrop: true,
+          sampleDragSource: buildSampleFileDraggable(
+            data: const SampleDragData(
+              filePath: '/tmp/kick.wav',
+              label: 'kick',
+            ),
+            feedback: const SizedBox(width: 84, height: 56),
+            childWhenDragging: const SizedBox.shrink(),
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text('kick.wav'),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final origin = tester.getTopLeft(find.byType(AudioCanvasTimeline));
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('kick.wav')),
+      );
+      await tester.pump(const Duration(milliseconds: 160));
+      await gesture.moveTo(origin + const Offset(337, 160));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('timeline_sample_new_row_drop_target')),
+        findsOneWidget,
+      );
+
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+      expect(drops, hasLength(1));
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets(
     'large timeline mounts and paints only the visible working set',
     (tester) async {
@@ -3015,6 +3707,37 @@ void main() {
     expect(find.text('Volume'), findsNothing);
   });
 
+  testWidgets('mobile grouping hides Add Row while desktop keeps it',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.android);
+    try {
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowGroupingSelectionMode: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add Row'), findsNothing);
+
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowGroupingSelectionMode: true,
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Add Row'), findsOneWidget);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
   testWidgets('desktop command-click toggles individual track headers',
       (tester) async {
     _setTestTargetPlatform(TargetPlatform.macOS);
@@ -4527,6 +5250,223 @@ void main() {
     await tester.tap(find.text('Remove From Group'));
     await tester.pumpAndSettle();
     expect(removedRows, <int>[1]);
+  });
+
+  testWidgets('folded group menu deletes every hidden member as one batch',
+      (tester) async {
+    final rows = <TimelineRow>[
+      TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 3, name: 'Keys', iconId: 0, groupId: 'band'),
+      TimelineRow(rowId: 4, name: 'Vocal', iconId: 0),
+    ];
+    final groups = <TrackGroup>[
+      const TrackGroup(
+        id: 'band',
+        name: 'Band',
+        rowIds: <int>[1, 2, 3],
+        collapsed: true,
+      ),
+    ];
+    final deletedBatches = <List<int>>[];
+    final deletedSingles = <int>[];
+
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: rows,
+        trackGroupsOverride: groups,
+        onDeleteRow: (row) async => deletedSingles.add(row),
+        onDeleteRows: (rows) async {
+          deletedBatches.add(rows.toList(growable: false));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('timeline_row_header_1')), findsNothing);
+    expect(find.byKey(const ValueKey('timeline_row_header_2')), findsNothing);
+    await _openRowHeaderMenu(tester, 0);
+    expect(find.text('Delete 3 Rows'), findsOneWidget);
+
+    await tester.tap(find.text('Delete 3 Rows'));
+    await tester.pumpAndSettle();
+
+    expect(deletedBatches, <List<int>>[
+      <int>[2, 1, 0],
+    ]);
+    expect(deletedSingles, isEmpty);
+  });
+
+  testWidgets('folded group deletion falls back to descending single callbacks',
+      (tester) async {
+    final deletedSingles = <int>[];
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+        ],
+        trackGroupsOverride: const <TrackGroup>[
+          TrackGroup(
+            id: 'band',
+            name: 'Band',
+            rowIds: <int>[1, 2],
+            collapsed: true,
+          ),
+        ],
+        onDeleteRow: (row) async => deletedSingles.add(row),
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+    await tester.tap(find.text('Delete 2 Rows'));
+    await tester.pumpAndSettle();
+
+    expect(deletedSingles, <int>[1, 0]);
+  });
+
+  testWidgets('keyboard delete expands a folded two-row group',
+      (tester) async {
+    final deletedBatches = <List<int>>[];
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 3, name: 'Vocal', iconId: 0),
+        ],
+        trackGroupsOverride: const <TrackGroup>[
+          TrackGroup(
+            id: 'band',
+            name: 'Band',
+            rowIds: <int>[1, 2],
+            collapsed: true,
+          ),
+        ],
+        onDeleteRows: (rows) async {
+          deletedBatches.add(rows.toList(growable: false));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('timeline_row_header_0')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+    await tester.pumpAndSettle();
+
+    expect(deletedBatches, <List<int>>[
+      <int>[1, 0],
+    ]);
+  });
+
+  testWidgets('folded group deletion combines other selected rows once',
+      (tester) async {
+    _setTestTargetPlatform(TargetPlatform.macOS);
+    try {
+      final deletedBatches = <List<int>>[];
+      await tester.pumpWidget(
+        _buildHarness(
+          clips: const <AudioTrack>[],
+          rowsOverride: <TimelineRow>[
+            TimelineRow(
+              rowId: 1,
+              name: 'Drums',
+              iconId: 0,
+              groupId: 'band',
+            ),
+            TimelineRow(
+              rowId: 2,
+              name: 'Bass',
+              iconId: 0,
+              groupId: 'band',
+            ),
+            TimelineRow(
+              rowId: 3,
+              name: 'Keys',
+              iconId: 0,
+              groupId: 'band',
+            ),
+            TimelineRow(rowId: 4, name: 'Vocal', iconId: 0),
+          ],
+          trackGroupsOverride: const <TrackGroup>[
+            TrackGroup(
+              id: 'band',
+              name: 'Band',
+              rowIds: <int>[1, 2, 3],
+              collapsed: true,
+            ),
+          ],
+          onDeleteRows: (rows) async {
+            deletedBatches.add(rows.toList(growable: false));
+          },
+          onMoveClipCommit: (_, __, ___) async {},
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await _tapRowHeader(tester, 0);
+      await _tapRowHeaderWithModifier(
+        tester,
+        row: 3,
+        modifier: LogicalKeyboardKey.metaLeft,
+      );
+      await _openRowHeaderMenu(tester, 0);
+      expect(find.text('Delete 4 Rows'), findsOneWidget);
+
+      await tester.tap(find.text('Delete 4 Rows'));
+      await tester.pumpAndSettle();
+
+      expect(deletedBatches, <List<int>>[
+        <int>[3, 2, 1, 0],
+      ]);
+    } finally {
+      _setTestTargetPlatform(null);
+    }
+  });
+
+  testWidgets('expanded group deletion keeps single-row behavior',
+      (tester) async {
+    final deletedBatches = <List<int>>[];
+    final deletedSingles = <int>[];
+    await tester.pumpWidget(
+      _buildHarness(
+        clips: const <AudioTrack>[],
+        rowsOverride: <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+        ],
+        trackGroupsOverride: const <TrackGroup>[
+          TrackGroup(
+            id: 'band',
+            name: 'Band',
+            rowIds: <int>[1, 2],
+          ),
+        ],
+        onDeleteRow: (row) async => deletedSingles.add(row),
+        onDeleteRows: (rows) async {
+          deletedBatches.add(rows.toList(growable: false));
+        },
+        onMoveClipCommit: (_, __, ___) async {},
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await _openRowHeaderMenu(tester, 0);
+    expect(find.text('Delete Row'), findsOneWidget);
+    await tester.tap(find.text('Delete Row'));
+    await tester.pumpAndSettle();
+
+    expect(deletedSingles, <int>[0]);
+    expect(deletedBatches, isEmpty);
   });
 
   testWidgets('group header menu renames the group instead of the row',
@@ -6459,4 +7399,194 @@ void main() {
       _setTestTargetPlatform(null);
     }
   });
+
+  testWidgets(
+    'live recording waveform paints above overlapping clips and stays row-scoped',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clock = ValueNotifier<Duration>(
+          const Duration(milliseconds: 1500),
+        );
+        final clips = <AudioTrack>[
+          await _buildClip(engineClipId: 1),
+          await _buildClip(engineClipId: 2),
+          await _buildClip(row: 1, rowId: 2, engineClipId: 3),
+        ];
+        final rows = _namedTrackRows(2);
+
+        Widget harness({required bool recording, int selectedClip = 0}) {
+          return _buildHarness(
+            clips: clips,
+            rowsOverride: rows,
+            onMoveClipCommit: (_, __, ___) async {},
+            transportClockListenable: clock,
+            selectedClipIndex: selectedClip,
+            selectedClipIndices: <int>[selectedClip],
+            isRecording: recording,
+            recordingRowIndex: 0,
+            recordingStartMs: 500.0,
+            recordingPeaks: const <double>[1.0, 1.0],
+            recordingPeakTimesMs: const <double>[0.0, 1000.0],
+          );
+        }
+
+        await tester.pumpWidget(harness(recording: false));
+        await tester.pumpAndSettle();
+        final withoutRecording = await _renderTimelineForeground(tester);
+        final dynamic baselinePainter = _timelineForegroundPainter(tester);
+        final pixelsPerMs = baselinePainter.pixelsPerMs as double;
+        final scrollOffsetMs = baselinePainter.scrollOffsetMs as double;
+        final rowHeight = baselinePainter.rowHeight as double;
+        final overlapX = ((1250.0 - scrollOffsetMs) * pixelsPerMs).round();
+        final beforeRecordingX =
+            ((250.0 - scrollOffsetMs) * pixelsPerMs).round();
+        final rowZeroY = (rowHeight / 2.0).round();
+        final rowOneY = (rowHeight * 1.5).round();
+
+        await tester.pumpWidget(harness(recording: true));
+        await tester.pumpAndSettle();
+        final recordingAboveFirstSelection =
+            await _renderTimelineForeground(tester);
+
+        final baselineOverlap = withoutRecording.pixelAt(overlapX, rowZeroY);
+        final liveOverlap =
+            recordingAboveFirstSelection.pixelAt(overlapX, rowZeroY);
+        expect(liveOverlap[0], greaterThan(baselineOverlap[0] + 5));
+        expect(liveOverlap[0], greaterThan(liveOverlap[1] + 80));
+        expect(liveOverlap[0], greaterThan(liveOverlap[2] + 80));
+        expect(
+          recordingAboveFirstSelection.pixelAt(beforeRecordingX, rowZeroY),
+          withoutRecording.pixelAt(beforeRecordingX, rowZeroY),
+        );
+        expect(
+          recordingAboveFirstSelection.pixelAt(overlapX, rowOneY),
+          withoutRecording.pixelAt(overlapX, rowOneY),
+        );
+
+        await tester.pumpWidget(harness(recording: true, selectedClip: 1));
+        await tester.pumpAndSettle();
+        final recordingAboveSecondSelection =
+            await _renderTimelineForeground(tester);
+        final reorderedOverlap =
+            recordingAboveSecondSelection.pixelAt(overlapX, rowZeroY);
+        expect(reorderedOverlap[0], greaterThan(reorderedOverlap[1] + 80));
+        expect(reorderedOverlap[0], greaterThan(reorderedOverlap[2] + 80));
+
+        clock.dispose();
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
+
+  testWidgets(
+    'recording preview skips stopped empty invalid and folded-away rows',
+    (tester) async {
+      _setTestTargetPlatform(TargetPlatform.macOS);
+      try {
+        final clock = ValueNotifier<Duration>(
+          const Duration(milliseconds: 1500),
+        );
+        final rows = _namedTrackRows(2);
+
+        Future<_TimelinePaintSnapshot> render({
+          required bool isRecording,
+          required int? recordingRow,
+          required List<double> peaks,
+          double recordingStartMs = 500.0,
+          List<TimelineRow>? rowFixtures,
+          List<TrackGroup>? groups,
+        }) async {
+          await tester.pumpWidget(
+            _buildHarness(
+              clips: const <AudioTrack>[],
+              rowsOverride: rowFixtures ?? rows,
+              trackGroupsOverride: groups,
+              onMoveClipCommit: (_, __, ___) async {},
+              transportClockListenable: clock,
+              isRecording: isRecording,
+              recordingRowIndex: recordingRow,
+              recordingStartMs: recordingStartMs,
+              recordingPeaks: peaks,
+              recordingPeakTimesMs: peaks.isEmpty
+                  ? const <double>[]
+                  : const <double>[0.0, 1000.0],
+            ),
+          );
+          await tester.pumpAndSettle();
+          return _renderTimelineForeground(tester);
+        }
+
+        final baseline = await render(
+          isRecording: false,
+          recordingRow: 0,
+          peaks: const <double>[1.0, 1.0],
+        );
+        final stopped = await render(
+          isRecording: false,
+          recordingRow: 0,
+          peaks: const <double>[1.0, 1.0],
+        );
+        final empty = await render(
+          isRecording: true,
+          recordingRow: 0,
+          peaks: const <double>[],
+        );
+        final invalid = await render(
+          isRecording: true,
+          recordingRow: 20,
+          peaks: const <double>[1.0, 1.0],
+        );
+        final nonPositiveDuration = await render(
+          isRecording: true,
+          recordingRow: 0,
+          recordingStartMs: 1500.0,
+          peaks: const <double>[1.0, 1.0],
+        );
+        expect(stopped.rgbaBytes, orderedEquals(baseline.rgbaBytes));
+        expect(empty.rgbaBytes, orderedEquals(baseline.rgbaBytes));
+        expect(invalid.rgbaBytes, orderedEquals(baseline.rgbaBytes));
+        expect(
+          nonPositiveDuration.rgbaBytes,
+          orderedEquals(baseline.rgbaBytes),
+        );
+
+        final groupedRows = <TimelineRow>[
+          TimelineRow(rowId: 1, name: 'Drums', iconId: 0, groupId: 'band'),
+          TimelineRow(rowId: 2, name: 'Bass', iconId: 0, groupId: 'band'),
+        ];
+        const collapsedGroup = <TrackGroup>[
+          TrackGroup(
+            id: 'band',
+            name: 'Band',
+            rowIds: <int>[1, 2],
+            collapsed: true,
+          ),
+        ];
+        final foldedBaseline = await render(
+          isRecording: false,
+          recordingRow: 1,
+          peaks: const <double>[1.0, 1.0],
+          rowFixtures: groupedRows,
+          groups: collapsedGroup,
+        );
+        final foldedRecording = await render(
+          isRecording: true,
+          recordingRow: 1,
+          peaks: const <double>[1.0, 1.0],
+          rowFixtures: groupedRows,
+          groups: collapsedGroup,
+        );
+        expect(
+          foldedRecording.rgbaBytes,
+          orderedEquals(foldedBaseline.rgbaBytes),
+        );
+
+        clock.dispose();
+      } finally {
+        _setTestTargetPlatform(null);
+      }
+    },
+  );
 }

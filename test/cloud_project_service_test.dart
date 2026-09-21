@@ -213,6 +213,74 @@ void main() {
       await tempDir.delete(recursive: true);
     }
   });
+
+  test('deleteProject encodes the project id in the request path', () async {
+    final auth = _signedInAuth();
+    final requests = <String>[];
+    final client = MockClient((request) async {
+      requests.add('${request.method} ${request.url}');
+      return _jsonResponse(<String, dynamic>{'deleted': true});
+    });
+    final service = CloudProjectService(httpClient: client);
+    try {
+      await service.deleteProject(auth: auth, projectId: 'cloud/project one');
+      expect(requests, hasLength(1));
+      expect(requests.single, startsWith('DELETE '));
+      expect(requests.single, contains('cloud%2Fproject%20one'));
+    } finally {
+      service.close();
+      auth.dispose();
+    }
+  });
+
+  test('deleteProject preserves API error details', () async {
+    final auth = _signedInAuth();
+    final client = MockClient(
+      (_) async => http.Response(
+        jsonEncode(<String, String>{'error': 'Only the owner can delete.'}),
+        403,
+      ),
+    );
+    final service = CloudProjectService(httpClient: client);
+    try {
+      await expectLater(
+        service.deleteProject(auth: auth, projectId: 'cloud-1'),
+        throwsA(
+          isA<CloudProjectApiException>()
+              .having((error) => error.statusCode, 'statusCode', 403)
+              .having(
+                (error) => error.message,
+                'message',
+                'Only the owner can delete.',
+              ),
+        ),
+      );
+    } finally {
+      service.close();
+      auth.dispose();
+    }
+  });
+}
+
+AuthService _signedInAuth() {
+  final auth = AuthService(restoreSessionOnInit: false);
+  auth.debugPrimeSession(
+    user: AuthUserProfile(
+      userId: 'current-user',
+      email: 'current@example.com',
+      displayName: 'Current User',
+      provider: AuthProviderType.email,
+      emailVerified: true,
+      createdAt: DateTime.utc(2026, 5, 7),
+    ),
+    tokens: CognitoTokens(
+      accessToken: 'access-token',
+      idToken: 'id-token',
+      refreshToken: 'rt_valid_refresh_secret',
+      expiresAtUtc: DateTime.now().toUtc().add(const Duration(hours: 1)),
+    ),
+  );
+  return auth;
 }
 
 http.Response _jsonResponse(Map<String, dynamic> body) {

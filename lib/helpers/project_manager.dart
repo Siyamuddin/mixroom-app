@@ -210,7 +210,7 @@ class ProjectManager {
   static Future<Directory> _rootDir() async {
     final override = _rootDirectoryOverrideForTesting;
     if (override != null) {
-      if (!await override.exists()) await override.create(recursive: true);
+      if (!override.existsSync()) override.createSync(recursive: true);
       return override;
     }
     final docs = await getApplicationDocumentsDirectory();
@@ -253,13 +253,21 @@ class ProjectManager {
   static Future<List<ProjectMeta>> listProjects() async {
     final root = await _rootDir();
     final metas = <ProjectMeta>[];
-    await for (final entity in root.list(followLinks: false)) {
+    final useSynchronousTestIo = _rootDirectoryOverrideForTesting != null;
+    final entities = useSynchronousTestIo
+        ? root.listSync(followLinks: false)
+        : await root.list(followLinks: false).toList();
+    for (final entity in entities) {
       if (entity is! Directory) continue;
       final d = entity;
       final f = _projectJsonFile(d);
-      if (!await f.exists()) continue;
+      final exists = useSynchronousTestIo ? f.existsSync() : await f.exists();
+      if (!exists) continue;
       try {
-        final json = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+        final contents = useSynchronousTestIo
+            ? f.readAsStringSync()
+            : await f.readAsString();
+        final json = jsonDecode(contents) as Map<String, dynamic>;
         final bundledDemoAssetPath = (json['bundledDemoAssetPath'] as String?)
             ?.trim();
         final cloudProjectId =
@@ -506,10 +514,15 @@ class ProjectManager {
 
   static Future<Map<String, dynamic>> readProjectJson(Directory dir) async {
     final f = _projectJsonFile(dir);
-    if (!await f.exists()) {
+    final useSynchronousTestIo = _rootDirectoryOverrideForTesting != null;
+    final exists = useSynchronousTestIo ? f.existsSync() : await f.exists();
+    if (!exists) {
       throw Exception("project.json missing in ${dir.path}");
     }
-    return (jsonDecode(await f.readAsString()) as Map<String, dynamic>);
+    final contents = useSynchronousTestIo
+        ? f.readAsStringSync()
+        : await f.readAsString();
+    return jsonDecode(contents) as Map<String, dynamic>;
   }
 
   static String assignFreshProjectId(Map<String, dynamic> json) {
@@ -594,6 +607,18 @@ class ProjectManager {
   ) async {
     final f = _projectJsonFile(dir);
     final temp = File('${f.path}.tmp');
+    if (_rootDirectoryOverrideForTesting != null) {
+      temp.writeAsStringSync(jsonEncode(json), flush: true);
+      try {
+        temp.renameSync(f.path);
+      } on FileSystemException {
+        if (f.existsSync()) {
+          f.deleteSync();
+        }
+        temp.renameSync(f.path);
+      }
+      return;
+    }
     await temp.writeAsString(jsonEncode(json), flush: true);
     try {
       await temp.rename(f.path);

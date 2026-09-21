@@ -52,7 +52,9 @@ void main() {
 
   test('iOS coordinator starts after project loading', () {
     final source = File('lib/screens/audio_editor.dart').readAsStringSync();
-    final projectLoad = source.indexOf('await _loadProjectIfAny();');
+    final projectLoad = source.indexOf(
+      'final projectLoaded = await _loadProjectIfAny();',
+    );
     final iosCoordinator = source.indexOf(
       'if (_isBluetoothV2Session && Platform.isIOS)',
       projectLoad,

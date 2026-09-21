@@ -33,7 +33,7 @@ void main() {
   });
 
   test('plugin-less hosts do not open raw plugin source as the timeline', () {
-    final load = _methodBody(editor, 'Future<void> _loadProjectIfAny() async');
+    final load = _methodBody(editor, 'Future<bool> _loadProjectIfAny() async');
     expect(load, contains('isPlayableOnThisDevice('));
     expect(load, contains('_queuePluginMixUnavailableNotice()'));
     expect(load, contains('_loadedOnce = false'));

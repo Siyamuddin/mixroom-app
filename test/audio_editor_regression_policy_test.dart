@@ -22,18 +22,13 @@ void main() {
       expect(initialization, contains('} catch (error, stackTrace) {'));
       expect(initialization, contains('FlutterError.reportError('));
       expect(initialization, contains('} finally {'));
-      expect(
-        initialization,
-        contains(
-          'if (mounted && _isLoadingNextScreen) {\n'
-          '        setState(() => _isLoadingNextScreen = false);',
-        ),
-      );
+      expect(initialization, contains('_editorStartupInFlight = false;'));
+      expect(initialization, contains('_isLoadingNextScreen = false;'));
     });
 
     test('the complete project restores in one fail-closed transaction', () {
       final source = File('lib/screens/audio_editor.dart').readAsStringSync();
-      final loadStart = source.indexOf('Future<void> _loadProjectIfAny()');
+      final loadStart = source.indexOf('Future<bool> _loadProjectIfAny()');
       final loadEnd = source.indexOf(
         '\n  void _queueCompatibilityAudioOpenNotice()',
         loadStart,
@@ -466,6 +461,48 @@ void main() {
         ),
         isFalse,
       );
+    });
+  });
+
+  group('row grouping safety', () {
+    test('mobile back cancels grouping before editor exit work begins', () {
+      final source = File('lib/screens/audio_editor.dart').readAsStringSync();
+      final backStart = source.indexOf('Future<void> _handleBackPressed()');
+      final backEnd = source.indexOf(
+        '\n  void _handleBackButtonTap()',
+        backStart,
+      );
+
+      expect(backStart, greaterThanOrEqualTo(0));
+      expect(backEnd, greaterThan(backStart));
+      final backHandler = source.substring(backStart, backEnd);
+      expect(backHandler, contains('_rowGroupingSelectionMode'));
+      expect(backHandler, contains('_cancelRowGroupingSelection();'));
+      expect(
+        backHandler.indexOf('_cancelRowGroupingSelection();'),
+        lessThan(backHandler.indexOf('_isDialogOpen = true;')),
+      );
+    });
+
+    test('bulk row deletion is captured and committed as one undo action', () {
+      final source = File('lib/screens/audio_editor.dart').readAsStringSync();
+      final deleteStart = source.indexOf(
+        'Future<void> _deleteRows(List<int> rows)',
+      );
+      final deleteEnd = source.indexOf(
+        '\n  Future<bool> _renameRowImpl(',
+        deleteStart,
+      );
+
+      expect(deleteStart, greaterThanOrEqualTo(0));
+      expect(deleteEnd, greaterThan(deleteStart));
+      final deletion = source.substring(deleteStart, deleteEnd);
+      expect(deletion, contains('_undoManager.captureActions'));
+      expect(
+        deletion,
+        contains("CompoundUndoAction('Delete \${actions.length} rows'"),
+      );
+      expect(source, contains('onDeleteRows: _deleteRows'));
     });
   });
 }

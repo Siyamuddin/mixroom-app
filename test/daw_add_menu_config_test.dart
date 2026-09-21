@@ -14,7 +14,7 @@ void main() {
       <String>[
         'audio:Add Audio Clip',
         'instrument:Add Instrument Lane',
-        'sample_browser:Open File Browser',
+        'sample_browser:File Browser',
       ],
     );
     expect(actions.any((action) => action.id == 'group_rows'), isFalse);
@@ -63,10 +63,10 @@ void main() {
     expect(
       actions.map((action) => '${action.id}:${action.title}').toList(),
       <String>[
-        'audio_row:+ Audio Row',
-        'instrument:+ MIDI Row',
-        'group_rows:Group 2 Rows',
-        'sample_browser:Open File Browser',
+        'audio:Add Audio File',
+        'instrument:Add Instrument Lane',
+        'group_rows:Group Rows',
+        'sample_browser:File Browser',
       ],
     );
     final groupAction =

@@ -40,10 +40,8 @@ void main() {
     expect(sessionLoad, greaterThanOrEqualTo(0));
     expect(initialization, greaterThan(sessionLoad));
     expect(failure, greaterThan(initialization));
-    expect(
-      startup,
-      contains("_showSmallNotice('Audio output is not available yet.')"),
-    );
+    expect(startup, contains('await _enterEditorStartupFailure('));
+    expect(startup, contains("'engine_initialization_failed'"));
     expect(startup, isNot(contains('JuceAudioEngine.initialise();')));
     expect(startup, isNot(contains('BluetoothImplementationV2.legacy')));
   });
