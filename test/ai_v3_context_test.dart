@@ -413,6 +413,7 @@ void main() {
     final project = first.data['project'] as Map;
     expect(project['generated_midi_policy'], aiV3GeneratedMidiPolicy);
     expect(project['plan_command_policy'], aiV3PlanCommandPolicy);
+    expect(project['plan_output_policy'], aiV3PlanOutputPolicy);
     expect(project['playhead_ms'], 1500);
     expect(project['playhead_beat'], 3.0);
     final transport = first.data['transport'] as Map;
@@ -630,6 +631,55 @@ void main() {
     );
   });
 
+  test(
+    'preserves every selectable instrument above the former 64 cap',
+    () async {
+      final instrumentIds = <String>[
+        'piano',
+        ...List<String>.generate(
+          451,
+          (index) => 'instrument-${index.toString().padLeft(3, '0')}',
+        ),
+      ];
+      final client = _clientContext()
+        ..['allowed_instrument_ids'] = instrumentIds
+        ..['ai_v3_instrument_catalog'] = instrumentIds
+            .map(
+              (instrumentId) => <String, dynamic>{
+                'instrument_id': instrumentId,
+                'name': 'Instrument $instrumentId',
+                'playable_pitch_ranges': <Map<String, int>>[
+                  <String, int>{'low': 0, 'high': 127},
+                ],
+              },
+            )
+            .toList(growable: false);
+
+      final context = const AiV3CoreContextBuilder().build(
+        profile: AiV3ContextProfile.essential,
+        userRequest: 'Create an instrument row.',
+        conversation: const <Map<String, String>>[],
+        validationState: _validation(),
+        audioTracks: <AudioTrack>[await _midiClip()],
+        clientContext: client,
+        bpm: 120,
+        beatsPerBar: 4,
+        beatUnit: 4,
+      );
+
+      final catalog = (context.data['instrument_catalog'] as List)
+          .whereType<Map>()
+          .toList(growable: false);
+      expect(context.data['instruments'], instrumentIds.toList()..sort());
+      expect(catalog, hasLength(452));
+      expect(
+        catalog.map((entry) => entry['instrument_id']).toSet(),
+        instrumentIds.toSet(),
+      );
+      expect(utf8.encode(context.canonicalJson).length, lessThan(4000000));
+    },
+  );
+
   test('preserves Free-tier effects and row capacity exactly', () async {
     final client = _clientContext()
       ..['allowed_builtin_effects'] = SubscriptionLimits.freeBuiltInEffects
@@ -678,9 +728,7 @@ void main() {
     );
   });
 
-  test(
-    'preserves existing Free-project state outside current creation entitlements',
-    () {
+  test('preserves existing Free-project state outside current creation entitlements', () {
       final validation = _validation();
       final baseRow = Map<String, dynamic>.from(
         (validation['rows'] as List).single as Map,
@@ -747,8 +795,7 @@ void main() {
       expect(capacity['current_rows'], 6);
       expect(capacity['creation_limit'], SubscriptionLimits.freeRowsPerProject);
       expect(capacity['can_create'], isFalse);
-    },
-  );
+  });
 
   test(
     'describes preserved instruments without making them selectable',
@@ -872,27 +919,122 @@ void main() {
     expect(enrichedRow['audio_analysis'], isA<Map>());
   });
 
-  test('keeps the supporting library envelope', () async {
+  test(
+    'supports more than 250 library assets within the byte envelope',
+    () async {
     final clip = await _midiClip();
-    expect(
-      () => const AiV3CoreContextBuilder(maxLibraryAssets: 0).build(
+      final client = _clientContext()
+        ..['ai_v3_library_assets'] = <Map<String, dynamic>>[
+          for (var index = 0; index < 512; index++)
+            <String, dynamic>{
+              'asset_id': 'sample-$index',
+              'path': 'Pack/sample-$index.wav',
+              'role': index.isEven ? 'drums' : 'melodic',
+            },
+        ];
+      final context = const AiV3CoreContextBuilder().build(
         profile: AiV3ContextProfile.essential,
         userRequest: 'Edit it.',
         conversation: const <Map<String, String>>[],
         validationState: _validation(),
         audioTracks: <AudioTrack>[clip],
-        clientContext: _clientContext(),
+        clientContext: client,
         bpm: 120,
         beatsPerBar: 4,
         beatUnit: 4,
-      ),
-      throwsA(
-        isA<AiV3ContextException>().having(
-          (error) => error.code,
-          'code',
-          'prototype_context_library_limit',
-        ),
-      ),
+      );
+
+      expect(context.data['library_assets'], hasLength(512));
+      expect(context.libraryAssetCountTotal, 512);
+      expect(context.libraryAssetCountIncluded, 512);
+      expect(context.libraryAssetCountOmitted, 0);
+      expect(
+        utf8.encode(context.canonicalJson).length,
+        lessThanOrEqualTo(AiV3CoreContextBuilder.maxCanonicalBytes),
+      );
+    },
+  );
+
+  test('compacts an oversized library by request relevance', () async {
+    final clip = await _midiClip();
+    final client = _clientContext()
+      ..['ai_v3_library_assets'] = <Map<String, dynamic>>[
+        for (var index = 0; index < 320; index++)
+          <String, dynamic>{
+            'asset_id': 'sample-${index.toString().padLeft(3, '0')}',
+            'path':
+                'Pack/${index == 319 ? 'priority-kick' : 'sample-$index'}-${'x' * 16000}.wav',
+            'role': index == 319 ? 'kick' : 'other',
+          },
+      ];
+    final context = const AiV3CoreContextBuilder().build(
+      profile: AiV3ContextProfile.essential,
+      userRequest: 'Add a kick sample.',
+      conversation: const <Map<String, String>>[],
+      validationState: _validation(),
+      audioTracks: <AudioTrack>[clip],
+      clientContext: client,
+      bpm: 120,
+      beatsPerBar: 4,
+      beatUnit: 4,
+    );
+    final retained = (context.data['library_assets'] as List)
+        .whereType<Map>()
+        .toList(growable: false);
+
+    expect(context.libraryAssetCountTotal, 320);
+    expect(context.libraryAssetCountIncluded, lessThan(320));
+    expect(context.libraryAssetCountOmitted, greaterThan(0));
+    expect(retained.any((asset) => asset['asset_id'] == 'sample-319'), isTrue);
+    final summary = context.data['library_catalog_summary'] as Map;
+    expect(summary['total_asset_count'], 320);
+    expect(summary['included_asset_count'], context.libraryAssetCountIncluded);
+    expect(summary['omitted_asset_count'], context.libraryAssetCountOmitted);
+    expect(summary['role_counts'], isNotEmpty);
+    expect(summary['top_level_folder_counts'], isNotEmpty);
+    expect(
+      utf8.encode(context.canonicalJson).length,
+      lessThanOrEqualTo(AiV3CoreContextBuilder.maxCanonicalBytes),
+    );
+  });
+
+  test('keeps a large library intact while context remains below 4 MB', () async {
+    final clip = await _midiClip();
+    final client = _clientContext()
+      ..['ai_v3_library_assets'] = <Map<String, dynamic>>[
+        for (var index = 0; index < 20000; index++)
+          <String, dynamic>{
+            'asset_id': 'sample:${index.toRadixString(16).padLeft(16, '0')}',
+            'path':
+                'Pack/${index == 19999 ? 'priority-kick' : 'sample-$index'}.wav',
+            'role': index == 19999 ? 'kick' : 'other',
+          },
+      ];
+    final context = const AiV3CoreContextBuilder().build(
+      profile: AiV3ContextProfile.essential,
+      userRequest: 'Add the priority kick sample.',
+      conversation: const <Map<String, String>>[],
+      validationState: _validation(),
+      audioTracks: <AudioTrack>[clip],
+      clientContext: client,
+      bpm: 120,
+      beatsPerBar: 4,
+      beatUnit: 4,
+    );
+    final retained = (context.data['library_assets'] as List)
+        .whereType<Map>()
+        .toList(growable: false);
+
+    expect(context.libraryAssetCountTotal, 20000);
+    expect(context.libraryAssetCountIncluded, 20000);
+    expect(context.libraryAssetCountOmitted, 0);
+    expect(
+      retained.any((asset) => asset['asset_id'] == 'sample:0000000000004e1f'),
+      isTrue,
+    );
+    expect(
+      utf8.encode(context.canonicalJson).length,
+      lessThanOrEqualTo(AiV3CoreContextBuilder.maxCanonicalBytes),
     );
   });
 

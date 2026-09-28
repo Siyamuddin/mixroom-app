@@ -1,12 +1,16 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+
 import 'ai_v3_midi_boundary.dart';
 
 import '../../helpers/timeline_tempo_mapping.dart';
 import '../../helpers/midi_pitch_ranges.dart';
 import '../../helpers/effect_parameter_exposure.dart';
 import '../../models/mixing_result.dart';
+
 import 'package:uuid/uuid.dart';
+
 import 'ai_v3_context.dart';
 import 'ai_v3_contract.dart';
 import 'ai_v3_resources.dart';
@@ -3577,19 +3581,21 @@ class AiV3CommandPreparer {
               : 'Transposed generated MIDI clip by $semitones semitones';
           break;
         case 'midi.create_clip':
-          final arrangementLimit =
-              ((project['beats_per_bar'] as num?)?.toDouble() ?? 4.0) * 8.0;
           final clipStart = (args['start_beat'] as num).toDouble();
           final clipLength = (args['length_beats'] as num).toDouble();
+          final timelineStartMs = clipStart * 60000.0 / symbolicBpm;
+          final timelineLengthMs = clipLength * 60000.0 / symbolicBpm;
           final notes = (args['notes'] as List).whereType<Map>();
-          if (clipLength > arrangementLimit ||
-              notes.any(
-                (note) =>
-                    (note['start_beat'] as num).toDouble() +
-                        (note['length_beats'] as num).toDouble() >
-                    clipLength,
-              )) {
-            throw const AiV3PreparationException('v3_midi_arrangement_limit');
+          if (!timelineStartMs.isFinite || !timelineLengthMs.isFinite) {
+            throw const AiV3PreparationException('v3_midi_clip_length_invalid');
+          }
+          if (notes.any(
+            (note) =>
+                (note['start_beat'] as num).toDouble() +
+                    (note['length_beats'] as num).toDouble() >
+                clipLength,
+          )) {
+            throw const AiV3PreparationException('v3_midi_note_out_of_bounds');
           }
           final resolved = destination(args['destination'], midi: true);
           final usesRowRef = (args['destination'] as Map)['row_ref'] is Map;
@@ -3619,7 +3625,7 @@ class AiV3CommandPreparer {
                 'operation': 'create_clip',
                 'target': resolved.target,
                 'notes': args['notes'],
-                'start_ms': clipStart * 60000.0 / symbolicBpm,
+                'start_ms': timelineStartMs,
                 'length_beats': args['length_beats'],
                 'exact_notes': true,
                 'create_new_clip': true,
@@ -3852,7 +3858,9 @@ class AiV3CommandPreparer {
               )) {
             throw const AiV3PreparationException('v3_midi_note_out_of_bounds');
           }
-          if (!deferredRuntimeTransform && nextNotes.length > 512) {
+          if (!deferredRuntimeTransform &&
+              _serializedMidiStateBytes(nextNotes) >
+                  aiV3MaxRuntimeMidiStateBytes) {
             throw const AiV3PreparationException('v3_midi_result_limit');
           }
           if (deferredRuntimeTransform) {
@@ -4864,6 +4872,9 @@ bool _midiNotesEqual(
   return true;
 }
 
+int _serializedMidiStateBytes(List<Map<String, dynamic>> notes) =>
+    utf8.encode(jsonEncode(notes)).length;
+
 List<Map<String, dynamic>> _chopMidiNotes(
   List<Map<String, dynamic>> notes, {
   required double stepBeats,
@@ -5072,13 +5083,15 @@ Map<String, dynamic> _aiV3ReceiptLocalization({
       'target': target,
       'name': args['new_name'],
     }),
-    'row.set_instrument' =>
-      message('Changed {row} instrument to {instrument}', {
+    'row.set_instrument' => message(
+      'Changed {row} instrument to {instrument}',
+      {
         'row': target,
         'instrument':
             instrumentNamesById[args['instrument_id']?.toString().trim()] ??
             'another instrument',
-      }),
+      },
+    ),
     'row.set_role_override' => message('Updated the role for {target}.', {
       'target': target,
     }),

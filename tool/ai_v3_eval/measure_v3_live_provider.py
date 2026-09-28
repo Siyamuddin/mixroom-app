@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one capped, synthetic V3 latency sample against the live OpenAI API."""
+"""Run three capped one-shot V3 control samples against the live OpenAI API."""
 
 from __future__ import annotations
 
@@ -28,9 +28,32 @@ from profile_v3_requests import _canonical_json, _json_bytes, scenarios  # noqa:
 
 
 MODEL = "gpt-5.6-luna"
-PROVIDER_TIMEOUT_SECONDS = 27
-FIXED_SCENARIOS = ("small", "medium", "product_max")
-OUTPUT_PATH = Path("/tmp/pro4-v3-live-measurement.json")
+REASONING_EFFORT = "low"
+PROVIDER_TIMEOUT_SECONDS = 105
+MEASUREMENT_CONTRACT = "pro118_one_shot_control_v1"
+FIXED_SCENARIOS = ("small", "product_max", "large_project")
+OUTPUT_PATH = Path("/tmp/pro118-one-shot-baseline.json")
+
+LIVE_CASES: dict[str, dict[str, Any]] = {
+    "small": {
+        "request": "Restart playback.",
+        "expected_type": "transport.restart",
+        "target_arguments": {},
+        "value_arguments": {},
+    },
+    "product_max": {
+        "request": "Transpose MIDI clip synthetic-clip-0002 up two semitones.",
+        "expected_type": "midi.transpose",
+        "target_arguments": {"clip_id": "synthetic-clip-0002"},
+        "value_arguments": {"semitones": 2},
+    },
+    "large_project": {
+        "request": "Rename row 1 to Lead Vocal.",
+        "expected_type": "row.rename",
+        "target_arguments": {"row_id": 1},
+        "value_arguments": {"new_name": "Lead Vocal"},
+    },
+}
 
 
 def _integer(value: Any) -> int | None:
@@ -103,10 +126,41 @@ def _load_configured_api_key() -> str:
     return _extract_api_key_from_secret(parsed, "openai")
 
 
+def _score_plan(plan: Any, case: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(plan, dict):
+        return {"semantic_match": False, "result_category": "invalid_plan"}
+    outcome = str(plan.get("outcome") or "")
+    if outcome == "clarify":
+        return {"semantic_match": False, "result_category": "clarification"}
+    if outcome != "plan":
+        return {"semantic_match": False, "result_category": "wrong_outcome"}
+    commands = plan.get("commands")
+    if not isinstance(commands, list) or len(commands) != 1:
+        return {"semantic_match": False, "result_category": "wrong_operation"}
+    command = commands[0]
+    if not isinstance(command, dict) or command.get("type") != case["expected_type"]:
+        return {"semantic_match": False, "result_category": "wrong_operation"}
+    arguments = command.get("arguments")
+    if not isinstance(arguments, dict):
+        return {"semantic_match": False, "result_category": "invalid_plan"}
+    if any(
+        arguments.get(key) != value
+        for key, value in case["target_arguments"].items()
+    ):
+        return {"semantic_match": False, "result_category": "wrong_target"}
+    if any(
+        arguments.get(key) != value
+        for key, value in case["value_arguments"].items()
+    ):
+        return {"semantic_match": False, "result_category": "wrong_value"}
+    return {"semantic_match": True, "result_category": "success"}
+
+
 def _measure(
     *,
     name: str,
     body: dict[str, Any],
+    case: dict[str, Any],
     api_key: str,
 ) -> dict[str, Any]:
     raw_body_bytes = _json_bytes(body)
@@ -117,12 +171,27 @@ def _measure(
     provider_request = v3_server_contract.build_provider_request(
         validated,
         model=MODEL,
-        reasoning_effort="low",
-        max_output_tokens=8192,
+        reasoning_effort=REASONING_EFFORT,
         prompt_cache_retention="24h",
         store=True,
     )
     upstream_request = build_openai_responses_request(provider_request)
+    provider_request_bytes = _json_bytes(provider_request)
+    wire_request_bytes = len(json.dumps(upstream_request).encode("utf-8"))
+    common_measurement = {
+        "scenario": name,
+        "client_request_bytes": raw_body_bytes,
+        "core_context_bytes": _json_bytes(validated["core_context"]),
+        "provider_request_bytes": provider_request_bytes,
+        "wire_request_bytes": wire_request_bytes,
+        "max_output_tokens": provider_request["max_output_tokens"],
+        "effective_command_type_count": len(validated["supported_command_types"]),
+        "tool_command_variant_count": len(
+            provider_request["tools"][0]["parameters"]["properties"]["commands"][
+                "items"
+            ]["anyOf"]
+        ),
+    }
     started_at = time.perf_counter()
     try:
         response = get_provider("openai").forward_request(
@@ -133,15 +202,16 @@ def _measure(
     except Exception as error:
         elapsed_ms = int((time.perf_counter() - started_at) * 1_000)
         return {
-            "scenario": name,
+            **common_measurement,
             "status_code": 504 if isinstance(error, TimeoutError) else 502,
             "provider_roundtrip_ms": elapsed_ms,
             "provider_timed_out": isinstance(error, TimeoutError),
             "error_type": type(error).__name__,
-            "client_request_bytes": raw_body_bytes,
-            "provider_request_bytes": _json_bytes(provider_request),
-            "wire_request_bytes": len(json.dumps(upstream_request).encode("utf-8")),
             "plan_valid": False,
+            "semantic_match": False,
+            "result_category": (
+                "timeout" if isinstance(error, TimeoutError) else "provider_error"
+            ),
         }
 
     elapsed_ms = int((time.perf_counter() - started_at) * 1_000)
@@ -149,8 +219,9 @@ def _measure(
     if not isinstance(observability, dict):
         observability = {}
     status_code = int(response.get("statusCode") or 500)
+    raw_response_body = str(response.get("body") or "{}")
     try:
-        payload = json.loads(str(response.get("body") or "{}"))
+        payload = json.loads(raw_response_body)
     except json.JSONDecodeError:
         payload = {}
     if not isinstance(payload, dict):
@@ -158,7 +229,9 @@ def _measure(
 
     plan_valid = False
     plan_command_count: int | None = None
+    serialized_plan_bytes: int | None = None
     validation_error_code: str | None = None
+    semantic = {"semantic_match": False, "result_category": "provider_error"}
     if 200 <= status_code < 300:
         try:
             plan = v3_server_contract.parse_and_validate_provider_plan(
@@ -170,23 +243,26 @@ def _measure(
             )
             plan_valid = True
             plan_command_count = len(plan.get("commands") or [])
+            serialized_plan_bytes = _json_bytes(plan)
+            semantic = _score_plan(plan, case)
         except v3_server_contract.V3ContractError as error:
             validation_error_code = error.code
+            semantic = {"semantic_match": False, "result_category": "invalid_plan"}
 
     return {
-        "scenario": name,
+        **common_measurement,
         "status_code": status_code,
         "provider_roundtrip_ms": _integer(
             observability.get("provider_roundtrip_ms")
         )
         or elapsed_ms,
         "provider_timed_out": False,
-        "client_request_bytes": raw_body_bytes,
-        "provider_request_bytes": _json_bytes(provider_request),
-        "wire_request_bytes": len(json.dumps(upstream_request).encode("utf-8")),
+        "provider_response_bytes": len(raw_response_body.encode("utf-8")),
         "plan_valid": plan_valid,
         "plan_command_count": plan_command_count,
+        "serialized_plan_bytes": serialized_plan_bytes,
         "validation_error_code": validation_error_code,
+        **semantic,
         **_usage(payload),
     }
 
@@ -196,16 +272,33 @@ def run() -> dict[str, Any]:
     if not api_key:
         raise RuntimeError("No OpenAI API key is configured.")
     fixtures = scenarios()
+    if tuple(LIVE_CASES) != FIXED_SCENARIOS or len(set(FIXED_SCENARIOS)) != 3:
+        raise RuntimeError("The live one-shot baseline must contain exactly three cases.")
     started_at = time.perf_counter()
-    measurements = [
-        _measure(name=name, body=fixtures[name], api_key=api_key)
-        for name in FIXED_SCENARIOS
-    ]
+    measurements = []
+    retry_env_name = "LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS"
+    previous_retry_attempts = os.environ.get(retry_env_name)
+    os.environ[retry_env_name] = "1"
+    try:
+        for name in FIXED_SCENARIOS:
+            body = json.loads(json.dumps(fixtures[name]))
+            case = LIVE_CASES[name]
+            body["original_request"] = case["request"]
+            measurements.append(
+                _measure(name=name, body=body, case=case, api_key=api_key)
+            )
+    finally:
+        if previous_retry_attempts is None:
+            os.environ.pop(retry_env_name, None)
+        else:
+            os.environ[retry_env_name] = previous_retry_attempts
     del api_key
     return {
-        "measurement_contract": "pro4_v3_live_provider_one_shot_v1",
+        "measurement_contract": MEASUREMENT_CONTRACT,
+        "architecture": "v3_one_shot_server_contract",
+        "contract_version": v3_server_contract.CONTRACT_VERSION,
         "model": MODEL,
-        "reasoning_effort": "low",
+        "reasoning_effort": REASONING_EFFORT,
         "provider_timeout_seconds": PROVIDER_TIMEOUT_SECONDS,
         "request_count": len(measurements),
         "total_wall_ms": int((time.perf_counter() - started_at) * 1_000),

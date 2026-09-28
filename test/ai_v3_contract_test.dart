@@ -4428,9 +4428,9 @@ void main() {
 
   group('V3 factual preparation', () {
     test('production guitars are range-aware AI instruments', () async {
-      final catalog =
-          jsonDecode(File('assets/instruments/index.json').readAsStringSync())
-              as Map<String, dynamic>;
+      final catalog = jsonDecode(
+        File('assets/instruments/index.json').readAsStringSync(),
+      ) as Map<String, dynamic>;
       final guitarEntries = (catalog['presets'] as List<dynamic>)
           .whereType<Map>()
           .map((entry) => Map<String, dynamic>.from(entry))
@@ -4859,13 +4859,10 @@ void main() {
     });
 
     test('matches shared state-contract fixtures', () {
-      final fixture =
-          jsonDecode(
-                File(
-                  'test/fixtures/ai_v3_state_contract_cases.json',
-                ).readAsStringSync(),
-              )
-              as Map<String, dynamic>;
+      final fixture = jsonDecode(
+        File('test/fixtures/ai_v3_state_contract_cases.json')
+            .readAsStringSync(),
+      ) as Map<String, dynamic>;
       final context = AiV3CoreContext(
         profile: AiV3ContextProfile.essential,
         stateDigest: 'shared-state-contract',
@@ -5208,9 +5205,10 @@ void main() {
           _command('delete-row', 'row.delete', <String, dynamic>{
             'row_ref': ref('created', 'row'),
           }),
-          _mixPlanForTarget(<String, dynamic>{
-            'scope': 'master',
-          }).commands.single.toJson(),
+          _mixPlanForTarget(<String, dynamic>{'scope': 'master'})
+              .commands
+              .single
+              .toJson(),
         ]),
         allowResourceRefs: true,
       );
@@ -7512,7 +7510,7 @@ void main() {
       },
     );
 
-    test('limits generated MIDI length without limiting timeline position', () {
+    test('allows long generated MIDI while keeping note bounds strict', () {
       final validLaterClip = AiV3Plan.fromJson(
         _plan(<Map<String, dynamic>>[
           _command('later-midi', 'midi.create_clip', <String, dynamic>{
@@ -7537,16 +7535,16 @@ void main() {
         isNotEmpty,
       );
 
-      final plan = AiV3Plan.fromJson(
+      final longPlan = AiV3Plan.fromJson(
         _plan(<Map<String, dynamic>>[
           _command('midi', 'midi.create_clip', <String, dynamic>{
             'destination': <String, dynamic>{'row_id': 200},
             'start_beat': 64,
-            'length_beats': 33,
+            'length_beats': 128,
             'notes': <Map<String, dynamic>>[
               <String, dynamic>{
                 'pitch': 60,
-                'start_beat': 0,
+                'start_beat': 127,
                 'length_beats': 1,
                 'velocity': 0.8,
               },
@@ -7556,15 +7554,39 @@ void main() {
       );
 
       expect(
+        const AiV3CommandPreparer()
+            .prepare(plan: longPlan, context: _context())
+            .actions,
+        isNotEmpty,
+      );
+
+      final outOfBounds = AiV3Plan.fromJson(
+        _plan(<Map<String, dynamic>>[
+          _command('midi', 'midi.create_clip', <String, dynamic>{
+            'destination': <String, dynamic>{'row_id': 200},
+            'start_beat': 64,
+            'length_beats': 128,
+            'notes': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'pitch': 60,
+                'start_beat': 127,
+                'length_beats': 2,
+                'velocity': 0.8,
+              },
+            ],
+          }),
+        ]),
+      );
+      expect(
         () => const AiV3CommandPreparer().prepare(
-          plan: plan,
+          plan: outOfBounds,
           context: _context(),
         ),
         throwsA(
           isA<AiV3PreparationException>().having(
             (error) => error.code,
             'code',
-            'v3_midi_arrangement_limit',
+            'v3_midi_note_out_of_bounds',
           ),
         ),
       );
@@ -7926,48 +7948,132 @@ void main() {
       }
     });
 
-    test('512 serialized notes fit the byte budget and larger totals fail', () {
+    test('serialized plan byte budget replaces generated-note counts', () {
       final notes = List<Map<String, dynamic>>.generate(
-        aiV3MaxGeneratedMidiNotes,
+        513,
         (index) => _note(127, index * 0.03125, 0.03125, 0.999999),
       );
       final rawPlan = _plan(<Map<String, dynamic>>[
         editCommand('replace-max', 'midi.replace_notes', notes: notes),
       ]);
       expect(AiV3Plan.fromJson(rawPlan).commands, hasLength(1));
-      expect(utf8.encode(jsonEncode(rawPlan)).length, lessThan(64000));
-
-      final tooMany = List<Map<String, dynamic>>.generate(
-        (aiV3MaxGeneratedMidiNotes ~/ 2) + 1,
-        (index) => _note(60, index * 0.05, 0.01),
-      );
       expect(
-        () => AiV3Plan.fromJson(
-          _plan(<Map<String, dynamic>>[
-            editCommand('replace-129', 'midi.replace_notes', notes: tooMany),
-            editCommand('append-129', 'midi.append_notes', notes: tooMany),
-          ]),
-        ),
+        utf8.encode(jsonEncode(rawPlan)).length,
+        lessThan(aiV3MaxSerializedPlanBytes),
+      );
+
+      final oversized = _plan(<Map<String, dynamic>>[
+        editCommand('replace', 'midi.replace_notes', notes: notes),
+      ])..['padding'] = 'x' * aiV3MaxSerializedPlanBytes;
+      expect(
+        () => AiV3Plan.fromJson(oversized),
         throwsA(
           isA<AiV3ContractException>().having(
             (error) => error.code,
             'code',
-            'v3_generated_midi_limit',
+            'v3_provider_plan_too_large',
+          ),
+        ),
+      );
+    });
+
+    test('former workload collection counts are byte-budgeted', () {
+      final commands = <Map<String, dynamic>>[
+        for (var i = 0; i < 40; i++)
+          _command('rename-$i', 'row.rename', <String, dynamic>{
+            'row_id': 100,
+            'new_name': 'Part $i',
+          }),
+        _command('group', 'group.create', <String, dynamic>{
+          'row_ids': <int>[for (var i = 0; i < 33; i++) i + 1],
+          'name': 'Large group',
+        }),
+        _command('glue', 'clip.glue', <String, dynamic>{
+          'clip_ids': <String>[for (var i = 0; i < 33; i++) 'clip-$i'],
+          'label': 'Combined',
+        }),
+        _command('effect', 'effect.ensure_configured', <String, dynamic>{
+          'row_id': 100,
+          'effect_id': 'Large effect',
+          'parameters': <Map<String, dynamic>>[
+            for (var i = 0; i < 17; i++)
+              <String, dynamic>{'parameter_id': 'parameter-$i', 'value': 0.5},
+          ],
+        }),
+        _command('automation', 'automation.set_points', <String, dynamic>{
+          'row_id': 100,
+          'automation_target_id': 'volume',
+          'points': <Map<String, dynamic>>[
+            for (var i = 0; i < 129; i++)
+              <String, dynamic>{'beat': i.toDouble(), 'value_normalized': 0.5},
+          ],
+        }),
+        _command('samples', 'sample.place', <String, dynamic>{
+          'destination': <String, dynamic>{'row_id': 100},
+          'placements': <Map<String, dynamic>>[
+            for (var i = 0; i < 129; i++)
+              <String, dynamic>{
+                'asset_id': 'sample-$i',
+                'start_beat': i.toDouble(),
+              },
+          ],
+        }),
+      ];
+      final rawPlan = _plan(commands);
+      expect(
+        utf8.encode(jsonEncode(rawPlan)).length,
+        lessThan(aiV3MaxSerializedPlanBytes),
+      );
+      expect(AiV3Plan.fromJson(rawPlan).commands, hasLength(commands.length));
+    });
+
+    test('runtime MIDI state uses a byte ceiling instead of a note count', () {
+      final oversizedNotes = List<Map<String, dynamic>>.generate(
+        70000,
+        (_) => _note(60, 0, 1),
+        growable: false,
+      );
+      expect(
+        utf8.encode(jsonEncode(oversizedNotes)).length,
+        greaterThan(aiV3MaxRuntimeMidiStateBytes),
+      );
+      final directPlan = AiV3Plan(
+        outcome: 'plan',
+        userMessage: 'Updated the notes.',
+        commands: <AiV3Command>[
+          AiV3Command(
+            commandId: 'oversized-midi-state',
+            type: 'midi.replace_notes',
+            arguments: <String, dynamic>{
+              'clip_id': 'midi-clip',
+              'notes': oversizedNotes,
+            },
+          ),
+        ],
+      );
+      expect(
+        () => const AiV3CommandPreparer().prepare(
+          plan: directPlan,
+          context: _contextWithMidiNotes(<Map<String, dynamic>>[
+            _note(60, 0, 1),
+          ]),
+        ),
+        throwsA(
+          isA<AiV3PreparationException>().having(
+            (error) => error.code,
+            'code',
+            'v3_midi_result_limit',
           ),
         ),
       );
     });
 
     test('shared generated-note fixtures pass parsing and preparation', () {
-      final fixture =
-          jsonDecode(
-                File(
-                  'backend/llm_proxy/tests/fixtures/generated_midi_budget_v1.json',
-                ).readAsStringSync(),
-              )
-              as Map<String, dynamic>;
+      final fixture = jsonDecode(
+        File('backend/llm_proxy/tests/fixtures/generated_midi_budget_v1.json')
+            .readAsStringSync(),
+      ) as Map<String, dynamic>;
       expect(aiV3GeneratedMidiPolicy, fixture['policy']);
-      expect(aiV3MaxGeneratedMidiNotes, fixture['updated_limit']);
       for (final count in (fixture['counts'] as List).cast<int>()) {
         for (final split in [false, true]) {
           final sizes = split ? [count ~/ 2, count - count ~/ 2] : [count];
@@ -7982,12 +8088,6 @@ void main() {
                 ],
               ),
           ];
-          if (count > aiV3MaxGeneratedMidiNotes) {
-            expect(
-              () => AiV3Plan.fromJson(_plan(commands)),
-              throwsA(isA<AiV3ContractException>()),
-            );
-          } else {
             final plan = AiV3Plan.fromJson(_plan(commands));
             final prepared = const AiV3CommandPreparer().prepare(
               plan: plan,
@@ -7996,7 +8096,6 @@ void main() {
             expect(prepared.actions, isNotEmpty);
           }
         }
-      }
     });
 
     test('simulates replace then append as exact complete note states', () {
@@ -8200,9 +8299,7 @@ void main() {
       ]);
     });
 
-    test(
-      'rejects wrong clips, bounds, ranges, empty chop, and 512 overflow',
-      () {
+    test('rejects wrong clips, bounds, ranges, and empty chop', () {
         final cases = <({AiV3Plan plan, AiV3CoreContext context, String code})>[
           (
             plan: AiV3Plan.fromJson(
@@ -8256,27 +8353,6 @@ void main() {
             context: _contextWithMidiNotes(const <Map<String, dynamic>>[]),
             code: 'v3_midi_notes_missing',
           ),
-          (
-            plan: AiV3Plan.fromJson(
-              _plan(<Map<String, dynamic>>[
-                editCommand(
-                  'overflow',
-                  'midi.append_notes',
-                  notes: List<Map<String, dynamic>>.generate(
-                    13,
-                    (index) => _note(80, index * 0.01, 0.005),
-                  ),
-                ),
-              ]),
-            ),
-            context: _contextWithMidiNotes(
-              List<Map<String, dynamic>>.generate(
-                500,
-                (index) => _note(60, index * 0.01, 0.005),
-              ),
-            ),
-            code: 'v3_midi_result_limit',
-          ),
         ];
 
         for (final value in cases) {
@@ -8295,7 +8371,6 @@ void main() {
             reason: value.code,
           );
         }
-      },
-    );
+    });
   });
 }

@@ -40,6 +40,8 @@ Available scenarios are:
 - `invalid_output`
 - `semantic_repair_success`
 - `semantic_repair_failure`
+- `capability_repair_success`
+- `capability_repair_failure`
 
 The default `standard` transport retains the current 27-second provider
 ceiling. The isolated long-running path is available explicitly with:
@@ -132,10 +134,11 @@ under `/tmp` when needed.
 ## Bounded live-provider measurement
 
 `measure_v3_live_provider.py` is separate from the listening bridge. It sends
-exactly one `small`, one `medium`, and one `product_max` synthetic request, then
-exits. It has no option for arbitrary prompts or request counts. It retains only
-safe timing, size, usage, status, and plan-validation metadata in
-`/tmp/pro4-v3-live-measurement.json`.
+exactly three fixed synthetic control requests, then exits: restart playback on
+`small`, transpose a known MIDI clip on `product_max`, and rename a known row on
+`large_project`. It has no option for arbitrary prompts, scenarios, or request
+counts. It retains only privacy-safe timing, size, usage, status, validation,
+and exact semantic-result metadata in `/tmp/pro118-one-shot-baseline.json`.
 
 The live run must be explicitly acknowledged and incurs normal OpenAI usage:
 
@@ -147,5 +150,6 @@ PYTHONDONTWRITEBYTECODE=1 python3 tool/ai_v3_eval/measure_v3_live_provider.py \
 ```
 
 The requests use the current contract-6 provider body, `gpt-5.6-luna`, low
-reasoning effort, and the unchanged 27-second provider deadline. The tool does
-not call the production Mixroom API or mutate production application data.
+reasoning effort, the contract-derived output budget, and the 105-second long
+path deadline. The tool does not call the production Mixroom API or mutate
+production application data, and it does not retry failed calls.

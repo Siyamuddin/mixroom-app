@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/chat_pipeline.dart';
 import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
+import 'package:mixroom/ai/ai_file_metadata.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/magnitude_predictor.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
@@ -288,7 +289,10 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     Map<int, String> roleOverrides = const {},
     List<TimelineRow> timelineRows = const <TimelineRow>[],
     List<TrackGroup> trackGroups = const <TrackGroup>[],
+    AiFileMetadataResolution? fileMetadata,
+    ProjectStateBuildMetrics? buildMetrics,
   }) async {
+    buildMetrics?.recordInventory(audioTracks);
     final rowStates = List<RowState>.generate(rows, (row) {
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
       final clips = rowTracks
@@ -479,6 +483,98 @@ void main() {
       expect(result.aiV3Handoff?['decision'], 'respond');
       expect(result.message, 'V3 handled the request.');
     });
+
+    test('V3 sends libraries larger than the former 250 asset cap', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.text('Unexpected V1 result.', null),
+      );
+      final fakeV3 = _FakeAiV3Planner();
+      final clientContext = _v3ClientContext()
+        ..['row_creation_limit'] = null
+        ..['ai_v3_library_assets'] = <Map<String, dynamic>>[
+          for (var index = 0; index < 251; index++)
+            <String, dynamic>{
+              'asset_id': 'sample-$index',
+              'path': 'Pack/sample-$index.wav',
+              'role': 'other',
+            },
+        ];
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: fakeV3,
+      );
+
+      final result = await pipeline.handleUserText(
+        text: 'Find a suitable sample.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: <TimelineRow>[
+          TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+        ],
+        clientContext: clientContext,
+      );
+
+      expect(fakeLlm.seenUserText, isNull);
+      expect(fakeV3.callCount, 1, reason: result.toString());
+      expect(result.aiV3Handoff?['decision'], 'respond');
+      expect(result.aiV3Handoff?['message'], 'V3 handled the request.');
+    });
+
+    test(
+      'V3 context failures always include a visible handoff message',
+      () async {
+        final fakeV3 = _FakeAiV3Planner();
+        final clientContext = _v3ClientContext()
+          ..['row_creation_limit'] = null
+          ..['ai_v3_library_assets'] = <Map<String, dynamic>>[
+            <String, dynamic>{
+              'asset_id': 'duplicate-id',
+              'path': 'Pack/first.wav',
+              'role': 'other',
+            },
+            <String, dynamic>{
+              'asset_id': 'duplicate-id',
+              'path': 'Pack/second.wav',
+              'role': 'other',
+            },
+          ];
+        final pipeline = ChatPipeline(
+          llm: _FakeCloudLlmService(
+            LlmResult.text('Unexpected V1 result.', null),
+          ),
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+          aiV3Planner: fakeV3,
+        );
+
+        final result = await pipeline.handleUserText(
+          text: 'Find a suitable sample.',
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+          timelineRows: <TimelineRow>[
+            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+          ],
+          clientContext: clientContext,
+        );
+
+        expect(fakeV3.callCount, 0);
+        expect(result.aiV3Handoff?['decision'], 'unsupported');
+        expect(
+          result.aiV3Handoff?['error_code'],
+          'prototype_context_asset_id_duplicate',
+        );
+        expect(result.message, isNotEmpty);
+        expect(result.aiV3Handoff?['message'], result.message);
+      },
+    );
 
     test('V3 plan diagnostics expose structure without command payloads', () {
       const privateClipId = 'private-clip-id-that-must-not-be-logged';
@@ -932,13 +1028,9 @@ void main() {
             .toList();
         if (const bool.fromEnvironment('AI_V3_LOCAL_VALIDATION_DIAGNOSTICS')) {
           expect(diagnosticLogs, hasLength(1));
-          final diagnostic =
-              jsonDecode(
-                    diagnosticLogs.single.substring(
-                      '[AI.v3-preparation] '.length,
-                    ),
-                  )
-                  as Map;
+          final diagnostic = jsonDecode(
+            diagnosticLogs.single.substring('[AI.v3-preparation] '.length),
+          ) as Map;
           expect(diagnostic.keys.toSet(), {
             'code',
             'stage',
@@ -1076,9 +1168,7 @@ void main() {
       },
     );
 
-    test(
-      'effect contract failures are actionable and expose only safe diagnostics',
-      () async {
+    test('effect contract failures are actionable and expose only safe diagnostics', () async {
         final planner = _StaticAiV3Planner(
           const AiV3Plan(
             outcome: 'plan',
@@ -1181,8 +1271,7 @@ void main() {
         expect(releaseResult.message, isNot(contains('Distortion')));
         expect(releaseResult.message, isNot(contains('Unsupported Amount')));
         expect(releaseResult.message, isNot(contains('parameter')));
-      },
-    );
+    });
 
     test(
       'empty-project mixing failure explains the missing material',
@@ -1739,8 +1828,7 @@ void main() {
           ),
           bpmFallback: 120.0,
           selectedRowIndex: 0,
-          automationClipSnapshot:
-              'selected_row_automation_clips=Volume[volume]=#0{clip_id=ac_1,start_ms=0.0,length_ms=500.0,lane=0,muted=false,pattern_id=pat_shared}',
+          automationClipSnapshot: 'selected_row_automation_clips=Volume[volume]=#0{clip_id=ac_1,start_ms=0.0,length_ms=500.0,lane=0,muted=false,pattern_id=pat_shared}',
         );
 
         expect(
@@ -2157,10 +2245,7 @@ void main() {
         final secondConversation = fakeLlm.seenConversations[1];
         expect(
           secondConversation.any(
-            (entry) =>
-                entry['role'] == 'assistant' &&
-                entry['content'] ==
-                    'Which clip should I move?\n\nOptions: selected clip / all clips',
+            (entry) => entry['role'] == 'assistant' && entry['content'] == 'Which clip should I move?\n\nOptions: selected clip / all clips',
           ),
           isTrue,
         );
@@ -2178,9 +2263,7 @@ void main() {
       'does not persist guessed assistant copy for direct effect edits',
       () async {
         final fakeLlm = _QueuedFakeCloudLlmService(<LlmResult>[
-          LlmResult.tool(
-            'daw_assistant_actions',
-            {
+          LlmResult.tool('daw_assistant_actions', {
               'assistant_message': 'Removed the Clipper plugin from track 1.',
               'actions': [
                 {
@@ -2191,9 +2274,7 @@ void main() {
                   },
                 },
               ],
-            },
-            text: 'Removed the Clipper plugin from track 1.',
-          ),
+          }, text: 'Removed the Clipper plugin from track 1.'),
           LlmResult.tool('informational_response', {
             'cancels_pending': false,
           }, text: 'Captured.'),
@@ -2548,36 +2629,23 @@ void main() {
       'routes mix_model_request propose to pending proposal message',
       () async {
         final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool(
-            'mix_model_request',
-            {
+          LlmResult.tool('mix_model_request', {
               'mode': 'propose',
-              'assistant_message':
-                  'I can tighten this with subtle EQ and gain.',
+            'assistant_message': 'I can tighten this with subtle EQ and gain.',
               'asks_permission': false,
               'actions': [
                 {
                   'goal': {
                     'type': 'mix_request',
                     'intensity': 0.6,
-                    'target': {
-                      'scope': 'row',
-                      'row_index': 0,
-                      'confidence': 0.9,
-                    },
+                  'target': {'scope': 'row', 'row_index': 0, 'confidence': 0.9},
                     'intents': [
-                      {
-                        'kind': 'eq',
-                        'descriptor': 'mud_cut',
-                        'confidence': 0.8,
-                      },
+                    {'kind': 'eq', 'descriptor': 'mud_cut', 'confidence': 0.8},
                     ],
                   },
                 },
               ],
-            },
-            text: 'I can tighten this with subtle EQ and gain.',
-          ),
+          }, text: 'I can tighten this with subtle EQ and gain.'),
         );
         final pipeline = ChatPipeline(
           llm: fakeLlm,
@@ -2619,9 +2687,7 @@ void main() {
       'proposal keeps assistant message primary and appends hint once',
       () async {
         final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool(
-            'mix_model_request',
-            {
+          LlmResult.tool('mix_model_request', {
               'mode': 'propose',
               'assistant_message':
                   'I can clean this up with subtle EQ and level balancing.',
@@ -2631,24 +2697,14 @@ void main() {
                   'goal': {
                     'type': 'mix_request',
                     'intensity': 0.6,
-                    'target': {
-                      'scope': 'row',
-                      'row_index': 0,
-                      'confidence': 0.9,
-                    },
+                  'target': {'scope': 'row', 'row_index': 0, 'confidence': 0.9},
                     'intents': [
-                      {
-                        'kind': 'eq',
-                        'descriptor': 'mud_cut',
-                        'confidence': 0.8,
-                      },
+                    {'kind': 'eq', 'descriptor': 'mud_cut', 'confidence': 0.8},
                     ],
                   },
                 },
               ],
-            },
-            text: 'I can clean this up with subtle EQ and level balancing.',
-          ),
+          }, text: 'I can clean this up with subtle EQ and level balancing.'),
         );
         final pipeline = ChatPipeline(
           llm: fakeLlm,
@@ -2682,9 +2738,9 @@ void main() {
           isTrue,
         );
         expect(
-          RegExp(
-            'Reply "yes" to apply or "no" to cancel.',
-          ).allMatches(result.message).length,
+          RegExp('Reply "yes" to apply or "no" to cancel.')
+              .allMatches(result.message)
+              .length,
           1,
         );
       },
@@ -2694,9 +2750,7 @@ void main() {
       'proposal does not duplicate approval hint if assistant already says it',
       () async {
         final fakeLlm = _FakeCloudLlmService(
-          LlmResult.tool(
-            'mix_model_request',
-            {
+          LlmResult.tool('mix_model_request', {
               'mode': 'propose',
               'assistant_message':
                   'I can do that. Reply "yes" to apply or "no" to cancel.',
@@ -2706,20 +2760,14 @@ void main() {
                   'goal': {
                     'type': 'mix_request',
                     'intensity': 0.6,
-                    'target': {
-                      'scope': 'row',
-                      'row_index': 0,
-                      'confidence': 0.9,
-                    },
+                  'target': {'scope': 'row', 'row_index': 0, 'confidence': 0.9},
                     'intents': [
                       {'kind': 'gain', 'direction': 'up', 'confidence': 0.8},
                     ],
                   },
                 },
               ],
-            },
-            text: 'I can do that. Reply "yes" to apply or "no" to cancel.',
-          ),
+          }, text: 'I can do that. Reply "yes" to apply or "no" to cancel.'),
         );
         final pipeline = ChatPipeline(
           llm: fakeLlm,
@@ -2747,9 +2795,9 @@ void main() {
         );
 
         expect(
-          RegExp(
-            'Reply "yes" to apply or "no" to cancel.',
-          ).allMatches(result.message).length,
+          RegExp('Reply "yes" to apply or "no" to cancel.')
+              .allMatches(result.message)
+              .length,
           1,
         );
       },
@@ -2979,7 +3027,9 @@ void main() {
       expect(fakeLlm.seenSelectionSnapshot, contains('clip_kind=midi'));
     });
 
-    test('runtime snapshots include concise fx chain state for AI planning', () async {
+    test(
+      'runtime snapshots include concise fx chain state for AI planning',
+      () async {
       final fakeLlm = _FakeCloudLlmService(
         LlmResult.tool('informational_response', {
           'message': 'Captured.',
@@ -3098,11 +3148,10 @@ void main() {
         fakeLlm.seenProjectSnapshot,
         contains('arrangement={audio_hits=1,bars≈1,onsets=m1:b1.00}'),
       );
-    });
+      },
+    );
 
-    test(
-      'passes master automation clip actions through for executor handling',
-      () async {
+    test('passes master automation clip actions through for executor handling', () async {
         final fakeLlm = _FakeCloudLlmService(
           LlmResult.tool('daw_assistant_actions', {
             'assistant_message': 'Master automation clip queued.',
@@ -3188,8 +3237,7 @@ void main() {
           result.assistantActions.last.data['target']['target_id'],
           startsWith('masterfxid:'),
         );
-      },
-    );
+    });
 
     test(
       'passes group-scoped row actions through with group context',

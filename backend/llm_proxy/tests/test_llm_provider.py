@@ -264,6 +264,29 @@ class LlmProviderTests(unittest.TestCase):
         )
         sleep_mock.assert_called_once()
 
+    def test_post_json_request_serializes_non_ascii_text_as_utf8(self) -> None:
+        response = mock.MagicMock()
+        response.__enter__.return_value.status = 200
+        response.__enter__.return_value.read.return_value = b'{"ok":true}'
+
+        with mock.patch.object(
+            llm_provider.urllib.request,
+            "urlopen",
+            return_value=response,
+        ) as urlopen_mock:
+            status_code, _ = llm_provider._post_json_request(
+                url="https://api.example.test/v1/responses",
+                headers={"Authorization": "Bearer sk-test"},
+                body={"input": "한국어 샘플"},
+                timeout_seconds=5,
+                fallback_error_message="Upstream error",
+            )
+
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(status_code, 200)
+        self.assertIn("한국어 샘플".encode("utf-8"), request.data)
+        self.assertNotIn(b"\\ud55c", request.data)
+
     def test_post_json_request_does_not_retry_after_deadline_exhausted(self) -> None:
         response = mock.MagicMock()
         response.__enter__.return_value.status = 200

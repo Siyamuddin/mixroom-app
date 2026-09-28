@@ -1,0 +1,23 @@
+{
+  "schema_version": "pro118_adaptive_parity_checklist_v1",
+  "source_architecture": "v3_one_shot_server_contract",
+  "requirements": {
+    "command_type_count": 54,
+    "plan_output_policy": "serialized_plan_64000_bytes_v1",
+    "max_serialized_plan_bytes": 64000,
+    "max_output_tokens": 16384,
+    "max_core_context_bytes": 4000000,
+    "max_request_envelope_bytes": 4500000,
+    "max_runtime_tool_bytes": 400000,
+    "max_runtime_midi_state_bytes": 4000000,
+    "resource_references": true,
+    "long_transport_timeout_seconds": 105,
+    "exact_identifier_matching": true,
+    "factual_preparation": true,
+    "atomic_execution": true,
+    "rollback": true,
+    "undo_redo": true,
+    "readback_verification": true,
+    "privacy_safe_diagnostics": true
+  }
+}

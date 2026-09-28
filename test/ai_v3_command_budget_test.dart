@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
@@ -7,23 +8,18 @@ import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
 import 'package:mixroom/ai/v3/ai_v3_resources.dart';
 
 void main() {
-  final fixture =
-      jsonDecode(
-            File(
-              'backend/llm_proxy/tests/fixtures/plan_command_budget_v1.json',
-            ).readAsStringSync(),
-          )
-          as Map;
-  final rebuild =
-      jsonDecode(
-            File(
-              'backend/llm_proxy/tests/fixtures/row_rebuild_v1.json',
-            ).readAsStringSync(),
-          )
-          as Map;
+  final fixture = jsonDecode(
+    File('backend/llm_proxy/tests/fixtures/plan_command_budget_v1.json')
+        .readAsStringSync(),
+  ) as Map;
+  final rebuild = jsonDecode(
+    File('backend/llm_proxy/tests/fixtures/row_rebuild_v1.json')
+        .readAsStringSync(),
+  ) as Map;
   test('advertised command policy matches shared server fixture', () {
     expect(aiV3PlanCommandPolicy, fixture['policy']);
-    expect(aiV3MaxCommands, 32);
+    expect(aiV3PlanOutputPolicy, 'serialized_plan_64000_bytes_v1');
+    expect(aiV3MaxSerializedPlanBytes, 64000);
   });
   for (final rowCount in [6, 8]) {
     test('complete $rowCount-row rebuild prepares above 16 commands', () {
@@ -131,13 +127,6 @@ void main() {
             },
         ],
       };
-      if (count > 32) {
-        expect(
-          () => AiV3Plan.fromJson(raw),
-          throwsA(isA<AiV3ContractException>()),
-        );
-        return;
-      }
       final context = Map<String, dynamic>.from(
         rebuild['cases'][0]['context'] as Map,
       );

@@ -278,6 +278,7 @@ def _context(
         "project_id": "synthetic-project",
         "generated_midi_policy": v3_server_contract.GENERATED_MIDI_POLICY,
         "plan_command_policy": v3_server_contract.PLAN_COMMAND_POLICY,
+        "plan_output_policy": v3_server_contract.PLAN_OUTPUT_POLICY,
         "bpm": 120,
         "row_capacity": (
             {
@@ -420,7 +421,7 @@ def scenarios() -> dict[str, dict[str, Any]]:
             row_count=1,
             clip_count=1,
             turn_count=0,
-            full_command_surface=False,
+            full_command_surface=True,
         ),
         "medium": _request(
             row_count=8,
@@ -482,7 +483,6 @@ def profile_scenario(
                 validated,
                 model="gpt-5.6-luna",
                 reasoning_effort="low",
-                max_output_tokens=8192,
                 prompt_cache_retention="24h",
                 store=True,
             )
@@ -506,6 +506,7 @@ def profile_scenario(
         "messages_bytes": _json_bytes(provider_request["messages"]),
         "tool_schema_bytes": _json_bytes(tool),
         "provider_request_bytes": _json_bytes(provider_request),
+        "max_output_tokens": provider_request["max_output_tokens"],
         "canonical_upstream_request_bytes": _json_bytes(upstream_request),
         "wire_request_bytes": len(wire_request),
         "effective_command_type_count": len(validated["supported_command_types"]),

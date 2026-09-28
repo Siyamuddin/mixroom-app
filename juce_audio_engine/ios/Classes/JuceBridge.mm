@@ -3246,7 +3246,7 @@ static NSString *const kMixroomYamnetScoresOutputName = @"output_0";
         @"synth" : @(synth),
         @"other" : @0.01,
     });
-    NSLog(@"[MixroomPromptAnalysis] Classified %d windows roleProbs=%@", used, normalized);
+    NSLog(@"[MixroomPromptAnalysis] Classified %d windows", used);
     return normalized;
 }
 
@@ -6777,7 +6777,7 @@ MixroomMacInputProbe &mixroomMacInputProbeV2()
     juce::File file = juceFileFromNSString(path);
     auto stats = JuceEngine::get().analyzeAudioPrompt16k(file, trimStartMs, trimEndMs);
     auto windows = JuceEngine::get().sampleAudioMono16kWindows(file, 15600, 3, trimStartMs, trimEndMs);
-    NSLog(@"[MixroomPromptAnalysis] analyzeAudioForPrompt path=%@ windows=%lu", path, (unsigned long)windows.size());
+    NSLog(@"[MixroomPromptAnalysis] analyzeAudioForPrompt windows=%lu", (unsigned long)windows.size());
     NSDictionary<NSString *, NSNumber *> *roleProbs =
         [[MixroomPromptAnalysisService sharedService] classifyWindows:windows];
     return @{

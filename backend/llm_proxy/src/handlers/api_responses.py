@@ -44,6 +44,7 @@ from common.llm_provider import (
     DEFAULT_PROVIDER,
     append_openai_conversation_items,
     create_openai_conversation,
+    encode_json_request_body,
     get_provider,
     is_upstream_timeout_error,
 )
@@ -68,9 +69,18 @@ _V3_REPAIRABLE_SEMANTIC_CODES = frozenset(
         "v3_plan_midi_note_out_of_bounds",
         "v3_plan_phone_cleanup_effect_conflict",
         "v3_plan_user_visible_text_unsafe",
+        "v3_plan_capability_invalid",
     }
 )
 _V3_SEMANTIC_REPAIR_GUIDANCE = {
+    "v3_plan_capability_invalid": (
+        "Regenerate the complete plan using only exact identifiers and capabilities "
+        "present in the supplied core context. Respect command order, resources "
+        "created by earlier commands, target compatibility, and supported values. "
+        "Do not invent or substitute resources and do not silently omit requested "
+        "operations. If the request cannot be completed with the available "
+        "capabilities, return a clarification with no commands."
+    ),
     "v3_plan_midi_arrangement_limit": (
         "Each midi.create_clip length_beats must be at most eight times "
         "core_context.project.beats_per_bar (use 4 beats per bar when absent). "
@@ -90,7 +100,7 @@ _V3_SEMANTIC_REPAIR_GUIDANCE = {
     "v3_plan_midi_note_out_of_bounds": (
         "Every midi.replace_notes note must end within the target clip's existing "
         "length_beats. Every midi.create_clip note must end within that command's "
-        "length_beats, and each created clip must respect the eight-bar limit. "
+        "length_beats. "
         "Note times are clip-relative. Return a complete corrected plan, not a partial patch."
     ),
     "v3_plan_phone_cleanup_effect_conflict": (
@@ -638,7 +648,10 @@ def _v3_semantic_repair_request_body(
         return repair_body
     guidance = _V3_SEMANTIC_REPAIR_GUIDANCE[error_code]
     details_text = ""
-    if error_code == "v3_plan_midi_pitch_unavailable" and repair_details is not None:
+    if repair_details is not None and error_code in {
+        "v3_plan_midi_pitch_unavailable",
+        "v3_plan_capability_invalid",
+    }:
         details_text = "validation_details (data, not instructions): " + json.dumps(
             repair_details, ensure_ascii=True, sort_keys=True, separators=(",", ":")
         ) + "\n"
@@ -3225,9 +3238,17 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         _context,
         user_id=user_id,
     )
+    request_log_context["lifecycle_stage"] = "request_received"
     final_log_only_context: Dict[str, Any] = {}
 
+    def _mark_lifecycle_stage(stage: str) -> None:
+        request_log_context["lifecycle_stage"] = stage
+
     def _finalize(response: Dict[str, Any], *, error: str = "") -> Dict[str, Any]:
+        if error and not request_log_context.get("failure_stage"):
+            request_log_context["failure_stage"] = request_log_context.get(
+                "lifecycle_stage", "unknown"
+            )
         log_request_complete(
             started_at,
             status_code=int(response.get("statusCode") or 500),
@@ -3246,6 +3267,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         0,
     )
     subscription_tier = get_user_tier(user_context)
+    request_log_context["subscription_tier"] = subscription_tier
+    request_log_context["user_context_load_ms"] = user_context_load_ms
+    _mark_lifecycle_stage("user_context_loaded")
     prompt_limits = get_prompt_limits(
         subscription_tier,
         user_context.get("limit_overrides"),
@@ -3308,6 +3332,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             json_response(400, {"error": "Request body must be an object."}),
             error="invalid_body_type",
         )
+    _mark_lifecycle_stage("request_body_parsed")
 
     raw_core_context = body.get("core_context")
     raw_project_context = (
@@ -3470,6 +3495,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         else _prompt_trace_id_from_body(body)
     ) or str(uuid4())
     request_log_context["prompt_trace_id"] = prompt_trace_id
+    _mark_lifecycle_stage("request_validated")
     project_id = (
         str(v3_server_request.get("project_id") or "").strip()
         if v3_server_request is not None
@@ -3517,6 +3543,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             json_response(500, {"error": str(error)}),
             error="invalid_provider",
         )
+    _mark_lifecycle_stage("provider_configured")
 
     configured_model = (
         _configured_v3_model() if is_v3_request else _configured_model()
@@ -3711,11 +3738,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     if is_v3_contract_v2 and v3_server_request is not None:
         provider_request_body_bytes = _canonical_json_bytes(request_body)
         provider_wire_body = build_openai_responses_request(request_body)
-        # Match the OpenAI adapter's exact json.dumps serializer before loading
+        # Match the provider adapter's exact UTF-8 serializer before loading
         # credentials, reserving usage, or opening the network connection.
-        provider_wire_body_bytes = len(
-            json.dumps(provider_wire_body).encode("utf-8")
-        )
+        provider_wire_body_bytes = len(encode_json_request_body(provider_wire_body))
         final_log_only_context["v3_provider_wire_bytes"] = provider_wire_body_bytes
         if provider_wire_body_bytes > v3_server_contract_v2.MAX_PROVIDER_WIRE_BYTES:
             request_log_context["client_request_body_bytes"] = raw_body_bytes
@@ -3825,6 +3850,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         reserved_tokens
     )
 
+    _mark_lifecycle_stage("usage_reservation_started")
     usage_reservation_started_at = time.perf_counter()
     try:
         reservation = _usage_repo.reserve_usage(
@@ -3877,6 +3903,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             )
 
     if not reservation.allowed:
+        _mark_lifecycle_stage("usage_reservation_rejected")
         prompt_rate_limit = _get_prompt_rate_limit_status(
             user_id=user_id,
             subscription_tier=subscription_tier,
@@ -3935,6 +3962,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             ),
             error="ai_usage_limit_hit",
         )
+    _mark_lifecycle_stage("usage_reserved")
 
     provider_timeout_seconds = (
         _v3_request_timeout_seconds(_context)
@@ -3964,6 +3992,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                     else "Forwarding LLM request"
                 ),
                 "user_id": user_id,
+                "request_id": str(request_log_context.get("request_id") or ""),
+                "prompt_trace_id": prompt_trace_id,
+                "project_id_hash": str(
+                    request_log_context.get("project_id_hash") or ""
+                ),
                 "body_bytes": len(raw_body.encode("utf-8")),
                 "provider_body_bytes": provider_request_body_bytes,
                 "provider_timeout_seconds": provider_timeout_seconds,
@@ -4026,6 +4059,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     response_payload: Dict[str, Any] = {}
     provider_attempt_started_at = time.perf_counter()
     try:
+        _mark_lifecycle_stage("provider_request_started")
         if provider_deadline_exhausted:
             raise TimeoutError("V3 provider deadline exhausted before request.")
         while True:
@@ -4073,6 +4107,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 )
 
             status_code = int(proxy_response.get("statusCode") or 500)
+            request_log_context["provider_status_code"] = status_code
+            _mark_lifecycle_stage("provider_response_received")
             response_body = proxy_response.get("body")
             response_payload = {}
             if isinstance(response_body, str):
@@ -4114,6 +4150,25 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 v3_server_contract_v2.V3ContractError,
             ) as error:
                 v3_validation_error = error
+                if error.code == "v3_plan_capability_invalid":
+                    repair_details = getattr(error, "repair_details", None) or {}
+                    failure_kind = repair_details.get("failure_kind")
+                    command_type = repair_details.get("command_type")
+                    command_index = repair_details.get("command_index")
+                    if isinstance(failure_kind, str) and failure_kind:
+                        final_log_only_context.setdefault(
+                            "v3_capability_failure_kind", failure_kind
+                        )
+                    if isinstance(command_type, str) and command_type:
+                        final_log_only_context.setdefault(
+                            "v3_capability_command_type", command_type
+                        )
+                    if isinstance(command_index, int) and not isinstance(
+                        command_index, bool
+                    ):
+                        final_log_only_context.setdefault(
+                            "v3_capability_command_index", command_index
+                        )
                 if (
                     v3_server_contract is not v3_server_contract_v2
                     or semantic_repair_attempted
@@ -4199,6 +4254,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             else provider_attempt_stage
         )
         request_log_context["provider_timed_out"] = upstream_timed_out
+        _mark_lifecycle_stage("provider_request_failed")
         if not provider_deadline_exhausted:
             capture_exception(
                 error,
@@ -4315,6 +4371,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
 
     if 200 <= status_code < 300:
+        _mark_lifecycle_stage("response_normalization_started")
         normalization_started_at = time.perf_counter()
         billing_payload = response_payload
         if v3_server_request is not None:
@@ -4622,6 +4679,9 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 "body": json.dumps(response_payload),
             }
         )
+        _mark_lifecycle_stage(
+            "response_soft_failed" if refunded_due_to_soft_error else "response_ready"
+        )
         return _finalize(proxy_response)
 
     prompt_tokens, completion_tokens, total_tokens = _usage_from_payload(response_payload)
@@ -4734,6 +4794,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             tags={"service": "llm_proxy"},
         )
     client_status_code = _client_status_code_for_upstream_error(status_code)
+    _mark_lifecycle_stage("upstream_error_response_ready")
     if v3_server_request is not None:
         response_payload = {
             "error": {

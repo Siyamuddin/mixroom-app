@@ -15,6 +15,8 @@ import 'package:path/path.dart' as p;
 import 'ai_v3_eval_fixture.dart';
 import 'test_harness.dart';
 
+const _legacyRuntimeMidiNoteCeiling = 1024;
+
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   binding.framePolicy = LiveTestWidgetsFlutterBindingFramePolicy.fullyLive;
@@ -10745,7 +10747,7 @@ void main() {
   );
 
   testWidgets(
-    'V3 runtime-authoritative MIDI accepts the converter 1024-note ceiling',
+    'V3 runtime-authoritative MIDI accepts 1024 notes below the byte budget',
     (tester) async {
       _ignoreKnownEditorSemanticsAssertion();
       final fixture = await _openAudioFixture(
@@ -10753,7 +10755,7 @@ void main() {
         fixtureId: 'audio_reference_valid',
         basicPitchOverride: ({required mono16k}) async =>
             List<BasicPitchNoteEvent>.generate(
-              aiV3MaxRuntimeAuthoritativeMidiNotes,
+              _legacyRuntimeMidiNoteCeiling,
               (index) => BasicPitchNoteEvent(
                 startSeconds: 0.0,
                 endSeconds: 0.25,
@@ -10825,7 +10827,7 @@ void main() {
           .singleWhere((clip) => clip['label'] == 'Runtime Limit MIDI');
       expect(
         (result['midi_notes'] as List).length,
-        aiV3MaxRuntimeAuthoritativeMidiNotes,
+        _legacyRuntimeMidiNoteCeiling,
       );
       expect(
         (result['midi_notes'] as List).cast<Map<String, dynamic>>().every(
@@ -10847,7 +10849,7 @@ void main() {
     },
   );
 
-  testWidgets('V3 runtime-authoritative MIDI rolls back a 1025-note result', (
+  testWidgets('V3 runtime-authoritative MIDI accepts above the former count cap', (
     tester,
   ) async {
     _ignoreKnownEditorSemanticsAssertion();
@@ -10856,7 +10858,7 @@ void main() {
       fixtureId: 'audio_reference_valid',
       basicPitchOverride: ({required mono16k}) async =>
           List<BasicPitchNoteEvent>.generate(
-            aiV3MaxRuntimeAuthoritativeMidiNotes,
+            _legacyRuntimeMidiNoteCeiling,
             (index) => BasicPitchNoteEvent(
               startSeconds: 0.0,
               endSeconds: 0.25,
@@ -10893,7 +10895,7 @@ void main() {
               'start_ms': source['start_ms'],
               'duration_ms': source['length_ms'],
               'instrument_id': 'sfz.vsco.upright_piano',
-              'output_label': 'Should Roll Back',
+              'output_label': 'Above Former Limit',
               'target': <String, dynamic>{
                 'scope': 'clip',
                 'clip_id': source['clip_id'],
@@ -10930,10 +10932,20 @@ void main() {
     );
     await _pumpFor(tester, const Duration(seconds: 2));
 
-    final after = controller.snapshot();
-    expect(after['rows'], before['rows']);
-    expect(after['clips'], before['clips']);
-    expect(after['undo_depth'], before['undo_depth']);
+    final applied = controller.snapshot();
+    final result = (applied['clips'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((clip) => clip['label'] == 'Above Former Limit');
+    expect(
+      (result['midi_notes'] as List).length,
+      _legacyRuntimeMidiNoteCeiling + 1,
+    );
+    expect(applied['undo_depth'], (before['undo_depth'] as int) + 1);
+
+    await controller.undo();
+    await _pumpFor(tester, const Duration(seconds: 1));
+    expect(controller.snapshot()['rows'], before['rows']);
+    expect(controller.snapshot()['clips'], before['clips']);
 
     await tester.pumpWidget(const SizedBox.shrink());
   });

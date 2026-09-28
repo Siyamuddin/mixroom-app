@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -63,13 +64,31 @@ class V3RequestProfilerTests(unittest.TestCase):
         profile_v3_requests.verify_baseline(first)
         self.assertEqual(
             first["summary"]["largest_boundary_component"],
-            "tool_schema",
+            "messages",
         )
         self.assertEqual(
             first["summary"]["slowest_local_non_provider_phase"],
             "provider_request_build",
         )
         profiles = {profile["name"]: profile for profile in first["profiles"]}
+        for name, body in profile_v3_requests.scenarios().items():
+            with self.subTest(policy_scenario=name):
+                self.assertEqual(
+                    body["core_context"]["project"]["plan_output_policy"],
+                    profile_v3_requests.v3_server_contract.PLAN_OUTPUT_POLICY,
+                )
+                self.assertEqual(profiles[name]["max_output_tokens"], 16_384)
+        self.assertEqual(
+            len(profile_v3_requests.scenarios()["small"]["supported_command_types"]),
+            len(profile_v3_requests.v3_server_contract.SERVER_COMMAND_TYPES),
+        )
+        self.assertEqual(
+            {
+                profiles[name]["tool_schema_bytes"]
+                for name in ("medium", "product_max", "boundary", "large_project")
+            },
+            {79_971},
+        )
         for profile in profiles.values():
             self.assertEqual(
                 profile["canonical_upstream_request_bytes"],
@@ -84,9 +103,9 @@ class V3RequestProfilerTests(unittest.TestCase):
         product_max = profiles["product_max"]
         boundary = profiles["boundary"]
         large_project = profiles["large_project"]
-        self.assertGreater(
+        self.assertLess(
             medium["tool_schema_bytes"],
-            medium["provider_request_bytes"] * 0.85,
+            medium["provider_request_bytes"],
         )
         self.assertLess(
             medium["schema_attribution"][
@@ -94,11 +113,19 @@ class V3RequestProfilerTests(unittest.TestCase):
             ],
             medium["tool_schema_bytes"] * 0.10,
         )
-        self.assertGreater(
+        self.assertEqual(
             boundary["schema_attribution"][
                 "resource_identifier_enum_value_bytes"
             ],
-            boundary["tool_schema_bytes"] * 0.65,
+            medium["schema_attribution"][
+                "resource_identifier_enum_value_bytes"
+            ],
+        )
+        self.assertLess(
+            boundary["schema_attribution"][
+                "resource_identifier_enum_value_bytes"
+            ],
+            boundary["tool_schema_bytes"] * 0.01,
         )
         self.assertEqual(product_max["row_count"], 32)
         self.assertEqual(product_max["clip_count"], 128)
@@ -123,6 +150,50 @@ class V3RequestProfilerTests(unittest.TestCase):
             large_project["wire_request_bytes"],
             profile_v3_requests.v3_server_contract.MAX_PROVIDER_WIRE_BYTES,
         )
+
+    def test_adaptive_parity_checklist_matches_current_one_shot_contract(self) -> None:
+        path = (
+            ROOT
+            / "tool"
+            / "ai_v3_eval"
+            / "v3_adaptive_parity_checklist.json"
+        )
+        checklist = json.loads(path.read_text(encoding="utf-8"))
+        requirements = checklist["requirements"]
+        contract = profile_v3_requests.v3_server_contract
+
+        self.assertEqual(
+            checklist["schema_version"],
+            "pro118_adaptive_parity_checklist_v1",
+        )
+        self.assertEqual(requirements["command_type_count"], len(contract.SERVER_COMMAND_TYPES))
+        self.assertEqual(requirements["plan_output_policy"], contract.PLAN_OUTPUT_POLICY)
+        self.assertEqual(requirements["max_serialized_plan_bytes"], 64_000)
+        self.assertEqual(requirements["max_output_tokens"], 16_384)
+        self.assertEqual(
+            requirements["max_core_context_bytes"],
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES,
+        )
+        self.assertEqual(
+            requirements["max_request_envelope_bytes"],
+            contract.DYNAMIC_MAX_REQUEST_BYTES,
+        )
+        self.assertEqual(
+            requirements["max_runtime_tool_bytes"],
+            contract.MAX_RUNTIME_TOOL_BYTES,
+        )
+        self.assertEqual(requirements["long_transport_timeout_seconds"], 105)
+        for field in (
+            "resource_references",
+            "exact_identifier_matching",
+            "factual_preparation",
+            "atomic_execution",
+            "rollback",
+            "undo_redo",
+            "readback_verification",
+            "privacy_safe_diagnostics",
+        ):
+            self.assertIs(requirements[field], True, field)
 
     def test_boundary_profile_is_the_largest_current_valid_context(self) -> None:
         body = profile_v3_requests._boundary_request()

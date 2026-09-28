@@ -41,6 +41,7 @@ class AnalyticsEvents {
   static const String aiResponseFailedName = 'ai_response_failed';
   static const String aiPromptCycleCompletedName = 'ai_prompt_cycle_completed';
   static const String aiPromptCycleFailedName = 'ai_prompt_cycle_failed';
+  static const String aiPromptDiagnosticName = 'ai_prompt_diagnostic';
   static const String aiMagnitudeModelUpdateName = 'ai_magnitude_model_update';
   static const String welcomeOnboardingShownName = 'welcome_onboarding_shown';
   static const String welcomeOnboardingCompletedName =
@@ -80,14 +81,10 @@ class AnalyticsEvents {
     );
   }
 
-  static AnalyticsEvent sessionStarted({
-    required String sessionId,
-  }) {
+  static AnalyticsEvent sessionStarted({required String sessionId}) {
     return AnalyticsEvent(
       sessionStartedName,
-      properties: _compact(<String, Object?>{
-        'session_id': sessionId,
-      }),
+      properties: _compact(<String, Object?>{'session_id': sessionId}),
     );
   }
 
@@ -117,14 +114,10 @@ class AnalyticsEvents {
     );
   }
 
-  static AnalyticsEvent userLoggedIn({
-    required String loginMethod,
-  }) {
+  static AnalyticsEvent userLoggedIn({required String loginMethod}) {
     return AnalyticsEvent(
       userLoggedInName,
-      properties: _compact(<String, Object?>{
-        'login_method': loginMethod,
-      }),
+      properties: _compact(<String, Object?>{'login_method': loginMethod}),
     );
   }
 
@@ -145,14 +138,10 @@ class AnalyticsEvents {
     );
   }
 
-  static AnalyticsEvent firstProjectCreated({
-    required String projectId,
-  }) {
+  static AnalyticsEvent firstProjectCreated({required String projectId}) {
     return AnalyticsEvent(
       firstProjectCreatedName,
-      properties: _compact(<String, Object?>{
-        'project_id': projectId,
-      }),
+      properties: _compact(<String, Object?>{'project_id': projectId}),
     );
   }
 
@@ -265,14 +254,10 @@ class AnalyticsEvents {
     );
   }
 
-  static AnalyticsEvent aiFeatureViewed({
-    required String featureName,
-  }) {
+  static AnalyticsEvent aiFeatureViewed({required String featureName}) {
     return AnalyticsEvent(
       aiFeatureViewedName,
-      properties: _compact(<String, Object?>{
-        'feature_name': featureName,
-      }),
+      properties: _compact(<String, Object?>{'feature_name': featureName}),
     );
   }
 
@@ -357,6 +342,35 @@ class AnalyticsEvents {
         'runtime_config_fingerprint': runtimeConfigFingerprint,
         'has_system_prompt_override': hasSystemPromptOverride,
         'success': false,
+      }),
+    );
+  }
+
+  /// Privacy-safe lifecycle telemetry for tracing a single AI prompt across
+  /// client preflight, transport, parsing, and presentation. Callers must not
+  /// include prompt text, response text, credentials, or raw account data in
+  /// [extra].
+  static AnalyticsEvent aiPromptDiagnostic({
+    required String projectId,
+    required String aiFeature,
+    required String promptTraceId,
+    required String stage,
+    required String status,
+    int? elapsedMs,
+    String? errorCode,
+    Map<String, Object?> extra = const <String, Object?>{},
+  }) {
+    return AnalyticsEvent(
+      aiPromptDiagnosticName,
+      properties: _compact(<String, Object?>{
+        ...extra,
+        'project_id': projectId,
+        'ai_feature': aiFeature,
+        'prompt_trace_id': promptTraceId,
+        'diagnostic_stage': stage,
+        'diagnostic_status': status,
+        'elapsed_ms': elapsedMs,
+        'error_code': errorCode,
       }),
     );
   }
@@ -644,14 +658,10 @@ class AnalyticsEvents {
     );
   }
 
-  static AnalyticsEvent aiUsageLimitHit({
-    required String limitType,
-  }) {
+  static AnalyticsEvent aiUsageLimitHit({required String limitType}) {
     return AnalyticsEvent(
       aiUsageLimitHitName,
-      properties: _compact(<String, Object?>{
-        'limit_type': limitType,
-      }),
+      properties: _compact(<String, Object?>{'limit_type': limitType}),
     );
   }
 
@@ -670,14 +680,10 @@ class AnalyticsEvents {
     );
   }
 
-  static AnalyticsEvent purchaseFailed({
-    required String errorCode,
-  }) {
+  static AnalyticsEvent purchaseFailed({required String errorCode}) {
     return AnalyticsEvent(
       purchaseFailedName,
-      properties: _compact(<String, Object?>{
-        'error_code': errorCode,
-      }),
+      properties: _compact(<String, Object?>{'error_code': errorCode}),
     );
   }
 

@@ -9,10 +9,17 @@ import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_planner_service.dart';
 
-AiV3CoreContext _context({List<Map<String, String>> conversation = const []}) =>
-    AiV3CoreContext(
+AiV3CoreContext _context({
+  List<Map<String, String>> conversation = const [],
+  int libraryAssetCountTotal = 0,
+  int libraryAssetCountIncluded = 0,
+  int libraryAssetCountOmitted = 0,
+}) => AiV3CoreContext(
       profile: AiV3ContextProfile.essential,
       stateDigest: 'digest-1',
+  libraryAssetCountTotal: libraryAssetCountTotal,
+  libraryAssetCountIncluded: libraryAssetCountIncluded,
+  libraryAssetCountOmitted: libraryAssetCountOmitted,
       data: <String, dynamic>{
         'schema_version': 'core_context_v3_prototype_1',
         'original_request': 'duplicate must be removed',
@@ -54,6 +61,7 @@ AiV3PlannerService _service(
   Set<String> commandTypes = aiV3CommandTypes,
   bool resourceRefsEnabled = false,
   Duration timeout = const Duration(seconds: 2),
+  AiV3PlannerDiagnosticCallback? onDiagnostic,
 }) => AiV3PlannerService(
   proxyApiBaseUrl: 'https://proxy.example/',
   proxyPath: 'v1/llm/v3/responses',
@@ -62,10 +70,70 @@ AiV3PlannerService _service(
   commandTypes: commandTypes,
   resourceRefsEnabled: resourceRefsEnabled,
   requestTimeout: timeout,
+  onDiagnostic: onDiagnostic,
   httpClient: client,
 );
 
 void main() {
+  test(
+    'emits privacy-safe lifecycle diagnostics with the prompt trace',
+    () async {
+      final diagnostics = <AiV3PlannerDiagnostic>[];
+      final service = _service(
+        MockClient(
+          (_) async =>
+              http.Response(jsonEncode(_serverResponse(_respondPlan())), 200),
+        ),
+        onDiagnostic: diagnostics.add,
+      );
+
+      await service.plan(
+        context: _context(
+          libraryAssetCountTotal: 300,
+          libraryAssetCountIncluded: 275,
+          libraryAssetCountOmitted: 25,
+        ),
+        originalRequest: 'Edit.',
+        promptTraceId: 'trace-118',
+      );
+
+      expect(
+        diagnostics.map((entry) => entry.stage),
+        containsAllInOrder(<String>[
+          'request_prepared',
+          'auth',
+          'proxy_roundtrip',
+          'response_received',
+          'response_parse',
+        ]),
+      );
+      expect(
+        diagnostics.every((entry) => entry.promptTraceId == 'trace-118'),
+        isTrue,
+      );
+      final parsed = diagnostics.last;
+      expect(parsed.status, 'success');
+      expect(parsed.fields['plan_outcome'], 'respond');
+      expect(parsed.fields['plan_command_count'], 0);
+      expect(parsed.fields['server_request_id'], 'request-1');
+      final prepared = diagnostics.firstWhere(
+        (entry) => entry.stage == 'request_prepared',
+      );
+      expect(prepared.fields['library_asset_count_total'], 300);
+      expect(prepared.fields['library_asset_count_included'], 275);
+      expect(prepared.fields['library_asset_count_omitted'], 25);
+      expect(prepared.fields['library_asset_compacted'], isTrue);
+      expect(prepared.fields['row_count'], 0);
+      expect(prepared.fields['clip_count'], 0);
+      expect(prepared.fields['conversation_turn_count'], 0);
+      expect(prepared.fields['request_contract'], aiV3ContextRequestContract);
+      expect(
+        diagnostics.expand((entry) => entry.fields.keys),
+        isNot(contains('original_request')),
+      );
+    },
+  );
+
   test('backend context rejection retains actionable capacity code', () async {
     final service = _service(
       MockClient(
@@ -277,9 +345,8 @@ void main() {
         ),
       );
       await expectLater(
-        _service(
-          client,
-        ).plan(context: _context(), originalRequest: 'SECRET_PROMPT'),
+        _service(client)
+            .plan(context: _context(), originalRequest: 'SECRET_PROMPT'),
         throwsA(
           isA<AiV3PlannerException>()
               .having((e) => e.code, 'code', 'v3_planner_contract_invalid')
@@ -291,9 +358,9 @@ void main() {
       );
       if (enabled) {
         expect(messages, hasLength(1));
-        final data =
-            jsonDecode(messages.single.split('[AI.v3-validation] ').last)
-                as Map;
+        final data = jsonDecode(
+          messages.single.split('[AI.v3-validation] ').last,
+        ) as Map;
         expect(data.keys.toSet(), {
           'code',
           'contract_error_code',
@@ -584,9 +651,8 @@ void main() {
         (_) async => http.Response(jsonEncode(payload), 200),
       );
       await expectLater(
-        _service(
-          client,
-        ).plan(context: _context(), originalRequest: 'Question.'),
+        _service(client)
+            .plan(context: _context(), originalRequest: 'Question.'),
         throwsA(
           isA<AiV3PlannerException>().having(
             (error) => error.code,
@@ -611,9 +677,8 @@ void main() {
       ),
     );
     try {
-      await _service(
-        client,
-      ).plan(context: _context(), originalRequest: 'Question.');
+      await _service(client)
+          .plan(context: _context(), originalRequest: 'Question.');
       fail('Expected a planner exception.');
     } on AiV3PlannerException catch (error) {
       expect(error.code, 'v3_planner_http_error');
@@ -629,6 +694,59 @@ void main() {
       expect(error.diagnostic.toString(), isNot(contains('secret prompt')));
     }
   });
+
+  test(
+    'captures fixed capability validation reason and safe response metadata',
+    () async {
+      final diagnostics = <AiV3PlannerDiagnostic>[];
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode(<String, dynamic>{
+            'error': <String, dynamic>{
+              'code': 'v3_capability_context_invalid',
+              'message': 'A clip references an unknown row.',
+            },
+          }),
+          400,
+          headers: <String, String>{
+            'content-type': 'application/json',
+            'x-request-id': 'request-safe-123',
+          },
+        ),
+      );
+
+      try {
+        await _service(client, onDiagnostic: diagnostics.add).plan(
+          context: _context(),
+          originalRequest: 'Question.',
+          promptTraceId: 'trace-validation',
+        );
+        fail('Expected a planner exception.');
+      } on AiV3PlannerException catch (error) {
+        expect(error.code, 'v3_planner_http_error');
+        expect(
+          error.diagnostic['server_error_code'],
+          'v3_capability_context_invalid',
+        );
+        expect(
+          error.diagnostic['server_validation_reason'],
+          'A clip references an unknown row.',
+        );
+        expect(error.diagnostic['server_request_id'], 'request-safe-123');
+        expect(error.diagnostic['response_body_bytes'], greaterThan(0));
+      }
+
+      final failedParse = diagnostics.firstWhere(
+        (entry) => entry.stage == 'response_parse' && entry.status == 'failed',
+      );
+      expect(
+        failedParse.fields['server_validation_reason'],
+        'A clip references an unknown row.',
+      );
+      expect(failedParse.fields['server_request_id'], 'request-safe-123');
+      expect(failedParse.fields['response_content_type'], 'application/json');
+    },
+  );
 
   test('maps gateway and V3 upstream deadline responses to timeout', () async {
     for (final response in <http.Response>[
@@ -659,9 +777,8 @@ void main() {
 
   test('maps invalid JSON and timeout to safe failures', () async {
     try {
-      await _service(
-        MockClient((_) async => http.Response('not-json', 200)),
-      ).plan(context: _context(), originalRequest: 'Question.');
+      await _service(MockClient((_) async => http.Response('not-json', 200)))
+          .plan(context: _context(), originalRequest: 'Question.');
       fail('Expected invalid JSON to fail.');
     } on AiV3PlannerException catch (error) {
       expect(error.code, 'v3_planner_response_invalid_json');

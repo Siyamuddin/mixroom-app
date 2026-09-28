@@ -7,6 +7,7 @@ import 'package:http/testing.dart';
 import 'package:mixroom/ai/chat_pipeline.dart';
 import 'package:mixroom/ai/cloud_llm_service.dart';
 import 'package:mixroom/ai/instrument_classifier.dart';
+import 'package:mixroom/ai/ai_file_metadata.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/models/models.dart';
@@ -32,7 +33,10 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
     Map<int, String> roleOverrides = const {},
     List<TimelineRow> timelineRows = const <TimelineRow>[],
     List<TrackGroup> trackGroups = const <TrackGroup>[],
+    AiFileMetadataResolution? fileMetadata,
+    ProjectStateBuildMetrics? buildMetrics,
   }) async {
+    buildMetrics?.recordInventory(audioTracks);
     final rowStates = List<RowState>.generate(rows, (row) {
       final rowTracks = audioTracks.where((t) => t.rowIndex == row).toList();
       return RowState(
@@ -42,10 +46,12 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
         laneKind: row < timelineRows.length
             ? timelineRows[row].kind.wireName
             : 'audio',
-        instrumentId:
-            row < timelineRows.length ? timelineRows[row].instrumentId : '',
-        instrumentName:
-            row < timelineRows.length ? timelineRows[row].instrumentName : '',
+        instrumentId: row < timelineRows.length
+            ? timelineRows[row].instrumentId
+            : '',
+        instrumentName: row < timelineRows.length
+            ? timelineRows[row].instrumentName
+            : '',
         clips: const <ClipState>[],
         approxRms: rowTracks.isEmpty ? 0.0 : 0.2,
         approxCrest: rowTracks.isEmpty ? 0.0 : 1.4,
@@ -85,10 +91,14 @@ class _FakeProjectStateBuilder extends ProjectStateBuilder {
       rows: rowStates,
       trackGroups: trackGroups,
       masterEffects: const <EffectState>[],
-      overlapMatrix:
-          List<List<int>>.generate(rows, (_) => List<int>.filled(rows, 0)),
+      overlapMatrix: List<List<int>>.generate(
+        rows,
+        (_) => List<int>.filled(rows, 0),
+      ),
       overlapRatioMatrix: List<List<double>>.generate(
-          rows, (_) => List<double>.filled(rows, 0)),
+        rows,
+        (_) => List<double>.filled(rows, 0),
+      ),
     );
   }
 }
@@ -150,9 +160,7 @@ Future<ChatPipelineResult> _runPrompt({
     rowPan: const [0.5, 0.5, 0.5, 0.5],
     rowAutomation: List<List<AutomationPoint>>.generate(
       4,
-      (_) => <AutomationPoint>[
-        AutomationPoint(x: 0, volume: 1.0),
-      ],
+      (_) => <AutomationPoint>[AutomationPoint(x: 0, volume: 1.0)],
     ),
     bpmFallback: 120.0,
     selectedRowIndex: 0,
@@ -197,9 +205,11 @@ void main() {
       expect(target['row_index'], 0);
       expect(target['effect_name'], 'reverb');
       expect(target['plugin_name'], 'reverb');
-    });
+      },
+    );
 
-    test('plugin remove call remains executable with missing assistant_message',
+    test(
+      'plugin remove call remains executable with missing assistant_message',
         () async {
       final result = await _runPrompt(
         prompt: 'remove gain from track 1',
@@ -229,7 +239,8 @@ void main() {
       expect(data['row_index'], 0);
       expect(target['row_index'], 0);
       expect(target['effect_name'], 'Gain');
-    });
+      },
+    );
 
     test('row group edit aliases normalize to executable actions', () async {
       final result = await _runPrompt(
@@ -311,10 +322,7 @@ void main() {
               'actions': [
                 {
                   'type': 'project_edit',
-                  'data': {
-                    'operation': 'set_bpm',
-                    'bpm': 128,
-                  },
+                  'data': {'operation': 'set_bpm', 'bpm': 128},
                 },
               ],
             },
@@ -387,7 +395,8 @@ void main() {
       }
     });
 
-    test('multi-call DAW tool output keeps all actions instead of falling back',
+    test(
+      'multi-call DAW tool output keeps all actions instead of falling back',
         () async {
       final result = await _runPrompt(
         prompt: 'on track 1 add reverb then bypass it',
@@ -431,9 +440,11 @@ void main() {
         result.assistantActions.map((a) => a.type).toList(growable: false),
         equals(const ['effect_edit', 'effect_edit']),
       );
-    });
+      },
+    );
 
-    test('mix execute action still applies when assistant_message is omitted',
+    test(
+      'mix execute action still applies when assistant_message is omitted',
         () async {
       final result = await _runPrompt(
         prompt: 'turn up track 1',
@@ -448,11 +459,7 @@ void main() {
                   'goal': {
                     'type': 'mix_request',
                     'intents': [
-                      {
-                        'kind': 'gain',
-                        'direction': 'up',
-                        'confidence': 0.9,
-                      }
+                        {'kind': 'gain', 'direction': 'up', 'confidence': 0.9},
                     ],
                     'target': {
                       'scope': 'row',
@@ -473,6 +480,7 @@ void main() {
       expect(llmActions, isNotNull);
       expect(llmActions, hasLength(1));
       expect(result.message, isNotEmpty);
-    });
+      },
+    );
   });
 }

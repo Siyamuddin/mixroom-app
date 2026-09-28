@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import threading
 import unittest
 import urllib.error
 import urllib.request
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Iterator
@@ -147,14 +148,25 @@ class LocalV3BridgeTests(unittest.TestCase):
         self.assertEqual(server.backend.usage.release_count, 1)
 
     def test_live_measurement_runner_is_fixed_to_three_synthetic_calls(self) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str, dict, str | None]] = []
 
-        def fake_measure(*, name: str, body: dict, api_key: str) -> dict:
-            del body
-            calls.append((name, api_key))
+        def fake_measure(*, name: str, body: dict, case: dict, api_key: str) -> dict:
+            calls.append(
+                (
+                    name,
+                    body["original_request"],
+                    api_key,
+                    case,
+                    os.environ.get("LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS"),
+                )
+            )
             return {"scenario": name, "status_code": 200}
 
         with (
+            patch.dict(
+                os.environ,
+                {"LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS": "7"},
+            ),
             patch.object(
                 live_measurement,
                 "_load_configured_api_key",
@@ -163,13 +175,204 @@ class LocalV3BridgeTests(unittest.TestCase):
             patch.object(live_measurement, "_measure", side_effect=fake_measure),
         ):
             report = live_measurement.run()
+            restored_retry_attempts = os.environ.get(
+                "LLM_UPSTREAM_NETWORK_RETRY_ATTEMPTS"
+            )
 
         self.assertEqual(
-            [name for name, _ in calls],
-            ["small", "medium", "product_max"],
+            [name for name, _, _, _, _ in calls],
+            ["small", "product_max", "large_project"],
         )
+        self.assertEqual(
+            [request for _, request, _, _, _ in calls],
+            [
+                live_measurement.LIVE_CASES[name]["request"]
+                for name in live_measurement.FIXED_SCENARIOS
+            ],
+        )
+        self.assertTrue(
+            all(
+                case is live_measurement.LIVE_CASES[name]
+                for name, _, _, case, _ in calls
+            )
+        )
+        self.assertEqual([attempts for *_, attempts in calls], ["1", "1", "1"])
+        self.assertEqual(restored_retry_attempts, "7")
         self.assertEqual(report["request_count"], 3)
+        self.assertEqual(
+            report["measurement_contract"],
+            "pro118_one_shot_control_v1",
+        )
+        self.assertEqual(report["provider_timeout_seconds"], 105)
         self.assertNotIn("PRIVATE_TEST_KEY", json.dumps(report))
+
+    def test_live_measurement_semantic_scoring_is_exact(self) -> None:
+        case = live_measurement.LIVE_CASES["product_max"]
+
+        def plan(*, outcome="plan", command_type="midi.transpose", arguments=None):
+            return {
+                "schema_version": "plan_v3_prototype_2",
+                "outcome": outcome,
+                "user_message": "Synthetic result.",
+                "commands": [] if arguments is None else [{
+                    "command_id": "command-1",
+                    "type": command_type,
+                    "arguments": arguments,
+                }],
+                "question_options": [],
+            }
+
+        correct = plan(arguments={"clip_id": "synthetic-clip-0002", "semitones": 2})
+        self.assertEqual(
+            live_measurement._score_plan(correct, case)["result_category"],
+            "success",
+        )
+        cases = (
+            (None, "invalid_plan"),
+            (plan(outcome="clarify"), "clarification"),
+            (plan(outcome="respond"), "wrong_outcome"),
+            (
+                plan(
+                    command_type="midi.replace_notes",
+                    arguments={"clip_id": "synthetic-clip-0002", "notes": []},
+                ),
+                "wrong_operation",
+            ),
+            (
+                plan(arguments={"clip_id": "synthetic-clip-0004", "semitones": 2}),
+                "wrong_target",
+            ),
+            (
+                plan(arguments={"clip_id": "synthetic-clip-0002", "semitones": 3}),
+                "wrong_value",
+            ),
+        )
+        for candidate, expected in cases:
+            with self.subTest(expected=expected):
+                score = live_measurement._score_plan(candidate, case)
+                self.assertFalse(score["semantic_match"])
+                self.assertEqual(score["result_category"], expected)
+
+    def test_live_measurement_rejects_malformed_output_and_records_timeout(self) -> None:
+        body = json.loads(json.dumps(profiler.scenarios()["small"]))
+        case = live_measurement.LIVE_CASES["small"]
+        body["original_request"] = case["request"]
+
+        class Provider:
+            def __init__(self, response=None, error=None):
+                self.response = response
+                self.error = error
+
+            def forward_request(self, **kwargs):
+                del kwargs
+                if self.error is not None:
+                    raise self.error
+                return self.response
+
+        malformed = Provider(response={"statusCode": 200, "body": "{}"})
+        with patch.object(live_measurement, "get_provider", return_value=malformed):
+            measurement = live_measurement._measure(
+                name="small",
+                body=body,
+                case=case,
+                api_key="PRIVATE_TEST_KEY",
+            )
+        self.assertFalse(measurement["plan_valid"])
+        self.assertEqual(measurement["result_category"], "invalid_plan")
+        self.assertEqual(measurement["max_output_tokens"], 16_384)
+        self.assertNotIn("PRIVATE_TEST_KEY", json.dumps(measurement))
+        self.assertNotIn(case["request"], json.dumps(measurement))
+
+        with patch.object(
+            live_measurement,
+            "get_provider",
+            return_value=Provider(error=TimeoutError("synthetic timeout")),
+        ):
+            measurement = live_measurement._measure(
+                name="small",
+                body=body,
+                case=case,
+                api_key="PRIVATE_TEST_KEY",
+            )
+        self.assertTrue(measurement["provider_timed_out"])
+        self.assertEqual(measurement["result_category"], "timeout")
+
+    def test_live_measurement_validates_and_scores_a_correct_provider_plan(self) -> None:
+        body = json.loads(json.dumps(profiler.scenarios()["small"]))
+        case = live_measurement.LIVE_CASES["small"]
+        body["original_request"] = case["request"]
+        plan = {
+            "schema_version": "plan_v3_prototype_2",
+            "outcome": "plan",
+            "user_message": "Restarted playback.",
+            "commands": [
+                {
+                    "command_id": "restart-1",
+                    "type": "transport.restart",
+                    "arguments": {},
+                }
+            ],
+            "question_options": [],
+        }
+        provider_payload = {
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": "submit_plan_v3",
+                    "arguments": json.dumps(plan),
+                }
+            ],
+            "usage": {
+                "input_tokens": 123,
+                "input_tokens_details": {"cached_tokens": 100},
+                "output_tokens": 45,
+                "output_tokens_details": {"reasoning_tokens": 20},
+                "total_tokens": 168,
+            },
+        }
+
+        class Provider:
+            def forward_request(self, **kwargs):
+                self.forwarded = kwargs
+                return {
+                    "statusCode": 200,
+                    "body": json.dumps(provider_payload),
+                    "observability": {"provider_roundtrip_ms": 321},
+                }
+
+        provider = Provider()
+        with patch.object(live_measurement, "get_provider", return_value=provider):
+            measurement = live_measurement._measure(
+                name="small",
+                body=body,
+                case=case,
+                api_key="PRIVATE_TEST_KEY",
+            )
+
+        self.assertTrue(measurement["plan_valid"])
+        self.assertTrue(measurement["semantic_match"])
+        self.assertEqual(measurement["result_category"], "success")
+        self.assertEqual(measurement["plan_command_count"], 1)
+        self.assertEqual(measurement["provider_roundtrip_ms"], 321)
+        self.assertEqual(measurement["input_tokens"], 123)
+        self.assertEqual(measurement["cached_input_tokens"], 100)
+        self.assertEqual(measurement["output_tokens"], 45)
+        self.assertEqual(measurement["reasoning_tokens"], 20)
+        self.assertEqual(measurement["total_tokens"], 168)
+        self.assertEqual(provider.forwarded["timeout_seconds"], 105)
+        serialized_measurement = json.dumps(measurement)
+        self.assertNotIn("PRIVATE_TEST_KEY", serialized_measurement)
+        self.assertNotIn(case["request"], serialized_measurement)
+
+    def test_live_measurement_requires_explicit_execution_flag(self) -> None:
+        with (
+            patch.object(sys, "argv", ["measure_v3_live_provider.py"]),
+            patch.object(live_measurement, "run") as run,
+            redirect_stderr(StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            live_measurement.main()
+        run.assert_not_called()
 
     def test_product_max_crosses_real_loopback_and_exports_safe_measurement(self) -> None:
         body = profiler.scenarios()["product_max"]
@@ -247,6 +450,8 @@ class LocalV3BridgeTests(unittest.TestCase):
             "invalid_output": (502, "v3_invalid_provider_output", 1, False),
             "semantic_repair_success": (200, "", 2, True),
             "semantic_repair_failure": (502, "v3_invalid_provider_output", 2, False),
+            "capability_repair_success": (200, "", 2, True),
+            "capability_repair_failure": (502, "v3_invalid_provider_output", 2, False),
         }
         body = profiler.scenarios()["small"]
         for scenario, (expected_status, error_code, attempts, finalized) in expected.items():
@@ -268,11 +473,26 @@ class LocalV3BridgeTests(unittest.TestCase):
                 self.assertEqual(measurement["provider_attempt_count"], attempts)
                 self.assertEqual(server.backend.usage.finalize_count, int(finalized))
                 self.assertEqual(server.backend.usage.release_count, int(not finalized))
-                if scenario.startswith("semantic_repair"):
+                if scenario.startswith(("semantic_repair", "capability_repair")):
                     self.assertTrue(measurement["semantic_repair_attempted"])
                     self.assertEqual(
                         measurement["semantic_repair_succeeded"],
                         finalized,
+                    )
+                if scenario.startswith("capability_repair"):
+                    self.assertEqual(
+                        measurement["semantic_repair_error_code"],
+                        "v3_plan_capability_invalid",
+                    )
+                    self.assertEqual(
+                        measurement["v3_capability_failure_kind"],
+                        "unavailable_row",
+                    )
+                    self.assertEqual(
+                        measurement["v3_capability_command_type"], "row.rename"
+                    )
+                    self.assertEqual(
+                        measurement["v3_capability_command_index"], 0
                     )
 
     def test_delay_is_measured_without_external_provider_calls(self) -> None:

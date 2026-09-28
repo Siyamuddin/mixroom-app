@@ -13,7 +13,6 @@ import 'ai_v3_midi_boundary.dart';
 
 enum AiV3ContextProfile { essential, enriched, rich }
 
-const int _aiV3MaxInstrumentCatalogFacts = 64;
 const String aiV3ProjectCapacityPolicy = 'unbounded_rows_clips_v1';
 
 AiV3ContextProfile parseAiV3ContextProfile(String value) {
@@ -41,11 +40,17 @@ class AiV3CoreContext {
     required this.profile,
     required this.stateDigest,
     required this.data,
+    this.libraryAssetCountTotal = 0,
+    this.libraryAssetCountIncluded = 0,
+    this.libraryAssetCountOmitted = 0,
   });
 
   final AiV3ContextProfile profile;
   final String stateDigest;
   final Map<String, dynamic> data;
+  final int libraryAssetCountTotal;
+  final int libraryAssetCountIncluded;
+  final int libraryAssetCountOmitted;
 
   String get profileName => profile.name;
   String get canonicalJson => jsonEncode(data);
@@ -53,9 +58,8 @@ class AiV3CoreContext {
 }
 
 class AiV3CoreContextBuilder {
-  const AiV3CoreContextBuilder({this.maxLibraryAssets = 250});
+  const AiV3CoreContextBuilder();
 
-  final int maxLibraryAssets;
   static const int maxCanonicalBytes = 4000000;
 
   AiV3CoreContext build({
@@ -92,9 +96,6 @@ class AiV3CoreContextBuilder {
       throw const AiV3ContextException('prototype_context_request_invalid');
     }
     final libraryAssets = _libraryAssets(clientContext);
-    if (libraryAssets.length > maxLibraryAssets) {
-      throw const AiV3ContextException('prototype_context_library_limit');
-    }
     if (libraryAssets.map((asset) => asset['asset_id']).toSet().length !=
         libraryAssets.length) {
       throw const AiV3ContextException('prototype_context_asset_id_duplicate');
@@ -518,6 +519,7 @@ class AiV3CoreContextBuilder {
         'midi_boundary_policy': aiV3MidiBoundaryPolicy,
         'generated_midi_policy': aiV3GeneratedMidiPolicy,
         'plan_command_policy': aiV3PlanCommandPolicy,
+        'plan_output_policy': aiV3PlanOutputPolicy,
         'beats_per_bar': beatsPerBar,
         'beat_unit': beatUnit,
         'key': (validationState['project'] as Map?)?['project_key'],
@@ -581,7 +583,7 @@ class AiV3CoreContextBuilder {
       ),
       if (pendingPlan != null) 'pending_plan': pendingPlan,
     };
-    final cleanedData = _withoutNulls(data);
+    var cleanedData = _withoutNulls(data);
     if (usesDynamicCapacity && creationLimit == null) {
       final project = cleanedData['project'] as Map<String, dynamic>;
       final rowCapacity = project['row_capacity'] as Map<String, dynamic>;
@@ -589,16 +591,192 @@ class AiV3CoreContextBuilder {
       // no product-defined row creation ceiling.
       rowCapacity['creation_limit'] = null;
     }
+    final totalLibraryAssetCount = libraryAssets.length;
+    var canonicalBytes = _canonicalContextBytes(cleanedData);
+    if (canonicalBytes > maxCanonicalBytes && totalLibraryAssetCount > 0) {
+      cleanedData = _compactLibraryAssetsToContextBudget(
+        cleanedData,
+        userRequest: userRequest,
+        maximumContextBytes: maxCanonicalBytes,
+      );
+      canonicalBytes = _canonicalContextBytes(cleanedData);
+    }
+    if (canonicalBytes > maxCanonicalBytes) {
+      throw const AiV3ContextException('v3_context_request_limit');
+    }
+    final includedLibraryAssetCount =
+        (cleanedData['library_assets'] as List? ?? const <Object>[]).length;
     final context = AiV3CoreContext(
       profile: profile,
       stateDigest: computedDigest,
       data: cleanedData,
+      libraryAssetCountTotal: totalLibraryAssetCount,
+      libraryAssetCountIncluded: includedLibraryAssetCount,
+      libraryAssetCountOmitted:
+          totalLibraryAssetCount - includedLibraryAssetCount,
     );
-    if (utf8.encode(context.canonicalJson).length > maxCanonicalBytes) {
-      throw const AiV3ContextException('v3_context_request_limit');
-    }
     return context;
   }
+}
+
+int _canonicalContextBytes(Map<String, dynamic> data) =>
+    utf8.encode(jsonEncode(data)).length;
+
+Map<String, dynamic> _compactLibraryAssetsToContextBudget(
+  Map<String, dynamic> data, {
+  required String userRequest,
+  required int maximumContextBytes,
+}) {
+  final rawAssets = data['library_assets'];
+  if (rawAssets is! List || rawAssets.isEmpty) return data;
+  final assets = rawAssets
+      .whereType<Map>()
+      .map((asset) => Map<String, dynamic>.from(asset))
+      .toList(growable: false);
+  final normalizedRequest = userRequest.toLowerCase();
+  const stopWords = <String>{
+    'and',
+    'for',
+    'from',
+    'into',
+    'make',
+    'please',
+    'that',
+    'the',
+    'this',
+    'with',
+  };
+  final requestTokens = normalizedRequest
+      .split(RegExp(r'[^a-z0-9]+'))
+      .where((token) => token.length >= 3 && !stopWords.contains(token))
+      .toSet();
+  final ranked =
+      assets
+          .map(
+            (asset) => (
+              asset: asset,
+              score: _libraryAssetRelevanceScore(
+                asset,
+                normalizedRequest,
+                requestTokens,
+              ),
+            ),
+          )
+          .toList(growable: false)
+        ..sort((left, right) {
+          final byScore = right.score.compareTo(left.score);
+          if (byScore != 0) return byScore;
+          return left.asset['asset_id'].toString().compareTo(
+            right.asset['asset_id'].toString(),
+          );
+        });
+  final prioritized = ranked
+      .map((entry) => entry.asset)
+      .toList(growable: false);
+
+  Map<String, dynamic> withFirst(int count) => <String, dynamic>{
+    ...data,
+    'library_assets': prioritized.take(count).toList(growable: false),
+    'library_catalog_summary': _libraryCatalogSummary(
+      assets,
+      includedCount: count,
+    ),
+  };
+
+  var low = 0;
+  var high = prioritized.length;
+  while (low < high) {
+    final candidate = (low + high + 1) ~/ 2;
+    final candidateData = withFirst(candidate);
+    if (_canonicalContextBytes(candidateData) <= maximumContextBytes) {
+      low = candidate;
+    } else {
+      high = candidate - 1;
+    }
+  }
+
+  final selected = prioritized.take(low).toList(growable: false)
+    ..sort(
+      (left, right) =>
+          left['asset_id'].toString().compareTo(right['asset_id'].toString()),
+    );
+  return <String, dynamic>{
+    ...data,
+    'library_assets': selected,
+    'library_catalog_summary': _libraryCatalogSummary(
+      assets,
+      includedCount: selected.length,
+    ),
+  };
+}
+
+Map<String, dynamic> _libraryCatalogSummary(
+  List<Map<String, dynamic>> assets, {
+  required int includedCount,
+}) {
+  final roleCounts = <String, int>{};
+  final folderCounts = <String, int>{};
+  String safeCategory(Object? raw, {required String fallback}) {
+    final value = raw?.toString().trim().toLowerCase() ?? '';
+    if (RegExp(r'^[a-z0-9 _.-]{1,128}$').hasMatch(value)) return value;
+    return fallback;
+  }
+
+  for (final asset in assets) {
+    final role = safeCategory(asset['role'], fallback: 'other');
+    roleCounts[role] = (roleCounts[role] ?? 0) + 1;
+    final normalizedPath =
+        asset['path']?.toString().replaceAll('\\', '/') ?? '';
+    final slash = normalizedPath.indexOf('/');
+    final folder = safeCategory(
+      slash > 0 ? normalizedPath.substring(0, slash) : '',
+      fallback: 'root',
+    );
+    folderCounts[folder] = (folderCounts[folder] ?? 0) + 1;
+  }
+
+  List<Map<String, dynamic>> topCounts(Map<String, int> counts) {
+    final entries = counts.entries.toList(growable: false)
+      ..sort((left, right) {
+        final byCount = right.value.compareTo(left.value);
+        return byCount != 0 ? byCount : left.key.compareTo(right.key);
+      });
+    return entries
+        .take(32)
+        .map(
+          (entry) => <String, dynamic>{
+            'category': entry.key,
+            'count': entry.value,
+          },
+        )
+        .toList(growable: false);
+  }
+
+  return <String, dynamic>{
+    'total_asset_count': assets.length,
+    'included_asset_count': includedCount,
+    'omitted_asset_count': assets.length - includedCount,
+    'role_counts': topCounts(roleCounts),
+    'top_level_folder_counts': topCounts(folderCounts),
+  };
+}
+
+int _libraryAssetRelevanceScore(
+  Map<String, dynamic> asset,
+  String normalizedRequest,
+  Set<String> requestTokens,
+) {
+  final role = asset['role']?.toString().trim().toLowerCase() ?? '';
+  final path = asset['path']?.toString().trim().toLowerCase() ?? '';
+  var score = 0;
+  if (role.isNotEmpty && role != 'other' && normalizedRequest.contains(role)) {
+    score += 1000;
+  }
+  for (final token in requestTokens) {
+    if (path.contains(token)) score += 10;
+    if (role.contains(token)) score += 100;
+  }
+  return score;
 }
 
 String _canonicalRowColor(int argb) {
@@ -675,9 +853,8 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
   Map<String, dynamic> context, {
   required Set<String> existingInstrumentIds,
 }) {
-  final allowedIds = _sortedUniqueStrings(
-    context['allowed_instrument_ids'],
-  ).toSet();
+  final allowedIds = _sortedUniqueStrings(context['allowed_instrument_ids'])
+      .toSet();
   final describableIds = allowedIds.union(existingInstrumentIds);
   final raw = context['ai_v3_instrument_catalog'];
   if (raw == null) return const <Map<String, dynamic>>[];
@@ -715,7 +892,7 @@ List<Map<String, dynamic>> _instrumentCatalogFacts(
         right['instrument_id'].toString(),
       ),
     );
-  return result.take(_aiV3MaxInstrumentCatalogFacts).toList(growable: false);
+  return result;
 }
 
 Map<String, dynamic> _selectionWithStableIds(

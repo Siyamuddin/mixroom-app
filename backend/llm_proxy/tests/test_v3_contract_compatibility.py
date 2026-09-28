@@ -577,6 +577,35 @@ class V3ContractCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(v1_provider.requests), 1)
         self.assertEqual(len(v2_provider.requests), 1)
 
+    def test_released_v1_route_is_isolated_from_current_v2_validation(self) -> None:
+        request = _released_v1_request()
+        validated = v3_server_contract_v1.validate_context_request(
+            request,
+            raw_body_bytes=len(json.dumps(request).encode("utf-8")),
+        )
+        expected_provider_request = v3_server_contract_v1.build_provider_request(
+            validated,
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+            max_output_tokens=8192,
+            prompt_cache_retention="24h",
+            store=True,
+        )
+
+        with mock.patch.object(
+            v3_server_contract,
+            "validate_context_request",
+            side_effect=AssertionError("released V1 request entered V2 validation"),
+        ):
+            response, provider = self._call(request)
+
+        self.assertEqual(response["statusCode"], 200)
+        self.assertEqual(provider.requests, [expected_provider_request])
+        self.assertEqual(
+            json.loads(response["body"])["trace"]["contract_version"],
+            "mixroom_v3_server_contract_3",
+        )
+
     def test_v1_and_v2_kill_switches_are_independent(self) -> None:
         disabled_v1_response, disabled_v1_provider = self._call(
             _released_v1_request(),

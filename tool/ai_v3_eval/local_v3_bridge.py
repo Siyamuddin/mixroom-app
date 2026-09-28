@@ -51,11 +51,14 @@ from analyze_v3_production_measurement import (  # noqa: E402
 
 SCENARIOS = (
     "success",
+    "byte_budget_midi_success",
     "timeout",
     "upstream_error",
     "invalid_output",
     "semantic_repair_success",
     "semantic_repair_failure",
+    "capability_repair_success",
+    "capability_repair_failure",
 )
 TRANSPORT_MODES = ("standard", "long")
 _MAX_DELAY_MS = 110_000
@@ -132,6 +135,47 @@ def _plan(*, unsafe: bool = False) -> dict[str, Any]:
             else "The deterministic local bridge completed the request."
         ),
         "commands": [],
+        "question_options": [],
+    }
+
+
+def _byte_budget_midi_plan() -> dict[str, Any]:
+    notes = [
+        {
+            "pitch": 60 + index % 12,
+            "start_beat": index / 128,
+            "length_beats": 1 / 128,
+            "velocity": 0.75,
+        }
+        for index in range(513)
+    ]
+    return {
+        "schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+        "outcome": "plan",
+        "user_message": "Replaced the MIDI notes through the byte-budget policy.",
+        "commands": [
+            {
+                "command_id": "replace-513-notes",
+                "type": "midi.replace_notes",
+                "arguments": {"clip_id": "old0", "notes": notes},
+            }
+        ],
+        "question_options": [],
+    }
+
+
+def _capability_plan(*, row_id: int) -> dict[str, Any]:
+    return {
+        "schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+        "outcome": "plan",
+        "user_message": "Renamed the requested row.",
+        "commands": [
+            {
+                "command_id": "rename-row",
+                "type": "row.rename",
+                "arguments": {"row_id": row_id, "new_name": "Vocal Space"},
+            }
+        ],
         "question_options": [],
     }
 
@@ -222,6 +266,17 @@ class DeterministicProvider:
             )
         elif self.scenario == "semantic_repair_failure":
             payload = _provider_payload(_plan(unsafe=True), self.attempt_count)
+        elif self.scenario == "capability_repair_success":
+            payload = _provider_payload(
+                _capability_plan(row_id=999 if self.attempt_count == 1 else 1),
+                self.attempt_count,
+            )
+        elif self.scenario == "capability_repair_failure":
+            payload = _provider_payload(
+                _capability_plan(row_id=999), self.attempt_count
+            )
+        elif self.scenario == "byte_budget_midi_success":
+            payload = _provider_payload(_byte_budget_midi_plan(), self.attempt_count)
         else:
             payload = _provider_payload(_plan(), self.attempt_count)
         return {

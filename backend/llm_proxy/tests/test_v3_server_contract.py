@@ -21,6 +21,41 @@ from common import v3_server_contract  # noqa: E402
 
 
 class V3ServerContractTests(unittest.TestCase):
+    def test_provider_wire_budget_is_derived_from_validated_context_budget(self) -> None:
+        self.assertEqual(
+            v3_server_contract.MAX_PROVIDER_WIRE_BYTES,
+            (
+                v3_server_contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES
+                * v3_server_contract.MAX_PROVIDER_CORE_TRANSFORM_MULTIPLIER
+                * v3_server_contract.MAX_PROVIDER_JSON_ESCAPE_MULTIPLIER
+                + v3_server_contract.MAX_PROVIDER_NON_CORE_WIRE_BYTES
+            ),
+        )
+
+    def test_provider_context_annotation_stays_below_transform_ceiling(self) -> None:
+        # This deliberately omits fields required by a valid clip, making each
+        # source object smaller and the measured expansion more conservative.
+        context = {
+            "clips": [
+                {"kind": "midi", "length_beats": 0, "start_beat": 0}
+                for _ in range(1_000)
+            ]
+        }
+        source_bytes = len(
+            v3_server_contract._canonical_json(context).encode("utf-8")
+        )
+        provider_bytes = len(
+            v3_server_contract._canonical_json(
+                v3_server_contract._provider_core_context(context)
+            ).encode("utf-8")
+        )
+
+        self.assertLessEqual(
+            provider_bytes,
+            source_bytes
+            * v3_server_contract.MAX_PROVIDER_CORE_TRANSFORM_MULTIPLIER,
+        )
+
     def test_existing_notes_use_context_budget_not_output_budget(self):
         for count in (300, 512, 513, 600, 1024):
             context = self._core_context()
@@ -140,6 +175,80 @@ class V3ServerContractTests(unittest.TestCase):
 
     def _surface(self):
         return v3_server_contract.extract_capability_surface(self._core_context())
+
+    def test_capability_repair_details_use_only_bounded_categories(self) -> None:
+        expected_kinds = {
+            "cannot_delete_row",
+            "incompatible_glue_sources",
+            "invalid_effect_parameter_value",
+            "invalid_group_membership",
+            "missing_effective_instrument",
+            "unavailable_asset",
+            "unavailable_clip",
+            "unavailable_effect",
+            "unavailable_effect_instance",
+            "unavailable_effect_parameter",
+            "unavailable_group",
+            "unavailable_group_membership",
+            "unavailable_instrument",
+            "unavailable_mix_intent",
+            "unavailable_row",
+            "unmixable_target",
+        }
+        self.assertEqual(
+            v3_server_contract._CAPABILITY_FAILURE_KINDS, expected_kinds
+        )
+        for failure_kind in expected_kinds:
+            with self.subTest(failure_kind=failure_kind):
+                error = v3_server_contract._capability_error(
+                    failure_kind,
+                    "PRIVATE_RESOURCE_MARKER",
+                    command_index=7,
+                    command_type="row.rename",
+                    field="row_id",
+                )
+                self.assertEqual(error.code, "v3_plan_capability_invalid")
+                self.assertEqual(
+                    error.repair_details,
+                    {
+                        "failure_kind": failure_kind,
+                        "command_index": 7,
+                        "command_type": "row.rename",
+                        "field": "row_id",
+                    },
+                )
+                self.assertNotIn(
+                    "PRIVATE_RESOURCE_MARKER",
+                    json.dumps(error.repair_details, sort_keys=True),
+                )
+
+    def test_capability_validation_attaches_command_context(self) -> None:
+        plan = {
+            "commands": [
+                {
+                    "command_id": "restart",
+                    "type": "transport.restart",
+                    "arguments": {},
+                },
+                {
+                    "command_id": "rename",
+                    "type": "row.rename",
+                    "arguments": {"row_id": 999, "new_name": "Vocal Space"},
+                },
+            ]
+        }
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.validate_plan_capabilities(plan, self._surface())
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
+        self.assertEqual(
+            raised.exception.repair_details,
+            {
+                "failure_kind": "unavailable_row",
+                "command_index": 1,
+                "command_type": "row.rename",
+                "field": "row_id",
+            },
+        )
 
     def _dynamic_context(self, *, row_count: int = 1, free: bool = False) -> dict:
         context = self._core_context()
@@ -531,8 +640,8 @@ class V3ServerContractTests(unittest.TestCase):
             "v3_contract_metadata.json": "5675e9adbf19cdbbf87cd1229adaf80d5228744202683f9fe391faf47a766fc8",
             "v3_instructions.txt": "db92912a052c1060ce668a55e4811948080cbf34071454b9cc05ba941be54dba",
             "v3_instructions_resource_refs.txt": "ee2297a73120c0bef602fd97245b3aaeed51645db461851f2b63383ba5edb792",
-            "v3_submit_plan_tool.json": "77db6cbb819cbf7e4dba7771fcfba502d5f117e9187c7e812be15d50c374b166",
-            "v3_submit_plan_tool_resource_refs.json": "3075d7b865313d86b0ae1d08233ef2b215de852fc9f7acb5f0c5087071dbb497",
+            "v3_submit_plan_tool.json": "0bde04be9e806437c24675e2e046294d005b5b667f5357757a47feccf59d25cf",
+            "v3_submit_plan_tool_resource_refs.json": "ae7ba968bce155b798c3f4465cdab1132abcef4408bf3d2b5a846e0b2c945068",
         }
         asset_directory = SRC / "common" / "v3_contract_assets"
         actual = {
@@ -984,36 +1093,46 @@ class V3ServerContractTests(unittest.TestCase):
                     authenticated_subscription_tier="pro",
                 )
 
-        with mock.patch.object(
-            v3_server_contract, "DYNAMIC_MAX_CONTEXT_NODES", 5
+        for limit_name, value in (
+            ("MAX_CONTEXT_NODES", {"items": [None, None, None, None]}),
+            ("MAX_COLLECTION_ITEMS", [None, None, None, None]),
+            ("MAX_CONTEXT_TOTAL_STRING_CHARS", {"a": "12345", "b": "678901"}),
         ):
-            v3_server_contract._validate_context_value(
-                {"items": [None, None, None]}, expanded_capacity=True
-            )
-            with self.assertRaises(v3_server_contract.V3ContractError):
+            with self.subTest(limit_name=limit_name), mock.patch.object(
+                v3_server_contract, limit_name, 3 if "STRING" not in limit_name else 10
+            ):
+                with self.assertRaises(v3_server_contract.V3ContractError):
+                    v3_server_contract._validate_context_value(
+                        value, expanded_capacity=False
+                    )
                 v3_server_contract._validate_context_value(
-                    {"items": [None, None, None, None]}, expanded_capacity=True
+                    value, expanded_capacity=True
                 )
-        with mock.patch.object(
-            v3_server_contract, "DYNAMIC_MAX_COLLECTION_ITEMS", 3
-        ):
-            v3_server_contract._validate_context_value(
-                [None, None, None], expanded_capacity=True
-            )
-            with self.assertRaises(v3_server_contract.V3ContractError):
-                v3_server_contract._validate_context_value(
-                    [None, None, None, None], expanded_capacity=True
-                )
-        with mock.patch.object(
-            v3_server_contract, "DYNAMIC_MAX_CONTEXT_TOTAL_STRING_CHARS", 10
-        ):
-            v3_server_contract._validate_context_value(
-                {"a": "12345", "b": "67890"}, expanded_capacity=True
-            )
-            with self.assertRaises(v3_server_contract.V3ContractError):
-                v3_server_contract._validate_context_value(
-                    {"a": "12345", "b": "678901"}, expanded_capacity=True
-                )
+
+    def test_dynamic_context_aggregate_counts_do_not_beat_byte_budget(self) -> None:
+        context = self._dynamic_context()
+        context["padding"] = [None] * 250_001
+        body = {
+            "request_contract": v3_server_contract.REQUEST_CONTRACT,
+            "original_request": "Inspect.",
+            "conversation": [],
+            "core_context": context,
+            "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+            "supported_command_types": ["transport.restart"],
+            "resource_refs_enabled": False,
+        }
+        raw_bytes = len(v3_server_contract._canonical_json(body).encode("utf-8"))
+        core_bytes = len(
+            v3_server_contract._canonical_json(context).encode("utf-8")
+        )
+
+        self.assertLess(core_bytes, v3_server_contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES)
+        self.assertLess(raw_bytes, v3_server_contract.DYNAMIC_MAX_REQUEST_BYTES)
+        validated = v3_server_contract.validate_context_request(
+            body,
+            raw_body_bytes=raw_bytes,
+        )
+        self.assertEqual(len(validated["core_context"]["padding"]), 250_001)
 
     def test_unknown_or_malformed_capacity_policy_never_unlocks_creation(self) -> None:
         unknown = self._dynamic_context()
@@ -1053,7 +1172,7 @@ class V3ServerContractTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "v3_plan_schema_invalid")
 
-    def test_runtime_effect_schema_rejects_hpf_and_wrong_effect_pairing(self) -> None:
+    def test_semantic_effect_validation_rejects_wrong_ids_and_pairing(self) -> None:
         for effect_id, parameter_id in [
             ("Distortion", "hpf"),
             ("Distortion", "Mix"),
@@ -1072,9 +1191,9 @@ class V3ServerContractTests(unittest.TestCase):
                         resource_refs_enabled=False,
                         capability_surface=self._surface(),
                     )
-                self.assertEqual(raised.exception.code, "v3_plan_schema_invalid")
+                self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
 
-    def test_runtime_effect_schema_accepts_exact_ids_ranges_and_defaults(self) -> None:
+    def test_semantic_effect_validation_accepts_exact_ids_ranges_and_defaults(self) -> None:
         for parameters in [
             [],
             [{"parameter_id": "HPF Frequency", "value": 0.5}],
@@ -1100,7 +1219,7 @@ class V3ServerContractTests(unittest.TestCase):
                 resource_refs_enabled=False,
                 capability_surface=self._surface(),
             )
-        self.assertEqual(raised.exception.code, "v3_plan_schema_invalid")
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
 
     def test_semantic_validation_rejects_duplicate_effect_parameters(self) -> None:
         plan = self._effect_plan(
@@ -1579,14 +1698,140 @@ class V3ServerContractTests(unittest.TestCase):
         self.assertNotIn('"group_id"', group_remove)
         self.assertIn('"group_ref"', group_remove)
 
-        oversized = self._core_context()
-        oversized["effects"][0]["parameters"] = [
-            {"parameter_id": f"Parameter {index}", "range": [0, 1]}
-            for index in range(v3_server_contract.MAX_EFFECT_PARAMETERS + 1)
+    def test_effect_catalog_is_bounded_by_bytes_not_legacy_count(self) -> None:
+        context = self._core_context()
+        context["effects"] = [
+            {"effect_id": f"Effect {index}", "parameters": []}
+            for index in range(65)
         ]
-        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
-            v3_server_contract.extract_capability_surface(oversized)
-        self.assertEqual(raised.exception.code, "v3_capability_context_limit")
+
+        surface = v3_server_contract.extract_capability_surface(context)
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+
+        self.assertEqual(len(surface.effects), 65)
+        self.assertLess(
+            len(v3_server_contract._canonical_json(tool).encode("utf-8")),
+            v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+        )
+
+    def test_effect_parameters_are_bounded_by_bytes_not_legacy_count(self) -> None:
+        context = self._core_context()
+        context["effects"][0]["parameters"] = [
+            {"parameter_id": f"Parameter {index}", "range": [0, 1]}
+            for index in range(17)
+        ]
+
+        surface = v3_server_contract.extract_capability_surface(context)
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+
+        self.assertEqual(len(surface.effect_by_id["Distortion"].parameters), 17)
+        self.assertLess(
+            len(v3_server_contract._canonical_json(tool).encode("utf-8")),
+            v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+        )
+
+    def test_filesystem_backed_instrument_ids_use_request_byte_budget(self) -> None:
+        instrument_ids = (
+            "/Library/Audio/Plug-Ins/VST3/"
+            + "/Deeply Nested Vendor Folder" * 8
+            + "/Large Instrument.vst3",
+            "sfz_asset:/Users/customer/Music/Mixroom/Generated Samplers/"
+            + "/Long Project Folder" * 8
+            + "/instrument.sfz",
+        )
+
+        for instrument_id in instrument_ids:
+            with self.subTest(instrument_id=instrument_id):
+                self.assertGreater(
+                    len(instrument_id), v3_server_contract.MAX_IDENTIFIER_CHARS
+                )
+                context = self._core_context()
+                context["rows"][0]["instrument_id"] = instrument_id
+                context["clips"][0]["instrument_id"] = instrument_id
+                context["instruments"] = [instrument_id]
+                context["instrument_catalog"] = [
+                    {
+                        "instrument_id": instrument_id,
+                        "name": "Filesystem-backed instrument",
+                        "playable_pitch_ranges": [{"low": 0, "high": 127}],
+                    }
+                ]
+                body = {
+                    "request_contract": v3_server_contract.REQUEST_CONTRACT,
+                    "original_request": "Keep using this instrument.",
+                    "conversation": [],
+                    "core_context": context,
+                    "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+                    "supported_command_types": ["row.set_instrument"],
+                    "resource_refs_enabled": False,
+                }
+
+                validated_request = v3_server_contract.validate_context_request(
+                    body,
+                    raw_body_bytes=len(
+                        v3_server_contract._canonical_json(body).encode("utf-8")
+                    ),
+                )
+                surface = validated_request["capability_surface"]
+                self.assertEqual(surface.instrument_ids, frozenset({instrument_id}))
+                self.assertIn(instrument_id, surface.instrument_by_id)
+
+                plan = {
+                    "schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+                    "outcome": "plan",
+                    "user_message": "Kept the selected instrument.",
+                    "commands": [
+                        {
+                            "command_id": "keep-instrument",
+                            "type": "row.set_instrument",
+                            "arguments": {
+                                "row_id": 101,
+                                "instrument_id": instrument_id,
+                            },
+                        }
+                    ],
+                    "question_options": [],
+                }
+                for resource_refs_enabled in (False, True):
+                    with self.subTest(
+                        instrument_id=instrument_id,
+                        resource_refs_enabled=resource_refs_enabled,
+                    ):
+                        validated_plan = (
+                            v3_server_contract.parse_and_validate_provider_plan(
+                                self._provider_payload(plan),
+                                command_types={"row.set_instrument"},
+                                resource_refs_enabled=resource_refs_enabled,
+                                capability_surface=surface,
+                            )
+                        )
+                        self.assertEqual(validated_plan, plan)
+
+                        invented_plan = copy.deepcopy(plan)
+                        invented_plan["commands"][0]["arguments"][
+                            "instrument_id"
+                        ] = instrument_id + ".invented"
+                        with self.assertRaises(
+                            v3_server_contract.V3ContractError
+                        ) as raised:
+                            v3_server_contract.parse_and_validate_provider_plan(
+                                self._provider_payload(invented_plan),
+                                command_types={"row.set_instrument"},
+                                resource_refs_enabled=resource_refs_enabled,
+                                capability_surface=surface,
+                            )
+                        self.assertEqual(
+                            raised.exception.code,
+                            "v3_plan_capability_invalid",
+                        )
 
     def test_free_context_accepts_preserved_paid_instrument_state(self) -> None:
         surface = v3_server_contract.extract_capability_surface(
@@ -1751,7 +1996,7 @@ class V3ServerContractTests(unittest.TestCase):
                 resource_refs_enabled=False,
                 capability_surface=surface,
             )
-        self.assertEqual(raised.exception.code, "v3_plan_schema_invalid")
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
 
     def test_free_plan_cannot_create_row_above_creation_limit(self) -> None:
         surface = v3_server_contract.extract_capability_surface(
@@ -1784,15 +2029,18 @@ class V3ServerContractTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "v3_plan_row_capacity_exceeded")
 
-    def test_runtime_schema_contains_only_tier_filtered_capabilities(self) -> None:
+    def test_runtime_schema_does_not_embed_effect_capabilities(self) -> None:
         tool = v3_server_contract.build_submit_plan_tool(
             command_types={"effect.ensure_configured", "row.create"},
             resource_refs_enabled=False,
             capability_surface=self._surface(),
         )
         encoded = json.dumps(tool)
-        self.assertIn('"Distortion"', encoded)
-        self.assertIn('"free-piano"', encoded)
+        self.assertIn("Distortion", self._surface().effect_by_id)
+        self.assertNotIn('"Distortion"', encoded)
+        self.assertNotIn('"HPF Frequency"', encoded)
+        self.assertIn("free-piano", self._surface().instrument_ids)
+        self.assertNotIn('"free-piano"', encoded)
         self.assertNotIn("Paid Plugin", encoded)
         self.assertNotIn("paid-piano", encoded)
         self.assertLess(
@@ -1816,6 +2064,327 @@ class V3ServerContractTests(unittest.TestCase):
             capability_surface=reduced_surface,
         )
         self.assertNotEqual(first_fingerprint, second_fingerprint)
+
+    def test_large_effect_catalog_does_not_expand_runtime_schema(self) -> None:
+        small_context = self._core_context()
+        large_context = copy.deepcopy(small_context)
+        large_context["effects"].extend(
+            {
+                "effect_id": f"Synthetic Effect {effect_index}",
+                "parameters": [
+                    {
+                        "parameter_id": f"Parameter {parameter_index}",
+                        "range": [0, 1],
+                    }
+                    for parameter_index in range(16)
+                ],
+            }
+            for effect_index in range(64)
+        )
+        small_surface = v3_server_contract.extract_capability_surface(
+            small_context
+        )
+        large_surface = v3_server_contract.extract_capability_surface(
+            large_context
+        )
+
+        self.assertLess(
+            len(v3_server_contract._canonical_json(large_context).encode("utf-8")),
+            v3_server_contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES,
+        )
+        for resource_refs_enabled in (False, True):
+            with self.subTest(resource_refs_enabled=resource_refs_enabled):
+                small_tool = v3_server_contract.build_submit_plan_tool(
+                    command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+                    resource_refs_enabled=resource_refs_enabled,
+                    capability_surface=small_surface,
+                )
+                large_tool = v3_server_contract.build_submit_plan_tool(
+                    command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+                    resource_refs_enabled=resource_refs_enabled,
+                    capability_surface=large_surface,
+                )
+
+                self.assertEqual(large_tool, small_tool)
+                self.assertLess(
+                    len(
+                        v3_server_contract._canonical_json(large_tool).encode(
+                            "utf-8"
+                        )
+                    ),
+                    v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+                )
+
+    def test_large_library_does_not_expand_runtime_schema(self) -> None:
+        context = self._core_context()
+        context["rows"][0].update({"lane_kind": "audio", "instrument_id": None})
+        context["clips"][0].update(
+            {"kind": "audio", "instrument_id": "", "source_available": True}
+        )
+        context["instruments"] = []
+        context["instrument_catalog"] = []
+        context["library_assets"] = [
+            {"asset_id": f"sample:{index:016x}"} for index in range(20000)
+        ]
+        surface = v3_server_contract.extract_capability_surface(context)
+        single_asset_context = copy.deepcopy(context)
+        single_asset_context["library_assets"] = context["library_assets"][:1]
+        single_asset_surface = v3_server_contract.extract_capability_surface(
+            single_asset_context
+        )
+
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=surface,
+        )
+        single_asset_tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=single_asset_surface,
+        )
+
+        def asset_id_schemas(value):
+            if isinstance(value, list):
+                for child in value:
+                    yield from asset_id_schemas(child)
+                return
+            if not isinstance(value, dict):
+                return
+            properties = value.get("properties")
+            if isinstance(properties, dict) and isinstance(
+                properties.get("asset_id"), dict
+            ):
+                yield properties["asset_id"]
+            for child in value.values():
+                yield from asset_id_schemas(child)
+
+        self.assertEqual(tool, single_asset_tool)
+        self.assertTrue(list(asset_id_schemas(tool)))
+        self.assertTrue(
+            all("enum" not in schema for schema in asset_id_schemas(tool))
+        )
+        self.assertLess(
+            len(v3_server_contract._canonical_json(tool).encode("utf-8")),
+            v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+        )
+
+    def test_large_project_resource_ids_do_not_expand_runtime_schema(self) -> None:
+        def project_context(resource_count: int) -> dict:
+            context = self._dynamic_context(row_count=resource_count)
+            instrument_ids = [
+                f"instrument-{index}" for index in range(2, resource_count + 1, 2)
+            ]
+            context["rows"] = [
+                {
+                    "row_id": index,
+                    "lane_kind": "instrument" if index % 2 == 0 else "audio",
+                    "instrument_id": (
+                        f"instrument-{index}" if index % 2 == 0 else ""
+                    ),
+                    "mix_processing_supported": True,
+                    "has_usable_signal": True,
+                    "effects": [{"effect_instance_id": f"effect-instance-{index}"}],
+                }
+                for index in range(1, resource_count + 1)
+            ]
+            context["clips"] = [
+                {
+                    "clip_id": f"clip-{index}",
+                    "row_id": index,
+                    "kind": "midi" if index % 2 == 0 else "audio",
+                    "instrument_id": (
+                        f"instrument-{index}" if index % 2 == 0 else ""
+                    ),
+                    "length_beats": 8,
+                    "midi_notes": [],
+                }
+                for index in range(1, resource_count + 1)
+            ]
+            context["groups"] = [
+                {
+                    "group_id": f"group-{index}",
+                    "member_row_ids": [index, index + 1],
+                }
+                for index in range(1, resource_count, 2)
+            ]
+            context["instruments"] = instrument_ids
+            context["instrument_catalog"] = [
+                {
+                    "instrument_id": instrument_id,
+                    "name": instrument_id,
+                    "playable_pitch_ranges": [{"low": 0, "high": 127}],
+                }
+                for instrument_id in instrument_ids
+            ]
+            return context
+
+        small_context = project_context(2)
+        large_context = project_context(3_000)
+        large_body = {
+            "request_contract": v3_server_contract.REQUEST_CONTRACT,
+            "original_request": "Mix the project.",
+            "conversation": [],
+            "core_context": large_context,
+            "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+            "supported_command_types": sorted(
+                v3_server_contract.SERVER_COMMAND_TYPES
+            ),
+            "resource_refs_enabled": True,
+        }
+        large_body_bytes = len(
+            v3_server_contract._canonical_json(large_body).encode("utf-8")
+        )
+        validated = v3_server_contract.validate_context_request(
+            large_body,
+            raw_body_bytes=large_body_bytes,
+        )
+        small_tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=v3_server_contract.extract_capability_surface(
+                small_context
+            ),
+        )
+        large_tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=validated["capability_surface"],
+        )
+
+        self.assertLess(
+            len(v3_server_contract._canonical_json(large_context).encode("utf-8")),
+            v3_server_contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES,
+        )
+        self.assertEqual(large_tool, small_tool)
+        self.assertLess(
+            len(v3_server_contract._canonical_json(large_tool).encode("utf-8")),
+            v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+        )
+
+        identifier_fields = {
+            "asset_id",
+            "clip_id",
+            "effect_instance_id",
+            "group_id",
+            "instrument_id",
+            "row_id",
+        }
+
+        def identifier_schemas(value):
+            if isinstance(value, list):
+                for child in value:
+                    yield from identifier_schemas(child)
+                return
+            if not isinstance(value, dict):
+                return
+            properties = value.get("properties")
+            if isinstance(properties, dict):
+                for name in identifier_fields:
+                    schema = properties.get(name)
+                    if isinstance(schema, dict):
+                        yield name, schema
+                row_ids = properties.get("row_ids")
+                if isinstance(row_ids, dict) and isinstance(
+                    row_ids.get("items"), dict
+                ):
+                    yield "row_ids", row_ids["items"]
+            for child in value.values():
+                yield from identifier_schemas(child)
+
+        schemas = list(identifier_schemas(large_tool))
+        self.assertTrue(identifier_fields.issubset({name for name, _ in schemas}))
+        self.assertTrue(all("enum" not in schema for _, schema in schemas))
+
+    def test_library_asset_ids_are_still_validated_at_runtime(self) -> None:
+        context = self._core_context()
+        context["rows"][0].update({"lane_kind": "audio", "instrument_id": None})
+        context["clips"][0].update(
+            {"kind": "audio", "instrument_id": "", "source_available": True}
+        )
+        context["instruments"] = []
+        context["instrument_catalog"] = []
+        surface = v3_server_contract.extract_capability_surface(context)
+
+        def plan(asset_id: str) -> dict:
+            return {
+                "schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+                "outcome": "plan",
+                "user_message": "Replaced the sample.",
+                "commands": [
+                    {
+                        "command_id": "replace-sample",
+                        "type": "sample.replace",
+                        "arguments": {
+                            "clip_id": "clip-1",
+                            "asset_id": asset_id,
+                        },
+                    }
+                ],
+                "question_options": [],
+            }
+
+        validated = v3_server_contract.parse_and_validate_provider_plan(
+            self._provider_payload(plan("asset-1")),
+            command_types={"sample.replace"},
+            resource_refs_enabled=False,
+            capability_surface=surface,
+        )
+        self.assertEqual(validated, plan("asset-1"))
+
+        with self.assertRaises(v3_server_contract.V3ContractError) as raised:
+            v3_server_contract.parse_and_validate_provider_plan(
+                self._provider_payload(plan("invented-asset")),
+                command_types={"sample.replace"},
+                resource_refs_enabled=False,
+                capability_surface=surface,
+            )
+        self.assertEqual(raised.exception.code, "v3_plan_capability_invalid")
+
+    def test_large_selectable_instrument_catalog_fits_runtime_schema(self) -> None:
+        context = self._dynamic_context()
+        instrument_ids = [f"instrument-{index:03d}" for index in range(452)]
+        context["instruments"] = instrument_ids
+        context["instrument_catalog"] = [
+            {
+                "instrument_id": instrument_id,
+                "name": f"Instrument {index}",
+                "playable_pitch_ranges": [{"low": 0, "high": 127}],
+            }
+            for index, instrument_id in enumerate(instrument_ids)
+        ]
+        body = {
+            "request_contract": v3_server_contract.REQUEST_CONTRACT,
+            "original_request": "Create an instrument row.",
+            "conversation": [],
+            "core_context": context,
+            "plan_schema_version": v3_server_contract.PLAN_SCHEMA_VERSION,
+            "supported_command_types": sorted(
+                v3_server_contract.SERVER_COMMAND_TYPES
+            ),
+            "resource_refs_enabled": True,
+        }
+        validated = v3_server_contract.validate_context_request(
+            body,
+            raw_body_bytes=len(
+                v3_server_contract._canonical_json(body).encode("utf-8")
+            ),
+        )
+
+        tool = v3_server_contract.build_submit_plan_tool(
+            command_types=v3_server_contract.SERVER_COMMAND_TYPES,
+            resource_refs_enabled=True,
+            capability_surface=validated["capability_surface"],
+        )
+
+        self.assertEqual(
+            validated["capability_surface"].instrument_ids,
+            frozenset(instrument_ids),
+        )
+        self.assertLess(
+            len(v3_server_contract._canonical_json(tool).encode("utf-8")),
+            v3_server_contract.MAX_RUNTIME_TOOL_BYTES,
+        )
 
     def test_runtime_mix_schema_excludes_intents_missing_required_effects(self) -> None:
         free_effects = {
@@ -2400,7 +2969,7 @@ class V3ServerContractTests(unittest.TestCase):
                         v3_server_contract.validate_plan_capabilities(plan, surface)
                     self.assertEqual(raised.exception.code, case["backend_error"])
 
-    def test_runtime_schema_excludes_wrong_typed_targets(self) -> None:
+    def test_runtime_schema_does_not_embed_typed_target_ids(self) -> None:
         fixture_path = (
             ROOT.parents[1] / "test" / "fixtures" / "ai_v3_state_contract_cases.json"
         )
@@ -2416,9 +2985,9 @@ class V3ServerContractTests(unittest.TestCase):
             variant["properties"]["type"]["enum"][0]: json.dumps(variant)
             for variant in variants
         }
-        self.assertIn('"enum": [2]', encoded_by_type["row.set_instrument"])
+        self.assertNotIn('"enum": [2]', encoded_by_type["row.set_instrument"])
         self.assertNotIn('"enum": [1, 2]', encoded_by_type["row.set_instrument"])
-        self.assertIn(
+        self.assertNotIn(
             '"enum": ["midi-clip"]', encoded_by_type["midi.replace_notes"]
         )
         self.assertNotIn("audio-clip", encoded_by_type["midi.replace_notes"])
@@ -2439,7 +3008,7 @@ class V3ServerContractTests(unittest.TestCase):
         self.assertIn('"clip_ref"', encoded)
         self.assertNotIn('"clip_id"', encoded)
 
-    def test_runtime_schema_constrains_direct_audio_target_with_resource_refs(self) -> None:
+    def test_runtime_schema_keeps_direct_audio_target_without_embedding_ids(self) -> None:
         context = self._core_context()
         context["project"]["row_capacity"]["current_rows"] = 2
         context["rows"].append(
@@ -2472,7 +3041,8 @@ class V3ServerContractTests(unittest.TestCase):
         self.assertIsNotNone(variant)
         encoded = json.dumps(variant)
         self.assertIn('"clip_ref"', encoded)
-        self.assertIn('"enum": ["audio-clip"]', encoded)
+        self.assertIn('"clip_id"', encoded)
+        self.assertNotIn('"enum": ["audio-clip"]', encoded)
         self.assertNotIn('"enum": ["clip-1"]', encoded)
 
     def test_runtime_schema_preserves_generated_clip_consumers(self) -> None:
@@ -3072,7 +3642,7 @@ class V3ServerContractTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "v3_plan_target_type_invalid")
 
-    def test_runtime_mix_targets_include_only_ready_stable_rows_and_groups(self) -> None:
+    def test_runtime_mix_targets_do_not_embed_ready_resource_ids(self) -> None:
         surface = v3_server_contract.extract_capability_surface(
             self._readiness_context()
         )
@@ -3084,10 +3654,8 @@ class V3ServerContractTests(unittest.TestCase):
             target for target in targets if "group_id" in target.get("properties", {})
         )
 
-        self.assertEqual(direct_row["properties"]["row_id"]["enum"], [101])
-        self.assertEqual(
-            direct_group["properties"]["group_id"]["enum"], ["mixed"]
-        )
+        self.assertNotIn("enum", direct_row["properties"]["row_id"])
+        self.assertNotIn("enum", direct_group["properties"]["group_id"])
 
     def test_semantic_mix_readiness_rejects_unready_direct_targets(self) -> None:
         surface = v3_server_contract.extract_capability_surface(

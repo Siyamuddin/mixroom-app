@@ -1,12 +1,13 @@
 import 'dart:collection';
-import 'dart:io';
 import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:mixroom/helpers/effect_parameter_exposure.dart';
 import 'package:mixroom/models/models.dart';
 import 'package:juce_audio_engine/juce_audio_engine.dart';
 
 import '../models/project_state.dart';
+import 'ai_file_metadata.dart';
 import 'instrument_classifier.dart';
 import 'producer_plugin_identity.dart';
 
@@ -26,6 +27,198 @@ const Map<String, double> _kFallbackPromptRoleProbs = <String, double>{
   'synth': 0.16,
   'other': 0.16,
 };
+const Map<String, double> _kFallbackPromptAudioStats = <String, double>{
+  'centroid_hz': 0,
+  'zcr': 0,
+  'hf_rms': 0,
+  'st_rms_mean': 0,
+  'st_rms_p95': 0,
+  'st_rms_std': 0,
+  'transient_density': 0,
+  'true_peak_dbfs': -120,
+  'integrated_lufs_est': -120,
+  'short_lufs_mean': -120,
+  'short_lufs_p95': -120,
+  'lra_est': 0,
+  'clip_ratio': 0,
+  'spectral_flatness': 0,
+  'spectral_rolloff_hz': 0,
+  'spectral_slope': 0,
+  'spectral_flux': 0,
+  'spectral_bandwidth_hz': 0,
+  'silence_ratio': 0,
+  'activity_ratio': 0,
+  'onset_rate_hz': 0,
+  'noise_floor_dbfs': -120,
+  'phase_corr': 1,
+  'side_ratio': 0,
+  'stereo_imbalance': 0,
+  'low': 0,
+  'lowmid': 0,
+  'mid': 0,
+  'high': 0,
+  'sibilance': 0,
+  'bassiness': 0,
+  'key_pc_0': 0,
+  'key_pc_1': 0,
+  'key_pc_2': 0,
+  'key_pc_3': 0,
+  'key_pc_4': 0,
+  'key_pc_5': 0,
+  'key_pc_6': 0,
+  'key_pc_7': 0,
+  'key_pc_8': 0,
+  'key_pc_9': 0,
+  'key_pc_10': 0,
+  'key_pc_11': 0,
+};
+
+typedef CombinedPromptAnalysisProvider = Future<Map<String, dynamic>> Function(
+  String path, {
+  double trimStartMs,
+  double? trimEndMs,
+});
+
+class ProjectStateBuildMetrics {
+  int _clipCount = 0;
+  int _audioClipCount = 0;
+  int _midiClipCount = 0;
+  int _uniqueSourcePathCount = 0;
+  int _uniqueAnalysisKeyCount = 0;
+  int _effectStateMs = 0;
+  int _cacheLookupMs = 0;
+  int _decodeMs = 0;
+  int _classificationMs = 0;
+  int _stereoAnalysisMs = 0;
+  int _audioStatsMs = 0;
+  int _rowAggregationMs = 0;
+  int _combinedNativeAnalysisMs = 0;
+  int _combinedNativeFallbackMs = 0;
+  int _cacheHitCount = 0;
+  int _cacheMissCount = 0;
+  int _decodeCallCount = 0;
+  int _decodeFailureCount = 0;
+  int _classificationCallCount = 0;
+  int _classificationFailureCount = 0;
+  int _stereoAnalysisCallCount = 0;
+  int _stereoAnalysisFailureCount = 0;
+  int _combinedNativeAnalysisCallCount = 0;
+  int _combinedNativeAnalysisFailureCount = 0;
+  int _combinedNativeFallbackCount = 0;
+
+  void recordInventory(Iterable<AudioTrack> tracks) {
+    final sourcePaths = <String>{};
+    final analysisKeys = <String>{};
+    for (final track in tracks) {
+      _clipCount++;
+      if (track.isMidi) {
+        _midiClipCount++;
+      } else {
+        _audioClipCount++;
+      }
+      final normalizedPath = normalizeAiFilePath(track.file.path);
+      sourcePaths.add(normalizedPath);
+      analysisKeys.add(
+        '$normalizedPath|${track.trimStart.inMilliseconds}|${track.trimEnd.inMilliseconds}',
+      );
+    }
+    _uniqueSourcePathCount = sourcePaths.length;
+    _uniqueAnalysisKeyCount = analysisKeys.length;
+  }
+
+  void addEffectStateMs(int elapsedMs) => _effectStateMs += elapsedMs;
+
+  void recordCacheLookup({required int elapsedMs, required bool hit}) {
+    _cacheLookupMs += elapsedMs;
+    if (hit) {
+      _cacheHitCount++;
+    } else {
+      _cacheMissCount++;
+    }
+  }
+
+  void recordDecode({required int elapsedMs, required bool failed}) {
+    _decodeMs += elapsedMs;
+    _decodeCallCount++;
+    if (failed) _decodeFailureCount++;
+  }
+
+  void recordClassification({required int elapsedMs, required bool failed}) {
+    _classificationMs += elapsedMs;
+    _classificationCallCount++;
+    if (failed) _classificationFailureCount++;
+  }
+
+  void recordStereoAnalysis({required int elapsedMs, required bool failed}) {
+    _stereoAnalysisMs += elapsedMs;
+    _stereoAnalysisCallCount++;
+    if (failed) _stereoAnalysisFailureCount++;
+  }
+
+  void addAudioStatsMs(int elapsedMs) => _audioStatsMs += elapsedMs;
+
+  void addRowAggregationMs(int elapsedMs) => _rowAggregationMs += elapsedMs;
+
+  void recordCombinedNativeAnalysis({
+    required int elapsedMs,
+    required bool failed,
+  }) {
+    _combinedNativeAnalysisMs += elapsedMs;
+    _combinedNativeAnalysisCallCount++;
+    if (failed) _combinedNativeAnalysisFailureCount++;
+  }
+
+  void recordMobileNativeAnalysis({
+    required int elapsedMs,
+    required bool failed,
+  }) => recordCombinedNativeAnalysis(elapsedMs: elapsedMs, failed: failed);
+
+  void recordCombinedNativeFallback({required int elapsedMs}) {
+    _combinedNativeFallbackMs += elapsedMs;
+    _combinedNativeFallbackCount++;
+  }
+
+  Map<String, dynamic> toObservability({
+    required int totalMs,
+  }) => <String, dynamic>{
+    'project_stats_ms': totalMs,
+    'project_effect_state_ms': _effectStateMs,
+    'project_analysis_cache_lookup_ms': _cacheLookupMs,
+    'project_audio_decode_ms': _decodeMs,
+    'project_role_classification_ms': _classificationMs,
+    'project_stereo_analysis_ms': _stereoAnalysisMs,
+    'project_audio_stats_ms': _audioStatsMs,
+    'project_row_aggregation_ms': _rowAggregationMs,
+    'project_combined_native_analysis_ms': _combinedNativeAnalysisMs,
+    'project_combined_native_analysis_fallback_ms': _combinedNativeFallbackMs,
+    // Compatibility aliases for reports produced before macOS used the
+    // combined native analyzer.
+    'project_mobile_native_analysis_ms': _combinedNativeAnalysisMs,
+    'project_clip_count': _clipCount,
+    'project_audio_clip_count': _audioClipCount,
+    'project_midi_clip_count': _midiClipCount,
+    'project_unique_source_path_count': _uniqueSourcePathCount,
+    'project_unique_analysis_key_count': _uniqueAnalysisKeyCount,
+    'project_analysis_cache_hit_count': _cacheHitCount,
+    'project_analysis_cache_miss_count': _cacheMissCount,
+    'project_audio_decode_call_count': _decodeCallCount,
+    'project_audio_decode_failure_count': _decodeFailureCount,
+    'project_role_classification_call_count': _classificationCallCount,
+    'project_role_classification_failure_count': _classificationFailureCount,
+    'project_stereo_analysis_call_count': _stereoAnalysisCallCount,
+    'project_stereo_analysis_failure_count': _stereoAnalysisFailureCount,
+    'project_combined_native_analysis_call_count':
+        _combinedNativeAnalysisCallCount,
+    'project_combined_native_analysis_failure_count':
+        _combinedNativeAnalysisFailureCount,
+    'project_combined_native_analysis_fallback_count':
+        _combinedNativeFallbackCount,
+    'project_mobile_native_analysis_call_count':
+        _combinedNativeAnalysisCallCount,
+    'project_mobile_native_analysis_failure_count':
+        _combinedNativeAnalysisFailureCount,
+  };
+}
 
 class ProjectStateBuilder {
   static const int _kMaxPersistentNativePromptAnalysisEntries = 256;
@@ -33,29 +226,28 @@ class ProjectStateBuilder {
 
   final InstrumentClassifier classifier;
   final int maxRows;
+  final TargetPlatform? targetPlatformOverride;
+  final bool? useCombinedNativeAnalysisOverride;
+  final CombinedPromptAnalysisProvider combinedPromptAnalysisProvider;
   final LinkedHashMap<String, _CachedNativePromptAnalysis>
       _persistentNativePromptAnalysis = LinkedHashMap();
   final LinkedHashMap<String, _CachedClipPromptAnalysis>
       _persistentClipPromptAnalysis = LinkedHashMap();
 
-  ProjectStateBuilder({required this.classifier, this.maxRows = 0});
-
-  String _clipPathSignature(String path) {
-    try {
-      final stat = FileStat.statSync(path);
-      return '$path|${stat.modified.millisecondsSinceEpoch}|${stat.size}';
-    } catch (_) {
-      return '$path|unavailable';
-    }
-  }
+  ProjectStateBuilder({
+    required this.classifier,
+    this.maxRows = 0,
+    this.targetPlatformOverride,
+    this.useCombinedNativeAnalysisOverride,
+    CombinedPromptAnalysisProvider? combinedPromptAnalysisProvider,
+  }) : combinedPromptAnalysisProvider =
+           combinedPromptAnalysisProvider ??
+           JuceAudioEngine.analyzeAudioForPrompt;
 
   String _promptAnalysisCacheKey(AudioTrack track) =>
       '${track.file.path}|${track.trimStart.inMilliseconds}|${track.trimEnd.inMilliseconds}';
 
-  String _promptAnalysisSignature(
-    String baseSignature,
-    AudioTrack track,
-  ) =>
+  String _promptAnalysisSignature(String baseSignature, AudioTrack track) =>
       '$baseSignature|${track.trimStart.inMilliseconds}|${track.trimEnd.inMilliseconds}';
 
   Map<String, dynamic>? _loadPersistentNativePromptAnalysis(
@@ -132,7 +324,20 @@ class ProjectStateBuilder {
     Map<int, String> roleOverrides = const {},
     List<TimelineRow> timelineRows = const <TimelineRow>[],
     List<TrackGroup> trackGroups = const <TrackGroup>[],
+    AiFileMetadataResolution? fileMetadata,
+    ProjectStateBuildMetrics? buildMetrics,
   }) async {
+    buildMetrics?.recordInventory(audioTracks);
+    final resolvedFileMetadata =
+        fileMetadata ??
+        await resolveAiFileMetadata(audioTracks.map((track) => track.file));
+
+    String clipPathSignature(String path) =>
+        resolvedFileMetadata
+            .byNormalizedPath[normalizeAiFilePath(path)]
+            ?.analysisSignature ??
+        '${normalizeAiFilePath(path)}|unavailable';
+
     int inferredRows = 0;
     if (rowGain.length > inferredRows) inferredRows = rowGain.length;
     if (rowPan.length > inferredRows) inferredRows = rowPan.length;
@@ -194,24 +399,32 @@ class ProjectStateBuilder {
       if (row < 0 || row >= effectiveMaxRows) continue;
 
       final startMs = t.offset * 1000.0;
-      final durMs =
-          (t.trimEnd - t.trimStart).inMilliseconds.toDouble().clamp(0.0, 1e12);
+      final durMs = (t.trimEnd - t.trimStart).inMilliseconds.toDouble().clamp(
+        0.0,
+        1e12,
+      );
       final endMs = startMs + durMs;
 
-      clipsByRow[row].add(ClipState(
+      clipsByRow[row].add(
+        ClipState(
         startMs: startMs,
         endMs: endMs,
         fileName: fileName,
         gain0to3: t.gain,
         pitchSemitones: t.pitchSemitones,
-      ));
+        ),
+      );
       clipDurMsByRow[row].add(durMs);
     }
 
     final overlap = List.generate(
-        effectiveMaxRows, (_) => List.filled(effectiveMaxRows, 0));
+      effectiveMaxRows,
+      (_) => List.filled(effectiveMaxRows, 0),
+    );
     final overlapRatio = List.generate(
-        effectiveMaxRows, (_) => List<double>.filled(effectiveMaxRows, 0.0));
+      effectiveMaxRows,
+      (_) => List<double>.filled(effectiveMaxRows, 0.0),
+    );
     for (var i = 0; i < effectiveMaxRows; i++) {
       for (var j = 0; j < effectiveMaxRows; j++) {
         if (i == j) continue;
@@ -226,12 +439,152 @@ class ProjectStateBuilder {
     final monoStatsCache = <String, Map<String, double>>{};
     final stereoStatsCache = <String, Map<String, double>>{};
     final nativePromptAnalysisCache = <String, Map<String, dynamic>>{};
-    final clipPathSignatureCache = <String, String>{};
     final keyAudioStatsByAnalysisKey = <String, Map<String, double>>{};
+    final targetPlatform = targetPlatformOverride ?? defaultTargetPlatform;
+    final usesCombinedNativeAnalysis =
+        useCombinedNativeAnalysisOverride ??
+        (targetPlatform == TargetPlatform.android ||
+            targetPlatform == TargetPlatform.iOS ||
+            targetPlatform == TargetPlatform.macOS);
+    final validatesCombinedNativeAnalysis =
+        targetPlatform == TargetPlatform.macOS;
+
+    Future<
+      ({
+        Map<String, double> probs,
+        Map<String, double> stats,
+        Map<String, double> stereoStats,
+      })
+    >
+    analyzeWithLegacyDesktopPath(AudioTrack clip) async {
+      final clipPath = clip.file.path;
+      final analysisKey = _promptAnalysisCacheKey(clip);
+      Map<String, double>? probs = roleProbCache[analysisKey];
+      Map<String, double>? stereoStats = stereoStatsCache[clipPath];
+      Map<String, double>? stats = monoStatsCache[analysisKey];
+      final baseSignature = clipPathSignature(clipPath);
+      final signature = _promptAnalysisSignature(baseSignature, clip);
+      final cacheLookupStopwatch = Stopwatch()..start();
+      final persistentAnalysis = _loadPersistentClipPromptAnalysis(
+        analysisKey,
+        signature,
+      );
+      cacheLookupStopwatch.stop();
+      buildMetrics?.recordCacheLookup(
+        elapsedMs: cacheLookupStopwatch.elapsedMilliseconds,
+        hit: persistentAnalysis != null,
+      );
+      if (persistentAnalysis != null) {
+        probs = persistentAnalysis.roleProbs;
+        stats = persistentAnalysis.audioStats;
+        stereoStats = persistentAnalysis.stereoStats;
+        roleProbCache[analysisKey] = probs;
+        monoStatsCache[analysisKey] = stats;
+        stereoStatsCache[clipPath] = stereoStats;
+      }
+
+      List<double>? pcm = monoPcmCache[clipPath];
+      if (pcm == null && (probs == null || stats == null)) {
+        final decodeStopwatch = Stopwatch()..start();
+        var decodeFailed = false;
+        try {
+          final pcmRaw = await JuceAudioEngine.decodeAudioMono16kForAnalysis(
+            clipPath,
+            maxOutputSamples: _kProjectAnalysisMaxMono16kSamples,
+          );
+          pcm = _toDoubleList(pcmRaw);
+        } catch (error) {
+          decodeFailed = true;
+          debugPrint(
+            'ProjectStateBuilder: decodeAudioMono16kForAnalysis failed: $error',
+          );
+          pcm = const <double>[];
+        } finally {
+          decodeStopwatch.stop();
+          buildMetrics?.recordDecode(
+            elapsedMs: decodeStopwatch.elapsedMilliseconds,
+            failed: decodeFailed,
+          );
+        }
+        monoPcmCache[clipPath] = pcm;
+      }
+
+      if (probs == null) {
+        final classificationStopwatch = Stopwatch()..start();
+        var classificationFailed = false;
+        try {
+          final pcmForAnalysis = _sparsePromptAnalysisSlice(
+            pcm ?? const <double>[],
+            trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
+            trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
+          );
+          final Float32List pcmF32 = Float32List.fromList(
+            pcmForAnalysis.map((x) => x.toDouble()).toList(growable: false),
+          );
+          probs = await classifier.classifyAudio(pcmF32);
+        } catch (_) {
+          classificationFailed = true;
+          rethrow;
+        } finally {
+          classificationStopwatch.stop();
+          buildMetrics?.recordClassification(
+            elapsedMs: classificationStopwatch.elapsedMilliseconds,
+            failed: classificationFailed,
+          );
+        }
+        roleProbCache[analysisKey] = probs;
+      }
+
+      if (stereoStats == null) {
+        final stereoAnalysisStopwatch = Stopwatch()..start();
+        var stereoAnalysisFailed = false;
+        try {
+          stereoStats = await JuceAudioEngine.analyzeAudioStereo16k(clipPath);
+        } catch (error) {
+          stereoAnalysisFailed = true;
+          debugPrint(
+            'ProjectStateBuilder: analyzeAudioStereo16k failed: $error',
+          );
+          stereoStats = const <String, double>{};
+        } finally {
+          stereoAnalysisStopwatch.stop();
+          buildMetrics?.recordStereoAnalysis(
+            elapsedMs: stereoAnalysisStopwatch.elapsedMilliseconds,
+            failed: stereoAnalysisFailed,
+          );
+        }
+        stereoStatsCache[clipPath] = stereoStats;
+      }
+
+      if (stats == null) {
+        final audioStatsStopwatch = Stopwatch()..start();
+        stats = _analyzePcm16k(
+          _sparsePromptAnalysisSlice(
+            pcm ?? const <double>[],
+            trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
+            trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
+          ),
+          stereoStats: stereoStats,
+        );
+        audioStatsStopwatch.stop();
+        buildMetrics?.addAudioStatsMs(audioStatsStopwatch.elapsedMilliseconds);
+        monoStatsCache[analysisKey] = stats;
+      }
+
+      _storePersistentClipPromptAnalysis(
+        analysisKey,
+        signature,
+        roleProbs: probs,
+        audioStats: stats,
+        stereoStats: stereoStats,
+      );
+      return (probs: probs, stats: stats, stereoStats: stereoStats);
+    }
 
     final rows = <RowState>[];
     for (var row = 0; row < effectiveMaxRows; row++) {
       final effects = <EffectState>[];
+      final effectStateStopwatch = Stopwatch()..start();
 
       final names = await JuceAudioEngine.getTrackEffectsForRow(
         row,
@@ -252,7 +605,9 @@ class ProjectStateBuilder {
         effectIds = List<String>.from(names);
       }
       final modelIds = await JuceAudioEngine.getTrackEffectIdsForRow(
-        row, forceIndividualRow: true, modelIdentity: true,
+        row,
+        forceIndividualRow: true,
+        modelIdentity: true,
       );
       for (int i = 0; i < names.length; i++) {
         final params = exposedEffectParameters(
@@ -269,7 +624,9 @@ class ProjectStateBuilder {
             effectIndex: i,
             instanceId: instanceIds[i],
             effectId: effectIds[i],
-            modelPluginId: modelIds.length == names.length ? producerModelPluginId(modelIds[i]) : '',
+            modelPluginId: modelIds.length == names.length
+                ? producerModelPluginId(modelIds[i])
+                : '',
             name: names[i],
             isBypassed: await JuceAudioEngine.getRowEffectBypassState(
               row,
@@ -277,12 +634,17 @@ class ProjectStateBuilder {
               forceIndividualRow: true,
             ),
             parameters: params
-                .map((p) =>
-                    EffectParameterState.fromMap(Map<String, dynamic>.from(p)))
+                .map(
+                  (p) => EffectParameterState.fromMap(
+                    Map<String, dynamic>.from(p),
+                  ),
+                )
                 .toList(),
           ),
         );
       }
+      effectStateStopwatch.stop();
+      buildMetrics?.addEffectStateMs(effectStateStopwatch.elapsedMilliseconds);
 
       final gain0to3 = gainForRow(row);
       final pan = panForRow(row);
@@ -335,7 +697,7 @@ class ProjectStateBuilder {
         'bass': 0,
         'drums': 0,
         'synth': 0,
-        'other': 0
+        'other': 0,
       };
 
       final clipTopRoles = <String>[];
@@ -381,43 +743,83 @@ class ProjectStateBuilder {
         final clip = rowTracks[i];
         final clipPath = clip.file.path;
         final analysisKey = _promptAnalysisCacheKey(clip);
-        final durMs =
-            (i < clipDurMsByRow[row].length) ? clipDurMsByRow[row][i] : 0.0;
+        final durMs = (i < clipDurMsByRow[row].length)
+            ? clipDurMsByRow[row][i]
+            : 0.0;
         final w = durMs.clamp(
-            100.0, 30000.0); // weight by duration, clamp to avoid extremes
+          100.0,
+          30000.0,
+        ); // weight by duration, clamp to avoid extremes
 
         Map<String, double>? probs = roleProbCache[analysisKey];
         Map<String, double>? stereoStats = stereoStatsCache[clipPath];
         Map<String, double>? stats = monoStatsCache[analysisKey];
-        if (defaultTargetPlatform == TargetPlatform.android ||
-            defaultTargetPlatform == TargetPlatform.iOS) {
+        var useLegacyDesktopPath = !usesCombinedNativeAnalysis;
+        Stopwatch? combinedFallbackStopwatch;
+        if (usesCombinedNativeAnalysis) {
           var nativeAnalysis = nativePromptAnalysisCache[analysisKey];
           if (nativeAnalysis == null) {
-            final baseSignature = clipPathSignatureCache.putIfAbsent(
-              clipPath,
-              () => _clipPathSignature(clipPath),
-            );
+            final cacheLookupStopwatch = Stopwatch()..start();
+            final baseSignature = clipPathSignature(clipPath);
             final signature = _promptAnalysisSignature(baseSignature, clip);
-            nativeAnalysis =
-                _loadPersistentNativePromptAnalysis(analysisKey, signature);
+            nativeAnalysis = _loadPersistentNativePromptAnalysis(
+              analysisKey,
+              signature,
+            );
+            cacheLookupStopwatch.stop();
+            buildMetrics?.recordCacheLookup(
+              elapsedMs: cacheLookupStopwatch.elapsedMilliseconds,
+              hit: nativeAnalysis != null,
+            );
           }
           if (nativeAnalysis == null) {
+            final metadata = resolvedFileMetadata
+                .byNormalizedPath[normalizeAiFilePath(clipPath)];
+            final skipUnavailableMacSource =
+                validatesCombinedNativeAnalysis &&
+                (metadata == null || !metadata.available);
+            if (skipUnavailableMacSource) {
+              nativeAnalysis = _fallbackNativePromptAnalysis();
+            } else {
+              final nativeAnalysisStopwatch = Stopwatch()..start();
+              var nativeAnalysisFailed = false;
             try {
-              nativeAnalysis = await JuceAudioEngine.analyzeAudioForPrompt(
+                final rawAnalysis = await combinedPromptAnalysisProvider(
                 clipPath,
                 trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
                 trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
               );
-            } catch (error) {
-              debugPrint(
-                'ProjectStateBuilder: analyzeAudioForPrompt failed for $clipPath: $error',
+                if (validatesCombinedNativeAnalysis) {
+                  nativeAnalysis = _validateCombinedNativePromptAnalysis(
+                    rawAnalysis,
               );
-              nativeAnalysis = const <String, dynamic>{};
+                  nativeAnalysisFailed = nativeAnalysis == null;
+                } else {
+                  nativeAnalysis = rawAnalysis;
             }
-            final baseSignature = clipPathSignatureCache.putIfAbsent(
-              clipPath,
-              () => _clipPathSignature(clipPath),
+              } catch (_) {
+                nativeAnalysisFailed = true;
+                debugPrint(
+                  'ProjectStateBuilder: combined prompt analysis failed; '
+                  'using the desktop fallback.',
+                );
+                nativeAnalysis = null;
+              } finally {
+                nativeAnalysisStopwatch.stop();
+                buildMetrics?.recordCombinedNativeAnalysis(
+                  elapsedMs: nativeAnalysisStopwatch.elapsedMilliseconds,
+                  failed: nativeAnalysisFailed,
             );
+              }
+              if (nativeAnalysis == null && validatesCombinedNativeAnalysis) {
+                useLegacyDesktopPath = true;
+                combinedFallbackStopwatch = Stopwatch()..start();
+              } else {
+                nativeAnalysis ??= const <String, dynamic>{};
+              }
+            }
+            if (nativeAnalysis != null) {
+              final baseSignature = clipPathSignature(clipPath);
             final signature = _promptAnalysisSignature(baseSignature, clip);
             _storePersistentNativePromptAnalysis(
               analysisKey,
@@ -425,6 +827,8 @@ class ProjectStateBuilder {
               nativeAnalysis,
             );
           }
+          }
+          if (nativeAnalysis != null) {
           nativePromptAnalysisCache[analysisKey] = nativeAnalysis;
 
           probs = probs ?? _mapToDoubleMap(nativeAnalysis['roleProbs']);
@@ -435,119 +839,67 @@ class ProjectStateBuilder {
 
           stats = stats ?? _mapToDoubleMap(nativeAnalysis['audioStats']);
           if (stats.isEmpty) {
+              final audioStatsStopwatch = Stopwatch()..start();
             stats = _analyzePcm16k(const <double>[]);
+              audioStatsStopwatch.stop();
+              buildMetrics?.addAudioStatsMs(
+                audioStatsStopwatch.elapsedMilliseconds,
+              );
           }
           monoStatsCache[analysisKey] = stats;
           stereoStats = const <String, double>{};
           stereoStatsCache[clipPath] = stereoStats;
-        } else {
-          final baseSignature = clipPathSignatureCache.putIfAbsent(
-            clipPath,
-            () => _clipPathSignature(clipPath),
-          );
-          final signature = _promptAnalysisSignature(baseSignature, clip);
-          final persistentAnalysis = _loadPersistentClipPromptAnalysis(
-            analysisKey,
-            signature,
-          );
-          if (persistentAnalysis != null) {
-            probs = persistentAnalysis.roleProbs;
-            stats = persistentAnalysis.audioStats;
-            stereoStats = persistentAnalysis.stereoStats;
-            roleProbCache[analysisKey] = probs;
-            monoStatsCache[analysisKey] = stats;
-            stereoStatsCache[clipPath] = stereoStats;
-          }
-
-          List<double>? pcm = monoPcmCache[clipPath];
-          if (pcm == null && (probs == null || stats == null)) {
-            try {
-              final pcmRaw =
-                  await JuceAudioEngine.decodeAudioMono16kForAnalysis(
-                clipPath,
-                maxOutputSamples: _kProjectAnalysisMaxMono16kSamples,
-              );
-              pcm = _toDoubleList(pcmRaw);
-            } catch (error) {
-              debugPrint(
-                'ProjectStateBuilder: decodeAudioMono16kForAnalysis failed for $clipPath: $error',
-              );
-              pcm = const <double>[];
             }
-            monoPcmCache[clipPath] = pcm;
           }
-
-          if (probs == null) {
-            final pcmForAnalysis = _sparsePromptAnalysisSlice(
-              pcm ?? const <double>[],
-              trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
-              trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
+        if (useLegacyDesktopPath) {
+          final legacy = await analyzeWithLegacyDesktopPath(clip);
+          probs = legacy.probs;
+          stats = legacy.stats;
+          stereoStats = legacy.stereoStats;
+          combinedFallbackStopwatch?.stop();
+          if (combinedFallbackStopwatch != null) {
+            buildMetrics?.recordCombinedNativeFallback(
+              elapsedMs: combinedFallbackStopwatch.elapsedMilliseconds,
             );
-            final Float32List pcmF32 = Float32List.fromList(
-              pcmForAnalysis.map((x) => x.toDouble()).toList(growable: false),
-            );
-            probs = await classifier.classifyAudio(pcmF32);
-            roleProbCache[analysisKey] = probs;
           }
-
-          if (stereoStats == null) {
-            try {
-              stereoStats =
-                  await JuceAudioEngine.analyzeAudioStereo16k(clipPath);
-            } catch (error) {
-              debugPrint(
-                'ProjectStateBuilder: analyzeAudioStereo16k failed for $clipPath: $error',
-              );
-              stereoStats = const <String, double>{};
-            }
-            stereoStatsCache[clipPath] = stereoStats;
-          }
-
-          if (stats == null) {
-            stats = _analyzePcm16k(
-              _sparsePromptAnalysisSlice(
-                pcm ?? const <double>[],
-                trimStartMs: clip.trimStart.inMilliseconds.toDouble(),
-                trimEndMs: clip.trimEnd.inMilliseconds.toDouble(),
-              ),
-              stereoStats: stereoStats,
-            );
-            monoStatsCache[analysisKey] = stats;
-          }
-
-          _storePersistentClipPromptAnalysis(
-            analysisKey,
-            signature,
-            roleProbs: probs,
-            audioStats: stats,
-            stereoStats: stereoStats,
-          );
         }
 
-        keyAudioStatsByAnalysisKey[analysisKey] = stats;
+        final resolvedProbs = probs ?? _kFallbackPromptRoleProbs;
+        final resolvedStats = stats ?? _kFallbackPromptAudioStats;
+        keyAudioStatsByAnalysisKey[analysisKey] = resolvedStats;
 
-        probs.forEach((k, v) {
+        final rowAggregationStopwatch = Stopwatch()..start();
+        resolvedProbs.forEach((k, v) {
           rowRoleAccum[k] = (rowRoleAccum[k] ?? 0) + v;
         });
 
-        final topRole = _topRoleFromProbs(probs);
+        final topRole = _topRoleFromProbs(resolvedProbs);
         clipTopRoles.add(topRole);
         roleWeightByTop[topRole] = (roleWeightByTop[topRole] ?? 0) + w;
         wSum += w;
         for (final e in acc.entries) {
-          acc[e.key] = (acc[e.key] ?? 0) + w * (stats[e.key] ?? 0.0);
+          acc[e.key] = (acc[e.key] ?? 0) + w * (resolvedStats[e.key] ?? 0.0);
         }
+        rowAggregationStopwatch.stop();
+        buildMetrics?.addRowAggregationMs(
+          rowAggregationStopwatch.elapsedMilliseconds,
+        );
       }
 
+      final rowFinalizationStopwatch = Stopwatch()..start();
       var roleProbs = _normalize(rowRoleAccum);
 
       // Compute roleConsistency
       double roleConsistency = 1.0;
       if (roleWeightByTop.isNotEmpty) {
-        final totalW =
-            roleWeightByTop.values.fold<double>(0.0, (a, b) => a + b);
-        final maxW =
-            roleWeightByTop.values.fold<double>(0.0, (a, b) => math.max(a, b));
+        final totalW = roleWeightByTop.values.fold<double>(
+          0.0,
+          (a, b) => a + b,
+        );
+        final maxW = roleWeightByTop.values.fold<double>(
+          0.0,
+          (a, b) => math.max(a, b),
+        );
         if (totalW > 1e-6) {
           roleConsistency = (maxW / totalW).clamp(0.0, 1.0);
         }
@@ -619,13 +971,21 @@ class ProjectStateBuilder {
           hasAudio: hasAudio,
         ),
       );
+      rowFinalizationStopwatch.stop();
+      buildMetrics?.addRowAggregationMs(
+        rowFinalizationStopwatch.elapsedMilliseconds,
+      );
     }
 
     final masterEffects = <EffectState>[];
+    final masterEffectStateStopwatch = Stopwatch()..start();
     final masterNames = await JuceAudioEngine.getMasterEffects();
     final masterIds = await JuceAudioEngine.getMasterEffectIds();
-    final masterModelIds = await JuceAudioEngine.getMasterEffectIds(modelIdentity: true);
-    final masterInstanceIds = await JuceAudioEngine.getMasterEffectInstanceIds();
+    final masterModelIds = await JuceAudioEngine.getMasterEffectIds(
+      modelIdentity: true,
+    );
+    final masterInstanceIds =
+        await JuceAudioEngine.getMasterEffectInstanceIds();
     for (int i = 0; i < masterNames.length; i++) {
       final params = exposedEffectParameters(
         masterNames[i],
@@ -636,46 +996,85 @@ class ProjectStateBuilder {
           effectIndex: i,
           name: masterNames[i],
           effectId: masterIds.length == masterNames.length ? masterIds[i] : '',
-          modelPluginId: masterModelIds.length == masterNames.length ? producerModelPluginId(masterModelIds[i]) : '',
-          instanceId: masterInstanceIds.length == masterNames.length ? masterInstanceIds[i] : '',
+          modelPluginId: masterModelIds.length == masterNames.length
+              ? producerModelPluginId(masterModelIds[i])
+              : '',
+          instanceId: masterInstanceIds.length == masterNames.length
+              ? masterInstanceIds[i]
+              : '',
           isBypassed: await JuceAudioEngine.getMasterEffectBypassState(i),
           parameters: params
-              .map((p) =>
-                  EffectParameterState.fromMap(Map<String, dynamic>.from(p)))
+              .map(
+                (p) =>
+                    EffectParameterState.fromMap(Map<String, dynamic>.from(p)),
+              )
               .toList(),
         ),
       );
     }
+    masterEffectStateStopwatch.stop();
+    buildMetrics?.addEffectStateMs(
+      masterEffectStateStopwatch.elapsedMilliseconds,
+    );
 
     final groupBuses = <Map<String, dynamic>>[];
+    final groupEffectStateStopwatch = Stopwatch()..start();
     for (final group in trackGroups) {
-      final members = rows.where((row) => group.rowIds.contains(row.rowId)).toList();
+      final members = rows
+          .where((row) => group.rowIds.contains(row.rowId))
+          .toList();
       if (members.isEmpty) continue;
       final lead = members.first.rowIndex;
       final names = await JuceAudioEngine.getTrackEffectsForRow(lead);
       final ids = await JuceAudioEngine.getTrackEffectIdsForRow(lead);
-      final modelIds = await JuceAudioEngine.getTrackEffectIdsForRow(lead, modelIdentity: true);
-      final instances = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(lead);
+      final modelIds = await JuceAudioEngine.getTrackEffectIdsForRow(
+        lead,
+        modelIdentity: true,
+      );
+      final instances = await JuceAudioEngine.getTrackEffectInstanceIdsForRow(
+        lead,
+      );
       final effects = <Map<String, dynamic>>[];
       for (var index = 0; index < names.length; index++) {
-        final params = exposedEffectParameters(names[index],
-            await JuceAudioEngine.getTrackPluginParameters(lead, index));
-        effects.add(EffectState(
+        final params = exposedEffectParameters(
+          names[index],
+          await JuceAudioEngine.getTrackPluginParameters(lead, index),
+        );
+        effects.add(
+          EffectState(
           effectIndex: index,
-          instanceId: instances.length == names.length ? instances[index] : '',
+            instanceId: instances.length == names.length
+                ? instances[index]
+                : '',
           effectId: ids.length == names.length ? ids[index] : '',
-          modelPluginId: modelIds.length == names.length ? producerModelPluginId(modelIds[index]) : '',
+            modelPluginId: modelIds.length == names.length
+                ? producerModelPluginId(modelIds[index])
+                : '',
           name: names[index],
-          isBypassed: await JuceAudioEngine.getRowEffectBypassState(lead, index),
-          parameters: params.map((p) => EffectParameterState.fromMap(p)).toList(),
-        ).toJson());
+            isBypassed: await JuceAudioEngine.getRowEffectBypassState(
+              lead,
+              index,
+            ),
+            parameters: params
+                .map((p) => EffectParameterState.fromMap(p))
+                .toList(),
+          ).toJson(),
+        );
       }
       groupBuses.add({
-        'group_id': group.id, 'row_indices': members.map((row) => row.rowIndex).toList(),
-        'gain': group.gain, 'pan': group.pan, 'muted': group.muted,
-        'soloed': group.soloed, 'effects': effects,
+        'group_id': group.id,
+        'row_indices': members.map((row) => row.rowIndex).toList(),
+        'gain': group.gain,
+        'pan': group.pan,
+        'muted': group.muted,
+        'soloed': group.soloed,
+        'effects': effects,
       });
     }
+    groupEffectStateStopwatch.stop();
+    buildMetrics?.addEffectStateMs(
+      groupEffectStateStopwatch.elapsedMilliseconds,
+    );
 
     final bpm = bpmFallback;
     final keyEstimate = _estimateProjectKey(
@@ -696,7 +1095,8 @@ class ProjectStateBuilder {
         groupBuses: groupBuses,
         masterEffects: masterEffects,
         overlapMatrix: overlap,
-        overlapRatioMatrix: overlapRatio);
+      overlapRatioMatrix: overlapRatio,
+    );
   }
 
   _ProjectKeyEstimate _estimateProjectKey(
@@ -710,7 +1110,8 @@ class ProjectStateBuilder {
       final transpose = track.pitchSemitones.round();
       if (track.isMidi && track.midiNotes.isNotEmpty) {
         for (final note in track.midiNotes) {
-          final noteWeight = note.lengthBeats.clamp(0.05, 16.0).toDouble() *
+          final noteWeight =
+              note.lengthBeats.clamp(0.05, 16.0).toDouble() *
               note.velocity.clamp(0.1, 1.0).toDouble();
           final pc = (note.pitch + transpose) % 12;
           pitchClassWeights[pc < 0 ? pc + 12 : pc] += noteWeight;
@@ -782,7 +1183,8 @@ class ProjectStateBuilder {
         var score = 0.0;
         for (var pc = 0; pc < 12; pc++) {
           final relative = (pc - root) % 12;
-          score += pitchClassWeights[pc] *
+          score +=
+              pitchClassWeights[pc] *
               profile[relative < 0 ? relative + 12 : relative];
         }
         final key = '${kProjectKeyRoots[root]} $mode';
@@ -824,18 +1226,21 @@ class ProjectStateBuilder {
     if (chromaSum <= 1e-9) return 0.0;
 
     final durationWeight = (durationMs / 1000.0).clamp(1.0, 30.0).toDouble();
-    final activity =
-        (stats['activity_ratio'] ?? 1.0).clamp(0.05, 1.0).toDouble();
-    final flatness =
-        (stats['spectral_flatness'] ?? 0.35).clamp(0.0, 1.0).toDouble();
+    final activity = (stats['activity_ratio'] ?? 1.0)
+        .clamp(0.05, 1.0)
+        .toDouble();
+    final flatness = (stats['spectral_flatness'] ?? 0.35)
+        .clamp(0.0, 1.0)
+        .toDouble();
     final tonalWeight = (1.0 - flatness).clamp(0.15, 1.0).toDouble();
     final weight = durationWeight * activity * tonalWeight * 0.35;
     if (weight <= 1e-9) return 0.0;
 
     for (var pc = 0; pc < _kKeyChromaBins; pc++) {
       final transposed = (pc + transpose) % _kKeyChromaBins;
-      final targetPc =
-          transposed < 0 ? transposed + _kKeyChromaBins : transposed;
+      final targetPc = transposed < 0
+          ? transposed + _kKeyChromaBins
+          : transposed;
       pitchClassWeights[targetPc] += (chroma[pc] / chromaSum) * weight;
     }
     return weight;
@@ -857,9 +1262,8 @@ class ProjectStateBuilder {
         '${explicit.group(1)}${explicit.group(2) ?? ''} ${explicit.group(3) ?? 'major'}',
       );
     }
-    final compact = RegExp(
-      r'\b([a-g])\s*(#|b)?\s*(major|maj|minor|min|m)\b',
-    ).firstMatch(normalized);
+    final compact = RegExp(r'\b([a-g])\s*(#|b)?\s*(major|maj|minor|min|m)\b')
+        .firstMatch(normalized);
     if (compact == null) return null;
     return normalizeProjectKey(
       '${compact.group(1)}${compact.group(2) ?? ''} ${compact.group(3)}',
@@ -873,7 +1277,8 @@ class ProjectStateBuilder {
     final rootIndex = kProjectKeyRoots.indexOf(parts.first);
     if (rootIndex < 0) return normalized;
     final transposedIndex = (rootIndex + semitones) % kProjectKeyRoots.length;
-    final nextRoot = kProjectKeyRoots[transposedIndex < 0
+    final nextRoot =
+        kProjectKeyRoots[transposedIndex < 0
         ? transposedIndex + kProjectKeyRoots.length
         : transposedIndex];
     return '$nextRoot ${parts.length > 1 ? parts[1] : 'major'}';
@@ -909,7 +1314,8 @@ class ProjectStateBuilder {
   }
 
   List<(double, double)> _mergeIntervals(List<ClipState> clips) {
-    final intervals = clips
+    final intervals =
+        clips
         .map((c) => (c.startMs, c.endMs))
         .where((iv) => iv.$2 > iv.$1)
         .toList()
@@ -997,6 +1403,82 @@ Map<String, double> _mapToDoubleMap(dynamic raw) {
   return out;
 }
 
+Map<String, dynamic> _fallbackNativePromptAnalysis() => const <String, dynamic>{
+  'roleProbs': _kFallbackPromptRoleProbs,
+  'audioStats': _kFallbackPromptAudioStats,
+};
+
+Map<String, dynamic>? _validateCombinedNativePromptAnalysis(
+  Map<String, dynamic> raw,
+) {
+  final roleProbs = _mapToDoubleMap(raw['roleProbs']);
+  if (roleProbs.length < _kFallbackPromptRoleProbs.length ||
+      !_kFallbackPromptRoleProbs.keys.every(roleProbs.containsKey)) {
+    return null;
+  }
+  var roleSum = 0.0;
+  for (final key in _kFallbackPromptRoleProbs.keys) {
+    final value = roleProbs[key]!;
+    if (!value.isFinite || value < 0.0 || value > 1.0) return null;
+    roleSum += value;
+  }
+  if (!roleSum.isFinite || roleSum < 0.98 || roleSum > 1.02) return null;
+  final normalizedRoleProbs = <String, double>{
+    for (final key in _kFallbackPromptRoleProbs.keys)
+      key: (roleProbs[key]! / roleSum).clamp(0.0, 1.0),
+  };
+
+  final audioStats = _mapToDoubleMap(raw['audioStats']);
+  if (audioStats.length < _kFallbackPromptAudioStats.length ||
+      !_kFallbackPromptAudioStats.keys.every(audioStats.containsKey)) {
+    return null;
+  }
+  final validatedAudioStats = <String, double>{};
+  for (final key in _kFallbackPromptAudioStats.keys) {
+    final value = audioStats[key]!;
+    if (!_isValidPromptAudioStat(key, value)) return null;
+    validatedAudioStats[key] = value;
+  }
+  return <String, dynamic>{
+    'roleProbs': normalizedRoleProbs,
+    'audioStats': validatedAudioStats,
+  };
+}
+
+bool _isValidPromptAudioStat(String key, double value) {
+  if (!value.isFinite) return false;
+  if (key == 'phase_corr') return value >= -1.0 && value <= 1.0;
+  if (key == 'side_ratio') return value >= 0.0 && value <= 2.0;
+  if (key == 'spectral_slope') return value >= -2.0 && value <= 2.0;
+  if (key == 'centroid_hz' ||
+      key == 'spectral_rolloff_hz' ||
+      key == 'spectral_bandwidth_hz') {
+    return value >= 0.0 && value <= 8000.0;
+  }
+  if (key == 'onset_rate_hz') return value >= 0.0 && value <= 20.0;
+  if (key == 'sibilance' || key == 'bassiness') {
+    return value >= 0.0 && value <= 5.0;
+  }
+  if (key == 'true_peak_dbfs' ||
+      key == 'integrated_lufs_est' ||
+      key == 'short_lufs_mean' ||
+      key == 'short_lufs_p95' ||
+      key == 'noise_floor_dbfs') {
+    return value >= -120.0 && value <= 0.0;
+  }
+  if (key == 'lra_est') return value >= 0.0 && value <= 120.0;
+  if (key == 'st_rms_mean' ||
+      key == 'st_rms_p95' ||
+      key == 'st_rms_std' ||
+      key == 'low' ||
+      key == 'lowmid' ||
+      key == 'mid' ||
+      key == 'high') {
+    return value >= 0.0;
+  }
+  return value >= 0.0 && value <= 1.0;
+}
+
 String _topRoleFromProbs(Map<String, double> probs) {
   if (probs.isEmpty) return 'other';
   final entries = probs.entries.toList()
@@ -1032,8 +1514,10 @@ RowInterpretationState _buildRowInterpretation({
   final clipsRoleDisagreement =
       (uniqueTopRoles.length <= 1 || clipTopRoles.isEmpty)
           ? 0.0
-          : ((uniqueTopRoles.length - 1) / math.max(1, roleProbs.length - 1))
-              .clamp(0.0, 1.0);
+      : ((uniqueTopRoles.length - 1) / math.max(1, roleProbs.length - 1)).clamp(
+          0.0,
+          1.0,
+        );
 
   final overlapDensity = overlapRatios.isEmpty
       ? 0.0
@@ -1057,8 +1541,11 @@ RowInterpretationState _buildRowInterpretation({
   final stereoImbalance = _stat(audioStats, 'stereo_imbalance');
   final lra = _stat(audioStats, 'lra_est');
   final truePeakDbfs = _stat(audioStats, 'true_peak_dbfs', fallback: -120.0);
-  final integratedLufs =
-      _stat(audioStats, 'integrated_lufs_est', fallback: -120.0);
+  final integratedLufs = _stat(
+    audioStats,
+    'integrated_lufs_est',
+    fallback: -120.0,
+  );
   final stRmsStd = _stat(audioStats, 'st_rms_std');
   final silenceRatio = _stat(audioStats, 'silence_ratio');
   final activityRatio = _stat(audioStats, 'activity_ratio');
@@ -1078,8 +1565,10 @@ RowInterpretationState _buildRowInterpretation({
         math.max(maxValue, (clip.endMs - clip.startMs).clamp(0.0, 1e12)),
   );
   final clipCount = clips.length;
-  final uniqueFileCount =
-      clips.map((clip) => (clip.fileName ?? '').trim()).toSet().length;
+  final uniqueFileCount = clips
+      .map((clip) => (clip.fileName ?? '').trim())
+      .toSet()
+      .length;
   final repeatedMaterialLikely =
       clipCount >= 2 && uniqueFileCount < clipCount && longestClipMs <= 20000.0;
 
@@ -1100,15 +1589,18 @@ RowInterpretationState _buildRowInterpretation({
   final monoCenterLikely =
       sideRatio <= 0.08 && stereoImbalance <= 0.15 && phaseCorr >= 0.65;
 
-  final multiRoleLikely = roleEntropy >= 0.72 ||
+  final multiRoleLikely =
+      roleEntropy >= 0.72 ||
       topRoleMargin <= 0.16 ||
       roleConsistency <= 0.58 ||
       clipsRoleDisagreement >= 0.35;
-  final singleSourceLikely = roleEntropy <= 0.45 &&
+  final singleSourceLikely =
+      roleEntropy <= 0.45 &&
       topRoleMargin >= 0.28 &&
       roleConsistency >= 0.72 &&
       clipsRoleDisagreement <= 0.20;
-  final fullMixLikely = multiRoleLikely &&
+  final fullMixLikely =
+      multiRoleLikely &&
       broadband &&
       activityRatio >= 0.72 &&
       wideStereoLikely &&
@@ -1117,11 +1609,13 @@ RowInterpretationState _buildRowInterpretation({
       multiRoleLikely && !fullMixLikely && roleConsistency <= 0.74;
   final oneShotLikely =
       coverageMs <= 2500.0 && percussiveLikely && silenceRatio >= 0.12;
-  final loopLikely = !oneShotLikely &&
+  final loopLikely =
+      !oneShotLikely &&
       coverageMs >= 350.0 &&
       coverageMs <= 18000.0 &&
       (repeatedMaterialLikely || (clipCount >= 3 && shortestClipMs <= 16000.0));
-  final fxOrTextureLikely = (roleProbs['other'] ?? 0.0) >= 0.32 &&
+  final fxOrTextureLikely =
+      (roleProbs['other'] ?? 0.0) >= 0.32 &&
       spectralFlatness >= 0.34 &&
       transientDensity <= 0.24 &&
       !lowEndAnchorLikely;
@@ -1176,7 +1670,8 @@ RowInterpretationState _buildRowInterpretation({
     return 'low';
   }();
 
-  final classificationConfidence = ((1.0 - roleEntropy) * 0.45 +
+  final classificationConfidence =
+      ((1.0 - roleEntropy) * 0.45 +
           topRoleMargin * 0.35 +
           roleConsistency.clamp(0.0, 1.0) * 0.20)
       .clamp(0.0, 1.0);
@@ -1246,8 +1741,9 @@ Map<String, double> _normalize(Map<String, double> m) {
 
 double _roleEntropy(Map<String, double> roleProbs) {
   if (roleProbs.isEmpty) return 0.0;
-  final values =
-      roleProbs.values.where((v) => v > 1e-9).toList(growable: false);
+  final values = roleProbs.values
+      .where((v) => v > 1e-9)
+      .toList(growable: false);
   if (values.isEmpty) return 0.0;
   final logDenom = math.log(values.length);
   if (logDenom <= 1e-9) return 0.0;
@@ -1259,7 +1755,8 @@ double _roleEntropy(Map<String, double> roleProbs) {
 }
 
 List<(double, double)> _mergeClipIntervals(List<ClipState> clips) {
-  final intervals = clips
+  final intervals =
+      clips
       .map((c) => (c.startMs, c.endMs))
       .where((iv) => iv.$2 > iv.$1)
       .toList()
@@ -1294,11 +1791,7 @@ double _totalClipIntervalMs(List<(double, double)> intervals) {
   return sum;
 }
 
-double _stat(
-  Map<String, double> stats,
-  String key, {
-  double fallback = 0.0,
-}) {
+double _stat(Map<String, double> stats, String key, {double fallback = 0.0}) {
   final value = stats[key];
   if (value == null || !value.isFinite) return fallback;
   return value;
@@ -1345,51 +1838,7 @@ Map<String, double> _analyzePcm16k(
 }) {
   const fs = 16000.0;
   if (pcm.isEmpty) {
-    return const {
-      'centroid_hz': 0,
-      'zcr': 0,
-      'hf_rms': 0,
-      'st_rms_mean': 0,
-      'st_rms_p95': 0,
-      'st_rms_std': 0,
-      'transient_density': 0,
-      'true_peak_dbfs': -120,
-      'integrated_lufs_est': -120,
-      'short_lufs_mean': -120,
-      'short_lufs_p95': -120,
-      'lra_est': 0,
-      'clip_ratio': 0,
-      'spectral_flatness': 0,
-      'spectral_rolloff_hz': 0,
-      'spectral_slope': 0,
-      'spectral_flux': 0,
-      'spectral_bandwidth_hz': 0,
-      'silence_ratio': 0,
-      'activity_ratio': 0,
-      'onset_rate_hz': 0,
-      'noise_floor_dbfs': -120,
-      'phase_corr': 1,
-      'side_ratio': 0,
-      'stereo_imbalance': 0,
-      'low': 0,
-      'lowmid': 0,
-      'mid': 0,
-      'high': 0,
-      'sibilance': 0,
-      'bassiness': 0,
-      'key_pc_0': 0,
-      'key_pc_1': 0,
-      'key_pc_2': 0,
-      'key_pc_3': 0,
-      'key_pc_4': 0,
-      'key_pc_5': 0,
-      'key_pc_6': 0,
-      'key_pc_7': 0,
-      'key_pc_8': 0,
-      'key_pc_9': 0,
-      'key_pc_10': 0,
-      'key_pc_11': 0,
-    };
+    return _kFallbackPromptAudioStats;
   }
 
   final n = math.min(pcm.length, _kPromptStatsMaxSamples);
@@ -1457,8 +1906,10 @@ Map<String, double> _analyzePcm16k(
   final spectralRolloffHz = _spectralRolloffHz(mags, 0.85).clamp(0.0, 8000.0);
   final spectralSlope = _spectralSlope(mags).clamp(-2.0, 2.0);
   final spectralFlux = _spectralFluxProxy(x, fs).clamp(0.0, 1.0);
-  final spectralBandwidthHz =
-      _spectralBandwidthHz(mags, centroidHz).clamp(0.0, 8000.0);
+  final spectralBandwidthHz = _spectralBandwidthHz(
+    mags,
+    centroidHz,
+  ).clamp(0.0, 8000.0);
   final onsetRateHz = _onsetRateHz(x, fs).clamp(0.0, 20.0);
 
   final absValues = x.map((v) => v.abs()).toList()..sort();
@@ -1467,8 +1918,10 @@ Map<String, double> _analyzePcm16k(
 
   final phaseCorr = (stereoStats['phase_corr'] ?? 1.0).clamp(-1.0, 1.0);
   final sideRatio = (stereoStats['side_ratio'] ?? 0.0).clamp(0.0, 2.0);
-  final stereoImbalance =
-      (stereoStats['stereo_imbalance'] ?? 0.0).clamp(0.0, 1.0);
+  final stereoImbalance = (stereoStats['stereo_imbalance'] ?? 0.0).clamp(
+    0.0,
+    1.0,
+  );
   final keyChroma = _keyChroma16k(x, fs);
 
   return {
@@ -1654,8 +2107,10 @@ _LufsStats _lufsStats16k(List<double> x) {
   }
   final meanSq = sumSq / math.max(1, kw.length);
   final integrated =
-      (-0.691 + (10.0 * math.log(math.max(meanSq, 1e-12)) / math.ln10))
-          .clamp(-120.0, 0.0);
+      (-0.691 + (10.0 * math.log(math.max(meanSq, 1e-12)) / math.ln10)).clamp(
+        -120.0,
+        0.0,
+      );
 
   // Approx short-term with 400ms windows / 200ms hop.
   const frame = 6400;
@@ -1884,8 +2339,8 @@ _ShortTermRmsStats _windowedRmsStats(
   for (int i = 1; i < frames.length; i++) {
     if ((frames[i] - frames[i - 1]) > 0.06) transientCount++;
   }
-  final transientDensity =
-      (transientCount / math.max(1, frames.length - 1)).clamp(0.0, 1.0);
+  final transientDensity = (transientCount / math.max(1, frames.length - 1))
+      .clamp(0.0, 1.0);
 
   return _ShortTermRmsStats(
     mean: mean,

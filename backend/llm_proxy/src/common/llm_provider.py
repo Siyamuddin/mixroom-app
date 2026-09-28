@@ -755,6 +755,10 @@ def is_upstream_timeout_error(error: BaseException) -> bool:
     return False
 
 
+def encode_json_request_body(body: Dict[str, Any]) -> bytes:
+    return json.dumps(body, ensure_ascii=False).encode("utf-8")
+
+
 def _post_json_request(
     *,
     url: str,
@@ -763,7 +767,7 @@ def _post_json_request(
     timeout_seconds: int,
     fallback_error_message: str,
 ) -> Tuple[int, str]:
-    payload = json.dumps(body).encode("utf-8")
+    payload = encode_json_request_body(body)
     request = urllib.request.Request(
         url,
         data=payload,

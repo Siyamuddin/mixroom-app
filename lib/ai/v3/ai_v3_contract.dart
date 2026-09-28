@@ -3,12 +3,11 @@ import 'dart:convert';
 import 'ai_v3_resources.dart';
 
 const String aiV3PlanVersion = 'plan_v3_prototype_2';
-const int aiV3MaxCommands = 32;
 const String aiV3PlanCommandPolicy = 'commands_32_v1';
 const String aiV3GeneratedMidiPolicy = 'notes_512_v1';
-const int aiV3MaxGeneratedMidiNotes = 512;
-const int aiV3MaxRuntimeAuthoritativeMidiNotes = 1024;
-const int aiV3MaxAutomationPoints = 128;
+const String aiV3PlanOutputPolicy = 'serialized_plan_64000_bytes_v1';
+const int aiV3MaxSerializedPlanBytes = 64000;
+const int aiV3MaxRuntimeMidiStateBytes = 4000000;
 const String aiV3PhoneMicCleanupPreset = 'phone_mic_cleanup_v1';
 const List<String> aiV3PhoneMicCleanupEffectIds = <String>[
   'EQ Parametric',
@@ -278,6 +277,15 @@ class AiV3Plan {
     bool allowResourceRefs = false,
     Set<String>? resourceRefCommandTypes,
   }) {
+    int serializedBytes;
+    try {
+      serializedBytes = utf8.encode(jsonEncode(raw)).length;
+    } on Object {
+      throw const AiV3ContractException('v3_plan_serialization_invalid');
+    }
+    if (serializedBytes > aiV3MaxSerializedPlanBytes) {
+      throw const AiV3ContractException('v3_provider_plan_too_large');
+    }
     final enabledResourceRefCommandTypes = allowResourceRefs
         ? resourceRefCommandTypes ?? aiV3CommandTypes
         : const <String>{};
@@ -309,11 +317,10 @@ class AiV3Plan {
       throw const AiV3ContractException('v3_user_message_invalid');
     }
     final rawCommands = raw['commands'];
-    if (rawCommands is! List || rawCommands.length > aiV3MaxCommands) {
+    if (rawCommands is! List) {
       throw const AiV3ContractException('v3_commands_invalid');
     }
     final commandIds = <String>{};
-    var generatedNotes = 0;
     final commands = <AiV3Command>[];
     for (final value in rawCommands) {
       if (value is! Map) {
@@ -344,21 +351,11 @@ class AiV3Plan {
         args,
         allowResourceRefs: enabledResourceRefCommandTypes.contains(type),
       );
-      if (const <String>{
-        'midi.create_clip',
-        'midi.replace_notes',
-        'midi.append_notes',
-      }.contains(type)) {
-        generatedNotes += (args['notes'] as List).length;
-      }
       commands.add(AiV3Command(commandId: id, type: type, arguments: args));
     }
     if (allowResourceRefs) {
       _canonicalizeIdentityResourceReferences(commands);
       _validateResourceReferences(commands);
-    }
-    if (generatedNotes > aiV3MaxGeneratedMidiNotes) {
-      throw const AiV3ContractException('v3_generated_midi_limit');
     }
     if ((outcome == 'plan') != commands.isNotEmpty) {
       throw const AiV3ContractException('v3_outcome_command_mismatch');
@@ -630,9 +627,7 @@ void _validateCommand(
       final usesTypedMembers = allowResourceRefs && args['members'] is List;
       requireKeys(<String>[usesTypedMembers ? 'members' : 'row_ids', 'name']);
       final rawMembers = args[usesTypedMembers ? 'members' : 'row_ids'];
-      if (rawMembers is! List ||
-          rawMembers.length < 2 ||
-          rawMembers.length > 32) {
+      if (rawMembers is! List || rawMembers.length < 2) {
         throw const AiV3ContractException('v3_group.create.members.invalid');
       }
       if (usesTypedMembers) {
@@ -753,7 +748,7 @@ void _validateCommand(
       if (usesTypedSources) {
         final rawSources = args['sources'] as List;
         final sourceKeys = <String>{};
-        if (rawSources.length < 2 || rawSources.length > 32) {
+        if (rawSources.length < 2) {
           throw const AiV3ContractException('v3_clip.glue.sources.invalid');
         }
         for (final rawSource in rawSources) {
@@ -781,7 +776,6 @@ void _validateCommand(
         final rawClipIds = args['clip_ids'];
         if (rawClipIds is! List ||
             rawClipIds.length < 2 ||
-            rawClipIds.length > 32 ||
             rawClipIds.any(
               (value) => value is! String || value.trim().isEmpty,
             ) ||
@@ -1052,7 +1046,6 @@ void _validateCommand(
       text('effect_id');
       final parameters = args['parameters'];
       if (parameters is! List ||
-          parameters.length > 16 ||
           parameters.any((raw) {
             if (raw is! Map) return true;
             if (raw.keys.toSet().difference(const <String>{
@@ -1123,9 +1116,7 @@ void _validateCommand(
       );
       text('automation_target_id');
       final points = args['points'];
-      if (points is! List ||
-          points.isEmpty ||
-          points.length > aiV3MaxAutomationPoints) {
+      if (points is! List || points.isEmpty) {
         throw const AiV3ContractException('v3_automation_points_invalid');
       }
       double? previousBeat;
@@ -1170,9 +1161,7 @@ void _validateCommand(
         allowResourceRefs: allowResourceRefs,
       );
       final placements = args['placements'];
-      if (placements is! List ||
-          placements.isEmpty ||
-          placements.length > 128) {
+      if (placements is! List || placements.isEmpty) {
         throw const AiV3ContractException('v3_sample_placements_invalid');
       }
       for (final value in placements) {
@@ -1274,7 +1263,7 @@ void _validateCommand(
 }
 
 void _validateMidiNotes(Object? raw) {
-  if (raw is! List || raw.isEmpty || raw.length > aiV3MaxGeneratedMidiNotes) {
+  if (raw is! List || raw.isEmpty) {
     throw const AiV3ContractException('v3_midi_notes_invalid');
   }
   for (final value in raw) {
@@ -1615,9 +1604,8 @@ void _canonicalizeIdentityResourceReferences(List<AiV3Command> commands) {
     if (consumerSpec != null && referenceContainer != null) {
       final rawRef = referenceContainer[consumerSpec.referenceField];
       if (rawRef != null) {
-        referenceContainer[consumerSpec.referenceField] = canonicalize(
-          rawRef,
-        ).toJson();
+        referenceContainer[consumerSpec.referenceField] = canonicalize(rawRef)
+            .toJson();
       }
     }
     if (command.type == 'clip.glue' && command.arguments['sources'] is List) {
@@ -1659,9 +1647,8 @@ void _canonicalizeIdentityResourceReferences(List<AiV3Command> commands) {
       final target = command.arguments['target'];
       if (target is Map && target['group_ref'] != null) {
         final mutableTarget = Map<String, dynamic>.from(target);
-        mutableTarget['group_ref'] = canonicalize(
-          mutableTarget['group_ref'],
-        ).toJson();
+        mutableTarget['group_ref'] = canonicalize(mutableTarget['group_ref'])
+            .toJson();
         command.arguments['target'] = mutableTarget;
       }
     }

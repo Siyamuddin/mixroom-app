@@ -1309,6 +1309,269 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertIsNone(provider.request_body)
         load_api_key.assert_not_called()
 
+    def test_v3_near_4mb_app_context_reaches_provider(self) -> None:
+        contract = api_responses.v3_server_contract_v2
+        body = self._v3_context_body(
+            supported_command_types=sorted(contract.SERVER_COMMAND_TYPES),
+            core_context={
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "project_id": "secret-project",
+                    "bpm": 120,
+                    "project_capacity_policy": contract.PROJECT_CAPACITY_POLICY,
+                    "row_capacity": {
+                        "current_rows": 0,
+                        "creation_limit": None,
+                        "can_create": True,
+                    },
+                },
+                "rows": [],
+                "clips": [],
+                "groups": [],
+                "library_assets": [
+                    {
+                        "asset_id": f"synthetic-asset-{index + 1:04d}",
+                        "path": f"Synthetic/Library/asset-{index + 1:04d}.wav",
+                        "role": "drums" if index % 2 == 0 else "melodic",
+                    }
+                    for index in range(41_800)
+                ],
+                "instruments": [],
+                "instrument_catalog": [],
+                "effects": [],
+            },
+        )
+        raw_body = json.dumps(body, separators=(",", ":"))
+        core_context_bytes = len(
+            contract._canonical_json(body["core_context"]).encode("utf-8")
+        )
+        validated = contract.validate_context_request(
+            body,
+            raw_body_bytes=len(raw_body.encode("utf-8")),
+        )
+        provider_request = contract.build_provider_request(
+            validated,
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+        )
+        provider_wire_bytes = len(
+            json.dumps(
+                api_responses.build_openai_responses_request(provider_request)
+            ).encode("utf-8")
+        )
+
+        self.assertGreater(
+            core_context_bytes,
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES - 10_000,
+        )
+        self.assertLessEqual(
+            core_context_bytes,
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES,
+        )
+        self.assertGreater(provider_wire_bytes, contract.DYNAMIC_MAX_REQUEST_BYTES)
+        self.assertLessEqual(provider_wire_bytes, contract.MAX_PROVIDER_WIRE_BYTES)
+
+        provider = _FakeProvider(
+            name="openai",
+            response_body=self._v3_provider_plan_payload(
+                self._v3_respond_plan(),
+                response_id="near-context-boundary",
+            ),
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(
+                _authed_event(raw_body, path="/v1/llm/v3/responses"),
+                _LambdaContext(120_000),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIsNotNone(provider.request_body)
+
+    def test_v3_near_4mb_non_ascii_context_reaches_provider(self) -> None:
+        contract = api_responses.v3_server_contract_v2
+        body = self._v3_context_body(
+            supported_command_types=sorted(contract.SERVER_COMMAND_TYPES),
+            core_context={
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "project_id": "secret-project",
+                    "bpm": 120,
+                    "project_capacity_policy": contract.PROJECT_CAPACITY_POLICY,
+                    "row_capacity": {
+                        "current_rows": 0,
+                        "creation_limit": None,
+                        "can_create": True,
+                    },
+                },
+                "rows": [],
+                "clips": [],
+                "groups": [],
+                "library_assets": [
+                    {
+                        "asset_id": f"한국어-샘플-{index + 1:05d}",
+                        "path": (
+                            "사용자 샘플/드럼/긴 폴더 이름/"
+                            f"한국어 샘플 파일-{index + 1:05d}.wav"
+                        ),
+                        "role": "drums" if index % 2 == 0 else "melodic",
+                    }
+                    for index in range(28_750)
+                ],
+                "instruments": [],
+                "instrument_catalog": [],
+                "effects": [],
+            },
+        )
+        raw_body = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        core_context_bytes = len(
+            contract._canonical_json(body["core_context"]).encode("utf-8")
+        )
+        validated = contract.validate_context_request(
+            body,
+            raw_body_bytes=len(raw_body.encode("utf-8")),
+        )
+        provider_request = contract.build_provider_request(
+            validated,
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+        )
+        provider_wire_bytes = len(
+            api_responses.encode_json_request_body(
+                api_responses.build_openai_responses_request(provider_request)
+            )
+        )
+
+        self.assertGreater(
+            core_context_bytes,
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES - 10_000,
+        )
+        self.assertLessEqual(
+            core_context_bytes,
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES,
+        )
+        self.assertLessEqual(provider_wire_bytes, contract.MAX_PROVIDER_WIRE_BYTES)
+
+        provider = _FakeProvider(
+            name="openai",
+            response_body=self._v3_provider_plan_payload(
+                self._v3_respond_plan(),
+                response_id="near-non-ascii-context-boundary",
+            ),
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(
+                _authed_event(raw_body, path="/v1/llm/v3/responses"),
+                _LambdaContext(120_000),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIsNotNone(provider.request_body)
+
+    def test_v3_near_4mb_escape_heavy_paths_reach_provider(self) -> None:
+        contract = api_responses.v3_server_contract_v2
+        nested_windows_path = "A\\B\\C\\D\\E\\F\\G\\H\\I\\J\\K\\L\\M\\N\\O\\P"
+        body = self._v3_context_body(
+            supported_command_types=sorted(contract.SERVER_COMMAND_TYPES),
+            core_context={
+                "schema_version": "core_context_v3_prototype_1",
+                "project": {
+                    "project_id": "secret-project",
+                    "bpm": 120,
+                    "project_capacity_policy": contract.PROJECT_CAPACITY_POLICY,
+                    "row_capacity": {
+                        "current_rows": 0,
+                        "creation_limit": None,
+                        "can_create": True,
+                    },
+                },
+                "rows": [],
+                "clips": [],
+                "groups": [],
+                "library_assets": [
+                    {
+                        "asset_id": f"asset-{index + 1:05d}",
+                        "path": (
+                            f"{nested_windows_path}\\asset-{index + 1:05d}.wav"
+                        ),
+                        "role": "drums" if index % 2 == 0 else "melodic",
+                    }
+                    for index in range(34_200)
+                ],
+                "instruments": [],
+                "instrument_catalog": [],
+                "effects": [],
+            },
+        )
+        raw_body = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+        core_context_bytes = len(
+            contract._canonical_json(body["core_context"]).encode("utf-8")
+        )
+        validated = contract.validate_context_request(
+            body,
+            raw_body_bytes=len(raw_body.encode("utf-8")),
+        )
+        provider_request = contract.build_provider_request(
+            validated,
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+        )
+        provider_wire_bytes = len(
+            api_responses.encode_json_request_body(
+                api_responses.build_openai_responses_request(provider_request)
+            )
+        )
+
+        self.assertGreater(
+            core_context_bytes,
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES - 40_000,
+        )
+        self.assertLessEqual(
+            core_context_bytes,
+            contract.DYNAMIC_MAX_CORE_CONTEXT_BYTES,
+        )
+        self.assertGreater(provider_wire_bytes, 5_500_000)
+        self.assertLessEqual(provider_wire_bytes, contract.MAX_PROVIDER_WIRE_BYTES)
+
+        provider = _FakeProvider(
+            name="openai",
+            response_body=self._v3_provider_plan_payload(
+                self._v3_respond_plan(),
+                response_id="near-escape-heavy-context-boundary",
+            ),
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
+            clear=False,
+        ), mock.patch.object(
+            api_responses, "_load_api_key", return_value="sk-test"
+        ), mock.patch.object(
+            api_responses, "get_provider", return_value=provider
+        ):
+            result = api_responses.handler(
+                _authed_event(raw_body, path="/v1/llm/v3/responses"),
+                _LambdaContext(120_000),
+            )
+
+        self.assertEqual(result["statusCode"], 200)
+        self.assertIsNotNone(provider.request_body)
+
     def test_v3_server_contract_rejects_malformed_clip_row_before_quota_or_provider(
         self,
     ) -> None:
@@ -1360,24 +1623,13 @@ class ApiResponsesTests(unittest.TestCase):
         oversized_schema = self._v3_context_body(
             supported_command_types=sorted(contract.SERVER_COMMAND_TYPES),
         )
-        # Legal identifiers and collection sizes whose repeated schema enums
-        # exceed the runtime-tool limit, not the incoming request limit.
-        oversized_schema["core_context"].update(
-            rows=[
-                {"row_id": i + 1, "lane_kind": "audio", "mix_processing_supported": True}
-                for i in range(32)
-            ],
-            clips=[
-                {"clip_id": f"{i:03d}" + "x" * 125, "row_id": i % 32 + 1, "kind": "audio"}
-                for i in range(128)
-            ],
-            library_assets=[
-                {"asset_id": f"{i:03d}" + "y" * 125} for i in range(250)
-            ],
-        )
-        for body, code in (
-            (empty_surface, "v3_command_surface_empty"),
-            (oversized_schema, "v3_capability_context_limit"),
+        for body, code, runtime_tool_limit in (
+            (
+                empty_surface,
+                "v3_command_surface_empty",
+                contract.MAX_RUNTIME_TOOL_BYTES,
+            ),
+            (oversized_schema, "v3_capability_context_limit", 1),
         ):
             with self.subTest(code=code):
                 raw_body = json.dumps(body)
@@ -1392,6 +1644,8 @@ class ApiResponsesTests(unittest.TestCase):
                     {"AI_V3_ENABLED": "true", "AI_V3_SERVER_CONTRACT_ENABLED": "true"},
                 ), mock.patch.object(
                     api_responses, "get_provider", return_value=provider
+                ), mock.patch.object(
+                    contract, "MAX_RUNTIME_TOOL_BYTES", runtime_tool_limit
                 ), mock.patch.object(
                     api_responses, "get_ai_feature_runtime", return_value={}
                 ), mock.patch.object(
@@ -1610,6 +1864,113 @@ class ApiResponsesTests(unittest.TestCase):
             self.assertNotIn(field, output.getvalue())
         self.assertEqual(self.fake_usage_repo.release_calls, [])
         self.assertEqual(len(self.fake_usage_repo.finalize_calls), 1)
+
+    def test_capability_repair_is_bounded_private_and_can_clarify(self):
+        body = self._v3_midi_repair_body()
+        body["original_request"] = "Sí, haz una base original con espacio para voz."
+        body["supported_command_types"] = ["row.rename"]
+
+        def rename_plan(row_id: int) -> dict:
+            return {
+                "schema_version": "plan_v3_prototype_2",
+                "outcome": "plan",
+                "user_message": "Renamed the row.",
+                "commands": [
+                    {
+                        "command_id": "rename-row",
+                        "type": "row.rename",
+                        "arguments": {
+                            "row_id": row_id,
+                            "new_name": "Vocal Space",
+                        },
+                    }
+                ],
+                "question_options": [],
+            }
+
+        invalid = rename_plan(999)
+        clarification = self._v3_respond_plan()
+        clarification.update(
+            outcome="clarify",
+            user_message="Which existing row should I rename?",
+            question_options=[],
+        )
+        for followup, expected_status, finalized in (
+            (rename_plan(101), 200, True),
+            (clarification, 200, True),
+            (invalid, 502, False),
+        ):
+            with self.subTest(
+                expected_status=expected_status,
+                followup=followup["outcome"],
+            ):
+                self.fake_usage_repo.reserve_calls.clear()
+                self.fake_usage_repo.release_calls.clear()
+                self.fake_usage_repo.finalize_calls.clear()
+                provider = _SequencedFakeProvider(
+                    [
+                        self._v3_provider_plan_payload(
+                            invalid, response_id="invalid-capability"
+                        ),
+                        self._v3_provider_plan_payload(
+                            followup, response_id="capability-repair"
+                        ),
+                    ]
+                )
+                output = StringIO()
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "AI_V3_ENABLED": "true",
+                        "AI_V3_SERVER_CONTRACT_ENABLED": "true",
+                        "LLM_PROVIDER": "fake",
+                    },
+                    clear=False,
+                ), mock.patch.object(
+                    api_responses, "_load_api_key", return_value="test"
+                ), mock.patch.object(
+                    api_responses, "get_provider", return_value=provider
+                ), redirect_stdout(output):
+                    result = api_responses.handler(
+                        _authed_event(
+                            json.dumps(body), path="/v1/llm/v3/responses"
+                        ),
+                        _LambdaContext(60_000),
+                    )
+
+                self.assertEqual(result["statusCode"], expected_status)
+                self.assertEqual(len(provider.request_bodies), 2)
+                correction_text = provider.request_bodies[1]["messages"][0][
+                    "content"
+                ][-1]["text"]
+                self.assertIn("v3_plan_capability_invalid", correction_text)
+                self.assertIn('"failure_kind":"unavailable_row"', correction_text)
+                self.assertIn('"command_index":0', correction_text)
+                self.assertIn('"command_type":"row.rename"', correction_text)
+                self.assertNotIn("999", correction_text)
+                self.assertNotIn("validation_details", result["body"])
+                self.assertEqual(len(self.fake_usage_repo.reserve_calls), 1)
+                self.assertEqual(
+                    len(self.fake_usage_repo.finalize_calls), int(finalized)
+                )
+                self.assertEqual(
+                    len(self.fake_usage_repo.release_calls), int(not finalized)
+                )
+                final_log = json.loads(output.getvalue().strip().splitlines()[-1])
+                self.assertEqual(final_log["provider_attempt_count"], 2)
+                self.assertEqual(
+                    final_log["semantic_repair_error_code"],
+                    "v3_plan_capability_invalid",
+                )
+                self.assertEqual(
+                    final_log["v3_capability_failure_kind"], "unavailable_row"
+                )
+                self.assertEqual(
+                    final_log["v3_capability_command_type"], "row.rename"
+                )
+                self.assertEqual(final_log["v3_capability_command_index"], 0)
+                for private_value in ("999", "secret-project"):
+                    self.assertNotIn(private_value, output.getvalue())
 
     def test_512_note_full_repair_keeps_budget_and_single_attempt_allowance(self):
         for repaired in (True, False):
@@ -2187,7 +2548,8 @@ class ApiResponsesTests(unittest.TestCase):
         self.assertEqual(self.fake_usage_repo.finalize_calls, [])
         assert provider.request_body is not None
         runtime_tool = json.dumps(provider.request_body["tools"][0])
-        self.assertIn("HPF Frequency", runtime_tool)
+        self.assertNotIn("HPF Frequency", runtime_tool)
+        self.assertNotIn('"Distortion"', runtime_tool)
         self.assertNotIn('"hpf"', runtime_tool)
 
     def test_v3_endpoint_kill_switch_blocks_before_provider_usage(self) -> None:
