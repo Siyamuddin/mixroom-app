@@ -916,12 +916,14 @@ class MixroomMainBottomDock extends StatelessWidget {
     required this.onTabSelected,
     required this.onAddTap,
     this.addMenuOpen = false,
+    this.creatingProject = false,
   });
 
   final MixroomMainTab selectedTab;
   final ValueChanged<MixroomMainTab> onTabSelected;
   final VoidCallback onAddTap;
   final bool addMenuOpen;
+  final bool creatingProject;
 
   String _iconForTab(MixroomMainTab tab, bool active) {
     switch (tab) {
@@ -970,18 +972,36 @@ class MixroomMainBottomDock extends StatelessWidget {
               active: selectedTab == MixroomMainTab.platform,
               onTap: () => onTabSelected(MixroomMainTab.platform),
             ),
-            MixroomShellRoundButton(
-              icon: Icon(
-                addMenuOpen ? Icons.close_rounded : Icons.add_rounded,
-                color: const Color(0xFFF4F4F4),
-                size: addMenuOpen ? 22 : 28,
+            Semantics(
+              label: L10n.translate(
+                context,
+                creatingProject ? 'Creating project…' : 'New Project',
               ),
-              active: !addMenuOpen,
-              activeWide: true,
-              fillColor: addMenuOpen
-                  ? const Color.fromRGBO(244, 244, 244, 0.34)
-                  : null,
-              onTap: onAddTap,
+              button: true,
+              enabled: !creatingProject,
+              child: MixroomShellRoundButton(
+                key: const ValueKey('mixroom-create-project-button'),
+                icon: creatingProject
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: Color(0xFFF4F4F4),
+                        ),
+                      )
+                    : Icon(
+                        addMenuOpen ? Icons.close_rounded : Icons.add_rounded,
+                        color: const Color(0xFFF4F4F4),
+                        size: addMenuOpen ? 22 : 28,
+                      ),
+                active: !addMenuOpen,
+                activeWide: true,
+                fillColor: addMenuOpen
+                    ? const Color.fromRGBO(244, 244, 244, 0.34)
+                    : null,
+                onTap: creatingProject ? null : onAddTap,
+              ),
             ),
             MixroomShellRoundButton(
               assetPath: _iconForTab(
@@ -1015,6 +1035,7 @@ class MixroomMainSideRail extends StatelessWidget {
     this.onBrandTap,
     this.showBrandNotificationDot = false,
     this.topContentInset = 22,
+    this.creatingProject = false,
   });
 
   final MixroomMainTab selectedTab;
@@ -1023,6 +1044,7 @@ class MixroomMainSideRail extends StatelessWidget {
   final VoidCallback? onBrandTap;
   final bool showBrandNotificationDot;
   final double topContentInset;
+  final bool creatingProject;
 
   String _iconForTab(MixroomMainTab tab, bool active) {
     switch (tab) {
@@ -1166,15 +1188,27 @@ class MixroomMainSideRail extends StatelessWidget {
               ),
               const Spacer(),
               _MixroomDesktopRailIconButton(
-                label: L10n.translate(context, 'New Project'),
+                label: L10n.translate(
+                  context,
+                  creatingProject ? 'Creating project…' : 'New Project',
+                ),
                 active: true,
                 emphasize: true,
-                icon: const Icon(
-                  Icons.add_rounded,
-                  color: Color(0xFFF4F4F4),
-                  size: 28,
-                ),
-                onTap: onAddTap,
+                icon: creatingProject
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          color: Color(0xFFF4F4F4),
+                        ),
+                      )
+                    : const Icon(
+                        Icons.add_rounded,
+                        color: Color(0xFFF4F4F4),
+                        size: 28,
+                      ),
+                onTap: creatingProject ? null : onAddTap,
               ),
             ],
           ),
@@ -1196,7 +1230,7 @@ class _MixroomDesktopRailIconButton extends StatefulWidget {
 
   final String label;
   final bool active;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final String? assetPath;
   final Widget? icon;
   final bool emphasize;
@@ -1213,6 +1247,7 @@ class _MixroomDesktopRailIconButtonState
 
   @override
   Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
     final active = widget.active;
     final emphasize = widget.emphasize;
     final activeColor = emphasize
@@ -1225,21 +1260,25 @@ class _MixroomDesktopRailIconButtonState
       message: widget.label,
       waitDuration: const Duration(milliseconds: 450),
       child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovered = true),
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        onEnter: (_) {
+          if (enabled) setState(() => _hovered = true);
+        },
         onExit: (_) => setState(() {
           _hovered = false;
           _pressed = false;
         }),
         child: GestureDetector(
           onTap: widget.onTap,
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapCancel: () => setState(() => _pressed = false),
-          onTapUp: (_) => setState(() => _pressed = false),
+          onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+          onTapCancel: enabled ? () => setState(() => _pressed = false) : null,
+          onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
           child: AnimatedScale(
             duration: const Duration(milliseconds: 140),
             curve: Curves.easeOutCubic,
-            scale: _pressed ? 0.96 : (_hovered ? 1.04 : 1.0),
+            scale: enabled && _pressed
+                ? 0.96
+                : (enabled && _hovered ? 1.04 : 1.0),
             child: SizedBox(
               width: 52,
               height: 52,
@@ -1262,9 +1301,8 @@ class _MixroomDesktopRailIconButtonState
                       boxShadow: emphasize
                           ? [
                               BoxShadow(
-                                color: const Color(
-                                  0xFF0A84FF,
-                                ).withValues(alpha: 0.34),
+                                color: const Color(0xFF0A84FF)
+                                    .withValues(alpha: 0.34),
                                 blurRadius: 20,
                                 offset: const Offset(0, 8),
                               ),

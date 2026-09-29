@@ -658,46 +658,49 @@ class _SignedInShellState extends State<SignedInShell> {
 
   Future<void> _createMusicProject() async {
     if (_creatingProject) return;
-    final entitlementService = context.read<EntitlementService>();
-    final projectLimit = entitlementService.isEnforcementEnabled
-        ? SubscriptionLimits.localProjectLimitFor(
-            entitlementService.entitlement,
-          )
-        : SubscriptionLimits.paidLocalProjects;
-    if (!await ProjectManager.canCreateNew(maxProjects: projectLimit)) {
-      if (!mounted) return;
-      if (projectLimit == SubscriptionLimits.freeLocalProjects) {
-        unawaited(
-          showAppUpgradeDialog(
-            context: context,
-            title: 'Upgrade for more projects',
-            message:
-                'Free includes 10 local projects. Export or delete one, or upgrade for more.',
-            icon: Icons.folder_off_outlined,
-            onUpgrade: _openSubscriptionAccountTab,
+    setState(() => _creatingProject = true);
+    var loadingDialogShown = false;
+    try {
+      final entitlementService = context.read<EntitlementService>();
+      final projectLimit = entitlementService.isEnforcementEnabled
+          ? SubscriptionLimits.localProjectLimitFor(
+              entitlementService.entitlement,
+            )
+          : SubscriptionLimits.paidLocalProjects;
+      if (!await ProjectManager.canCreateNew(maxProjects: projectLimit)) {
+        if (!mounted) return;
+        if (projectLimit == SubscriptionLimits.freeLocalProjects) {
+          unawaited(
+            showAppUpgradeDialog(
+              context: context,
+              title: 'Upgrade for more projects',
+              message: 'Free includes 10 local projects. Export or delete one, or upgrade for more.',
+              icon: Icons.folder_off_outlined,
+              onUpgrade: _openSubscriptionAccountTab,
+            ),
+          );
+          return;
+        }
+        showAppMessageDialog(
+          context: context,
+          title: L10n.translate(context, 'Project limit reached'),
+          message: L10n.translate(
+            context,
+            'Delete a project to create or import a new one.',
           ),
+          buttonLabel: L10n.translate(context, 'OK'),
+          icon: Icons.folder_off_outlined,
         );
         return;
       }
-      showAppMessageDialog(
-        context: context,
-        title: L10n.translate(context, 'Project limit reached'),
-        message: L10n.translate(
+      if (!mounted) return;
+      loadingDialogShown = true;
+      unawaited(
+        showLoadingDialog(
           context,
-          'Delete a project to create or import a new one.',
+          message: L10n.translate(context, 'Creating project…'),
         ),
-        buttonLabel: L10n.translate(context, 'OK'),
-        icon: Icons.folder_off_outlined,
       );
-      return;
-    }
-    if (!mounted) return;
-    _creatingProject = true;
-    showLoadingDialog(
-      context,
-      message: L10n.translate(context, 'Creating project…'),
-    );
-    try {
       await Future.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
       final dir = await ProjectManager.createNewProjectDir(
@@ -727,12 +730,16 @@ class _SignedInShellState extends State<SignedInShell> {
       );
       ProjectManager.notifyProjectLibraryChanged();
     } finally {
-      _creatingProject = false;
-      if (mounted) {
+      if (loadingDialogShown && mounted) {
         final navigator = Navigator.of(context);
         if (navigator.canPop()) {
           navigator.pop();
         }
+      }
+      if (mounted) {
+        setState(() => _creatingProject = false);
+      } else {
+        _creatingProject = false;
       }
     }
   }
@@ -804,6 +811,7 @@ class _SignedInShellState extends State<SignedInShell> {
                               selectedTab: _selectedTab,
                               onTabSelected: _setTab,
                               onAddTap: _createMusicProject,
+                              creatingProject: _creatingProject,
                               onBrandTap: () =>
                                   _showRailInfo(desktopRailTopInset),
                               showBrandNotificationDot: showUpdateDot,
@@ -900,6 +908,7 @@ class _SignedInShellState extends State<SignedInShell> {
                 onTabSelected: _setTab,
                 addMenuOpen: false,
                 onAddTap: _createMusicProject,
+                creatingProject: _creatingProject,
               ),
             ),
           ],
