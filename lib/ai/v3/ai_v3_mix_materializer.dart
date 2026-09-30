@@ -6,6 +6,7 @@ import '../../models/mixing_result.dart';
 import '../../models/project_state.dart';
 import '../local_mixing_model.dart';
 import '../magnitude_predictor.dart';
+import '../one_button_mix_profiles.dart';
 import 'ai_v3_preparer.dart';
 
 const Set<String> _v3AllowedMixActionTypes = <String>{
@@ -306,7 +307,13 @@ class AiV3MixGoalMaterializer {
     Set<int>? allowedTargetRowIds,
     AiV3OrderedEffectConstraints? effectConstraints,
     String? projectId,
+    String? oneButtonMixProfileId,
   }) async {
+    final rawProfileId =
+        oneButtonMixProfileId ?? data['one_button_mix_profile_id']?.toString();
+    final profileId = (rawProfileId ?? '').trim().isEmpty
+        ? null
+        : OneButtonMixProfiles.byId(rawProfileId).id;
     final goal = _goalFromPreparedAction(data);
     final inferredContainment = resolveAiV3MixContainment(data, project);
     final masterOnly = inferredContainment.masterOnly;
@@ -405,6 +412,7 @@ class AiV3MixGoalMaterializer {
           .where((candidate) => candidate.type != 'noop')
           .toList(growable: false);
     }
+    resolved = OneButtonMixProfiles.tuneActions(resolved, profileId: profileId);
     validateAiV3MixEffectCapabilities(
       resolved,
       allowedEffectIds: allowedEffectIds,
@@ -422,6 +430,7 @@ class AiV3MixGoalMaterializer {
       actions: resolved,
       protectedReferenceRow: protectedReferenceRow,
       metadata: <String, dynamic>{
+        if (profileId != null) 'one_button_mix_profile_id': profileId,
         'goal': goal.toJson(),
         'heuristic_actions': heuristic.actions
             .map((candidate) => candidate.toJson())
@@ -458,8 +467,16 @@ class AiV3MixGoalMaterializer {
     required bool bypassLearnedMagnitudes,
     required Set<String> allowedEffectIds,
     String? projectId,
+    String? oneButtonMixProfileId,
   }) async {
-    if (!bundle.actions.any((action) => action.type == 'v3_mix_goal')) {
+    final profileId = (oneButtonMixProfileId ?? '').trim().isEmpty
+        ? null
+        : OneButtonMixProfiles.byId(oneButtonMixProfileId).id;
+    if (!bundle.actions.any(
+      (action) =>
+          action.type == 'v3_mix_goal' ||
+          (profileId != null && action.type == 'v3_deferred_mix_goal'),
+    )) {
       return AiV3MixMaterializationResult(
         bundle: bundle,
         metadata: const <String, dynamic>{},
@@ -487,6 +504,19 @@ class AiV3MixGoalMaterializer {
 
     for (final action in bundle.actions) {
       if (action.type != 'v3_mix_goal') {
+        if (action.type == 'v3_deferred_mix_goal' && profileId != null) {
+          // Deferred goals are materialized later from this serialized data.
+          actions.add(
+            AssistantAction(
+              type: action.type,
+              data: <String, dynamic>{
+                ...action.data,
+                'one_button_mix_profile_id': profileId,
+              },
+            ),
+          );
+          continue;
+        }
         if (action.type == 'v3_row_role_override') {
           final target = action.data['target'];
           final rowIndex = target is Map
@@ -514,6 +544,7 @@ class AiV3MixGoalMaterializer {
         allowedEffectIds: allowedEffectIds,
         effectConstraints: effectConstraints,
         projectId: projectId,
+        oneButtonMixProfileId: profileId,
       );
       final resolved = materializedGoal.actions;
       final protectedReferenceRow = materializedGoal.protectedReferenceRow;

@@ -9667,6 +9667,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
             authTokenProvider: authService.getIdTokenOrNull,
             refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
             requestTimeout: Duration(seconds: LlmConfig.requestTimeoutSeconds),
+            extraHeaders: LlmConfig.debugProxyExtraHeaders,
           )
         : OnnxMixingMagnitudePredictor(
             enabled: true,
@@ -9708,6 +9709,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
               refreshAuthTokenProvider: authService.refreshIdTokenOrNull,
               resourceRefsEnabled: LlmConfig.aiV3ResourceRefsEnabled,
               onDiagnostic: _recordAiV3PlannerDiagnostic,
+              extraHeaders: LlmConfig.debugProxyExtraHeaders,
             )
           : null,
       aiV3ContextProfile: parseAiV3ContextProfile(LlmConfig.aiV3ContextProfile),
@@ -81931,22 +81933,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 );
 
                                                 await runOneButtonMix();
-
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                      L10n.translate(
-                                                        context,
-                                                        'One-Button Mix executed. Open chat for details.',
-                                                      ),
-                                                    ),
-                                                    duration: const Duration(
-                                                      seconds: 3,
-                                                    ),
-                                                  ),
-                                                );
                                               },
                                               child: Ink(
                                                 decoration: BoxDecoration(
@@ -82354,18 +82340,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       context,
     ).showSnackBar(SnackBar(content: Text(L10n.translate(context, 'Mixing…'))));
     await runOneButtonMix();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          L10n.translate(
-            context,
-            'One-Button Mix executed. Open chat for details.',
-          ),
-        ),
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 
   Widget _buildTabletDesktopBottomControlRow({
@@ -82909,17 +82883,6 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                             ),
                           );
                           await runOneButtonMix();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                L10n.translate(
-                                  context,
-                                  'One-Button Mix executed. Open chat for details.',
-                                ),
-                              ),
-                              duration: const Duration(seconds: 3),
-                            ),
-                          );
                         },
                         child: Ink(
                           decoration: BoxDecoration(

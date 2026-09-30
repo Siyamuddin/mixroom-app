@@ -701,7 +701,13 @@ class ChatPipeline {
       final normalizedAiFeature = (aiFeature ?? 'ai_chat').trim();
       final isProjectChat =
           normalizedAiFeature.isEmpty || normalizedAiFeature == 'ai_chat';
-      if (aiV3Planner != null && isProjectChat) {
+      final isOneButtonMix = normalizedAiFeature == 'one_button_mix';
+      if (aiV3Planner != null && (isProjectChat || isOneButtonMix)) {
+        if (isOneButtonMix) {
+          // A button run starts a fresh mix, not a revision of a chat preview.
+          _pendingAiV3Bundle = null;
+          _pendingAiV3PlanId = null;
+        }
         final result = await _handleAiV3(
           userText: userText,
           project: project,
@@ -714,6 +720,7 @@ class ChatPipeline {
           promptTraceId: promptTraceId,
           projectId: projectId,
           bypassLearnedMagnitudes: bypassLearnedMagnitudes,
+          oneButtonMixProfileId: isOneButtonMix ? oneButtonMixProfileId : null,
         );
         return ChatPipelineResult.v3(
           result.message,
@@ -1260,6 +1267,7 @@ class ChatPipeline {
     required String? promptTraceId,
     required String? projectId,
     required bool bypassLearnedMagnitudes,
+    String? oneButtonMixProfileId,
   }) async {
     final normalized = userText.trim().toLowerCase();
     final pending = _pendingAiV3Bundle;
@@ -1573,6 +1581,7 @@ class ChatPipeline {
         bypassLearnedMagnitudes: bypassLearnedMagnitudes,
         allowedEffectIds: _aiV3AllowedEffectIds(context),
         projectId: projectId,
+        oneButtonMixProfileId: oneButtonMixProfileId,
       );
       prepared = mixMaterialization.bundle;
       mixMaterializationMeta = mixMaterialization.metadata;

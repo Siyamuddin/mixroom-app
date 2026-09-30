@@ -116,6 +116,25 @@ class LlmConfig {
     defaultValue: false,
   );
 
+  static const String n8nSecretHeaderName = String.fromEnvironment(
+    'MIXROOM_N8N_SECRET_HEADER',
+    defaultValue: '',
+  );
+
+  static const String n8nSecretHeaderValue = String.fromEnvironment(
+    'MIXROOM_N8N_SECRET',
+    defaultValue: '',
+  );
+
+  /// Debug-only extra proxy headers, for example an n8n webhook secret.
+  static Map<String, String> get debugProxyExtraHeaders {
+    if (!kDebugMode) return const <String, String>{};
+    final name = n8nSecretHeaderName.trim();
+    final value = n8nSecretHeaderValue.trim();
+    if (name.isEmpty || value.isEmpty) return const <String, String>{};
+    return <String, String>{name: value};
+  }
+
   /// Primary route for updated clients. Set false at build time to retain V1
   /// as the visible planner without removing either implementation.
   static const bool aiV3PrimaryEnabled = bool.fromEnvironment(

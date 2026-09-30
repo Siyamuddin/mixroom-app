@@ -140,9 +140,11 @@ class AiV3PlannerService implements AiV3Planner {
     Set<String> commandTypes = aiV3CommandTypes,
     this.resourceRefsEnabled = false,
     this.onDiagnostic,
+    Map<String, String> extraHeaders = const <String, String>{},
     http.Client? httpClient,
   }) : assert(commandTypes.isNotEmpty),
        commandTypes = Set<String>.unmodifiable(commandTypes),
+       extraHeaders = Map<String, String>.unmodifiable(extraHeaders),
        _httpClient = httpClient ?? http.Client();
 
   final String proxyApiBaseUrl;
@@ -153,6 +155,7 @@ class AiV3PlannerService implements AiV3Planner {
   final Set<String> commandTypes;
   final bool resourceRefsEnabled;
   final AiV3PlannerDiagnosticCallback? onDiagnostic;
+  final Map<String, String> extraHeaders;
   final http.Client _httpClient;
 
   void _emitDiagnostic(AiV3PlannerDiagnostic diagnostic) {
@@ -595,6 +598,7 @@ class AiV3PlannerService implements AiV3Planner {
         headers: <String, String>{
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
+          ...extraHeaders,
         },
         body: encodedBody,
       )

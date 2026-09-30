@@ -21,8 +21,10 @@ class RemoteMixingMagnitudePredictor implements MixingMagnitudePredictor {
     required this.requestTimeout,
     this.authTokenProvider,
     this.refreshAuthTokenProvider,
+    Map<String, String> extraHeaders = const <String, String>{},
     http.Client? httpClient,
-  }) : _httpClient = httpClient ?? http.Client();
+  }) : extraHeaders = Map<String, String>.unmodifiable(extraHeaders),
+       _httpClient = httpClient ?? http.Client();
 
   final bool enabled;
   final String proxyApiBaseUrl;
@@ -30,6 +32,7 @@ class RemoteMixingMagnitudePredictor implements MixingMagnitudePredictor {
   final Duration requestTimeout;
   final ProxyAuthTokenProvider? authTokenProvider;
   final ProxyAuthTokenProvider? refreshAuthTokenProvider;
+  final Map<String, String> extraHeaders;
   final http.Client _httpClient;
 
   Map<String, dynamic> _observabilityContext = const <String, dynamic>{
@@ -213,6 +216,7 @@ class RemoteMixingMagnitudePredictor implements MixingMagnitudePredictor {
           headers: <String, String>{
             'Authorization': 'Bearer $token',
             'Content-Type': 'application/json',
+            ...extraHeaders,
           },
           body: jsonEncode(body),
         )

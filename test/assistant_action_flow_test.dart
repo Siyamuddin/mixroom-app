@@ -9,6 +9,7 @@ import 'package:mixroom/ai/instrument_classifier.dart';
 import 'package:mixroom/ai/ai_file_metadata.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/magnitude_predictor.dart';
+import 'package:mixroom/ai/one_button_mix_profiles.dart';
 import 'package:mixroom/ai/project_state_builder.dart';
 import 'package:mixroom/ai/v3/ai_v3_context.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
@@ -26,6 +27,7 @@ class _FakeCloudLlmService extends CloudLlmService {
   String? seenSelectionSnapshot;
   String? seenProjectSnapshot;
   String? seenUserText;
+  String? seenAiFeature;
 
   @override
   Future<LlmResult> send({
@@ -42,6 +44,7 @@ class _FakeCloudLlmService extends CloudLlmService {
     Map<String, dynamic> clientContext = const <String, dynamic>{},
   }) async {
     seenUserText = userText;
+    seenAiFeature = aiFeature;
     seenProjectSnapshot = projectSnapshot;
     seenSelectionSnapshot = selectionSnapshot;
     return _next;
@@ -225,6 +228,7 @@ class _FailingAiV3MixGoalMaterializer extends AiV3MixGoalMaterializer {
     required bool bypassLearnedMagnitudes,
     required Set<String> allowedEffectIds,
     String? projectId,
+    String? oneButtonMixProfileId,
   }) async {
     throw AiV3PreparationException(
       code,
@@ -575,6 +579,146 @@ void main() {
         expect(result.aiV3Handoff?['message'], result.message);
       },
     );
+
+    for (final profile in OneButtonMixProfiles.all) {
+      test('One-Button Mix routes ${profile.id} through V3', () async {
+        final fakeLlm = _FakeCloudLlmService(
+          LlmResult.text('Unexpected V1 result.', null),
+        );
+        final planner = _FakeAiV3Planner();
+        final pipeline = ChatPipeline(
+          llm: fakeLlm,
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+          aiV3Planner: planner,
+        );
+        final prompt = OneButtonMixProfiles.buildPrompt(profile.id);
+
+        final result = await pipeline.handleUserText(
+          text: prompt,
+          aiFeature: 'one_button_mix',
+          oneButtonMixProfileId: profile.id,
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+          timelineRows: <TimelineRow>[
+            TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+          ],
+          clientContext: _v3ClientContext(),
+        );
+
+        expect(planner.callCount, 1);
+        expect(planner.seenRequest, prompt);
+        expect(fakeLlm.seenUserText, isNull);
+        expect(result.aiV3Handoff?['decision'], 'respond');
+        expect(result.message, 'V3 handled the request.');
+      });
+    }
+
+    test(
+      'One-Button Mix keeps the legacy route without a V3 planner',
+      () async {
+        final fakeLlm = _FakeCloudLlmService(
+          LlmResult.tool('informational_response', const <String, dynamic>{
+            'message': 'Legacy mix request handled.',
+          }, text: 'Legacy mix request handled.'),
+        );
+        final pipeline = ChatPipeline(
+          llm: fakeLlm,
+          projectBuilder: _FakeProjectStateBuilder(rows: 1),
+          mixModel: LocalMixingModel(),
+        );
+        final prompt = OneButtonMixProfiles.buildPrompt(
+          OneButtonMixProfiles.warmSpaciousId,
+        );
+
+        final result = await pipeline.handleUserText(
+          text: prompt,
+          aiFeature: 'one_button_mix',
+          oneButtonMixProfileId: OneButtonMixProfiles.warmSpaciousId,
+          audioTracks: const <AudioTrack>[],
+          rowGain: const <double>[1.0],
+          rowPan: const <double>[0.5],
+          rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+          bpmFallback: 120,
+        );
+
+        expect(fakeLlm.seenUserText, prompt);
+        expect(fakeLlm.seenAiFeature, 'one_button_mix');
+        expect(result.hasAiV3Handoff, isFalse);
+        expect(result.message, 'Legacy mix request handled.');
+      },
+    );
+
+    test('One-Button Mix starts fresh when a V3 plan is pending', () async {
+      final fakeLlm = _FakeCloudLlmService(
+        LlmResult.text('Unexpected V1 result.', null),
+      );
+      final planner = _StaticAiV3Planner(
+        const AiV3Plan(
+          outcome: 'plan',
+          userMessage: 'Preparing the requested change.',
+          commands: <AiV3Command>[
+            AiV3Command(
+              commandId: 'gain',
+              type: 'row.adjust_gain_db',
+              arguments: <String, dynamic>{'row_id': 101, 'delta_db': -2},
+            ),
+          ],
+        ),
+      );
+      final pipeline = ChatPipeline(
+        llm: fakeLlm,
+        projectBuilder: _FakeProjectStateBuilder(rows: 1),
+        mixModel: LocalMixingModel(),
+        aiV3Planner: planner,
+        aiV3Preparer: const _ConfirmingAiV3Preparer(),
+      );
+      final timelineRows = <TimelineRow>[
+        TimelineRow(rowId: 101, name: 'Audio 1', iconId: 0),
+      ];
+
+      final preview = await pipeline.handleUserText(
+        text: 'Lower Audio 1 by 2 dB.',
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'pending-mix-state',
+        clientContext: _v3ClientContext(),
+      );
+      expect(preview.aiV3Handoff?['decision'], 'ask_confirmation');
+      expect(pipeline.hasActiveAiV3PendingPlan(), isTrue);
+
+      final prompt = OneButtonMixProfiles.buildPrompt(
+        OneButtonMixProfiles.producerId,
+      );
+      final result = await pipeline.handleUserText(
+        text: prompt,
+        aiFeature: 'one_button_mix',
+        oneButtonMixProfileId: OneButtonMixProfiles.producerId,
+        audioTracks: const <AudioTrack>[],
+        rowGain: const <double>[1.0],
+        rowPan: const <double>[0.5],
+        rowAutomation: const <List<AutomationPoint>>[<AutomationPoint>[]],
+        bpmFallback: 120,
+        timelineRows: timelineRows,
+        clientStateDigest: 'pending-mix-state',
+        clientContext: _v3ClientContext(),
+      );
+
+      expect(planner.callCount, 2);
+      expect(fakeLlm.seenUserText, isNull);
+      expect(result.hasAiV3Handoff, isTrue);
+      final context = planner.seenContexts.last.data;
+      expect(context['request_mode'], 'new_request');
+      expect(context, isNot(contains('pending_plan')));
+      expect(context, isNot(contains('modification_request')));
+    });
 
     test('V3 plan diagnostics expose structure without command payloads', () {
       const privateClipId = 'private-clip-id-that-must-not-be-logged';

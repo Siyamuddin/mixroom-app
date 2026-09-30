@@ -194,4 +194,10 @@ void main() {
     );
     expect(route.requestTimeoutSeconds, 130);
   });
+
+  test('n8n debug headers stay empty without dart-defines', () {
+    expect(LlmConfig.n8nSecretHeaderName, isEmpty);
+    expect(LlmConfig.n8nSecretHeaderValue, isEmpty);
+    expect(LlmConfig.debugProxyExtraHeaders, isEmpty);
+  });
 }

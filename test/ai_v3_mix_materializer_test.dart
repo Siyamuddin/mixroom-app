@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mixroom/ai/local_mixing_model.dart';
 import 'package:mixroom/ai/magnitude_predictor.dart';
+import 'package:mixroom/ai/one_button_mix_profiles.dart';
 import 'package:mixroom/ai/v3/ai_v3_contract.dart';
 import 'package:mixroom/ai/v3/ai_v3_mix_materializer.dart';
 import 'package:mixroom/ai/v3/ai_v3_preparer.dart';
@@ -285,6 +286,111 @@ AiV3PreparedBundle _bundle({
 }
 
 void main() {
+  for (final profile in <({String? id, double expectedDelta})>[
+    (id: null, expectedDelta: 0.1),
+    (id: OneButtonMixProfiles.producerId, expectedDelta: 0.1),
+    (id: OneButtonMixProfiles.warmSpaciousId, expectedDelta: 0.11),
+    (id: OneButtonMixProfiles.punchyEnergeticId, expectedDelta: 0.092),
+  ]) {
+    test(
+      'one-button profile ${profile.id} tunes the learned result before execution',
+      () async {
+        final modelAction = MixAction('set_row_pan', <String, dynamic>{
+          'row': 0,
+          'mode': 'delta',
+          'delta': 0.05,
+        });
+        final materializer = AiV3MixGoalMaterializer(
+          mixModel: _FixedMixModel(<MixAction>[modelAction]),
+          magnitudePredictor: _Predictor((actions) {
+            expect(actions.single.data['delta'], 0.05);
+            return <MixAction>[
+              MixAction(actions.single.type, <String, dynamic>{
+                ...actions.single.data,
+                'delta': 0.1,
+              }),
+            ];
+          }),
+        );
+
+        final result = await materializer.materialize(
+          bundle: _bundle(intentKind: 'pan', direction: 'right'),
+          project: _project(),
+          roleOverrides: const <int, String>{},
+          bypassLearnedMagnitudes: false,
+          allowedEffectIds: _allMixEffectIds,
+          oneButtonMixProfileId: profile.id,
+        );
+
+        final action =
+            (result.bundle.actions.single.data['actions'] as List).single
+                as Map;
+        expect(
+          (action['data'] as Map)['delta'],
+          closeTo(profile.expectedDelta, 0.000001),
+        );
+        expect((action['data'] as Map)['force_individual_row'], isTrue);
+        expect(modelAction.data['delta'], 0.05);
+        final steps = result.metadata['mix_materialization_steps'] as List;
+        expect((steps.single as Map)['one_button_mix_profile_id'], profile.id);
+      },
+    );
+  }
+
+  test('deferred one-button mix retains its profile until runtime', () async {
+    final base = _bundle(intentKind: 'pan', direction: 'right');
+    final deferred = AssistantAction(
+      type: 'v3_deferred_mix_goal',
+      data: Map<String, dynamic>.from(base.actions.single.data),
+    );
+    final materializer = AiV3MixGoalMaterializer(
+      mixModel: _FixedMixModel(<MixAction>[
+        MixAction('set_row_pan', <String, dynamic>{
+          'row': 0,
+          'mode': 'delta',
+          'delta': 0.1,
+        }),
+      ]),
+      magnitudePredictor: _Predictor((_) => fail('Refinement was bypassed.')),
+    );
+
+    final prepared = await materializer.materialize(
+      bundle: AiV3PreparedBundle(
+        plan: base.plan,
+        stateDigest: base.stateDigest,
+        actions: <AssistantAction>[deferred],
+        receipts: base.receipts,
+        preview: base.preview,
+        executionPolicy: base.executionPolicy,
+      ),
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: true,
+      allowedEffectIds: _allMixEffectIds,
+      oneButtonMixProfileId: OneButtonMixProfiles.warmSpaciousId,
+    );
+    final preparedAction = prepared.bundle.actions.single;
+    expect(preparedAction.type, 'v3_deferred_mix_goal');
+    expect(
+      preparedAction.data['one_button_mix_profile_id'],
+      OneButtonMixProfiles.warmSpaciousId,
+    );
+    expect(deferred.data.containsKey('one_button_mix_profile_id'), isFalse);
+
+    final runtime = await materializer.materializeSingleGoal(
+      data: preparedAction.data,
+      project: _project(),
+      roleOverrides: const <int, String>{},
+      bypassLearnedMagnitudes: true,
+      allowedEffectIds: _allMixEffectIds,
+    );
+    expect(runtime.actions.single.data['delta'], closeTo(0.11, 0.000001));
+    expect(
+      runtime.metadata['one_button_mix_profile_id'],
+      OneButtonMixProfiles.warmSpaciousId,
+    );
+  });
+
   test(
     'capture observer preserves normal refinement and its exact inputs',
     () async {
