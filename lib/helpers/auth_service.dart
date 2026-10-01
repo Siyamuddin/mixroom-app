@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -22,9 +24,9 @@ class AuthService extends ChangeNotifier {
     CognitoAuthClient? cognitoClient,
     http.Client? httpClient,
     bool restoreSessionOnInit = true,
-  })  : _cognito = cognitoClient ?? CognitoAuthClient(),
-        _httpClient = httpClient ?? http.Client() {
-    if (restoreSessionOnInit) {
+  }) : _cognito = cognitoClient ?? CognitoAuthClient(),
+       _httpClient = httpClient ?? http.Client() {
+    if (restoreSessionOnInit && !HackathonConfig.enabled) {
       unawaited(_restoreSession());
     } else {
       _isInitializing = false;
@@ -103,6 +105,9 @@ class AuthService extends ChangeNotifier {
     Future<http.Response> Function(String token) send, {
     bool expireSessionOnAuthFailure = false,
   }) async {
+    if (HackathonConfig.enabled) {
+      throw StateError('Original account services are disabled in this build.');
+    }
     final initialCandidates = await _collectAuthTokenCandidates();
     if (initialCandidates.isEmpty) {
       if (expireSessionOnAuthFailure) {

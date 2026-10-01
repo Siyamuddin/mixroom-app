@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -153,6 +155,10 @@ class EntitlementService extends ChangeNotifier {
   }
 
   void bindAuth(AuthService auth) {
+    if (HackathonConfig.enabled) {
+      _isInitialized = true;
+      return;
+    }
     if (identical(_auth, auth)) return;
     _detachAuthListener();
     _auth = auth;

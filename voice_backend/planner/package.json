@@ -1,0 +1,6 @@
+{
+  "name": "mixroom-local-planner",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18.0" }
+}

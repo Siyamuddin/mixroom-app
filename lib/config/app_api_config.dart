@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 class AppApiConfig {
   const AppApiConfig._();
 
@@ -52,6 +54,7 @@ class AppApiConfig {
   );
 
   static String get apiBaseUrl {
+    if (HackathonConfig.enabled) return '';
     final preferred = appApiBaseUrl.trim();
     if (preferred.isNotEmpty) return preferred;
     final legacy = legacyApiBaseUrl.trim();

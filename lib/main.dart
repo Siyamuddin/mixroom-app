@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:async';
 
 // import 'package:ffmpeg_kit_flutter_full_gpl/ffmpeg_kit.dart';
@@ -25,6 +27,7 @@ import 'package:mixroom/l10n/l10n.dart';
 // import 'package:just_audio/just_audio.dart';
 
 import 'screens/auth_gate.dart';
+import 'screens/projects.dart';
 
 import 'package:provider/provider.dart'; // Import Provider
 import 'package:mixroom/providers/locale_provider.dart'; // Import LocaleProvider
@@ -164,7 +167,7 @@ class MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       navigatorKey: rootNavKey,
       navigatorObservers: <NavigatorObserver>[
-        SentryNavigatorObserver(),
+        if (!HackathonConfig.enabled) SentryNavigatorObserver(),
       ],
       theme: ThemeData(
         fontFamily: 'Pretendard',
@@ -273,7 +276,7 @@ class MyAppState extends State<MyApp> {
         ),
       ),
       //****TEMPORARY****
-      home: const AuthGate(),
+      home: HackathonConfig.enabled ? const ProjectsScreen() : const AuthGate(),
     );
   }
 }

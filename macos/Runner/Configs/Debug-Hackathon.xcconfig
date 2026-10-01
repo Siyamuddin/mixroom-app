@@ -1,0 +1,2 @@
+#include "../../Flutter/Flutter-Debug-Hackathon.xcconfig"
+#include "Warnings.xcconfig"

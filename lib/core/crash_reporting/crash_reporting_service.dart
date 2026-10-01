@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -12,9 +14,10 @@ class CrashReportingService {
   static final CrashReportingService instance = CrashReportingService._();
 
   bool _initialized = false;
-  bool _enabled = true;
+  bool _enabled = !HackathonConfig.enabled;
 
   Future<void> initialize() async {
+    if (HackathonConfig.enabled) return;
     if (_initialized) return;
 
     _enabled = await PrivacyPreferences.isAnalyticsAndCrashDiagnosticsEnabled();
@@ -41,6 +44,7 @@ class CrashReportingService {
   }
 
   Future<void> setCollectionEnabled(bool enabled) async {
+    if (HackathonConfig.enabled) return;
     _enabled = enabled;
     await PrivacyPreferences.setAnalyticsAndCrashDiagnosticsEnabled(enabled);
   }

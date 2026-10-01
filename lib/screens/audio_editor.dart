@@ -183,6 +183,17 @@ import 'package:record/record.dart';
 import 'package:mixroom/widgets/sample_browser_panel.dart';
 import 'package:mixroom/widgets/export_success_preview_player.dart';
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:mixroom/config/hackathon_config.dart';
+import 'package:mixroom/voice/voice_protocol.dart';
+import 'package:mixroom/voice/voice_command_journal.dart';
+import 'package:mixroom/voice/voice_session_controller.dart';
+import 'package:mixroom/voice/voice_relay_transport.dart';
+import 'package:mixroom/voice/voice_relay_planner.dart';
+import 'package:mixroom/voice/voice_project_notes.dart';
+import 'package:mixroom/voice/voice_pair_dialog.dart';
+import 'package:mixroom/voice/voice_comparison.dart';
+
+part 'audio_editor_voice.dart';
 
 @visibleForTesting
 bool shouldMidiClipLabelFollowInstrument({
@@ -4008,6 +4019,7 @@ class AudioEditorScreen extends StatefulWidget {
 /// chat and transport controls without depending on platform accessibility
 /// semantics. Normal app construction never supplies this controller.
 class AudioEditorEvaluationController {
+  Future<Map<String, dynamic>> Function(Map<String, dynamic>)? _voiceAction;
   Future<void> Function(String prompt)? _submit;
   Future<void> Function()? _undo;
   Future<void> Function()? _redo;
@@ -4036,6 +4048,11 @@ class AudioEditorEvaluationController {
   }
 
   bool get isAttached => _submit != null;
+  Future<Map<String, dynamic>> voiceAction(Map<String, dynamic> action) async {
+    final callback = _voiceAction;
+    if (callback == null) throw StateError('voice_evaluation_not_attached');
+    return callback(action);
+  }
   bool get hasPendingPlan => _hasPendingPlan?.call() ?? false;
   String get stateDigest => _stateDigest?.call() ?? '';
 
@@ -4100,6 +4117,7 @@ class AudioEditorEvaluationController {
   }
 
   void _attach({
+    Future<Map<String, dynamic>> Function(Map<String, dynamic>)? voiceAction,
     required Future<void> Function(String prompt) submit,
     required Future<void> Function() undo,
     required Future<void> Function() redo,
@@ -4117,6 +4135,7 @@ class AudioEditorEvaluationController {
     performanceAction,
   }) {
     _submit = submit;
+    _voiceAction = voiceAction;
     _undo = undo;
     _redo = redo;
     _executeV3Handoff = executeV3Handoff;
@@ -4132,6 +4151,7 @@ class AudioEditorEvaluationController {
   }
 
   void _detach() {
+    _voiceAction = null;
     _submit = null;
     _undo = null;
     _redo = null;
@@ -4803,6 +4823,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   String _progressMessage = "";
   String _currentOperation = "";
   bool _v3ExecutionInProgress = false;
+  final _voice = _NativeVoiceState();
   bool _showAiBatchProcessingOverlay = false;
   bool _cancelAiBatchProcessingRequested = false;
   int _aiBatchProcessingCompleted = 0;
@@ -9368,7 +9389,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return true;
     }
 
-    if (_v3ExecutionInProgress) {
+    if (_v3ExecutionInProgress || (HackathonConfig.enabled && _voice.captureId != null)) {
       if (_desktopMidiHeldKeys.isNotEmpty) {
         unawaited(_releaseAllDesktopMidiNotes());
       }
@@ -9657,7 +9678,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           )
           .catchError((Object _) {}),
     );
-    final baseMagnitudePredictor = !kUseLearnedMagnitudePredictor
+    final baseMagnitudePredictor = HackathonConfig.enabled || !kUseLearnedMagnitudePredictor
         ? const NoopMixingMagnitudePredictor()
         : kUseRemoteLearnedMagnitudePredictor
         ? RemoteMixingMagnitudePredictor(
@@ -9698,7 +9719,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       projectBuilder: ProjectStateBuilder(classifier: _classifier),
       mixModel: _mixModel,
       magnitudePredictor: _magnitudePredictor,
-      aiV3Planner: LlmConfig.effectiveAiV3Enabled
+      aiV3Planner: HackathonConfig.enabled
+          ? _createVoicePlanner()
+          : LlmConfig.effectiveAiV3Enabled
           ? AiV3PlannerService(
               requestTimeout: Duration(
                 seconds: aiV3RequestRoute.requestTimeoutSeconds,
@@ -9723,6 +9746,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       },
     );
     widget.evaluationController?._attach(
+      voiceAction: HackathonConfig.enabled
+          ? (action) async => (await _runVoiceSessionAction(action)).toJson()
+          : null,
       performanceAction: _runPerformanceTestAction,
       submit: _submitChatPrompt,
       undo: _performEditorUndo,
@@ -13470,6 +13496,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   @override
   void dispose() {
     _manualNavigationIdleTimer?.cancel();
+    _disposeVoiceSession();
     _manualNavigationIdleTimer = null;
     if (kDawPerformanceMetricsEnabled) {
       GestureBinding.instance.pointerRouter.removeGlobalRoute(
@@ -16072,6 +16099,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   void _handleUndoHistoryChanged() {
+    _voiceHistoryChanged();
     final action = _undoManager.lastAction;
     if (action == null) {
       _scheduleProjectAutosave();
@@ -16327,6 +16355,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   bool get _cloudProjectsFeatureEnabled {
+    if (HackathonConfig.enabled) return false;
     try {
       return context.read<EntitlementService>().areCloudProjectsEnabled;
     } catch (_) {
@@ -18104,6 +18133,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _performAutosaveWrite() async {
+    if (_voice.comparison?.before == true) return;
     if (!_loadedOnce || !_editorSessionReady) {
       debugPrint('Skipping autosave because the editor is not ready.');
       return;
@@ -20007,6 +20037,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _saveProject({bool showSnackBar = true}) async {
+    if (_voice.comparison?.before == true && !await _voiceSwitchComparison(false)) return;
     if (!_loadedOnce || !_editorSessionReady) {
       debugPrint('Skipping project save because the editor is not ready.');
       return;
@@ -20196,6 +20227,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _handleBackPressed() async {
+    if (HackathonConfig.enabled && !await _voicePrepareToLeave()) return;
     if (_rowGroupingSelectionMode &&
         !PlatformCapabilities.current.isDesktop &&
         !mixroomUsesTabletLandscapeShell(context)) {
@@ -71649,6 +71681,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
     Map<String, dynamic> handoff, {
     int? chatFlowId,
   }) async {
+    if (HackathonConfig.enabled) _voice.handoff = handoff;
     if (handoff['schema_version'] != 'ai_v3_handoff_prototype_1') {
       _insertAiFailureSystemText(
         'The assistant returned an invalid change request. Nothing was changed.',
@@ -71769,6 +71802,21 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _insertAiFailureSystemText(
         'Confirmation is required before these changes can be applied.',
       );
+      return;
+    }
+    if (HackathonConfig.enabled &&
+        _voice.controller?.busy == true &&
+        _voice.controller?.connected != true &&
+        _voice.recordingPhase != 'transcribing') {
+      _voice.executionResult = const VoiceResult('rejected',
+          'The voice session ended before this edit could be applied. Connect again and ask once more.');
+      _insertAssistantChatText(_voice.executionResult!.message);
+      return;
+    }
+    if (HackathonConfig.enabled && _voice.comparison?.before == true) {
+      _voice.executionResult = const VoiceResult('clarify',
+          'You are comparing the original mix. Say keep original or keep revised before making another edit.');
+      _insertAssistantChatText(_voice.executionResult!.message);
       return;
     }
     if (_v3ExecutionInProgress) {
@@ -71924,9 +71972,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       )
                       .toList(growable: false);
                   if (persistentActions.isEmpty) return;
-                  await _undoManager.addWithoutExecute(
-                    CompoundUndoAction('AI changes', persistentActions),
-                  );
+                  final compound = CompoundUndoAction('AI changes', persistentActions);
+                  await _undoManager.addWithoutExecute(compound);
+                  if (HackathonConfig.enabled) _voice.pendingAction = compound;
                 },
               );
       if (_producerDataMode && producerBefore != null) {
@@ -71979,6 +72027,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         alreadySatisfiedLocalizer: _localizedAiV3AlreadySatisfiedLabel,
       );
       final completionMessage = aiV3VerifiedCompletionMessage(verifiedBundle);
+      if (HackathonConfig.enabled) {
+        _voiceVerified(bundle, expectedDigest, conversationMessage, transaction.observed,
+            executionStopwatch.elapsedMilliseconds);
+      }
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
         result: <String, dynamic>{
@@ -72057,6 +72109,14 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         },
       );
       _reportAiChatFailure(error, stackTrace, stage: 'v3_execution');
+      if (HackathonConfig.enabled) {
+        _voice.executionResult = VoiceResult(
+          error.rollbackIncomplete ? 'failed_rollback_incomplete' : 'failed_rolled_back',
+          error.rollbackIncomplete
+              ? 'The change failed and could not be fully restored. Review the project.'
+              : 'The change failed and was rolled back.',
+        );
+      }
       _insertAiFailureSystemText(
         error.rollbackIncomplete || !artifactCleanupComplete
             ? 'The changes failed and could not be fully rolled back. Review the project state.'
@@ -90511,7 +90571,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   usesTabletDawLayout: usesTabletDawLayout,
                   keyboardLift: keyboardLift,
                 ),
-                if (_v3ExecutionInProgress)
+                if (_v3ExecutionInProgress || (HackathonConfig.enabled && _voice.captureId != null))
                   const Positioned.fill(
                     child: ModalBarrier(
                       dismissible: false,
@@ -90574,6 +90634,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                 if (_showDawOnboarding) _buildDawOnboardingOverlay(),
                 if (_audioStartupFailed)
                   Positioned.fill(child: _buildAudioStartupRecoveryOverlay()),
+                if (HackathonConfig.enabled) _buildVoiceSessionOverlay(),
               ],
             ),
           ),
@@ -93846,6 +93907,8 @@ class EditorUndoManager extends ChangeNotifier {
   bool get isCapturingActions => _capturedActions != null;
   int get undoDepth => _undo.length;
   EditorUndoAction? get lastAction => _lastAction;
+  EditorUndoAction? get latestUndoAction => _undo.isEmpty ? null : _undo.last.action;
+  EditorUndoAction? get latestRedoAction => _redo.isEmpty ? null : _redo.last.action;
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
       List.unmodifiable(_snapshotRecords(_undo));
   List<ProjectUndoSnapshotRecord> get redoSnapshotRecords =>

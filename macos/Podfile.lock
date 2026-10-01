@@ -236,7 +236,7 @@ SPEC CHECKSUMS:
   flutter_onnxruntime: 546c7c7630c9259f59021319639b30bdaff148c2
   flutter_secure_storage_macos: 7f45e30f838cf2659862a4e4e3ee1c347c2b3b54
   flutter_webrtc: 718eae22a371cd94e5d56aa4f301443ebc5bb737
-  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
+  FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
   google_sign_in_ios: 000870aa06da9b28d1d0bf7ef70ff0213059dd28
   GoogleSignIn: fcee2257188d5eda57a5e2b6a715550ffff9206d
   GoogleUtilities: 4e0c2ad9fa0d0d18b5c4df8bf57b461cba35b0bb
@@ -265,6 +265,6 @@ SPEC CHECKSUMS:
   wakelock_plus: 917609be14d812ddd9e9528876538b2263aaa03b
   WebRTC-SDK: 40d4f5ba05cadff14e4db5614aec402a633f007e
 
-PODFILE CHECKSUM: 429f567d9ab401e946f77b31dd025355fafef34e
+PODFILE CHECKSUM: 6deea87e3117eb0edcfb961cf9a8a82ac4467ebd
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.17.0

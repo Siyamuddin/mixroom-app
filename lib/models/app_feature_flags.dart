@@ -1,3 +1,4 @@
+import 'package:mixroom/config/hackathon_config.dart';
 import 'package:mixroom/config/app_api_config.dart';
 import 'package:mixroom/config/iap_config.dart';
 
@@ -65,20 +66,24 @@ class AppFeatureFlags {
   final String source;
 
   bool get accountPlanBillingEnabled =>
-      flags[AppFeatureFlagKeys.accountPlanBillingEnabled] ??
-      AppApiConfig.accountPlanBillingEnabled;
+      !HackathonConfig.enabled &&
+      (flags[AppFeatureFlagKeys.accountPlanBillingEnabled] ??
+          AppApiConfig.accountPlanBillingEnabled);
 
   bool get subscriptionEnforcementEnabled =>
-      flags[AppFeatureFlagKeys.subscriptionEnforcementEnabled] ??
-      AppApiConfig.enforceSubscriptions;
+      !HackathonConfig.enabled &&
+      (flags[AppFeatureFlagKeys.subscriptionEnforcementEnabled] ??
+          AppApiConfig.enforceSubscriptions);
 
   bool get iapPurchasesEnabled =>
-      flags[AppFeatureFlagKeys.iapPurchasesEnabled] ??
-      IapConfig.purchasesEnabled;
+      !HackathonConfig.enabled &&
+      (flags[AppFeatureFlagKeys.iapPurchasesEnabled] ??
+          IapConfig.purchasesEnabled);
 
   bool get cloudProjectsEnabled =>
-      flags[AppFeatureFlagKeys.cloudProjectsEnabled] ??
-      AppApiConfig.cloudProjectsEnabled;
+      !HackathonConfig.enabled &&
+      (flags[AppFeatureFlagKeys.cloudProjectsEnabled] ??
+          AppApiConfig.cloudProjectsEnabled);
 
   static bool? _localOverrideFor(String key) {
     switch (key) {

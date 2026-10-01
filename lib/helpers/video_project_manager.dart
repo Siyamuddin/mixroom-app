@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -23,7 +25,14 @@ class VideoProjectManager {
 
   static Future<Directory> _rootDir() async {
     final docs = await getApplicationDocumentsDirectory();
-    final root = Directory(p.join(docs.path, 'mixroom_video_projects'));
+    final root = Directory(
+      p.join(
+        docs.path,
+        HackathonConfig.enabled
+            ? 'mixroom_hackathon_video_projects'
+            : 'mixroom_video_projects',
+      ),
+    );
     if (!await root.exists()) await root.create(recursive: true);
     return root;
   }

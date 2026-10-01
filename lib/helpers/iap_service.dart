@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -74,14 +76,18 @@ class IapService extends ChangeNotifier {
     _lastCompletedPurchaseMayBeDeferred = false;
   }
 
-  bool get isMobilePlatformSupported => IapConfig.isMobileTarget;
+  bool get isMobilePlatformSupported =>
+      !HackathonConfig.enabled && IapConfig.isMobileTarget;
   bool get purchasesEnabled =>
-      _entitlementService?.areIapPurchasesEnabled ?? IapConfig.purchasesEnabled;
+      !HackathonConfig.enabled &&
+      (_entitlementService?.areIapPurchasesEnabled ??
+          IapConfig.purchasesEnabled);
 
   @visibleForTesting
   Duration? get purchaseLaunchWatchdogDuration => const Duration(seconds: 6);
 
   void bindEntitlementService(EntitlementService entitlementService) {
+    if (HackathonConfig.enabled) return;
     if (!identical(_entitlementService, entitlementService)) {
       final listener = _entitlementListener;
       if (listener != null) {
@@ -385,11 +391,10 @@ class IapService extends ChangeNotifier {
       _lastMessage = 'Checking purchases...';
       _restoreInProgress = true;
       notifyListeners();
-      final restoredCount =
-          await _verifyRestorablePurchases(applicationUserName);
-      await _iap.restorePurchases(
-        applicationUserName: applicationUserName,
+      final restoredCount = await _verifyRestorablePurchases(
+        applicationUserName,
       );
+      await _iap.restorePurchases(applicationUserName: applicationUserName);
       _lastError = null;
       _lastMessage = restoredCount > 0
           ? 'Purchase restored.'

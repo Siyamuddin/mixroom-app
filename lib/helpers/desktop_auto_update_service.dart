@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:io';
 
 import 'package:auto_updater/auto_updater.dart';
@@ -22,7 +24,8 @@ class DesktopAutoUpdateService with UpdaterListener {
   Future<bool>? _configuration;
   final ValueNotifier<bool> updateAvailable = ValueNotifier<bool>(false);
 
-  bool get isSupported => !kIsWeb && Platform.isMacOS;
+  bool get isSupported =>
+      !HackathonConfig.enabled && !kIsWeb && Platform.isMacOS;
 
   bool get isConfigured =>
       isSupported && AppUpdateConfig.macosAppcastUrl.trim().isNotEmpty;

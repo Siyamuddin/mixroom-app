@@ -1,3 +1,4 @@
+import 'package:mixroom/config/hackathon_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum CloudSyncMode {
@@ -13,6 +14,7 @@ class CloudSyncPreferences {
       'mixroom.cloud_sync.default_workspace_id.v1';
 
   static Future<CloudSyncMode> loadMode() async {
+    if (HackathonConfig.enabled) return CloudSyncMode.manual;
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_modeKey);
     return switch (raw) {

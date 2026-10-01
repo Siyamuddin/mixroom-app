@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:convert';
 import 'dart:io';
 
@@ -324,6 +326,11 @@ class CloudProjectService {
   }
 
   Uri _buildUri(String path) {
+    if (HackathonConfig.enabled) {
+      throw StateError(
+        'Cloud project synchronization is disabled in this build.',
+      );
+    }
     final base = AppApiConfig.apiBaseUrl.trim().replaceAll(RegExp(r'/$'), '');
     return Uri.parse('$base$path');
   }

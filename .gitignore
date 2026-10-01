@@ -53,3 +53,15 @@ tools/live_chatbar_probe_v2_full_results.json
 tools/live_chatbar_probe_v2_full_results_r2.json
 tools/ai_mixing/out*/
 .vercel
+
+# Independent voice build: credentials, captures and local diagnostics
+.env
+.env.*
+!.env.example
+tool/local_*.json
+recordings/
+captures/
+.voice_commands.json
+*.pending
+coverage/
+node_modules/

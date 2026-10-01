@@ -1,0 +1,6 @@
+// Dedicated identity for the independent DIGITAL AF build.
+// Keep the original copyright and license attribution.
+#include "AppInfo.xcconfig"
+
+PRODUCT_NAME = MixRoom
+PRODUCT_BUNDLE_IDENTIFIER = io.github.siyamuddin.mixroom.hackathon

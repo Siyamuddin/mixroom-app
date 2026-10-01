@@ -1,3 +1,5 @@
+import 'package:mixroom/config/hackathon_config.dart';
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -35,7 +37,7 @@ class AnalyticsService with WidgetsBindingObserver {
 
   bool _initialized = false;
   bool _postHogReady = false;
-  bool _collectionEnabled = true;
+  bool _collectionEnabled = !HackathonConfig.enabled;
   String _deviceId = '';
   String? _userId;
   String? _subscriptionTier;
@@ -65,6 +67,11 @@ class AnalyticsService with WidgetsBindingObserver {
   String get environment => AnalyticsConfig.environment;
 
   Future<void> initialize() async {
+    if (HackathonConfig.enabled) {
+      _collectionEnabled = false;
+      _initialized = true;
+      return;
+    }
     if (_initialized) return;
     _prefs = await SharedPreferences.getInstance();
     _packageInfo = await PackageInfo.fromPlatform();
@@ -107,6 +114,7 @@ class AnalyticsService with WidgetsBindingObserver {
   }
 
   Future<void> setCollectionEnabled(bool enabled) async {
+    if (HackathonConfig.enabled) return;
     await PrivacyPreferences.setAnalyticsAndCrashDiagnosticsEnabled(enabled);
     _collectionEnabled = enabled;
     if (enabled) {
@@ -259,6 +267,7 @@ class AnalyticsService with WidgetsBindingObserver {
   }
 
   Future<void> _ensurePostHogReady() async {
+    if (HackathonConfig.enabled) return;
     if (_postHogReady || !AnalyticsConfig.hasPostHog) return;
     try {
       final config = PostHogConfig(AnalyticsConfig.postHogApiKey)

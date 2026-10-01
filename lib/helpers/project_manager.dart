@@ -1,3 +1,4 @@
+import 'package:mixroom/config/hackathon_config.dart';
 /*
 class ProjectManager = logic for a creating/saving a project
 class ProjectBundle = export; define format for sharing projects
@@ -214,7 +215,14 @@ class ProjectManager {
       return override;
     }
     final docs = await getApplicationDocumentsDirectory();
-    final root = Directory(p.join(docs.path, "mixroom_projects"));
+    final root = Directory(
+      p.join(
+        docs.path,
+        HackathonConfig.enabled
+            ? HackathonConfig.projectDirectory
+            : 'mixroom_projects',
+      ),
+    );
     if (!await root.exists()) await root.create(recursive: true);
     return root;
   }
