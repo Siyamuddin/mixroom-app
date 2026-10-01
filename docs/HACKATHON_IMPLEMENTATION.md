@@ -2,7 +2,7 @@
 
 ## Current architecture
 
-The user's final backend choice is local Python in Docker. The earlier n8n and Lovable Cloud backend designs are superseded. Lovable remains the browser product for hackathon eligibility; its generated project exists, but GitHub linking and publication are still pending.
+The backend is local Python with SQLite, packaged for Docker. Lovable hosts the browser controls at [mix-voice-studio.lovable.app](https://mix-voice-studio.lovable.app), with source connected to the private [Siyamuddin/mixroom-voice](https://github.com/Siyamuddin/mixroom-voice) repository. The updated deployment is published; its actual browser sign-in, pairing-code creation, waiting-for-Mac controls, and session revocation passed. Its HTTPS tunnel reaches the Mac's backend. Native audio recording, playback, edits, and Basic Pitch processing stay on the Mac.
 
 The Docker image is built. After initial container checks passed, Docker's outbound networking stopped responding for both providers and the host route. The same Python service is temporarily running directly on the Mac for manual testing. Only MixRoom's container was stopped, and its database volume was preserved; unrelated containers and global Docker settings were not reset. Follow the active addresses in [the manual guide](MANUAL_TESTING.md).
 
@@ -11,12 +11,12 @@ Lovable / React microphone
   → ElevenLabs Scribe Realtime (temporary server-issued token)
   → Python relay / SQLite durable command
   → Mac fresh project context
-  → Python planner adapter → bundled V3 worker → OpenAI / optional Jev
+  → Python planner adapter → bundled V3 worker → OpenAI
   → native validation, apply, readback, undo journal
   → Python verified result → browser → ElevenLabs spoken response
 ```
 
-The backend is [`voice_backend`](../voice_backend/README.md). The companion source is preserved at [`voice_companion`](../voice_companion/README.md) while the intended private Lovable repository is pending. The native repository is private `Siyamuddin/mixroom-app`, based on the original `ai-v4` checkpoint `df4f86e9`. The original working directory and Git configuration were left untouched.
+The backend is [`voice_backend`](../voice_backend/README.md). The standalone companion remains at [`voice_companion`](../voice_companion/README.md), and the integrated hosted version lives in the Lovable-connected repository. Native uses `http://127.0.0.1:8766/api/voice` for the current host runtime; the hosted browser uses the HTTPS address in [the manual guide](MANUAL_TESTING.md). The native repository is private `Siyamuddin/mixroom-app`, based on the original `ai-v4` checkpoint `df4f86e9`. The original working directory and Git configuration were left untouched. Jev remains optional and unconfigured; the tested planning path uses OpenAI.
 
 ## Implemented features
 
@@ -42,6 +42,8 @@ The Hackathon macOS configuration has a separate bundle ID and data directory an
 - The later URL check found a stale development server returning 504 for its JavaScript modules, despite an HTTP 200 index. The demo now serves the built browser bundle on port 5173. Fresh browser rendering, login, and real pairing creation/revocation passed. The backend root on port 8766 now shows a status page instead of a 404. Authenticated pairing is limited to five per minute, replacing a five-per-hour limit that blocked recovery after earlier tests; public login and pairing-code protections remain unchanged.
 - The local Docker image was updated offline with these backend fixes, and its application file matches the tested source. Docker startup still stalls on this Mac; the updated image has not passed a fresh runtime check. The working demo continues to use the host backend.
 - The browser signed into the real local Python service and generated a pairing code. No native track edit was performed during these protocol checks.
+- The temporary public HTTPS tunnel passed health and authentication checks. The exact published and preview Lovable origins each passed preflight, login, authenticated status, and logout; unknown and lookalike origins were rejected. Private endpoints require authentication. These HTTP checks do not establish that the deployed browser or phone audio works.
+- The updated Lovable deployment was published and loaded in the browser. Real HTTPS login, pairing-code creation, disabled controls while waiting for the Mac, and **End session** revocation passed. The native app was not paired during this check; microphone capture and all five features together remain unverified.
 - The Docker image built successfully and uses UID 10001 with loopback port 8765. Container health, authentication, single-use pairing, duplicate commands, single claim, result receipt, persistent results after container restart, and live ElevenLabs token/audio proxying passed with the latest supplied credential before Docker's outbound networking failed. Docker Desktop was initially restored by re-enabling its specific disabled application service; no global restart was performed when the later network failure occurred.
 
 ## Still required before submission
@@ -51,8 +53,8 @@ The Hackathon macOS configuration has a separate bundle ID and data directory an
 - Maintain enough free space for recordings and subsequent builds. The isolated debug app now builds successfully with the documented reduced-metadata Xcode override; failed-build/test caches and regenerable package downloads were reclaimed during the build.
 - Run the actual editor comparison integration test. The focused native voice/transport/comparison/isolation tests have passed.
 - Verify all five features against the real Mac app, including a known melody fixture and live microphone humming, exact A/B values, manual-edit invalidation, disconnected recording, unknown-result recovery, stale-project rejection and notes after reopening.
-- Finish Lovable GitHub authorization, create the private `Siyamuddin/mixroom-voice` through its integration, integrate the tested companion source, configure the HTTPS tunnel/allowed origin and publish the Lovable site.
-- Exercise the published page from both laptop and phone. Measure recognition, planning, native execution and response latency separately.
+- Pair the native app with the published page and complete the feature checklist. The private GitHub connection, publication, HTTPS origin configuration, browser login, and pairing-code lifecycle are verified.
+- Exercise microphone use from both laptop and phone. Measure recognition, planning, native execution and response latency separately.
 
 Do not present the project as release-ready until these checks pass. The UI must never show a fake completed edit because providers, the tunnel, or the native app are unavailable.
 
@@ -63,9 +65,9 @@ Prepare a local project with a named vocal/audio track, a backing track, headpho
 | Time | Action |
 | --- | --- |
 | 0:00–0:15 | Explain the solo-musician problem: hands are occupied playing while recording/editing. Show the live Lovable page and connected Mac. |
-| 0:15–0:45 | Say “Hum for ten seconds and turn it into piano.” Wait for countdown, hum a short melody, and play the MIDI result. |
+| 0:15–0:45 | Say “Hum for ten seconds and turn it into Warm Keys.” Wait for countdown, hum a short melody, and play the MIDI result. |
 | 0:45–1:15 | Say “Lower the backing track by two decibels.” Show the native-confirmed value; ask for before/after and keep the preferred version. |
 | 1:15–1:35 | Say “Remember: try a quieter guitar in the second verse.” Show the time-stamped saved note. |
 | 1:35–2:00 | Explain ElevenLabs command transcription and spoken responses, local music processing, and the existing native DAW foundation. |
 
-Submission fields: **MixRoom**; pitch “A voice-controlled studio for musicians whose hands are busy playing”; published Lovable link; audio-on video under two minutes; accurate ElevenLabs description; team members. State that the native DAW is the reused foundation. Do not claim Jev, publication, or end-to-end operation unless verified.
+Submission fields: **MixRoom**; pitch “A voice-controlled studio for musicians whose hands are busy playing”; [published Lovable link](https://mix-voice-studio.lovable.app); audio-on video under two minutes; accurate ElevenLabs description; team members. State that the native DAW is the reused foundation. Jev is unconfigured, and complete native end-to-end operation still needs verification.

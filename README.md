@@ -5,18 +5,25 @@ The original application and repository are unchanged. Existing attribution and
 license notices below and in the source remain in force.
 
 - Native application: [Siyamuddin/mixroom-app](https://github.com/Siyamuddin/mixroom-app) (private).
-- Companion: Lovable project **MixRoom**, intended private repository `Siyamuddin/mixroom-voice`.
+- Hosted controls: [MixRoom on Lovable](https://mix-voice-studio.lovable.app). Published-browser sign-in, pairing-code creation, and session revocation are verified.
+- Companion repository: [Siyamuddin/mixroom-voice](https://github.com/Siyamuddin/mixroom-voice) (private, connected to Lovable).
 - [Build and run the isolated macOS flavor](tool/HACKATHON_MACOS.md).
 - [Test the app step by step on this Mac](docs/MANUAL_TESTING.md).
 - [Implementation, configuration, acceptance checks, and demo](docs/HACKATHON_IMPLEMENTATION.md).
 
-The backend is a **local Python/FastAPI service in Docker**, with SQLite and
-direct OpenAI / optional Jev planning. [Start the backend](voice_backend/README.md).
-It does not require n8n or Lovable Cloud. ElevenLabs provides command transcription and spoken responses.
-Audio recording, playback, effects, and Basic Pitch transcription run locally.
+The hosted browser controls connect through a temporary HTTPS tunnel to the
+**Python/FastAPI backend on this Mac**, with SQLite and direct OpenAI planning.
+ElevenLabs provides command transcription and spoken responses. The native Mac
+app records and plays audio, applies effects, and runs Basic Pitch locally.
+[Start the backend](voice_backend/README.md). Its Docker image is available, but
+the active runtime uses host Python because Docker networking is unavailable.
+Optional Jev classification is not configured in the verified setup.
 
-The [companion source](voice_companion/) is included here while Lovable's GitHub
-connection is pending. Its destination remains `Siyamuddin/mixroom-voice`.
+The [companion source](voice_companion/) is retained as the local standalone
+version. The Lovable-connected repository hosts the integrated browser version.
+For the current native connection, use `http://127.0.0.1:8766/api/voice`.
+Retrieve the studio password privately from `MIXROOM_PASSWORD` in the ignored
+`voice_backend/.env`; paste only its value into the sign-in form.
 
 Implementation includes voice mixing, guarded before/after and undo, timed takes,
 humming to editable MIDI, and persistent session notes. Local tests have passed;

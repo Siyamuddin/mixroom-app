@@ -6,6 +6,20 @@ lives, and which deeper docs matter.
 If a new service, vendor, or deploy surface is introduced, update this page
 first and then add the deeper doc if needed.
 
+## DIGITAL AF fork
+
+For this independent hackathon build, start with [manual testing](MANUAL_TESTING.md)
+and the [implementation record](HACKATHON_IMPLEMENTATION.md). Its hosted controls
+are [MixRoom on Lovable](https://mix-voice-studio.lovable.app), backed by the private
+[mixroom-voice repository](https://github.com/Siyamuddin/mixroom-voice). Python and
+SQLite run on the Mac behind an HTTPS tunnel; the native app uses
+`http://127.0.0.1:8766/api/voice` and processes music locally. Published-browser
+sign-in and pairing-code lifecycle are verified. Live native microphone capture
+and the full five-feature demonstration remain unchecked.
+
+The stack below documents the original product. Its account, billing, telemetry,
+and cloud startup are disabled in the isolated Hackathon flavor.
+
 ## Current Stack
 
 ### Product surfaces

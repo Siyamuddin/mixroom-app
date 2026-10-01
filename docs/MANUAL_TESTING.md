@@ -2,9 +2,20 @@
 
 This guide tests the local Python backend, browser voice companion, and native Mac app together. Start with English commands, wired headphones, and ten-second recordings. Allow about 30 minutes after the applications have built.
 
+Open the published controls at **[mix-voice-studio.lovable.app](https://mix-voice-studio.lovable.app)**. Its source is the private [Siyamuddin/mixroom-voice](https://github.com/Siyamuddin/mixroom-voice) repository. The website controls the native Mac app through the Mac's Python backend and HTTPS tunnel; the website does not host the music engine.
+
+| Connection | Current address |
+| --- | --- |
+| Hosted browser controls | `https://mix-voice-studio.lovable.app` |
+| Studio address for the hosted page or a phone | `https://accidents-enzyme-archived-members.trycloudflare.com/api/voice` |
+| Native Mac relay and local browser fallback | `http://127.0.0.1:8766/api/voice` |
+| Optional standalone browser on this Mac | `http://127.0.0.1:5173` |
+
+The tunnel URL is temporary and changes when restarted. Keep the Mac, backend, and tunnel running throughout a hosted demonstration. Retrieve the studio password privately from `MIXROOM_PASSWORD` in `voice_backend/.env`; do not put its value in this guide or a recording.
+
 **Current runtime:** Docker's outbound networking stopped responding on this Mac, including connections to both AI providers. The Docker image is built, but the backend now runs directly on the Mac at `http://127.0.0.1:8766` so you can test. Docker still holds its old port 8765 even with this container stopped. Only MixRoom's container was stopped; its database was preserved and the other containers were left running. The Docker instructions below are for returning to that runtime once its networking works.
 
-**Verification record, October 1, 2026:** the native Hackathon app built successfully, its code signature was verified, and the app was launched. The packaged app includes the new home screen with **New Project**. The canonical browser companion is running on port 5173, and its sign-in screen has been visually checked.
+**Verification record, October 1, 2026:** the native Hackathon app built successfully, its code signature was verified, and the app was launched. The packaged app includes the new home screen with **New Project**. The updated Lovable website loaded successfully and passed actual browser HTTPS login, pairing-code creation, disabled controls while waiting for the Mac, and **End session** revocation. Native was not paired during that check. The local browser companion on port 5173 remains a fallback.
 
 All nine final live OpenAI planning checks passed through the host backend on port 8766: a gain change (7.4 seconds), comparison before/after (3.3/3.6 seconds), ten-second recording (2.2 seconds), three humming requests (2.2–4.2 seconds), rejection of an unrelated mixed capture/edit request (3.4 seconds), and a note (2.4 seconds). ElevenLabs token issuance and TTS audio generation also passed through this backend. These are real provider calls using fixture project context; no native edit or recording was executed, and generated speech was not played. Backend/browser tests and earlier successful Docker protocol checks are recorded in [HACKATHON_IMPLEMENTATION.md](HACKATHON_IMPLEMENTATION.md).
 
@@ -20,7 +31,7 @@ Use this independent project folder:
 cd /Users/uddinsiyam/Desktop/digital-af/mixroom-app
 ```
 
-The browser companion, host backend, and native app have already been started for this session; use those instances if they are still open. Do not start a second host backend on port 8766 or a second browser development server on port 5173. The commands below are for starting them again when needed.
+The host backend, HTTPS tunnel, local browser companion, and native app have already been started for this session; use those instances if they are still open. The published page needs no local browser server. Do not start a duplicate backend, tunnel, or local preview. The commands below are for starting them again when needed.
 
 ### Terminal 1: backend
 
@@ -42,7 +53,7 @@ Open `voice_backend/.env` in your editor. Preserve the existing values. Check th
 | `ELEVENLABS_VOICE_ID` | The voice used for replies. |
 | `TYPESAFE_API_KEY` | Optional Jev classification; leave empty if not using Jev. |
 
-The **studio password** is the value after `MIXROOM_PASSWORD=`. Enter that password in the browser later. Provider API keys belong only in this backend configuration; do not paste them into the browser, native pairing dialog, screenshots, or source code.
+The **studio password** is the `MIXROOM_PASSWORD` value, without any surrounding quotes. Read it privately in the local editor and paste only that value into the browser's password field. Close `.env` before screen recording; do not share the file or print its contents into a shared terminal. Provider API keys belong only in this backend configuration; do not paste them into the browser, native pairing dialog, screenshots, or source code.
 
 To restart the current host runtime after stopping the previous instance:
 
@@ -55,7 +66,7 @@ MIXROOM_DATA_DIR="$PWD/data" .venv/bin/python -m uvicorn mixroom_backend.app:app
 
 Leave that terminal open. This uses the already installed Python environment and the private `.env`; restart this process after changing its configuration. The health request returning JSON proves the server is reachable, not that provider calls or your microphone work.
 
-**Docker alternative, after its network is repaired:** stop the host backend first, change the browser and native relay URLs to `http://127.0.0.1:8765/api/voice`, open Docker Desktop, then run these commands from the repository root:
+**Docker alternative, after its network is repaired:** stop the host backend first, change the native and local browser relay URLs to `http://127.0.0.1:8765/api/voice`, open Docker Desktop, then run these commands from the repository root. Hosted controls still need HTTPS: a replacement tunnel must target port 8765 and the browser must use its new HTTPS URL.
 
 ```sh
 python3 voice_backend/scripts/docker_local.py compose up -d --no-build
@@ -65,7 +76,32 @@ curl --fail http://127.0.0.1:8765/health
 
 These commands use the existing built image. The helper runs Compose from the backend folder. On this Mac the default Docker proxy socket can hang; the helper probes it for five seconds, then tries Docker Desktop's working raw socket without changing global settings. It fixes CLI access only, not Docker's provider connectivity. Docker retains its own database volume; changes made in the host database after the copy are not automatically synchronized back. After switching runtimes, sign in and pair again if necessary. After editing `.env` in Docker mode, apply it with `python3 voice_backend/scripts/docker_local.py compose up -d --no-build --force-recreate`.
 
-### Terminal 2: browser companion
+### HTTPS tunnel for the hosted page
+
+Check the existing tunnel before starting another:
+
+```sh
+curl --fail --max-time 5 https://accidents-enzyme-archived-members.trycloudflare.com/health
+```
+
+If the tunnel process has stopped, this session's official binary can start a new one:
+
+```sh
+/tmp/mixroom-cloudflared/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8766
+```
+
+Leave the process running. Use its new printed HTTPS URL plus `/api/voice` as the hosted browser's studio address. Its hostname changes on restart; the native app can keep using `http://127.0.0.1:8766/api/voice`. The current tunnel log is `/tmp/mixroom-cloudflared/tunnel.log`; files under `/tmp` may disappear after a Mac restart. See [backend setup](../voice_backend/README.md) for the official tunnel documentation. The exact Lovable published and preview origins are already allowed in the private backend configuration.
+
+### Open the hosted browser controls
+
+Open **[mix-voice-studio.lovable.app](https://mix-voice-studio.lovable.app)** and keep the tab visible during voice tests. On **Open your studio.**, enter:
+
+- **Studio address:** `https://accidents-enzyme-archived-members.trycloudflare.com/api/voice`, or the current tunnel URL if it was restarted.
+- **Studio password:** the `MIXROOM_PASSWORD` value retrieved privately above.
+
+Click **Open studio**. You should see **Pair your Mac**. Disabled controls and a waiting/offline state are expected before the native app is paired. This hosted sign-in and pairing-code lifecycle has passed browser verification; microphone and native feature tests are still required below.
+
+### Local browser alternative
 
 ```sh
 cd /Users/uddinsiyam/Desktop/digital-af/mixroom-app/voice_companion
@@ -76,12 +112,12 @@ npm run preview -- --port 5173 --strictPort
 
 Open **http://127.0.0.1:5173** in a browser on this same Mac. Keep this tab visible during voice tests. The current demo serves the built bundle. If port 5173 is already in use, use the existing server instead of starting a duplicate. Rebuild with `npm run build` after changing source or public configuration; developers can stop the preview and use `npm run dev` while editing. The default backend accepts the documented local browser origins.
 
-On **Open your studio.**, enter:
+For this local alternative only, enter:
 
 - **Studio address:** `http://127.0.0.1:8766/api/voice`
 - **Studio password:** the password from your private backend `.env`
 
-Click **Open studio**. You should see **Pair your Mac**. “Mac offline” is normal before pairing.
+Click **Open studio**. You should see **Pair your Mac**. Use either this local tab or the hosted tab for the test session.
 
 ### Open the built native Mac app
 
@@ -119,6 +155,8 @@ The browser microphone hears **commands**. The native app’s selected audio inp
 4. Wait for the browser to show **Mac connected**, your project name, and the selected track near **CONVERSATION**. Click a different native row and confirm this selected name updates; finish with `Voice Take` selected.
 
 Codes last five minutes and are single-use. If one expires, end that browser session and create a fresh code. If the native **Voice session** panel is absent, check that you opened an editor project in the exact Hackathon app bundle above.
+
+The pairing code identifies the same backend session whether the browser reaches it through HTTPS or loopback. Keep the native connection on the local address shown above.
 
 ## 4. Check recording before interpreting speech
 
@@ -212,7 +250,8 @@ An unknown outcome is different from “nothing happened.” **Check your projec
 | Symptom | First check |
 | --- | --- |
 | Studio will not open | Check the backend terminal, health URL, exact studio address, and studio password. In Docker mode also check the helper's `compose ps` command. Provider keys are not the sign-in password. |
-| Browser reports a connection/origin error | Use `http://127.0.0.1:5173` and the documented backend URL. Changed ports or a hosted page need an exact allowed origin. |
+| Browser reports a connection/origin error | On the published page, use the current HTTPS tunnel address. On the local preview, use the local relay address. The two documented Lovable origins are allowed; changed domains or preview origins need an exact backend allowlist entry. |
+| Hosted page opens but the studio is unreachable | Confirm the Mac, host backend, and tunnel are running. A restarted Quick Tunnel has a new hostname; update the studio address field. |
 | The website is blank | The earlier development server returned 504 for JavaScript after an environment reload. The demo now uses the built preview. Refresh the page and confirm you are using this Mac; `127.0.0.1` on a phone refers to the phone. |
 | Mac stays offline | Check the code has not expired, the native relay URL includes `/api/voice`, and an editor project is open in the Hackathon app. |
 | Browser hears no command | Allow its microphone permission, keep the tab visible, click **Start conversation**, and wait for **I’m listening.** |
@@ -247,14 +286,14 @@ Save a screenshot or short screen recording showing the native result for each p
 
 Write down the test date, app revision, browser, audio device, actual results, and any failing step. Leave failed or untested items unchecked.
 
-To finish, wait for recording/saving to end, click **End conversation**, then **Disconnect studio** and **Sign out**. Close the native app. Stop the browser development server and host backend with Control-C in their terminals if you started them there. In Docker mode, preserve backend data with:
+To finish, wait for recording/saving to end, click **End conversation**, then end/disconnect the session and **Sign out**. Close the native app. Stop any local browser server, tunnel, and host backend with Control-C in their terminals if you started them there. Stopping the tunnel makes the hosted controls unable to reach this Mac. In Docker mode, preserve backend data with:
 
 ```sh
 cd /Users/uddinsiyam/Desktop/digital-af/mixroom-app
 python3 voice_backend/scripts/docker_local.py compose stop
 ```
 
-These steps test one browser on the same Mac. A published Lovable page or phone needs an HTTPS backend address and its exact allowed browser origin; see [backend setup](../voice_backend/README.md). Local success does not establish that the published hackathon demo is connected or ready.
+The published browser has passed sign-in and pairing-code lifecycle checks. The full checklist above, live microphone capture, and phone audio remain unverified. Record actual native outcomes before calling the five-feature hackathon demonstration ready.
 
 ### Developer build commands
 
@@ -262,7 +301,7 @@ Use these only when a native build is needed, with Flutter/Xcode installed and e
 
 ```sh
 cd /Users/uddinsiyam/Desktop/digital-af/mixroom-app
-./tool/run_hackathon.sh
+./tool/run_hackathon.sh --relay-url http://127.0.0.1:8766/api/voice
 ```
 
 That command builds and launches the debug Hackathon flavor. `./tool/build_hackathon.sh` makes a release build; `./tool/run_hackathon.sh --release` builds and launches in release mode. Provider API keys are not required in any build command.
