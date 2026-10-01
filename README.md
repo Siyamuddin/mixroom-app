@@ -10,6 +10,7 @@ license notices below and in the source remain in force.
 - [Build and run the isolated macOS flavor](tool/HACKATHON_MACOS.md).
 - [Test the app step by step on this Mac](docs/MANUAL_TESTING.md).
 - [Implementation, configuration, acceptance checks, and demo](docs/HACKATHON_IMPLEMENTATION.md).
+- [Presentation and team handoff materials](hackathon/README.md).
 
 The hosted browser controls connect through a temporary HTTPS tunnel to the
 **Python/FastAPI backend on this Mac**, with SQLite and direct OpenAI planning.
