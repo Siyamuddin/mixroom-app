@@ -91,6 +91,21 @@ def test_exact_cors_and_server_date_on_errors(relay):
     assert allowed.status_code == 204 and allowed.headers["Access-Control-Allow-Private-Network"] == "true"
 
 
+def test_public_service_page_links_to_app_without_exposing_private_config(relay):
+    f = relay
+    response = f["client"].get("/")
+    assert response.status_code == 200 and response.headers["content-type"].startswith("text/html")
+    assert "MixRoom backend is running" in response.text
+    assert 'href="http://127.0.0.1:5173/"' in response.text and 'href="/health"' in response.text
+    for private in (PASSWORD, f["settings"].data_dir, f["settings"].elevenlabs_api_key, f["settings"].openai_api_key, f["owner_token"], f["native_token"]):
+        assert private not in response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    assert f["client"].get("/api/auth/status").status_code == 401
+    assert f["client"].get(f["base"] + "/state").status_code == 401
+    assert f["client"].get("/", headers={"Origin": "https://untrusted.invalid"}).status_code == 403
+
+
 def test_pairing_single_use_expiry_and_wrong_device(relay):
     f = relay
     assert f["client"].post("/api/voice/pairing/claim", json={"pairingCode": f["pairing"]["pairingCode"]}).status_code == 410
@@ -100,6 +115,26 @@ def test_pairing_single_use_expiry_and_wrong_device(relay):
     assert f["client"].get(f["base"] + "/state", headers={"Authorization": "Bearer mr_dev_" + "f" * 64}).status_code == 404
     assert f["client"].get(f["base"] + "/state").status_code == 401
     assert f["client"].put(f["base"] + "/state", json=f["state"], headers=f["owner"]).status_code == 403
+
+
+def test_owner_pairing_allows_five_per_minute_then_resets_at_boundary(relay):
+    f = relay
+    # The fixture created the first pair in this minute. Unauthorized callers
+    # must neither create a session nor consume the owner's remaining attempts.
+    assert f["client"].post("/api/voice/pairing", json={}).status_code == 401
+    assert f["client"].post("/api/voice/pairing", json={}, headers=f["native"]).status_code == 403
+    session_ids = {f["sid"]}
+    for _ in range(4):
+        response = f["client"].post("/api/voice/pairing", json={}, headers=f["owner"])
+        assert response.status_code == 201
+        session_ids.add(response.json()["sessionId"])
+    assert len(session_ids) == 5
+    sixth = f["client"].post("/api/voice/pairing", json={}, headers=f["owner"])
+    assert sixth.status_code == 429 and sixth.json()["error"]["code"] == "rate_limited"
+    f["now"][0] += 59
+    assert f["client"].post("/api/voice/pairing", json={}, headers=f["owner"]).status_code == 429
+    f["now"][0] += 1
+    assert f["client"].post("/api/voice/pairing", json={}, headers=f["owner"]).status_code == 201
 
 
 def test_idempotent_submit_rejects_changed_payload_and_invalid_guards(relay):

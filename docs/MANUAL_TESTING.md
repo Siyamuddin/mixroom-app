@@ -70,10 +70,11 @@ These commands use the existing built image. The helper runs Compose from the ba
 ```sh
 cd /Users/uddinsiyam/Desktop/digital-af/mixroom-app/voice_companion
 test -d node_modules || npm ci
-npm run dev
+test -f dist/index.html || npm run build
+npm run preview -- --port 5173 --strictPort
 ```
 
-Open **http://127.0.0.1:5173** in your browser. Keep this tab visible during voice tests. If Vite selects another port, an existing server may already be running; use the existing 5173 server or stop the duplicate. The default backend accepts the documented local browser origins.
+Open **http://127.0.0.1:5173** in a browser on this same Mac. Keep this tab visible during voice tests. The current demo serves the built bundle. If port 5173 is already in use, use the existing server instead of starting a duplicate. Rebuild with `npm run build` after changing source or public configuration; developers can stop the preview and use `npm run dev` while editing. The default backend accepts the documented local browser origins.
 
 On **Open your studio.**, enter:
 
@@ -212,6 +213,7 @@ An unknown outcome is different from “nothing happened.” **Check your projec
 | --- | --- |
 | Studio will not open | Check the backend terminal, health URL, exact studio address, and studio password. In Docker mode also check the helper's `compose ps` command. Provider keys are not the sign-in password. |
 | Browser reports a connection/origin error | Use `http://127.0.0.1:5173` and the documented backend URL. Changed ports or a hosted page need an exact allowed origin. |
+| The website is blank | The earlier development server returned 504 for JavaScript after an environment reload. The demo now uses the built preview. Refresh the page and confirm you are using this Mac; `127.0.0.1` on a phone refers to the phone. |
 | Mac stays offline | Check the code has not expired, the native relay URL includes `/api/voice`, and an editor project is open in the Hackathon app. |
 | Browser hears no command | Allow its microphone permission, keep the tab visible, click **Start conversation**, and wait for **I’m listening.** |
 | Recording cannot start | Select an audio row, choose an available native input/channel, allow MixRoom microphone access, and wait for spoken preparation to finish. |

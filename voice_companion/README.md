@@ -4,10 +4,13 @@ React interface for the local MixRoom Python backend. The official Lovable proje
 
 ```sh
 npm ci
-npm run dev
+npm run build
+npm run preview -- --port 5173 --strictPort
 ```
 
 Start [the backend](../voice_backend/README.md), open `http://127.0.0.1:5173`, and sign in with its studio address and password. `VITE_VOICE_RELAY_URL` is an optional public address default. No provider keys or studio password belong in frontend environment variables.
+
+The current demo serves the built bundle, avoiding development-server reloads during a presentation. Rebuild after source or public environment changes. For development, stop the preview first and use `npm run dev`; do not run both on port 5173.
 
 `npm test` covers microphone/speech lifecycle, command deduplication, recording readiness, session isolation, and auth URL handling. `npm run build` checks TypeScript and builds the production bundle. Browser outcomes come only from native-confirmed results. No simulated tracks or successful edits are shown when disconnected.
 

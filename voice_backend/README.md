@@ -53,6 +53,7 @@ Use the printed HTTPS URL plus `/api/voice` as the studio address. Add the exact
 
 - API base: `/api/voice`; local owner login/status/logout: `/api/auth`.
 - Pairing codes expire after five minutes and can be used once. Browser and device sessions expire after twelve hours. Password rotation invalidates existing sessions on restart.
+- An authenticated owner can create five pairing codes per minute. Reaching that limit does not prevent an already connected session from operating.
 - SQLite stores hashed tokens, bounded state, commands, and outcomes; it does not store recordings or provider keys. Old command records expire after seven days.
 - Command IDs are durable and duplicate submissions do not repeat an edit. Changed content under the same ID is rejected. Work is serialized per session, with project/revision checks before planning and application.
 - Interrupted execution is reported as unknown, never automatically replayed. Recording and emergency stop do not depend on a working planning provider.
@@ -64,7 +65,7 @@ Run tests with `.venv/bin/python -m pytest tests` from this folder. The planner 
 
 ## Verified on this Mac
 
-The Docker image built successfully. Python tests: **35 passed plus eight subtests**. Before Docker's outbound networking stopped responding, the real container passed login, one-use pairing, command deduplication, single native claim, result receipt, SQLite persistence through a restart, and live ElevenLabs token/TTS proxy checks with the latest supplied credential. These protocol fixtures do not perform native audio edits. MixRoom's container is now stopped while the host runtime is used; other containers were left running.
+The Docker image built successfully. Python tests: **37 passed plus eight subtests**. Before Docker's outbound networking stopped responding, the real container passed login, one-use pairing, command deduplication, single native claim, result receipt, SQLite persistence through a restart, and live ElevenLabs token/TTS proxy checks with the latest supplied credential. These protocol fixtures do not perform native audio edits. MixRoom's container is now stopped while the host runtime is used; other containers were left running. The current host's base URL displays a service status page, and real browser sign-in and pairing have been verified.
 
 `./.venv/bin/python scripts/smoke_local.py` repeats the basic real HTTP check. `--speech` makes two small provider calls; `--restart` also restarts this Compose service, so run it before a musician connects.
 

@@ -8,7 +8,7 @@ import time
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 import httpx
 
 from .config import Settings
@@ -110,6 +110,19 @@ def create_app(settings=None, *, provider_transport=None, planner=None, mix_reso
 
     def native(actor):
         if not actor.get("device_hash"): fail(403, "device_auth_required")
+
+    @app.get("/", response_class=HTMLResponse)
+    async def service_home():
+        return HTMLResponse("""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MixRoom backend</title><style>
+body{margin:0;background:#111315;color:#f4f4f1;font:17px/1.6 system-ui,sans-serif}
+main{max-width:36rem;margin:12vh auto;padding:2rem}h1{font-size:2rem;line-height:1.2}
+p{color:#bfc4c7}a{color:#a5e5c3;text-underline-offset:.2em}nav{display:flex;gap:1.5rem;flex-wrap:wrap}
+</style></head><body><main><h1>MixRoom backend is running</h1>
+<p>Open the MixRoom app to sign in and pair your desktop session.</p>
+<nav aria-label="MixRoom links"><a href="http://127.0.0.1:5173/">Open MixRoom</a><a href="/health">View service health</a></nav>
+</main></body></html>""", headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"})
 
     @app.get("/health")
     @app.get("/api/voice/health")
@@ -241,7 +254,7 @@ def create_app(settings=None, *, provider_transport=None, planner=None, mix_reso
             return {**result, "deviceToken": bearer}
         actor = authenticate(request)
         if route == "pairing" and method == "POST":
-            browser(actor); store.rate("pair-create:owner", 5, 3600)
+            browser(actor); store.rate("pair-create:owner", 5, 60)
             store.cleanup()
             code = pairing_code()
             result = store.relay("pairing_create", actor, payload={"code_hash": digest(code)})
