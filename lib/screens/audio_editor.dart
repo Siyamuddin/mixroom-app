@@ -3950,15 +3950,15 @@ _kProducerPromptTemplates = <_ProducerPromptTemplate>[
   ),
 ];
 
-typedef AudioEditorStemSeparatorOverride =
-    Future<void> Function({
-      required String inputPath,
-      required String vocalsOutputPath,
-      required String instrumentalOutputPath,
-    });
+typedef AudioEditorStemSeparatorOverride = Future<void> Function({
+  required String inputPath,
+  required String vocalsOutputPath,
+  required String instrumentalOutputPath,
+});
 
-typedef AudioEditorSampleDurationOverride =
-    Future<Duration?> Function(String filePath);
+typedef AudioEditorSampleDurationOverride = Future<Duration?> Function(
+  String filePath,
+);
 
 typedef AudioEditorBasicPitchOverride =
     Future<List<BasicPitchNoteEvent>> Function({required Float32List mono16k});
@@ -4053,6 +4053,7 @@ class AudioEditorEvaluationController {
     if (callback == null) throw StateError('voice_evaluation_not_attached');
     return callback(action);
   }
+
   bool get hasPendingPlan => _hasPendingPlan?.call() ?? false;
   String get stateDigest => _stateDigest?.call() ?? '';
 
@@ -9381,6 +9382,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return false;
     }
 
+    if (HackathonConfig.enabled && isKeyDown && key == LogicalKeyboardKey.f8) {
+      if (_voice.controller?.connected != true &&
+          _voice.controller?.busy != true &&
+          _voice.captureId == null) {
+        unawaited(_pairVoiceSession());
+      }
+      return true;
+    }
+
     if (_handleDesktopTopPopupEscape(event)) {
       return true;
     }
@@ -9389,7 +9399,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       return true;
     }
 
-    if (_v3ExecutionInProgress || (HackathonConfig.enabled && _voice.captureId != null)) {
+    if (_v3ExecutionInProgress ||
+        (HackathonConfig.enabled && _voice.captureId != null)) {
       if (_desktopMidiHeldKeys.isNotEmpty) {
         unawaited(_releaseAllDesktopMidiNotes());
       }
@@ -9678,7 +9689,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           )
           .catchError((Object _) {}),
     );
-    final baseMagnitudePredictor = HackathonConfig.enabled || !kUseLearnedMagnitudePredictor
+    final baseMagnitudePredictor =
+        HackathonConfig.enabled || !kUseLearnedMagnitudePredictor
         ? const NoopMixingMagnitudePredictor()
         : kUseRemoteLearnedMagnitudePredictor
         ? RemoteMixingMagnitudePredictor(
@@ -14846,8 +14858,7 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
           ((uiSettings?["desktopFollowPlayhead"] as bool?) ?? false);
       _desktopFollowPlayheadContinuous =
           PlatformCapabilities.current.isDesktop &&
-          ((uiSettings?["desktopFollowPlayheadContinuous"] as bool?) ??
-              false);
+          ((uiSettings?["desktopFollowPlayheadContinuous"] as bool?) ?? false);
       _allowMultipleExpandedRows =
           (uiSettings?["allowMultipleExpandedRows"] as bool?) ?? true;
       _expandRowsOnTrackSelect =
@@ -20037,7 +20048,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
   }
 
   Future<void> _saveProject({bool showSnackBar = true}) async {
-    if (_voice.comparison?.before == true && !await _voiceSwitchComparison(false)) return;
+    if (_voice.comparison?.before == true &&
+        !await _voiceSwitchComparison(false))
+      return;
     if (!_loadedOnce || !_editorSessionReady) {
       debugPrint('Skipping project save because the editor is not ready.');
       return;
@@ -21650,9 +21663,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             buildDropdownField(
                                                               label:
                                                                   L10n.translate(
-                                                                context,
-                                                                'Resample quality',
-                                                              ),
+                                                                    context,
+                                                                    'Resample quality',
+                                                                  ),
                                                               value:
                                                                   selectedResampleQuality,
                                                               options:
@@ -21717,8 +21730,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                     exportBlue,
                                                                 onChanged: (value) {
                                                                   setSheetState(() {
-                                                                      selectedNormalize =
-                                                                          value;
+                                                                    selectedNormalize =
+                                                                        value;
                                                                   });
                                                                 },
                                                               ),
@@ -21937,8 +21950,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                     exportBlue,
                                                                 onChanged: (value) {
                                                                   setSheetState(() {
-                                                                      selectedWavDithering =
-                                                                          value;
+                                                                    selectedWavDithering =
+                                                                        value;
                                                                   });
                                                                 },
                                                               ),
@@ -21947,9 +21960,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                             buildDropdownField(
                                                               label:
                                                                   L10n.translate(
-                                                                context,
-                                                                'Encoding mode',
-                                                              ),
+                                                                    context,
+                                                                    'Encoding mode',
+                                                                  ),
                                                               value:
                                                                   selectedMp3Mode,
                                                               options:
@@ -21997,8 +22010,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                     return;
                                                                   }
                                                                   setSheetState(() {
-                                                                      selectedMp3Bitrate =
-                                                                          value;
+                                                                    selectedMp3Bitrate =
+                                                                        value;
                                                                   });
                                                                 },
                                                               )
@@ -22006,9 +22019,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                               buildDropdownField(
                                                                 label:
                                                                     L10n.translate(
-                                                                  context,
-                                                                  'VBR quality',
-                                                                ),
+                                                                      context,
+                                                                      'VBR quality',
+                                                                    ),
                                                                 value:
                                                                     selectedMp3VbrQuality,
                                                                 options:
@@ -22022,8 +22035,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                     return;
                                                                   }
                                                                   setSheetState(() {
-                                                                      selectedMp3VbrQuality =
-                                                                          value;
+                                                                    selectedMp3VbrQuality =
+                                                                        value;
                                                                   });
                                                                 },
                                                               ),
@@ -41001,8 +41014,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                 ? Padding(
                                                                     key:
                                                                         const ValueKey(
-                                                                      'copied_badge',
-                                                                    ),
+                                                                          'copied_badge',
+                                                                        ),
                                                                     padding: const EdgeInsets.symmetric(
                                                                       horizontal:
                                                                           14,
@@ -41063,12 +41076,12 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                 HitTestBehavior
                                                                     .translucent,
                                                             onSecondaryTapDown: (_) {
-                                                                  unawaited(
-                                                                    _copyChatMessageToClipboard(
-                                                                      message,
-                                                                    ),
-                                                                  );
-                                                                },
+                                                              unawaited(
+                                                                _copyChatMessageToClipboard(
+                                                                  message,
+                                                                ),
+                                                              );
+                                                            },
                                                             child: AnimatedContainer(
                                                               duration:
                                                                   const Duration(
@@ -41153,8 +41166,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                                           ),
                                                                           AiV3ClarificationOptions(
                                                                             key: ValueKey<String>(
-                                                                                  clarificationId,
-                                                                                ),
+                                                                              clarificationId,
+                                                                            ),
                                                                             options:
                                                                                 questionOptions,
                                                                             busy:
@@ -49565,8 +49578,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                   unawaited(
                                     _setRoutingSheetMonitoring(value)
                                         .whenComplete(() {
-                                      setSheetState(() {});
-                                    }),
+                                          setSheetState(() {});
+                                        }),
                                   );
                                 }
                               : null,
@@ -71808,14 +71821,18 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
         _voice.controller?.busy == true &&
         _voice.controller?.connected != true &&
         _voice.recordingPhase != 'transcribing') {
-      _voice.executionResult = const VoiceResult('rejected',
-          'The voice session ended before this edit could be applied. Connect again and ask once more.');
+      _voice.executionResult = const VoiceResult(
+        'rejected',
+        'The voice session ended before this edit could be applied. Connect again and ask once more.',
+      );
       _insertAssistantChatText(_voice.executionResult!.message);
       return;
     }
     if (HackathonConfig.enabled && _voice.comparison?.before == true) {
-      _voice.executionResult = const VoiceResult('clarify',
-          'You are comparing the original mix. Say keep original or keep revised before making another edit.');
+      _voice.executionResult = const VoiceResult(
+        'clarify',
+        'You are comparing the original mix. Say keep original or keep revised before making another edit.',
+      );
       _insertAssistantChatText(_voice.executionResult!.message);
       return;
     }
@@ -71972,7 +71989,10 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                       )
                       .toList(growable: false);
                   if (persistentActions.isEmpty) return;
-                  final compound = CompoundUndoAction('AI changes', persistentActions);
+                  final compound = CompoundUndoAction(
+                    'AI changes',
+                    persistentActions,
+                  );
                   await _undoManager.addWithoutExecute(compound);
                   if (HackathonConfig.enabled) _voice.pendingAction = compound;
                 },
@@ -72028,8 +72048,13 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       );
       final completionMessage = aiV3VerifiedCompletionMessage(verifiedBundle);
       if (HackathonConfig.enabled) {
-        _voiceVerified(bundle, expectedDigest, conversationMessage, transaction.observed,
-            executionStopwatch.elapsedMilliseconds);
+        _voiceVerified(
+          bundle,
+          expectedDigest,
+          conversationMessage,
+          transaction.observed,
+          executionStopwatch.elapsedMilliseconds,
+        );
       }
       _chatPipeline.recordAiV3Execution(
         handoff: handoff,
@@ -72111,7 +72136,9 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
       _reportAiChatFailure(error, stackTrace, stage: 'v3_execution');
       if (HackathonConfig.enabled) {
         _voice.executionResult = VoiceResult(
-          error.rollbackIncomplete ? 'failed_rollback_incomplete' : 'failed_rolled_back',
+          error.rollbackIncomplete
+              ? 'failed_rollback_incomplete'
+              : 'failed_rolled_back',
           error.rollbackIncomplete
               ? 'The change failed and could not be fully restored. Review the project.'
               : 'The change failed and was rolled back.',
@@ -81982,15 +82009,15 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
 
                                                 ScaffoldMessenger.of(context)
                                                     .showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                      L10n.translate(
-                                                        context,
-                                                        'Mixing…',
+                                                      SnackBar(
+                                                        content: Text(
+                                                          L10n.translate(
+                                                            context,
+                                                            'Mixing…',
+                                                          ),
+                                                        ),
                                                       ),
-                                                    ),
-                                                  ),
-                                                );
+                                                    );
 
                                                 await runOneButtonMix();
                                               },
@@ -88185,19 +88212,19 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 );
                                               },
                                           onRevealAutomationTarget: (row, targetId) async {
-                                                if (_parseAutomationTargetId(
-                                                  targetId,
-                                                ).isMaster) {
-                                                  await _revealMasterAutomationTarget(
-                                                    targetId,
-                                                  );
-                                                  return;
-                                                }
-                                                await _revealRowAutomationTargetInRightPanel(
-                                                  row,
-                                                  targetId,
-                                                );
-                                              },
+                                            if (_parseAutomationTargetId(
+                                              targetId,
+                                            ).isMaster) {
+                                              await _revealMasterAutomationTarget(
+                                                targetId,
+                                              );
+                                              return;
+                                            }
+                                            await _revealRowAutomationTargetInRightPanel(
+                                              row,
+                                              targetId,
+                                            );
+                                          },
                                           // extractors
                                           getStartMs: (t) =>
                                               t.offset *
@@ -88248,45 +88275,45 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                 e, {
                                                 double? newStartMs,
                                               }) async {
-                                            final clip = _audioTracks[i];
+                                                final clip = _audioTracks[i];
 
-                                            // 1. Update the internal trim values (where in the source file we start/end)
-                                            clip.trimStart = Duration(
-                                              milliseconds: s.round(),
-                                            );
-                                            clip.trimEnd = Duration(
-                                              milliseconds: e.round(),
-                                            );
+                                                // 1. Update the internal trim values (where in the source file we start/end)
+                                                clip.trimStart = Duration(
+                                                  milliseconds: s.round(),
+                                                );
+                                                clip.trimEnd = Duration(
+                                                  milliseconds: e.round(),
+                                                );
 
-                                            // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
-                                            // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
-                                            if (newStartMs != null) {
-                                              // newStartMs is the intended start time in milliseconds.
-                                              // Convert to seconds (assuming clip.offset is in seconds).
+                                                // 2. === FIX: Use the calculated newStartMs for the timeline offset ===
+                                                // newStartMs is ONLY sent by the timeline widget during a 'trim-start' operation.
+                                                if (newStartMs != null) {
+                                                  // newStartMs is the intended start time in milliseconds.
+                                                  // Convert to seconds (assuming clip.offset is in seconds).
                                                   clip.offset =
                                                       newStartMs / 1000.0;
-                                            }
-                                            // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
-                                            // await _undoManager.execute(
-                                            //   TrimClipAction(
-                                            //     clip: clip,
-                                            //     oldTrimStart: clip.trimStart,
-                                            //     oldTrimEnd: clip.trimEnd,
-                                            //     oldOffset: clip.offset,
-                                            //     newTrimStart: Duration(milliseconds: s.round()),
-                                            //     newTrimEnd: Duration(milliseconds: e.round()),
-                                            //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
-                                            //     onChange: _updateOverallDurationIfNeeded,
-                                            //   ),
-                                            // );
-                                            setState(() {});
-                                            _updateOverallDurationIfNeeded(
+                                                }
+                                                // If newStartMs is null (during 'trim-end'), the clip.offset must not change.
+                                                // await _undoManager.execute(
+                                                //   TrimClipAction(
+                                                //     clip: clip,
+                                                //     oldTrimStart: clip.trimStart,
+                                                //     oldTrimEnd: clip.trimEnd,
+                                                //     oldOffset: clip.offset,
+                                                //     newTrimStart: Duration(milliseconds: s.round()),
+                                                //     newTrimEnd: Duration(milliseconds: e.round()),
+                                                //     newOffset: newStartMs != null ? newStartMs / 1000.0 : null,
+                                                //     onChange: _updateOverallDurationIfNeeded,
+                                                //   ),
+                                                // );
+                                                setState(() {});
+                                                _updateOverallDurationIfNeeded(
                                                   changedClips: <AudioTrack>[
                                                     clip,
                                                   ],
-                                            );
-                                            // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
-                                          },
+                                                );
+                                                // Defer JUCE update until trim commit (pointer-up) to avoid UI lag.
+                                              },
 
                                           // for the undo history
                                           onTrimClipCommit:
@@ -88770,47 +88797,47 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                               : null,
 
                                           setTrackAutomationPoints: (
-                                                    row,
+                                            row,
                                             points,
                                           ) => _syncNativeAutomationForRow(row),
 
                                           onAutomationCommit: (row, oldPoints, newPoints) {
-                                                _undoManager.execute(
-                                                  SetAutomationPointsAction(
-                                                    row: row,
-                                                    oldPoints: oldPoints,
-                                                    newPoints: newPoints,
-                                                    applyToState: (r, points) {
-                                                      setState(() {
-                                                        _rowVolumeAutomation[r] =
-                                                            points
-                                                                .map(
+                                            _undoManager.execute(
+                                              SetAutomationPointsAction(
+                                                row: row,
+                                                oldPoints: oldPoints,
+                                                newPoints: newPoints,
+                                                applyToState: (r, points) {
+                                                  setState(() {
+                                                    _rowVolumeAutomation[r] =
+                                                        points
+                                                            .map(
                                                               (p) =>
                                                                   AutomationPoint(
                                                                     x: p.x,
                                                                     volume: p
                                                                         .volume,
                                                                   ),
-                                                                )
-                                                                .toList();
-                                                      });
-                                                    },
-                                                    onApplied: (r, _) async {
-                                                      await _syncNativeAutomationForRow(
-                                                        r,
-                                                      );
-                                                    },
-                                                  ),
-                                                );
-                                                _recordProducerManualEdit(
-                                                  'row_automation',
-                                                  {
-                                                    'row': row,
+                                                            )
+                                                            .toList();
+                                                  });
+                                                },
+                                                onApplied: (r, _) async {
+                                                  await _syncNativeAutomationForRow(
+                                                    r,
+                                                  );
+                                                },
+                                              ),
+                                            );
+                                            _recordProducerManualEdit(
+                                              'row_automation',
+                                              {
+                                                'row': row,
                                                 'old_count': oldPoints.length,
                                                 'new_count': newPoints.length,
-                                                  },
-                                                );
                                               },
+                                            );
+                                          },
 
                                           setRowGain: _setRowGainLive,
                                           onRowGainCommit:
@@ -88973,42 +89000,42 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                           onStretchClipCommit:
                                               _handleStretchClipResizeCommit,
                                           onRenameClip: (clipIndex, newLabel) async {
-                                                if (clipIndex < 0 ||
-                                                    clipIndex >=
-                                                        _audioTracks.length) {
-                                                  return;
-                                                }
-                                                final oldLabel =
+                                            if (clipIndex < 0 ||
+                                                clipIndex >=
+                                                    _audioTracks.length) {
+                                              return;
+                                            }
+                                            final oldLabel =
                                                 _audioTracks[clipIndex].label;
                                             final nextLabel = newLabel.trim();
-                                                if (nextLabel.isEmpty ||
-                                                    oldLabel == nextLabel) {
-                                                  return;
-                                                }
+                                            if (nextLabel.isEmpty ||
+                                                oldLabel == nextLabel) {
+                                              return;
+                                            }
 
-                                                await _undoManager.execute(
-                                                  SetClipLabelAction(
-                                                    tracks: _audioTracks,
-                                                    originalIndex: clipIndex,
-                                                    oldLabel: oldLabel,
-                                                    newLabel: nextLabel,
-                                                    applyToState: (clip, label) {
-                                                      clip.label = label;
-                                                      _markClipVisualMutation();
-                                                      setState(() {});
-                                                    },
-                                                  ),
-                                                );
+                                            await _undoManager.execute(
+                                              SetClipLabelAction(
+                                                tracks: _audioTracks,
+                                                originalIndex: clipIndex,
+                                                oldLabel: oldLabel,
+                                                newLabel: nextLabel,
+                                                applyToState: (clip, label) {
+                                                  clip.label = label;
+                                                  _markClipVisualMutation();
+                                                  setState(() {});
+                                                },
+                                              ),
+                                            );
 
-                                                _recordProducerManualEdit(
-                                                  'clip_rename',
-                                                  {
-                                                    'clip': clipIndex,
-                                                    'old_label': oldLabel,
-                                                    'new_label': nextLabel,
-                                                  },
-                                                );
+                                            _recordProducerManualEdit(
+                                              'clip_rename',
+                                              {
+                                                'clip': clipIndex,
+                                                'old_label': oldLabel,
+                                                'new_label': nextLabel,
                                               },
+                                            );
+                                          },
                                           onOpenAudioClipOptionsPanel:
                                               _openTabletAudioClipOptions,
 
@@ -89203,23 +89230,22 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                     pointCount: pointCount,
                                                   ),
                                           onExternalSampleDrop: (data, row, timeMs) async {
-                                                _cancelSampleBrowserReopenAfterSuccessfulDrop();
-                                                await _insertAudioFileAtTimeline(
-                                                  data.filePath,
-                                                  row: row,
-                                                  timeMs: timeMs,
-                                                  uploadMethod: 'dragdrop',
-                                                  showLoadingOverlay: false,
-                                                );
-                                              },
-                                          onExternalSampleDropToNewRow:
-                                              (data, timeMs) async {
-                                                _cancelSampleBrowserReopenAfterSuccessfulDrop();
-                                                await _insertFileBrowserSampleOnNewRow(
-                                                  data,
-                                                  timeMs,
-                                                );
-                                              },
+                                            _cancelSampleBrowserReopenAfterSuccessfulDrop();
+                                            await _insertAudioFileAtTimeline(
+                                              data.filePath,
+                                              row: row,
+                                              timeMs: timeMs,
+                                              uploadMethod: 'dragdrop',
+                                              showLoadingOverlay: false,
+                                            );
+                                          },
+                                          onExternalSampleDropToNewRow: (data, timeMs) async {
+                                            _cancelSampleBrowserReopenAfterSuccessfulDrop();
+                                            await _insertFileBrowserSampleOnNewRow(
+                                              data,
+                                              timeMs,
+                                            );
+                                          },
                                           onExternalSampleNewRowUnavailable:
                                               _showRowLimitReachedNotice,
                                           canCreateRowFromSampleDrop:
@@ -89908,11 +89934,11 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                                                   canCleanUpRecording:
                                                       _captureDeckCanCleanUpRecording(),
                                                   onFullscreenChanged: (expanded) {
-                                                        setState(() {
-                                                          _captureDeckFullscreen =
-                                                              expanded;
-                                                        });
-                                                      },
+                                                    setState(() {
+                                                      _captureDeckFullscreen =
+                                                          expanded;
+                                                    });
+                                                  },
                                                   onClose: _closeCaptureDeck,
                                                   onStartRecording:
                                                       _onCaptureDeckRecordPressed,
@@ -90571,7 +90597,8 @@ class _AudioEditorScreenState2 extends State<AudioEditorScreen>
                   usesTabletDawLayout: usesTabletDawLayout,
                   keyboardLift: keyboardLift,
                 ),
-                if (_v3ExecutionInProgress || (HackathonConfig.enabled && _voice.captureId != null))
+                if (_v3ExecutionInProgress ||
+                    (HackathonConfig.enabled && _voice.captureId != null))
                   const Positioned.fill(
                     child: ModalBarrier(
                       dismissible: false,
@@ -93907,8 +93934,10 @@ class EditorUndoManager extends ChangeNotifier {
   bool get isCapturingActions => _capturedActions != null;
   int get undoDepth => _undo.length;
   EditorUndoAction? get lastAction => _lastAction;
-  EditorUndoAction? get latestUndoAction => _undo.isEmpty ? null : _undo.last.action;
-  EditorUndoAction? get latestRedoAction => _redo.isEmpty ? null : _redo.last.action;
+  EditorUndoAction? get latestUndoAction =>
+      _undo.isEmpty ? null : _undo.last.action;
+  EditorUndoAction? get latestRedoAction =>
+      _redo.isEmpty ? null : _redo.last.action;
   List<ProjectUndoSnapshotRecord> get undoSnapshotRecords =>
       List.unmodifiable(_snapshotRecords(_undo));
   List<ProjectUndoSnapshotRecord> get redoSnapshotRecords =>

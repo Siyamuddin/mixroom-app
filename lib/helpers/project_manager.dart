@@ -938,6 +938,9 @@ class ProjectManager {
     );
 
     final tempDir = await getTemporaryDirectory();
+    // The macOS cache directory can be removed between launches. File writes
+    // create the file itself, but not a missing parent directory.
+    await tempDir.create(recursive: true);
     final outName =
         '${DateTime.now().microsecondsSinceEpoch}_${p.basename(assetPath)}';
     final bundleFile = File(p.join(tempDir.path, outName));

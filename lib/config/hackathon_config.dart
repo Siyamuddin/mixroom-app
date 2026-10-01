@@ -8,7 +8,7 @@ abstract final class HackathonConfig {
 
   static const relayBaseUrl = String.fromEnvironment(
     'MIXROOM_VOICE_RELAY_URL',
-    defaultValue: 'http://127.0.0.1:8765/api/voice',
+    defaultValue: 'http://127.0.0.1:8766/api/voice',
   );
 
   static const projectDirectory = 'mixroom_hackathon_projects';
