@@ -6,6 +6,8 @@ The existing validated planner is bundled as a small Node 22 worker inside the s
 
 ## Start on this Mac
 
+For the currently running test setup, follow [the manual guide](../docs/MANUAL_TESTING.md). Docker's outbound networking failed after the image and initial protocol checks passed. The same Python service is temporarily running on the Mac so provider calls can work; the Docker image and database volume remain available. The guide gives the active address and restart command.
+
 Docker Desktop must be running, with enough free storage to build the image. From this folder:
 
 ```sh
@@ -16,7 +18,7 @@ docker compose up --build -d
 curl --fail http://127.0.0.1:8765/health
 ```
 
-The setup script creates a random studio password and preserves an existing `.env`. The current workspace already has a private `.env` with the supplied ElevenLabs credential. OpenAI is still required for spoken request interpretation. Read `MIXROOM_PASSWORD` locally from `.env` when signing into the companion; never commit it.
+The setup script creates a random studio password and preserves an existing `.env`. The current workspace already has a private `.env` with the supplied ElevenLabs credential. The supplied OpenAI credential is configured for spoken request interpretation. Read `MIXROOM_PASSWORD` locally from `.env` when signing into the companion; never commit it.
 
 ```sh
 docker compose logs --tail 50 backend
@@ -37,7 +39,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`, use studio address `http://127.0.0.1:8765/api/voice`, and enter the studio password. Select **Pair your Mac**. Start the native application with `../tool/run_hackathon.sh`, open a local project, and enter the displayed pairing code in its voice connection dialog.
+Open `http://127.0.0.1:5173`, use studio address `http://127.0.0.1:8766/api/voice` for the current host runtime (`8765` for Docker), and enter the studio password. Select **Pair your Mac**. Open the already built native app as described in [the manual guide](../docs/MANUAL_TESTING.md), open a local project, and enter the displayed pairing code and matching relay URL in its voice connection dialog. To rebuild and run the Mac app instead, use `../tool/run_hackathon.sh`.
 
 For the published Lovable page or a phone, give the local backend an HTTPS address. One temporary demo option is a [Cloudflare Quick Tunnel](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/):
 
@@ -62,8 +64,12 @@ Run tests with `.venv/bin/python -m pytest tests` from this folder. The planner 
 
 ## Verified on this Mac
 
-The Docker image built successfully and the Compose service is running healthy on `127.0.0.1:8765`. Python tests: **31 passed plus eight subtests**. The real container passed login, one-use pairing, command deduplication, single native claim, result receipt, SQLite persistence through a restart, and live ElevenLabs token/TTS proxy checks with the latest supplied credential. These protocol fixtures do not perform native audio edits.
+The Docker image built successfully. Python tests: **35 passed plus eight subtests**. Before Docker's outbound networking stopped responding, the real container passed login, one-use pairing, command deduplication, single native claim, result receipt, SQLite persistence through a restart, and live ElevenLabs token/TTS proxy checks with the latest supplied credential. These protocol fixtures do not perform native audio edits. MixRoom's container is now stopped while the host runtime is used; other containers were left running.
 
 `./.venv/bin/python scripts/smoke_local.py` repeats the basic real HTTP check. `--speech` makes two small provider calls; `--restart` also restarts this Compose service, so run it before a musician connects.
 
-OpenAI planning still needs `OPENAI_API_KEY`. Complete native recording/mixing/humming acceptance and the published Lovable connection remain pending.
+Live OpenAI planning has been tested with the supplied server-side credential. Complete native recording/mixing/humming acceptance and the published Lovable connection remain pending. See [step-by-step manual testing](../docs/MANUAL_TESTING.md).
+
+The current host service is on `127.0.0.1:8766` because Docker Desktop still holds port 8765. All nine final real OpenAI planning cases and ElevenLabs token/TTS calls passed through that host HTTP service. To repeat this explicit live-provider check (uses credits), run `.venv/bin/python scripts/smoke_planner.py --live --base-url http://127.0.0.1:8766 --speech`. It uses fixture context and never executes native edits or records microphone audio.
+
+If ordinary Docker CLI commands hang on this Mac, use `python3 scripts/docker_local.py compose ps` (or replace `ps` with another Compose command). It probes the default connection, then Docker Desktop’s local raw socket, without changing the global Docker context.

@@ -27,7 +27,7 @@ import 'package:mixroom/l10n/l10n.dart';
 // import 'package:just_audio/just_audio.dart';
 
 import 'screens/auth_gate.dart';
-import 'screens/projects.dart';
+import 'screens/hackathon_home.dart';
 
 import 'package:provider/provider.dart'; // Import Provider
 import 'package:mixroom/providers/locale_provider.dart'; // Import LocaleProvider
@@ -276,7 +276,7 @@ class MyAppState extends State<MyApp> {
         ),
       ),
       //****TEMPORARY****
-      home: HackathonConfig.enabled ? const ProjectsScreen() : const AuthGate(),
+      home: HackathonConfig.enabled ? const HackathonHomeScreen() : const AuthGate(),
     );
   }
 }

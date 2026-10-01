@@ -7,6 +7,7 @@ license notices below and in the source remain in force.
 - Native application: [Siyamuddin/mixroom-app](https://github.com/Siyamuddin/mixroom-app) (private).
 - Companion: Lovable project **MixRoom**, intended private repository `Siyamuddin/mixroom-voice`.
 - [Build and run the isolated macOS flavor](tool/HACKATHON_MACOS.md).
+- [Test the app step by step on this Mac](docs/MANUAL_TESTING.md).
 - [Implementation, configuration, acceptance checks, and demo](docs/HACKATHON_IMPLEMENTATION.md).
 
 The backend is a **local Python/FastAPI service in Docker**, with SQLite and

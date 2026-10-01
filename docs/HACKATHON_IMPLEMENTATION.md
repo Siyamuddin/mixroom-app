@@ -4,6 +4,8 @@
 
 The user's final backend choice is local Python in Docker. The earlier n8n and Lovable Cloud backend designs are superseded. Lovable remains the browser product for hackathon eligibility; its generated project exists, but GitHub linking and publication are still pending.
 
+The Docker image is built. After initial container checks passed, Docker's outbound networking stopped responding for both providers and the host route. The same Python service is temporarily running directly on the Mac for manual testing. Only MixRoom's container was stopped, and its database volume was preserved; unrelated containers and global Docker settings were not reset. Follow the active addresses in [the manual guide](MANUAL_TESTING.md).
+
 ```text
 Lovable / React microphone
   → ElevenLabs Scribe Realtime (temporary server-issued token)
@@ -29,20 +31,23 @@ The Hackathon macOS configuration has a separate bundle ID and data directory an
 ## Verification completed
 
 - Existing focused AI configuration, transaction, execution, mixing, audio-to-MIDI and undo tests: 84 passed.
-- Hackathon isolation test passed. New voice/controller/comparison tests passed before the local-backend transport changes.
+- Hackathon isolation test passed. The final focused voice/session/comparison/transport and isolation run passed 19 tests, with no skipped tests.
 - Native local HTTP policy, actual loopback pairing/poll transport, redirect rejection and durable journal restart passed standalone Dart checks. Analyzer reported no errors or warnings.
-- Browser session, speech lifecycle and local-auth tests: 36 passed. Production build and TypeScript passed. The sign-in page was visually checked in the browser.
-- Local planner: nine Python-to-Node lifecycle/compatibility tests and ten V3/voice contract tests passed.
+- Browser session, speech lifecycle and local-auth tests: 36 passed. Production build and TypeScript passed. The sign-in page was visually checked in the browser. The isolated ARM64 Mac app was built, its deep code signature verified, its new home screen confirmed in the packaged code, and its process launched. Desktop UI inspection timed out, so native interaction and microphone acceptance remain unverified.
+- Local planner: nine Python-to-Node lifecycle/compatibility tests and ten V3/voice contract tests passed. All nine final real OpenAI planning cases passed through the host HTTP API on port 8766: gain targets, comparison before/after, ten-second capture, three combined humming/conversion phrases, clarification of unrelated capture-plus-edit intent, and an explicit note. These fixture commands were never executed in the native app. Planning took 2.2–7.4 seconds per case in this run.
 - ElevenLabs direct live smoke passed: Sarah streaming TTS, single-use Scribe token, and realtime transcription of a synthetic spoken fixture. These are provider checks, not a live musician demonstration.
-- Python backend: 31 tests and eight subtests passed, including real SQLite transactions and Python-to-Node worker integration. Real local HTTP checks passed for login, origin rejection, pairing, deduplication, single claim, result receipt, and ElevenLabs token/audio proxying.
+- Final host HTTP ElevenLabs checks passed: single-use token issuance in 404 ms and TTS audio response in 472 ms (30,974 bytes). Audio was not played or stored during this check.
+- Actual bundled Basic Pitch ONNX inference and MixRoom's Dart note decoder recovered all eight expected pitches from an eight-second generated melody: A4 C5 E5 C5 A4 G4 E4 A4. Note starts were within 18 ms of the fixture. Model processing took 253 ms and decoding 29 ms in one run. This used an isolated harness; native plugin invocation, microphone humming, and editor MIDI insertion remain unchecked.
+- Python backend: 35 tests and eight subtests passed, including real SQLite transactions, Python-to-Node worker integration, and the scoped Docker connection helper. Real local HTTP checks passed for login, origin rejection, pairing, deduplication, single claim, result receipt, and ElevenLabs token/audio proxying.
 - The browser signed into the real local Python service and generated a pairing code. No native track edit was performed during these protocol checks.
-- The Docker image built successfully and runs as UID 10001 on loopback port 8765. Container health, authentication, single-use pairing, duplicate commands, single claim, result receipt, persistent results after container restart, and live ElevenLabs token/audio proxying passed with the latest supplied credential. Docker Desktop was restored by re-enabling its specific disabled application service.
+- The Docker image built successfully and uses UID 10001 with loopback port 8765. Container health, authentication, single-use pairing, duplicate commands, single claim, result receipt, persistent results after container restart, and live ElevenLabs token/audio proxying passed with the latest supplied credential before Docker's outbound networking failed. Docker Desktop was initially restored by re-enabling its specific disabled application service; no global restart was performed when the later network failure occurred.
 
 ## Still required before submission
 
-- Add a valid OpenAI key. Add a TypeSafe key only if demonstrating Jev; otherwise describe the OpenAI route accurately.
-- Free sufficient disk space and build the isolated Mac app. The first build failed during CocoaPods downloads; the second completed CocoaPods and reached native/JUCE compilation, then the disk guard stopped it at 464 MiB free. No compiler error was identified before interruption. Only this new copy’s failed build outputs were removed to free space for the backend.
-- Run the added Flutter transport tests and actual editor comparison integration test.
+- Add a TypeSafe key only if demonstrating Jev; otherwise describe the tested OpenAI route accurately.
+- Restore Docker Desktop's provider connectivity before claiming the final combined humming workflow is verified in Docker. The host fallback uses the same backend/planner source.
+- Maintain enough free space for recordings and subsequent builds. The isolated debug app now builds successfully with the documented reduced-metadata Xcode override; failed-build/test caches and regenerable package downloads were reclaimed during the build.
+- Run the actual editor comparison integration test. The focused native voice/transport/comparison/isolation tests have passed.
 - Verify all five features against the real Mac app, including a known melody fixture and live microphone humming, exact A/B values, manual-edit invalidation, disconnected recording, unknown-result recovery, stale-project rejection and notes after reopening.
 - Finish Lovable GitHub authorization, create the private `Siyamuddin/mixroom-voice` through its integration, integrate the tested companion source, configure the HTTPS tunnel/allowed origin and publish the Lovable site.
 - Exercise the published page from both laptop and phone. Measure recognition, planning, native execution and response latency separately.

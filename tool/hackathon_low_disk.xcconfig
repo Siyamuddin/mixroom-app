@@ -1,0 +1,5 @@
+// Optional local-debug build override; reduces generated native metadata.
+COMPILER_INDEX_STORE_ENABLE = NO
+GCC_GENERATE_DEBUGGING_SYMBOLS = NO
+DEBUG_INFORMATION_FORMAT =
+SWIFT_SERIALIZE_DEBUGGING_OPTIONS = NO

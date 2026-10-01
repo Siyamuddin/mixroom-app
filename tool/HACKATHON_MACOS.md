@@ -19,3 +19,13 @@ These configurations use local ad-hoc signing and clear the original development
 `ruby tool/configure_hackathon_macos.rb` regenerates the project configurations, independent plist/entitlements, and shared scheme. It does not build, install, call providers, or load secrets. CocoaPods has matching Debug/Profile/Release-Hackathon mappings; Flutter may need to regenerate dependencies on the first actual build.
 
 Configuration validation is separate from compilation. Successful plist, shell, and Xcode-project parsing checks do not establish that the app builds, launches, records, or connects to the relay. Verify those through the normal native demo checks after a build completes.
+
+The isolated debug build succeeded on October 1, 2026, and its deep code-signature check passed. It is available at `build/macos/Build/Products/Debug-Hackathon/MixRoom.app`. Open that bundle directly for manual testing; rebuilding is not required. See [the manual checklist](../docs/MANUAL_TESTING.md).
+
+To reproduce the build on this Mac with less generated native metadata:
+
+```sh
+XCODE_XCCONFIG_FILE="$PWD/tool/hackathon_low_disk.xcconfig" tool/build_hackathon.sh --debug --no-pub
+```
+
+This disables compiler indexing and native debug symbols for that invocation, reducing disk use but limiting native crash-debugging detail. It does not disable Flutter debug mode or change the app's voice features. The ordinary build remains available without the override.
